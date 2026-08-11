@@ -30,11 +30,12 @@
       "Aktuelle Medikation",
       "Dauermedikation",
       "Entlassungsmedikation",
+      "Medikation bei Entlassung",
+      "Empfohlene Medikation",
       "Häusliche Medikation",
       "Medikamente",
       "Medikationsplan",
-      "Bundeseinheitlicher Medikationsplan",
-      "Therapie"
+      "Bundeseinheitlicher Medikationsplan"
     ],
     "examination": [
       "Befund",
@@ -48,17 +49,22 @@
       "Echokardiographie",
       "Abdomensonographie",
       "Labor",
+      "Laborwerte",
       "Labor vom",
       "Körpermaße",
       "Karnofsky-Index",
       "Chronologie",
-      "EKG"
+      "EKG",
+      "Therapie",
+      "Therapie und Verlauf",
+      "Beurteilung und Verlauf"
     ],
     "recommendation": [
       "Empfehlung",
       "Empfehlungen",
       "Procedere",
       "Weiteres Procedere",
+      "Weiteres Prozedere und Abschluss",
       "Therapieempfehlung",
       "Zusammenfassende Beurteilung"
     ]

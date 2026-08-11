@@ -293,6 +293,183 @@ def test_laboratory_observation_without_date_requires_review() -> None:
     assert "laboratory_date_requires_confirmation" in row.normalized["review_reasons"]
 
 
+def test_longitudinal_laboratory_columns_preserve_every_date_and_value() -> None:
+    text = """
+Laborwerte
+Parameter        Einheit    Referenz       01.08.2021   03.08.2021
+Hämoglobin       g/dl       12-15          15,1         14,5
+CRP              ng/ml      <0,5           9,9          1,5
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert [
+        (
+            row.normalized["analyte_name"],
+            row.normalized["measured_on"],
+            row.normalized["result_text"],
+            row.normalized["unit"],
+            row.normalized["reference_text"],
+            row.normalized["abnormal_flag"],
+        )
+        for row in rows
+    ] == [
+        ("Hämoglobin", "2021-08-01", "15,1", "g/dl", "12-15", "high"),
+        ("Hämoglobin", "2021-08-03", "14,5", "g/dl", "12-15", "normal"),
+        ("CRP", "2021-08-01", "9,9", "ng/ml", "<0,5", "high"),
+        ("CRP", "2021-08-03", "1,5", "ng/ml", "<0,5", "high"),
+    ]
+
+
+def test_narrative_laboratory_decimal_and_encounter_dates_are_not_truncated() -> None:
+    text = """
+Herr Beispiel, der sich vom 31.07. bis 02.08.2016 in unserer stationären Behandlung befand.
+Diagnosen
+Akute Appendizitis
+Laborwerte bei Aufnahme: Hämoglobin (Hb): 152 g/L, Hämatokrit:
+0.44, Thrombozyten: 350/nL, Leukozyten: 14.000/μL; Gerinnung: INR: 1.00, PTT: 28 s, TPZ:
+99%
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert len(rows) == 7
+    assert {row.normalized["measured_on"] for row in rows} == {"2016-07-31"}
+    hematocrit = next(row for row in rows if row.normalized["analyte_name"] == "Hämatokrit")
+    assert hematocrit.normalized["result_text"] == "0.44"
+    assert hematocrit.normalized["numeric_result"] == 0.44
+    leukocytes = next(row for row in rows if row.normalized["analyte_name"] == "Leukozyten")
+    assert leukocytes.normalized["numeric_result"] == 14000.0
+
+
+def test_medication_table_wraps_disclaimer_and_daily_frequency_fail_closed() -> None:
+    text = """
+Empfohlene Medikation
+Wirkstoff                               Handelsname               Einnahme              Bemerkung
+Lactulose 10 g                          Bifiteral®                1-1-1                 Titration zu 2–3 wei-
+                                                                                        chen Stuhlgängen/Tag
+Pantoprazol 40 mg                       Pantozol®                 1x täglich            Ulkusprophylaxe
+(Die aufgeführten Präparate können durch wirk-
+stoffgleiche Präparate ersetzt werden.)
+Laborwerte
+Parameter        Einheit    Referenz       05.11.2025
+CRP              mg/l       < 5            8,2
+"""
+
+    draft = parse_clinical_text(text)
+    medications = [item for item in draft.candidates if item.target == "medication"]
+
+    assert len(medications) == 2
+    lactulose, pantoprazole = medications
+    assert lactulose.normalized["wirkstoff"] == "Lactulose"
+    assert lactulose.normalized["handelsname"] == "Bifiteral®"
+    assert lactulose.normalized["hinweis"] == "Titration zu 2–3 weichen Stuhlgängen/Tag"
+    assert pantoprazole.normalized["hinweis"] == "1x täglich Ulkusprophylaxe"
+    assert "dose_time_requires_confirmation" in pantoprazole.normalized["review_reasons"]
+    assert all(item.selected is False for item in medications)
+    assert not any("stoffgleiche" in item.value for item in draft.candidates)
+
+
+def test_wrapped_example_trade_name_and_compound_strength_are_repaired() -> None:
+    text = """
+Medikation bei Entlassung
+Novaminsulfon 500 mg p.o. (z.B. Novaminsulfon-    1-1-1 bis inkl. 07.08.2016
+ratiopharm®)
+Amoxicillin/Clavulansäure 825/125 mg (z.B. Amoxiclav®) 1-0-1
+"""
+
+    medications = [
+        item for item in parse_clinical_text(text).candidates if item.target == "medication"
+    ]
+
+    assert len(medications) == 2
+    assert medications[0].normalized["wirkstoff"] == "Novaminsulfon"
+    assert medications[0].normalized["handelsname"] == "Novaminsulfon-ratiopharm®"
+    assert medications[0].normalized["einnahmeform"] == "oral"
+    assert medications[0].normalized["einnahme_bis"] == "2016-08-07"
+    assert medications[1].normalized["wirkstoff"] == "Amoxicillin/Clavulansäure"
+    assert medications[1].normalized["staerke"] == "825/125 mg"
+
+
+def test_stationary_letter_nested_bullets_keep_diagnosis_semantics_separate() -> None:
+    text = """
+Der Patient befand sich vom 11. bis 13.11.2016 in unserer stationären Behandlung.
+Diagnosen
+• Hauptdiagnose: Symptomatische Cholezystolithiasis
+• Nebendiagnosen
+  o   Z.n. Nabelherniotomie 2012
+  o   Adipositas
+• Therapie: Laparoskopische Cholezystektomie
+Anamnese
+Beschwerdebild bei Aufnahme.
+"""
+
+    draft = parse_clinical_text(text)
+
+    assert draft.document_type == "discharge_summary"
+    assert [item.value for item in draft.candidates if item.target == "diagnosis"] == [
+        "Symptomatische Cholezystolithiasis",
+        "Adipositas",
+    ]
+    assert any(
+        item.target == "anamnesis" and item.value == "Z.n. Nabelherniotomie 2012"
+        for item in draft.candidates
+    )
+    assert any(
+        item.target == "examination" and item.value == "Laparoskopische Cholezystektomie"
+        for item in draft.candidates
+    )
+
+
+def test_narrative_sections_remove_only_safe_pdf_line_hyphenation() -> None:
+    draft = parse_clinical_text(
+        "Befund\nKeine signifikanten Rückbil-\ndungsstörungen. H.-p.-\nEradikation geplant."
+    )
+
+    finding = next(item for item in draft.candidates if item.target == "examination")
+    assert finding.value == (
+        "Keine signifikanten Rückbildungsstörungen. H.-p.-\nEradikation geplant."
+    )
+
+
+def test_radiology_native_pdf_spacing_artifacts_are_repaired_conservatively() -> None:
+    draft = parse_clinical_text(
+        """
+Klinische Angaben:
+Verlaufskontrolle zu 06 /20 22 bei Colon - Ca (ED 2009)
+Befund:
+MRCP m it regelrechter D arstellung des Ductus choledochus.
+Beurteilung:
+Unauffällige parenchymatö se Oberbauchorgane. Keine lympho gene Filialisierung.
+"""
+    )
+
+    assert draft.document_type == "radiology_report"
+    values = [item.value for item in draft.candidates]
+    assert values == [
+        "Verlaufskontrolle zu 06/2022 bei Colon-Ca (ED 2009)",
+        "MRCP mit regelrechter Darstellung des Ductus choledochus.",
+        "Unauffällige parenchymatöse Oberbauchorgane. Keine lymphogene Filialisierung.",
+    ]
+
+
+def test_administrative_cost_estimate_never_proposes_clinical_facts() -> None:
+    draft = parse_clinical_text(
+        """
+Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen
+MEDIZINISCHE LEISTUNGEN
+Gastroenterologische Untersuchung und Beratung mit Gastro- und Koloskopie
+8.800,00 - 12.000,00 EUR
+"""
+    )
+
+    assert draft.document_type == "administrative_cost_estimate"
+    assert draft.candidates == []
+    assert draft.warnings == [
+        "Administrative cost estimate recognized; no clinical facts were proposed."
+    ]
+
+
 def test_oncology_report_folds_wrapped_diagnoses_and_keeps_inline_chronology_labels() -> None:
     text = """
 Onkologische Diagnosen:

@@ -111,6 +111,12 @@ DEVICE_HISTORY_RE = re.compile(
     r"^\s*(?:implantierter\s+)?(?:Defibrillator|Herzschrittmacher|Port(?:implantation)?)\b",
     re.IGNORECASE,
 )
+DIAGNOSIS_DETAIL_RE = re.compile(
+    r"^(?:Klinik\s*:|(?:prim[aä]r\s+)?erfolgreiche\s+(?:Elektro)?kardioversion\b|"
+    r"CHA[\w-]*Score\b)",
+    re.IGNORECASE,
+)
+DIAGNOSIS_CODE_BLOCK_RE = re.compile(r"^(?:ICD(?:-10)?|OPS)\s*:", re.IGNORECASE)
 
 ONCOLOGY_DIAGNOSIS_CONTINUATION_RE = re.compile(
     r"^(?:Kolon\s+ascendens|Rektumkarzinom|UICC\s+Stadium|"
@@ -146,11 +152,17 @@ class DiagnosisSemantics:
 
 
 def parse_clinical_text(text: str) -> ParseDraft:
-    clean = _normalize_text(text)
+    layout = _normalize_layout_text(text)
+    clean = _normalize_text(layout)
     language = _detect_language(clean)
     document_type = _detect_document_type(clean)
-    sections = _split_sections(clean)
-    candidates: list[ClinicalCandidate] = _laboratory_candidates(clean)
+    sections = _split_sections(layout)
+    admission_date, discharge_date = _document_stay_dates(clean)
+    candidates: list[ClinicalCandidate] = _laboratory_candidates(
+        layout,
+        admission_date=admission_date,
+        discharge_date=discharge_date,
+    )
     warnings: list[str] = []
 
     for section in sections:
@@ -159,13 +171,26 @@ def parse_clinical_text(text: str) -> ParseDraft:
             candidates.extend(
                 _diagnosis_candidates(
                     section,
-                    fold_wrapped=document_type == "oncology_report",
+                    fold_wrapped=(
+                        document_type in {"oncology_report", "discharge_summary"}
+                        or (
+                            document_type == "cardiology_report"
+                            and bool(
+                                re.search(
+                                    r"^\s*(?:\d+|[a-z])[.)]\s+",
+                                    section.text,
+                                    re.MULTILINE,
+                                )
+                            )
+                        )
+                    ),
                 )
             )
         elif section.target == "medication":
             medication_rows, section_warnings = _medication_candidates(
                 section,
                 source_country=_source_country(clean),
+                document_date=discharge_date,
             )
             candidates.extend(medication_rows)
             warnings.extend(section_warnings)
@@ -175,9 +200,12 @@ def parse_clinical_text(text: str) -> ParseDraft:
             assessment_candidates, assessment_warnings = _oncology_assessment_candidates(section)
             candidates.extend(assessment_candidates)
             warnings.extend(assessment_warnings)
-        elif role == "laboratory" and any(
-            item.target == "lab_result" and item.source.page == section.page
-            for item in candidates
+        elif role == "laboratory" and (
+            any(
+                item.target == "lab_result" and item.source.page == section.page
+                for item in candidates
+            )
+            or re.fullmatch(r"(?:s(?:iehe|\.)\s*)?Anhang\.?", section.text.strip(), re.IGNORECASE)
         ):
             # Structured rows already preserve this section at analyte level.
             # Do not also create one large, duplicate examination paragraph.
@@ -190,7 +218,12 @@ def parse_clinical_text(text: str) -> ParseDraft:
                 candidates.extend(_radiology_diagnosis_candidates(section))
 
     if not candidates:
-        warnings.append("No supported clinical sections were recognized; manual review is required.")
+        if document_type == "administrative_cost_estimate":
+            warnings.append(
+                "Administrative cost estimate recognized; no clinical facts were proposed."
+            )
+        else:
+            warnings.append("No supported clinical sections were recognized; manual review is required.")
     return ParseDraft(
         document_type=document_type,
         source_language=language,
@@ -202,10 +235,16 @@ def parse_clinical_text(text: str) -> ParseDraft:
 
 
 def _normalize_text(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _normalize_layout_text(text)
     # Tabs carry column boundaries from native PDF table extraction. Collapsing
     # them into spaces made laboratory rows impossible to reconstruct reliably.
     text = re.sub(r" {2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _normalize_layout_text(text: str) -> str:
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -214,7 +253,7 @@ LAB_RESULT_RE = re.compile(
     r"^(?P<comparator><=|>=|<|>|=)?\s*(?P<number>[+-]?(?:\d{1,3}(?:[. ]\d{3})+|\d+)(?:,\d+)?|[+-]?\d+\.\d+)\s*(?P<marker>[*↑↓]?)$"
 )
 LAB_TEXT_RESULT_RE = re.compile(
-    r"^(?:negativ|positiv|reaktiv|nicht\s+nachweisbar|nachweisbar|normal|unauff[aä]llig)$",
+    r"^(?:neg\.?|pos\.?|negativ|positiv|reaktiv|nicht\s+nachweisbar|nachweisbar|normal|unauff[aä]llig)$",
     re.IGNORECASE,
 )
 LAB_REFERENCE_RANGE_RE = re.compile(
@@ -224,6 +263,16 @@ LAB_REFERENCE_RANGE_RE = re.compile(
 LAB_REFERENCE_LIMIT_RE = re.compile(r"(?P<comparator><=|>=|<|>)\s*(?P<number>[+-]?[\d.,]+)")
 LAB_DATE_RE = re.compile(
     r"(?:Untersuchung|Labor(?:befund)?|Befund|Entnahme)\s+(?:vom|am)\s+(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)",
+    re.IGNORECASE,
+)
+LAB_COLUMN_DATE_RE = re.compile(
+    r"(?<!\d)(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)"
+)
+LAB_NARRATIVE_VALUE_RE = re.compile(
+    r"(?P<analyte>H[aä]moglobin(?:\s*\(Hb\))?|H[aä]matokrit|Thrombozyten|"
+    r"Leukozyten|CRP|INR|PTT|TPZ)\s*:?[ \t]*"
+    r"(?P<comparator><=|>=|<|>|=)?\s*(?P<number>[+-]?\d+\.\d+|[+-]?(?:\d{1,3}(?:[. ]\d{3})+|\d+)(?:,\d+)?)"
+    r"[ \t]*(?P<unit>g/L|g/dl|mg/L|mg/dl|/nL|/nl|/μL|/µL|%|s)?",
     re.IGNORECASE,
 )
 
@@ -245,6 +294,30 @@ def _parse_localized_number(value: str) -> float | None:
 def _laboratory_date(text: str) -> str | None:
     match = LAB_DATE_RE.search(text)
     return _normalize_german_date(match.group("date")) if match else None
+
+
+def _document_stay_dates(text: str) -> tuple[str | None, str | None]:
+    match = re.search(
+        r"(?:station[aä]re\s+Behandlung\s+vom|(?:der|die)\s+sich\s+vom)\s+"
+        r"(?P<start>\d{1,2}\.(?:\d{1,2}\.)?(?:\d{4})?)\s*"
+        r"(?:bis(?:\s+zum)?|[-–—])\s*"
+        r"(?P<end>\d{1,2}\.\d{1,2}\.\d{4})",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    end = _normalize_german_date(match.group("end"))
+    if not end:
+        return None, None
+    end_year, end_month, _ = end.split("-")
+    start_raw = match.group("start")
+    if re.fullmatch(r"\d{1,2}\.", start_raw):
+        start_raw = f"{start_raw}{int(end_month):02d}.{end_year}"
+    elif re.fullmatch(r"\d{1,2}\.\d{1,2}\.", start_raw):
+        start_raw = f"{start_raw}{end_year}"
+    start = _normalize_german_date(start_raw)
+    return start, end
 
 
 def _lab_cells(line: str) -> list[str]:
@@ -295,37 +368,222 @@ def _lab_abnormal_flag(
     return "unknown"
 
 
-def _laboratory_candidates(text: str) -> list[ClinicalCandidate]:
-    """Extract one reviewable candidate per analyte from tabular lab reports."""
+def _looks_like_lab_unit(value: str) -> bool:
+    compact = value.strip()
+    return bool(
+        re.fullmatch(
+            r"(?:%|s|fl|fL|pg|g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
+            r"/(?:nl|nL|µl|μl)|(?:g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|µIU|μIU|G|T)/(?:l|L|dl|ml))",
+            compact,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _lab_row_metadata(
+    prefix: str,
+    metadata_headers: list[str],
+) -> tuple[str, str | None, str | None] | None:
+    cells = _lab_cells(prefix)
+    if len(cells) < 2:
+        return None
+    analyte = cells[0].strip(" -*•")
+    unit: str | None = None
+    reference_text: str | None = None
+    for index, cell in enumerate(cells[1:], start=1):
+        header = _heading_key(metadata_headers[index]) if index < len(metadata_headers) else ""
+        if header in {"einheit", "unit"}:
+            unit = cell
+        elif header in {"norm", "referenz", "referenzbereich", "reference"}:
+            reference_text = cell
+    if reference_text is None:
+        reference_text = cells[-1]
+
+    parenthetical_unit = re.search(r"\s*\((?P<unit>[^()]{1,24})\)\s*$", analyte)
+    if parenthetical_unit and _looks_like_lab_unit(parenthetical_unit.group("unit")):
+        unit = unit or parenthetical_unit.group("unit")
+        analyte = analyte[: parenthetical_unit.start()].strip()
+
+    if reference_text and _looks_like_lab_unit(reference_text):
+        unit = unit or reference_text
+        reference_text = None
+
+    reference_match = (
+        LAB_REFERENCE_RANGE_RE.search(reference_text)
+        or LAB_REFERENCE_LIMIT_RE.search(reference_text)
+        if reference_text
+        else None
+    )
+    if reference_match:
+        trailing = reference_text[reference_match.end() :].strip()
+        if trailing and _looks_like_lab_unit(trailing):
+            unit = unit or trailing
+            reference_text = reference_text[: reference_match.end()].strip()
+    if not analyte or len(analyte) > 160 or not any(character.isalpha() for character in analyte):
+        return None
+    return analyte, unit, reference_text or None
+
+
+def _lab_candidate(
+    *,
+    analyte: str,
+    result_text: str,
+    unit: str | None,
+    reference_text: str | None,
+    measured_on: str | None,
+    panel: str,
+    page_number: int,
+    source_text: str,
+) -> ClinicalCandidate:
+    result_match = LAB_RESULT_RE.fullmatch(result_text)
+    numeric_result = _parse_localized_number(result_match.group("number")) if result_match else None
+    comparator = result_match.group("comparator") if result_match else None
+    explicit_marker = result_match.group("marker") if result_match else ""
+    reference_low, reference_high = _lab_reference(reference_text or "")
+    abnormal_flag = _lab_abnormal_flag(
+        numeric_result,
+        comparator,
+        reference_low,
+        reference_high,
+        explicit_marker,
+    )
+    if numeric_result is None and reference_text:
+        textual_result = result_text.casefold().strip(" .()")
+        textual_reference = reference_text.casefold().strip(" .()")
+        negative_terms = {"neg", "negativ", "nicht nachweisbar"}
+        positive_terms = {"pos", "positiv", "reaktiv", "nachweisbar"}
+        normal_terms = {"normal", "unauffällig"}
+        if (
+            (textual_result in negative_terms and textual_reference in negative_terms)
+            or (textual_result in positive_terms and textual_reference in positive_terms)
+            or (textual_result in normal_terms and textual_reference in normal_terms)
+        ):
+            abnormal_flag = "normal"
+        elif textual_reference in negative_terms and textual_result in positive_terms:
+            abnormal_flag = "abnormal"
+    value = f"{analyte}: {result_text}"
+    if unit:
+        value += f" {unit}"
+    if reference_text:
+        value += f" (Referenz: {reference_text})"
+    section = Section(
+        target="lab_result",
+        heading=panel,
+        text=source_text.strip(),
+        page=page_number,
+    )
+    return _candidate(
+        "lab_result",
+        value,
+        {
+            "panel": panel,
+            "analyte_name": analyte,
+            "result_text": result_text,
+            "numeric_result": numeric_result,
+            "comparator": comparator,
+            "unit": unit,
+            "reference_text": reference_text,
+            "reference_low": reference_low,
+            "reference_high": reference_high,
+            "abnormal_flag": abnormal_flag,
+            "measured_on": measured_on,
+            "auto_select": measured_on is not None,
+            "review_reasons": [] if measured_on is not None else ["laboratory_date_requires_confirmation"],
+            "semantic_role": "laboratory_observation",
+        },
+        section,
+        ("specific_section_role", "structured_date") if measured_on else ("specific_section_role",),
+    )
+
+
+def _narrative_laboratory_candidates(
+    text: str,
+    *,
+    admission_date: str | None,
+    discharge_date: str | None,
+) -> list[ClinicalCandidate]:
+    candidates: list[ClinicalCandidate] = []
+    boundary = re.compile(
+        r"^(?:EKG|Mikrobiologische|Blutkultur|R[oö]ntgen|Histologie|Beurteilung|"
+        r"Therapie|Medikation|Weiteres\s+Prozedere)\b",
+        re.IGNORECASE,
+    )
+    for page_number, page in enumerate(text.split("\f"), start=1):
+        lines = page.splitlines()
+        index = 0
+        while index < len(lines):
+            line = lines[index].strip()
+            context_match = re.match(
+                r"^Laborwerte\s+bei\s+(?P<context>Aufnahme|Entlassung)\s*:\s*(?P<body>.*)$",
+                line,
+                re.IGNORECASE,
+            )
+            if not context_match:
+                index += 1
+                continue
+            context = context_match.group("context").casefold()
+            measured_on = admission_date if context == "aufnahme" else discharge_date
+            block = [context_match.group("body")]
+            cursor = index + 1
+            while cursor < len(lines):
+                following = lines[cursor].strip()
+                if not following or boundary.match(following):
+                    break
+                block.append(following)
+                cursor += 1
+            source_text = " ".join(part for part in block if part).strip()
+            for match in LAB_NARRATIVE_VALUE_RE.finditer(source_text):
+                analyte = re.sub(r"\s*\(Hb\)\s*$", "", match.group("analyte"), flags=re.IGNORECASE)
+                result_text = f"{match.group('comparator') or ''}{match.group('number')}"
+                candidates.append(
+                    _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=match.group("unit"),
+                        reference_text=None,
+                        measured_on=measured_on,
+                        panel=f"Laborwerte bei {context_match.group('context')}",
+                        page_number=page_number,
+                        source_text=source_text,
+                    )
+                )
+            index = max(cursor, index + 1)
+    return candidates
+
+
+def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
+    """Parse vertical one-result-per-row laboratory tables.
+
+    This is deliberately separate from the date-column parser: a table headed
+    ``Parameter / Ergebnis / Einheit / Referenzbereich`` has different column
+    semantics from longitudinal tables whose result columns are dates.
+    """
 
     measured_on = _laboratory_date(text)
     candidates: list[ClinicalCandidate] = []
     current_panel = "Labor"
+    laboratory_mode = False
+    laboratory_table = False
+
     for page_number, page in enumerate(text.split("\f"), start=1):
-        laboratory_mode = False
-        laboratory_table = False
         for raw_line in page.splitlines():
             line = raw_line.strip()
             cells = _lab_cells(raw_line)
             if not line:
                 continue
             heading_key = _heading_key(line.rstrip(":"))
-            if heading_key in {
-                "medikation",
-                "aktuellemedikation",
-                "dauermedikation",
-                "entlassungsmedikation",
-                "häuslichemedikation",
-                "medikamente",
-                "medikationsplan",
-                "bundeseinheitlichermedikationsplan",
-            } or heading_key.startswith(
+            if heading_key.startswith(
                 (
-                    "medikationsplanvom",
-                    "bundeseinheitlichermedikationsplanvom",
-                    "aktuellemedikationvom",
-                    "dauermedikationvom",
-                    "entlassungsmedikationvom",
+                    "medikation",
+                    "aktuellemedikation",
+                    "dauermedikation",
+                    "entlassungsmedikation",
+                    "medikationbeientlassung",
+                    "empfohlenemedikation",
+                    "häuslichemedikation",
+                    "medikamente",
+                    "medikationsplan",
+                    "bundeseinheitlichermedikationsplan",
                 )
             ):
                 laboratory_mode = False
@@ -334,45 +592,44 @@ def _laboratory_candidates(text: str) -> list[ClinicalCandidate]:
             if heading_key.startswith("labor"):
                 laboratory_mode = True
                 current_panel = line.rstrip(":")
+                continue
             if len(cells) == 1:
                 if laboratory_mode and len(line) <= 80 and not LAB_RESULT_RE.fullmatch(line):
                     current_panel = line.rstrip(":")
                 continue
+
             lowered = " ".join(cells).casefold()
+            if LAB_COLUMN_DATE_RE.search(raw_line) and "ergebnis" not in lowered:
+                laboratory_table = False
+                continue
             if _medication_table_headers(raw_line):
                 laboratory_mode = False
                 laboratory_table = False
                 continue
             if "referenzbereich" in lowered or "ergebnis" in lowered or (
-                cells and _heading_key(cells[0]) in {"parameter", "messwert", "analyt", "untersuchung"}
+                cells
+                and _heading_key(cells[0]) in {"parameter", "messwert", "analyt", "untersuchung"}
             ):
-                laboratory_mode = True
                 laboratory_table = True
                 continue
-            if not (laboratory_mode or laboratory_table):
+            if not laboratory_table:
                 continue
 
             result_index = next(
                 (
                     index
                     for index, cell in enumerate(cells[1:], start=1)
-                    if LAB_RESULT_RE.fullmatch(cell.strip()) or LAB_TEXT_RESULT_RE.fullmatch(cell.strip())
+                    if LAB_RESULT_RE.fullmatch(cell.strip())
+                    or LAB_TEXT_RESULT_RE.fullmatch(cell.strip())
                 ),
                 None,
             )
             if result_index is None:
                 continue
-
             analyte = " ".join(cells[:result_index]).strip(" -*•")
             if not analyte or len(analyte) > 160 or not any(char.isalpha() for char in analyte):
                 continue
             result_text = cells[result_index].strip()
-            result_match = LAB_RESULT_RE.fullmatch(result_text)
-            numeric_result = (
-                _parse_localized_number(result_match.group("number")) if result_match else None
-            )
-            comparator = result_match.group("comparator") if result_match else None
-            explicit_marker = result_match.group("marker") if result_match else ""
             trailing = cells[result_index + 1 :]
             reference_index = next(
                 (
@@ -384,53 +641,129 @@ def _laboratory_candidates(text: str) -> list[ClinicalCandidate]:
                 ),
                 None,
             )
-            unit = " ".join(trailing[:reference_index]).strip() if reference_index is not None else " ".join(trailing).strip()
-            reference_text = " ".join(trailing[reference_index:]).strip() if reference_index is not None else ""
-            reference_low, reference_high = _lab_reference(reference_text)
-            abnormal_flag = _lab_abnormal_flag(
-                numeric_result,
-                comparator,
-                reference_low,
-                reference_high,
-                explicit_marker,
+            unit = (
+                " ".join(trailing[:reference_index]).strip()
+                if reference_index is not None
+                else " ".join(trailing).strip()
             )
-            value = f"{analyte}: {result_text}"
-            if unit:
-                value += f" {unit}"
-            if reference_text:
-                value += f" (Referenz: {reference_text})"
-            section = Section(
-                target="lab_result",
-                heading=current_panel,
-                text=line,
-                page=page_number,
+            reference_text = (
+                " ".join(trailing[reference_index:]).strip()
+                if reference_index is not None
+                else ""
             )
             candidates.append(
-                _candidate(
-                    "lab_result",
-                    value,
-                    {
-                        "panel": current_panel,
-                        "analyte_name": analyte,
-                        "result_text": result_text,
-                        "numeric_result": numeric_result,
-                        "comparator": comparator,
-                        "unit": unit or None,
-                        "reference_text": reference_text or None,
-                        "reference_low": reference_low,
-                        "reference_high": reference_high,
-                        "abnormal_flag": abnormal_flag,
-                        "measured_on": measured_on,
-                        "auto_select": measured_on is not None,
-                        "review_reasons": (
-                            [] if measured_on is not None else ["laboratory_date_requires_confirmation"]
-                        ),
-                        "semantic_role": "laboratory_observation",
-                    },
-                    section,
-                    ("specific_section_role", "structured_date") if measured_on else ("specific_section_role",),
+                _lab_candidate(
+                    analyte=analyte,
+                    result_text=result_text,
+                    unit=unit or None,
+                    reference_text=reference_text or None,
+                    measured_on=measured_on,
+                    panel=current_panel,
+                    page_number=page_number,
+                    source_text=line,
                 )
             )
+    return candidates
+
+
+def _laboratory_candidates(
+    text: str,
+    *,
+    admission_date: str | None = None,
+    discharge_date: str | None = None,
+) -> list[ClinicalCandidate]:
+    """Extract one candidate per analyte/date from layout-aware laboratory tables."""
+
+    candidates = _narrative_laboratory_candidates(
+        text,
+        admission_date=admission_date,
+        discharge_date=discharge_date,
+    )
+    candidates.extend(_single_result_laboratory_candidates(text))
+    current_panel = "Labor"
+    laboratory_mode = False
+    column_dates: list[str] = []
+    column_positions: list[int] = []
+    metadata_headers: list[str] = []
+    medication_heading_prefixes = (
+        "medikation",
+        "aktuellemedikation",
+        "dauermedikation",
+        "entlassungsmedikation",
+        "medikationbeientlassung",
+        "empfohlenemedikation",
+        "häuslichemedikation",
+        "medikamente",
+        "medikationsplan",
+        "bundeseinheitlichermedikationsplan",
+    )
+
+    for page_number, page in enumerate(text.split("\f"), start=1):
+        for raw_line in page.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            heading_key = _heading_key(line.rstrip(":"))
+            if heading_key.startswith(medication_heading_prefixes):
+                laboratory_mode = False
+                column_dates = []
+                column_positions = []
+                metadata_headers = []
+                continue
+            if heading_key in {"wichtigerhinweis", "hinweis"}:
+                laboratory_mode = False
+                column_dates = []
+                column_positions = []
+                metadata_headers = []
+                continue
+            if heading_key.startswith("labor"):
+                laboratory_mode = True
+                current_panel = line.rstrip(":")
+                continue
+
+            date_matches = list(LAB_COLUMN_DATE_RE.finditer(raw_line))
+            if laboratory_mode and date_matches:
+                normalized_dates = [
+                    _normalize_german_date(match.group("date")) for match in date_matches
+                ]
+                if all(normalized_dates):
+                    column_dates = [date for date in normalized_dates if date is not None]
+                    column_positions = [match.start() for match in date_matches]
+                    metadata_headers = _lab_cells(raw_line[: column_positions[0]])
+                    continue
+            if not laboratory_mode or not column_dates or not column_positions:
+                continue
+
+            metadata = _lab_row_metadata(raw_line[: column_positions[0]], metadata_headers)
+            if metadata is None:
+                continue
+            analyte, unit, reference_text = metadata
+            for column_index, (measured_on, start) in enumerate(
+                zip(column_dates, column_positions, strict=True)
+            ):
+                end = (
+                    column_positions[column_index + 1]
+                    if column_index + 1 < len(column_positions)
+                    else len(raw_line)
+                )
+                result_text = raw_line[start:end].strip()
+                if not result_text or not (
+                    LAB_RESULT_RE.fullmatch(result_text)
+                    or LAB_TEXT_RESULT_RE.fullmatch(result_text)
+                ):
+                    continue
+                candidates.append(
+                    _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=unit,
+                        reference_text=reference_text,
+                        measured_on=measured_on,
+                        panel=current_panel,
+                        page_number=page_number,
+                        source_text=line,
+                    )
+                )
     return candidates
 
 
@@ -451,8 +784,27 @@ def _detect_document_type(text: str) -> str:
 
     # These section combinations are substantially more specific than individual
     # modality words such as CT, which often also appear in oncology letters.
+    if any(
+        marker in lowered
+        for marker in (
+            "unverbindliche voraussichtliche kostenschätzung",
+            "orientierungsangebot für medizinische leistungen",
+            "ориентировочный расчёт стоимости медицинских услуг",
+        )
+    ):
+        return "administrative_cost_estimate"
     if "onkologische diagnosen" in lowered or "nichtonkologische diagnosen" in lowered:
         return "oncology_report"
+    if "kardiologie" in lowered and any(
+        marker in lowered for marker in ("vorhofflimmern", "echokardiographie", "kardioversion")
+    ):
+        return "cardiology_report"
+    if (
+        "entlassungsbrief" in lowered
+        or "entlassbrief" in lowered
+        or re.search(r"\bstation[aä]r\w*\s+behandlung\b", lowered)
+    ) and "diagnos" in lowered:
+        return "discharge_summary"
     radiology_headings = sum(
         bool(re.search(pattern, lowered, re.MULTILINE))
         for pattern in (
@@ -692,6 +1044,8 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
 
 
 def _is_signoff_line(line: str) -> bool:
+    if _heading_key(line.rstrip(":")) == "wichtigerhinweis":
+        return True
     return bool(
         re.match(
             r"^(?:mit\s+)?(?:freundliche[nr]?\s+)?(?:kollegiale[nr]?\s+)?(?:grüße|grüsse|grüßen|grüssen)|^hochachtungsvoll",
@@ -790,7 +1144,7 @@ def _looks_like_coherent_text(value: str) -> bool:
 
 
 def _looks_like_ocr_artifact(value: str) -> bool:
-    if "�" in value or "\ufffd" in value:
+    if "\ufffd" in value:
         return True
     tokens = value.split()
     mixed_tokens = sum(
@@ -805,7 +1159,11 @@ def _section_at_page(section: Section, page: int | None) -> Section:
 
 
 def _strip_row_prefix(line: str) -> str:
-    value = re.sub(r"^\s*(?:[•*\-–—]+\s*|\d+[.)]\s+)", "", line).strip()
+    value = re.sub(
+        r"^\s*(?:[•*\-–—]+\s*|(?:\d+|[a-z])[.)]\s+|o\s{2,})",
+        "",
+        line,
+    ).strip()
     dated = DATE_AT_START_RE.match(value)
     if dated and dated.group("text"):
         return dated.group("text").strip()
@@ -869,6 +1227,20 @@ def _diagnosis_semantics(value: str) -> DiagnosisSemantics:
                 "explicit_rule_out",
                 "redirected_from_diagnosis",
                 "requires_clinical_confirmation",
+            ),
+        )
+    if DIAGNOSIS_DETAIL_RE.search(value):
+        return DiagnosisSemantics(
+            target="examination",
+            assertion="documented",
+            semantic_role="diagnosis_detail",
+            certainty=None,
+            auto_select=True,
+            review_reasons=(),
+            confidence_signals=(
+                "recognized_heading",
+                "redirected_from_diagnosis",
+                "specific_section_role",
             ),
         )
     if _diagnosis_has_negation(value):
@@ -981,19 +1353,40 @@ def _diagnosis_rows(
 
     def flush() -> None:
         nonlocal current_lines, current_page
-        value = " ".join(part.strip() for part in current_lines if part.strip()).strip()
+        value = ""
+        for part in (part.strip() for part in current_lines if part.strip()):
+            if value.endswith("-") and part[:1].islower():
+                value = f"{value[:-1]}{part}"
+            else:
+                value = f"{value} {part}".strip()
+        value = re.sub(r"\bmm/(?:20yy|yyyy)\b", "", value, flags=re.IGNORECASE)
+        value = " ".join(value.split()).strip(" ,;")
         if value:
             rows.append((value, current_page))
         current_lines = []
         current_page = section.page
 
+    skipping_code_block = False
     for index, line in enumerate(section.text.splitlines()):
         page = section.line_pages[index] if index < len(section.line_pages) else section.page
-        dated = DATE_AT_START_RE.match(line)
+        compact = line.strip()
+        if DIAGNOSIS_CODE_BLOCK_RE.match(compact):
+            flush()
+            skipping_code_block = True
+            continue
+        dated = DATE_AT_START_RE.match(compact)
+        list_item = re.match(
+            r"^(?:[•*\-–—]+\s*|(?:\d+|[a-z])[.)]\s+|o\s{2,})",
+            compact,
+        )
+        if skipping_code_block and not (dated or list_item):
+            continue
+        if dated or list_item:
+            skipping_code_block = False
         value = _strip_row_prefix(line)
         if not value:
             continue
-        if dated or (current_lines and _looks_like_standalone_oncology_diagnosis(value)):
+        if dated or list_item or (current_lines and _looks_like_standalone_oncology_diagnosis(value)):
             flush()
             current_page = page
         elif not current_lines:
@@ -1091,7 +1484,7 @@ MEDICATION_PZN_RE = re.compile(r"\bPZN\s*[:#-]?\s*(?P<value>\d[\d\s-]{5,10}\d)\b
 MEDICATION_ATC_RE = re.compile(r"\bATC\s*[:#-]?\s*(?P<value>[A-Z]\d{2}[A-Z]{2}\d{2})\b", re.IGNORECASE)
 MEDICATION_STRENGTH_RE = re.compile(
     r"(?<![\w.,])(?P<value>"
-    r"(?:\d+(?:[.,]\d+)?\s*[-–]\s*)?\d+(?:[.,]\d+)?\s*"
+    r"(?:\d+(?:[.,]\d+)?\s*(?:-|/|\N{EN DASH})\s*)*\d+(?:[.,]\d+)?\s*"
     r"(?:mg|g|µg|mcg|ng|ml|l|IE|I\.E\.|E|mmol|%)"
     r"(?:\s*/\s*(?:\d+(?:[.,]\d+)?\s*)?(?:mg|g|µg|mcg|ml|l|IE|I\.E\.|Hub|Dosis|Tabl?\.?))?"
     r")",
@@ -1106,7 +1499,7 @@ MEDICATION_SCHEDULE_RE = re.compile(
 )
 MEDICATION_FORM_PATTERNS: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
     (re.compile(r"\b(?:Retardtabletten?|Retardkapseln?)\b", re.IGNORECASE), "Retardpräparat", "oral"),
-    (re.compile(r"\b(?:Tabl?\.?|(?:Film)?tabletten?)\b", re.IGNORECASE), "Tablette", "oral"),
+    (re.compile(r"\b(?:Tabl?\.?|Tbl\.?|Filmtbl?\.?|(?:Film)?tabletten?)\b", re.IGNORECASE), "Tablette", "oral"),
     (re.compile(r"\b(?:Kaps?\.?|Kapseln?)\b", re.IGNORECASE), "Kapsel", "oral"),
     (re.compile(r"\b(?:Tropfen|Trpf\.?)\b", re.IGNORECASE), "Tropfen", "oral"),
     (re.compile(r"\b(?:Saft|L[oö]sung)\b", re.IGNORECASE), "Lösung", "oral"),
@@ -1146,6 +1539,8 @@ MEDICATION_HEADER_FIELDS = {
     "pzn": "pzn",
     "dosierung": "schedule",
     "dosierschema": "schedule",
+    "einnahme": "schedule",
+    "bemerkung": "hinweis",
     "verordnetam": "verordnet_am",
     "einnahmevon": "einnahme_von",
     "einnahmebis": "einnahme_bis",
@@ -1184,6 +1579,7 @@ def _medication_candidates(
     section: Section,
     *,
     source_country: str | None = None,
+    document_date: str | None = None,
 ) -> tuple[list[ClinicalCandidate], list[str]]:
     text = section.text.strip()
     contains_explicit_negation = bool(MEDICATION_NEGATION_RE.search(text)) or any(
@@ -1199,7 +1595,7 @@ def _medication_candidates(
         section.heading,
         re.IGNORECASE,
     )
-    inherited_date = heading_date_match.group(1) if heading_date_match else None
+    inherited_date = heading_date_match.group(1) if heading_date_match else document_date
     entries: list[tuple[str, str | None, int | None, dict[str, str] | None]] = []
     current_lines: list[str] = []
     current_date: str | None = inherited_date
@@ -1209,7 +1605,8 @@ def _medication_candidates(
     def flush(*, clear_date: bool = False) -> None:
         nonlocal current_lines, current_date, current_page
         if current_lines:
-            entries.append(("\n".join(current_lines).strip(), current_date, current_page, None))
+            repaired_value = _repair_wrapped_example_brand("\n".join(current_lines).strip())
+            entries.append((repaired_value, current_date, current_page, None))
         current_lines = []
         if clear_date:
             current_date = inherited_date
@@ -1224,11 +1621,36 @@ def _medication_candidates(
             flush()
             table_headers = detected_headers
             continue
-        if table_headers and "\t" in stripped:
+        if table_headers:
+            if re.match(
+                r"^(?:\(?Die\s+aufgef[uü]hrten|Laborwerte|Wichtiger\s+Hinweis)\b",
+                stripped,
+                re.IGNORECASE,
+            ):
+                break
             mapped = _medication_table_values(table_headers, stripped)
-            if mapped and (mapped.get("wirkstoff") or mapped.get("handelsname")):
+            if _is_structured_medication_row(mapped, stripped):
                 flush()
                 entries.append((stripped, current_date, page, mapped))
+                continue
+            if (
+                entries
+                and entries[-1][3] is not None
+                and not stripped.startswith("(")
+                and not re.match(r"^(?:Die\s+aufgef[uü]hrten|Laborwerte)\b", stripped, re.IGNORECASE)
+            ):
+                entry, entry_date, entry_page, structured_values = entries[-1]
+                assert structured_values is not None
+                structured_values["hinweis"] = _join_wrapped_text(
+                    structured_values.get("hinweis", ""),
+                    stripped,
+                )
+                entries[-1] = (
+                    _join_wrapped_text(entry, stripped),
+                    entry_date,
+                    entry_page,
+                    structured_values,
+                )
                 continue
         dated = DATE_AT_START_RE.match(stripped)
         if dated:
@@ -1302,6 +1724,8 @@ def _medication_active_context(
             "aktuellemedikation",
             "dauermedikation",
             "entlassungsmedikation",
+            "medikationbeientlassung",
+            "empfohlenemedikation",
             "häuslichemedikation",
             "medikationsplan",
             "bundeseinheitlichermedikationsplan",
@@ -1312,11 +1736,12 @@ def _medication_active_context(
 
 
 def _medication_table_headers(line: str) -> list[str | None] | None:
-    if "\t" not in line:
+    cells = _lab_cells(line)
+    if len(cells) < 2:
         return None
     mapped: list[str | None] = []
     recognized = 0
-    for cell in line.split("\t"):
+    for cell in cells:
         key = _heading_key(cell)
         field_name = MEDICATION_HEADER_FIELDS.get(key)
         mapped.append(field_name)
@@ -1327,8 +1752,15 @@ def _medication_table_headers(line: str) -> list[str | None] | None:
 
 
 def _medication_table_values(headers: list[str | None], line: str) -> dict[str, str]:
-    cells = line.split("\t")
+    cells = _lab_cells(line)
     values: dict[str, str] = {}
+    if (
+        len(cells) == len(headers) + 1
+        and headers[-1] == "hinweis"
+        and re.fullmatch(r"(?:p\.?o\.?|i\.?v\.?|s\.?c\.?)", cells[-2], re.IGNORECASE)
+    ):
+        values["einnahmeform"] = cells[-2]
+        cells = [*cells[:-2], cells[-1]]
     for index, field_name in enumerate(headers):
         if field_name is None or index >= len(cells):
             continue
@@ -1336,6 +1768,57 @@ def _medication_table_values(headers: list[str | None], line: str) -> dict[str, 
         if value:
             values[field_name] = value
     return values
+
+
+def _is_structured_medication_row(values: dict[str, str], line: str) -> bool:
+    if not (values.get("wirkstoff") or values.get("handelsname")):
+        return False
+    if _has_medication_dose_pattern(line):
+        return True
+    if any(
+        values.get(field_name)
+        for field_name in (
+            "dose_morgens",
+            "dose_mittags",
+            "dose_abends",
+            "dose_nachts",
+            "schedule",
+            "status_text",
+        )
+    ):
+        return True
+    return bool(
+        MEDICATION_STOPPED_RE.search(line)
+        or MEDICATION_PAUSED_RE.search(line)
+        or MEDICATION_PLANNED_RE.search(line)
+    )
+
+
+def _join_wrapped_text(existing: str, continuation: str) -> str:
+    left = existing.rstrip()
+    right = continuation.lstrip()
+    if not left:
+        return right
+    if left.endswith("-") and right and right[0].islower():
+        return f"{left[:-1]}{right}"
+    return f"{left} {right}"
+
+
+def _repair_wrapped_example_brand(value: str) -> str:
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) != 2:
+        return value
+    first, second = lines
+    if not re.fullmatch(r"[A-Za-zÄÖÜäöüß][\wÄÖÜäöüß®.-]*\)", second):
+        return value
+    match = re.match(
+        r"^(?P<prefix>.*\(\s*z\.?\s*B\.?\s+[^()\s]+-)\s{2,}(?P<tail>.+)$",
+        first,
+        re.IGNORECASE,
+    )
+    if not match:
+        return value
+    return f"{match.group('prefix')}{second} {match.group('tail').strip()}"
 
 
 def _starts_new_medication_line(current: str, following: str) -> bool:
@@ -1353,6 +1836,10 @@ def _starts_new_medication_line(current: str, following: str) -> bool:
     if any(pattern.match(following) for pattern, _, _ in MEDICATION_FORM_PATTERNS):
         return False
     if current.rstrip().endswith((",", "/", "-", "(")):
+        return False
+    if current.count("(") > current.count(")"):
+        return False
+    if following.endswith(")") and not _has_medication_dose_pattern(following):
         return False
     return bool(re.match(r"^[A-ZÄÖÜ][\wÄÖÜäöüß®+./-]{2,}", following))
 
@@ -1486,7 +1973,7 @@ def _normalize_medication(
         field_evidence["staerke"] = "labeled_table_cell" if structured.get("staerke") else "strength_unit_pattern"
 
     form = _clean_optional(structured.get("form"))
-    route = _clean_optional(structured.get("einnahmeform"))
+    route = _canonical_medication_route(structured.get("einnahmeform"))
     inferred_form: tuple[str, str | None] | None = None
     for pattern, canonical_form, canonical_route in MEDICATION_FORM_PATTERNS:
         if pattern.search(raw_text):
@@ -1496,6 +1983,14 @@ def _normalize_medication(
         form = inferred_form[0]
     if route is None and inferred_form:
         route = inferred_form[1]
+    if route is None:
+        explicit_route = re.search(
+            r"\b(?P<route>p\.?\s*o\.?|i\.?\s*v\.?|s\.?\s*c\.?|i\.?\s*m\.?)\b",
+            raw_text,
+            re.IGNORECASE,
+        )
+        if explicit_route:
+            route = _canonical_medication_route(explicit_route.group("route"))
     if form:
         field_confidence["form"] = 0.98 if structured.get("form") else 0.88
         field_evidence["form"] = "labeled_table_cell" if structured.get("form") else "dosage_form_term"
@@ -1534,6 +2029,10 @@ def _normalize_medication(
         field_confidence["category"] = 0.97
         field_evidence["category"] = "explicit_prn_term"
     hinweis = _clean_optional(structured.get("hinweis")) or _labeled_medication_text(raw_text, "Hinweis|Anweisung")
+    structured_schedule = _clean_optional(structured.get("schedule"))
+    if structured_schedule and schedule is None:
+        hinweis = _join_wrapped_text(structured_schedule, hinweis or "")
+        review_reasons.append("dose_time_requires_confirmation")
     if hinweis is None:
         instructions = [
             match.group(0).strip(" ,.;")
@@ -1553,7 +2052,7 @@ def _normalize_medication(
             field_confidence[field_name] = 0.98 if structured.get(field_name) else 0.9
             field_evidence[field_name] = "labeled_table_cell" if structured.get(field_name) else "explicit_instruction_label_or_phrase"
 
-    normalized_source_date = _normalize_german_date(raw_date) if raw_date else None
+    normalized_source_date = _normalize_medication_date(raw_date)
     if raw_date and normalized_source_date is None:
         review_reasons.append("source_date_requires_confirmation")
     verordnet_am = _normalize_medication_date(structured.get("verordnet_am")) or _medication_date_after(
@@ -1565,7 +2064,10 @@ def _normalize_medication(
     stop_date = _medication_date_after(raw_text, r"(?:abgesetzt|beendet|gestoppt)(?:\s+(?:am|zum))?")
     einnahme_bis = _normalize_medication_date(structured.get("einnahme_bis")) or stop_date
     if einnahme_bis is None:
-        einnahme_bis = _medication_date_after(raw_text, r"(?:Einnahme\s+)?bis(?:\s+zum)?")
+        einnahme_bis = _medication_date_after(
+            raw_text,
+            r"(?:Einnahme\s+)?bis(?:\s+(?:zum|einschlie[ßs]lich|einschl\.?|inkl\.?))?",
+        )
     hold_from = _medication_date_after(raw_text, r"(?:pausiert|Pause|ausgesetzt)\s+(?:seit|ab|vom)") if paused else None
     hold_until = _medication_date_after(raw_text, r"(?:pausiert|Pause|ausgesetzt).*?bis(?:\s+zum)?") if paused else None
     for field_name, value in (
@@ -1649,14 +2151,39 @@ def _clean_optional(value: str | None) -> str | None:
     return compact or None
 
 
+def _canonical_medication_route(value: str | None) -> str | None:
+    compact = _clean_optional(value)
+    if compact is None:
+        return None
+    key = re.sub(r"[^a-z]", "", compact.casefold())
+    return {
+        "po": "oral",
+        "oral": "oral",
+        "iv": "intravenös",
+        "intravenos": "intravenös",
+        "intravenoes": "intravenös",
+        "sc": "subkutan",
+        "subkutan": "subkutan",
+        "im": "intramuskulär",
+        "intramuskular": "intramuskulär",
+        "intramuskulaer": "intramuskulär",
+    }.get(key, compact)
+
+
 def _medication_names(
     raw_text: str,
     structured: dict[str, str],
 ) -> tuple[str | None, str | None, dict[str, float], dict[str, str]]:
     confidence: dict[str, float] = {}
     evidence: dict[str, str] = {}
-    wirkstoff = _clean_optional(structured.get("wirkstoff"))
-    handelsname = _clean_optional(structured.get("handelsname"))
+    wirkstoff = _trim_medication_name(structured.get("wirkstoff"))
+    structured_trade = re.sub(
+        r"^\s*z\.?\s*B\.?\s*",
+        "",
+        structured.get("handelsname", ""),
+        flags=re.IGNORECASE,
+    )
+    handelsname = _trim_medication_name(structured_trade)
     if wirkstoff:
         confidence["wirkstoff"] = 0.98
         evidence["wirkstoff"] = "labeled_table_cell"
@@ -1678,6 +2205,24 @@ def _medication_names(
         handelsname = explicit_trade
         confidence["handelsname"] = 0.97
         evidence["handelsname"] = "explicit_trade_name_label"
+
+    if wirkstoff is None:
+        example_brand = re.match(
+            r"^\s*(?:neu\s+)?(?P<ingredient>[A-ZÄÖÜ][^(),;]{1,120}?)\s*"
+            r"\(\s*z\.?\s*B\.?\s*(?P<trade>[^)]{2,100})\)",
+            raw_text,
+            re.IGNORECASE,
+        )
+        if example_brand:
+            wirkstoff = _trim_medication_name(example_brand.group("ingredient"))
+            handelsname = _trim_medication_name(example_brand.group("trade"))
+            confidence.update({"wirkstoff": 0.96, "handelsname": 0.95})
+            evidence.update(
+                {
+                    "wirkstoff": "active_ingredient_before_example_brand",
+                    "handelsname": "example_brand_in_parentheses",
+                }
+            )
 
     if wirkstoff is None:
         parenthetical = re.match(
@@ -1749,6 +2294,10 @@ def _trim_medication_name(value: str | None) -> str | None:
         for match in [pattern.search(value)]
         if match
     ]
+    for form_pattern, _, _ in MEDICATION_FORM_PATTERNS:
+        form_match = form_pattern.search(value)
+        if form_match:
+            marker_positions.append(form_match.start())
     trimmed = value[: min(marker_positions)] if marker_positions else value
     return _clean_optional(trimmed.strip(" ,-"))
 
@@ -2183,7 +2732,7 @@ def _is_non_diagnostic_assessment(value: str) -> bool:
 
 
 def _section_candidate(section: Section) -> ClinicalCandidate | None:
-    value = section.text.strip()
+    value = _normalize_section_body(section.text)
     if not value:
         return None
     role = _section_role(section.heading)
@@ -2229,3 +2778,44 @@ def _section_candidate(section: Section) -> ClinicalCandidate | None:
         section,
         ("recognized_heading", "section_body", "specific_section_role"),
     )
+
+
+def _normalize_section_body(text: str) -> str:
+    value = ""
+    for line in (
+        _repair_native_pdf_spacing_artifacts(" ".join(line.split()))
+        for line in text.splitlines()
+        if line.strip()
+    ):
+        if value.endswith("-") and line[:1].islower():
+            value = f"{value[:-1]}{line}"
+        else:
+            value = f"{value}\n{line}".strip()
+    return value
+
+
+def _repair_native_pdf_spacing_artifacts(text: str) -> str:
+    """Repair only allowlisted kerning splits seen in otherwise-good PDF text layers.
+
+    A broad "join adjacent tokens" rule would corrupt genuine prose. These
+    patterns therefore cover deterministic date formatting and a small set of
+    common German radiology words whose glyph runs are often split by embedded
+    font positioning.
+    """
+
+    text = re.sub(r"\b(\d{2})\s*/\s*(\d{2})\s+(\d{2})\b", r"\1/\2\3", text)
+    text = re.sub(
+        r"\b(Colon|Rektum)\s*-\s*(Ca)\b",
+        r"\1-\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    repairs = (
+        (r"\bm\s+it\b", "mit"),
+        (r"\bD\s+arstellung\b", "Darstellung"),
+        (r"\bparenchymatö\s+se\b", "parenchymatöse"),
+        (r"\blympho\s+gene\b", "lymphogene"),
+    )
+    for pattern, replacement in repairs:
+        text = re.sub(pattern, replacement, text)
+    return text

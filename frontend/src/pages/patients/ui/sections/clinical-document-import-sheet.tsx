@@ -108,6 +108,15 @@ const targetLabels: Record<ClinicalDocumentImportTarget, { ru: string; de: strin
   recommendation: { ru: "Рекомендации", de: "Empfehlungen" },
 };
 
+const documentTypeLabels: Record<string, { ru: string; de: string }> = {
+  medical_report: { ru: "Медицинский отчёт", de: "Medizinischer Bericht" },
+  discharge_summary: { ru: "Выписной эпикриз", de: "Entlassungsbrief" },
+  cardiology_report: { ru: "Кардиологический отчёт", de: "Kardiologischer Bericht" },
+  oncology_report: { ru: "Онкологический отчёт", de: "Onkologischer Bericht" },
+  radiology_report: { ru: "Радиологический отчёт", de: "Radiologischer Bericht" },
+  administrative_cost_estimate: { ru: "Расчёт стоимости", de: "Kostenschätzung" },
+};
+
 const targetTone: Record<ClinicalDocumentImportTarget, string> = {
   diagnosis: "border-rose-200 bg-rose-50 text-rose-700",
   anamnesis: "border-violet-200 bg-violet-50 text-violet-700",
@@ -146,55 +155,55 @@ function labCandidateDisplay(normalized: Record<string, unknown>): string {
 
 const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
   medication_brand_without_active_ingredient: {
-    ru: "У документі є торгова назва, але діючу речовину треба вказати вручну",
+    ru: "В документе есть торговое название, но действующее вещество нужно указать вручную",
     de: "Handelsname erkannt, Wirkstoff muss manuell ergänzt werden",
   },
   active_ingredient_requires_confirmation: {
-    ru: "Вкажіть і перевірте діючу речовину",
+    ru: "Укажите и проверьте действующее вещество",
     de: "Wirkstoff ergänzen und prüfen",
   },
   medication_name_requires_confirmation: {
-    ru: "Не вдалося надійно визначити назву препарату",
+    ru: "Не удалось надёжно определить название препарата",
     de: "Arzneimittelname konnte nicht sicher bestimmt werden",
   },
   medication_lifecycle_change_requires_confirmation: {
-    ru: "Зміну статусу препарату потрібно підтвердити вручну",
+    ru: "Изменение статуса препарата нужно подтвердить вручную",
     de: "Änderung des Medikationsstatus manuell bestätigen",
   },
   hold_end_requires_confirmation: {
-    ru: "Перевірте дату завершення паузи",
+    ru: "Проверьте дату завершения паузы",
     de: "Ende der Einnahmepause prüfen",
   },
   conflicting_medication_status: {
-    ru: "У документі знайдено суперечливі статуси препарату",
+    ru: "В документе найдены противоречивые статусы препарата",
     de: "Im Dokument wurden widersprüchliche Medikationsstatus erkannt",
   },
   pzn_requires_confirmation: {
-    ru: "Перевірте розпізнаний PZN",
+    ru: "Проверьте распознанный PZN",
     de: "Erkannte PZN prüfen",
   },
   dose_schedule_requires_confirmation: {
-    ru: "Перевірте розпізнану схему дозування",
+    ru: "Проверьте распознанную схему дозирования",
     de: "Erkanntes Dosierschema prüfen",
   },
   medication_active_ingredient_requires_confirmation: {
-    ru: "Перевірте діючу речовину за оригіналом документа",
+    ru: "Проверьте действующее вещество по оригиналу документа",
     de: "Wirkstoff mit dem Originaldokument abgleichen",
   },
   medication_regimen_requires_confirmation: {
-    ru: "Перевірте дозування та схему прийому",
+    ru: "Проверьте дозировку и схему приёма",
     de: "Dosierung und Einnahmeschema prüfen",
   },
   medication_status_requires_confirmation: {
-    ru: "Перевірте статус і дати прийому",
+    ru: "Проверьте статус и даты приёма",
     de: "Status und Einnahmedaten prüfen",
   },
   medication_country_requires_confirmation: {
-    ru: "Перевірте країну походження препарату",
+    ru: "Проверьте страну происхождения препарата",
     de: "Ursprungsland des Arzneimittels prüfen",
   },
   source_date_requires_confirmation: {
-    ru: "Перевірте дату документа або дату набуття чинності схеми",
+    ru: "Проверьте дату документа или дату вступления схемы в силу",
     de: "Dokument- bzw. Wirksamkeitsdatum des Schemas prüfen",
   },
   laboratory_date_requires_confirmation: {
@@ -242,6 +251,14 @@ const semanticLabels: Record<string, { ru: string; de: string }> = {
 };
 
 const draftWarningLabels: Record<string, { ru: string; de: string }> = {
+  "Administrative cost estimate recognized; no clinical facts were proposed.": {
+    ru: "Распознан административный расчёт стоимости. Клинические данные не предлагаются.",
+    de: "Administrative Kostenschätzung erkannt. Es werden keine klinischen Daten vorgeschlagen.",
+  },
+  "No supported clinical sections were recognized; manual review is required.": {
+    ru: "Поддерживаемые клинические разделы не найдены. Требуется ручная проверка.",
+    de: "Keine unterstützten klinischen Abschnitte erkannt. Manuelle Prüfung erforderlich.",
+  },
   "Low-confidence OCR evidence requires manual review.": {
     ru: "Часть OCR-текста распознана неуверенно и требует ручной сверки с документом.",
     de: "Ein Teil des OCR-Texts hat niedrige Konfidenz und muss mit dem Dokument geprüft werden.",
@@ -259,7 +276,7 @@ const importStatusLabels: Record<
   queued: { ru: "В очереди", de: "In Warteschlange" },
   processing: { ru: "Обрабатывается", de: "Wird verarbeitet" },
   review_required: { ru: "Готово к проверке", de: "Bereit zur Prüfung" },
-  applying: { ru: "Застосування зафіксовано", de: "Übernahme vorbereitet" },
+  applying: { ru: "Применение зафиксировано", de: "Übernahme vorbereitet" },
   applied: { ru: "Добавлено в карту", de: "Übernommen" },
   failed: { ru: "Ошибка", de: "Fehlgeschlagen" },
 };
@@ -310,12 +327,12 @@ function medicationDispositionLabel(
 ) {
   if (disposition === "blocked") {
     return tx(
-      "Вкажіть діючу речовину — без неї запис не можна імпортувати",
+      "Укажите действующее вещество — без него запись нельзя импортировать",
       "Wirkstoff ergänzen – ohne Wirkstoff ist kein Import möglich",
     );
   }
   return tx(
-    "Перевірте всі поля — дублювання, зміни схеми та статусу визначить система під час збереження",
+    "Проверьте все поля — дублирование, изменение схемы и статуса система определит при сохранении",
     "Alle Felder prüfen – Deduplizierung, Schema- und Statusänderungen werden beim Speichern ermittelt",
   );
 }
@@ -429,7 +446,7 @@ function MedicationCandidateEditor({
           <p className="font-medium">{medicationDispositionLabel(disposition, tx)}</p>
           <p className="text-[11px] opacity-80">
             {tx(
-              "OCR не підтверджує препарат і не підбирає заміну автоматично.",
+              "OCR не подтверждает препарат и не подбирает замену автоматически.",
               "OCR bestätigt das Arzneimittel nicht und führt keine automatische Substitution durch.",
             )}
           </p>
@@ -439,7 +456,7 @@ function MedicationCandidateEditor({
       {seriesOptions.length > 0 || requiresExplicitSeries ? (
         <label className="block space-y-1 rounded-lg border border-sky-200 bg-sky-50/70 p-3">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-sky-900">
-            {tx("Лінія медикаменту", "Medikationsserie")}{requiresExplicitSeries ? " *" : ""}
+            {tx("Линия медикамента", "Medikationsserie")}{requiresExplicitSeries ? " *" : ""}
           </span>
           <select
             value={seriesSelection}
@@ -454,8 +471,8 @@ function MedicationCandidateEditor({
           >
             <option value="">
               {requiresExplicitSeries
-                ? tx("Оберіть відповідну лінію", "Passende Medikationsserie auswählen")
-                : tx("Визначити під час збереження", "Beim Speichern zuordnen")}
+                ? tx("Выберите подходящую линию", "Passende Medikationsserie auswählen")
+                : tx("Определить при сохранении", "Beim Speichern zuordnen")}
             </option>
             {seriesOptions.map((option) => (
               <option key={option.medicationSeriesId ?? option.id} value={option.medicationSeriesId ?? ""}>
@@ -463,13 +480,13 @@ function MedicationCandidateEditor({
               </option>
             ))}
             <option value={CREATE_NEW_MEDICATION_SERIES}>
-              {tx("Створити нову лінію", "Neue Medikationsserie erstellen")}
+              {tx("Создать новую линию", "Neue Medikationsserie erstellen")}
             </option>
           </select>
           {ambiguousSeries ? (
             <span className="block text-[11px] text-amber-800">
               {tx(
-                "Є кілька поточних або вибраних записів із цією діючою речовиною. Виберіть лінію вручну — система не буде вгадувати.",
+                "Есть несколько текущих или выбранных записей с этим действующим веществом. Выберите линию вручную — система не будет угадывать.",
                 "Mehrere aktuelle oder ausgewählte Einträge haben diesen Wirkstoff. Serie manuell wählen; es erfolgt keine automatische Zuordnung.",
               )}
             </span>
@@ -477,7 +494,7 @@ function MedicationCandidateEditor({
           {createsNewSeries ? (
             <span className="block text-[11px] text-sky-800">
               {tx(
-                "Буде створено окрему паралельну лінію; наявні схеми не перезаписуються.",
+                "Будет создана отдельная параллельная линия; существующие схемы не перезаписываются.",
                 "Es wird eine eigene parallele Serie erstellt; bestehende Schemata werden nicht überschrieben.",
               )}
             </span>
@@ -486,10 +503,10 @@ function MedicationCandidateEditor({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {field("wirkstoff", tx("Діюча речовина", "Wirkstoff"), { required: true, className: "xl:col-span-2" })}
+        {field("wirkstoff", tx("Действующее вещество", "Wirkstoff"), { required: true, className: "xl:col-span-2" })}
         {field("handelsname", tx("Торгова назва", "Handelsname"), { className: "xl:col-span-2" })}
-        {field("staerke", tx("Сила / концентрація", "Stärke / Konzentration"))}
-        {field("form", tx("Лікарська форма", "Darreichungsform"))}
+        {field("staerke", tx("Дозировка / концентрация", "Stärke / Konzentration"))}
+        {field("form", tx("Лекарственная форма", "Darreichungsform"))}
         {field("einnahmeform", tx("Шлях введення", "Einnahmeform / Applikationsweg"), { className: "sm:col-span-2" })}
       </div>
 
@@ -500,8 +517,8 @@ function MedicationCandidateEditor({
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
           {field("dose_morgens", tx("Ранок", "Morgens"))}
           {field("dose_mittags", tx("День", "Mittags"))}
-          {field("dose_abends", tx("Вечір", "Abends"))}
-          {field("dose_nachts", tx("Ніч", "Nachts"))}
+          {field("dose_abends", tx("Вечер", "Abends"))}
+          {field("dose_nachts", tx("Ночь", "Nachts"))}
           {field("einheit", tx("Одиниця", "Einheit"), { className: "col-span-2 sm:col-span-1 xl:col-span-2" })}
         </div>
         <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-sky-950">
@@ -517,9 +534,9 @@ function MedicationCandidateEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {field("source_date", tx("Дата документа / дії", "Dokument- / Wirksamkeitsdatum"), { type: "date" })}
+        {field("source_date", tx("Дата документа / действия", "Dokument- / Wirksamkeitsdatum"), { type: "date" })}
         {field("verordnet_am", tx("Призначено", "Verordnet am"), { type: "date" })}
-        {field("einnahme_von", tx("Прийом від", "Einnahme von"), { type: "date" })}
+        {field("einnahme_von", tx("Приём с", "Einnahme von"), { type: "date" })}
         {field("einnahme_bis", tx("Прийом до", "Einnahme bis"), { type: "date" })}
         <label className="space-y-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -540,14 +557,14 @@ function MedicationCandidateEditor({
       </div>
       {invalidDateRange ? (
         <p className="text-xs font-medium text-destructive">
-          {tx("Дата завершення раніше дати початку.", "Das Enddatum liegt vor dem Startdatum.")}
+          {tx("Дата окончания раньше даты начала.", "Das Enddatum liegt vor dem Startdatum.")}
         </p>
       ) : null}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <label className="space-y-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {tx("Вказівки", "Hinweise")}
+            {tx("Указания", "Hinweise")}
           </span>
           <textarea
             value={normalizedValue("hinweis")}
@@ -574,7 +591,7 @@ function MedicationCandidateEditor({
       <div className="grid gap-3 rounded-lg border border-border/60 bg-white/70 p-3 sm:grid-cols-2 xl:grid-cols-4">
         <label className="space-y-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {tx("Країна джерела", "Ursprungsland")}
+            {tx("Страна источника", "Ursprungsland")}
           </span>
           <Input
             value={country}
@@ -595,16 +612,16 @@ function MedicationCandidateEditor({
             className="size-4 rounded border-border accent-orange-500"
             onChange={(event) => update("on_hold", event.target.checked)}
           />
-          {tx("Прийом на паузі", "Einnahme pausiert")}
+          {tx("Приём приостановлен", "Einnahme pausiert")}
         </label>
-        {onHold ? field("hold_from", tx("Пауза від", "Pause von"), { type: "date" }) : null}
+        {onHold ? field("hold_from", tx("Пауза с", "Pause von"), { type: "date" }) : null}
         {onHold ? field("hold_until", tx("Пауза до", "Pause bis"), { type: "date" }) : null}
         {onHold ? field("hold_note", tx("Причина паузи", "Pausengrund"), { className: "sm:col-span-2 xl:col-span-4" }) : null}
       </div>
 
       {identifiers ? (
         <p className="break-words rounded-md border border-border/60 bg-white px-3 py-2 text-[11px] text-muted-foreground">
-          <span className="font-semibold text-foreground">{tx("Ідентифікатори", "Kennungen")}:</span>{" "}
+          <span className="font-semibold text-foreground">{tx("Идентификаторы", "Kennungen")}:</span>{" "}
           {identifiers}
         </p>
       ) : null}
@@ -659,6 +676,7 @@ export function ClinicalDocumentImportSheet({
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const fileRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const appliedNoticeRef = useRef<HTMLDivElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [documentImport, setDocumentImport] = useState<ClinicalDocumentImport | null>(null);
   const [candidates, setCandidates] = useState<ClinicalDocumentImportCandidate[]>([]);
@@ -835,7 +853,7 @@ export function ClinicalDocumentImportSheet({
       setDeleteTarget(null);
       toast.error(
         tx(
-          "Зафіксоване застосування не можна видалити. Відкрийте його та завершіть імпорт.",
+          "Зафиксированное применение нельзя удалить. Откройте его и завершите импорт.",
           "Eine vorbereitete Übernahme kann nicht gelöscht werden. Öffnen und schließen Sie den Import ab.",
         ),
       );
@@ -1092,11 +1110,11 @@ export function ClinicalDocumentImportSheet({
       toast.error(
         reason === "missing_wirkstoff"
           ? tx(
-              "Вибраний медикамент не має діючої речовини. Заповніть Wirkstoff перед імпортом.",
+              "У выбранного медикамента нет действующего вещества. Заполните Wirkstoff перед импортом.",
               "Für das ausgewählte Medikament fehlt der Wirkstoff. Bitte vor dem Import ergänzen.",
             )
           : tx(
-              "Для вибраного медикаменту потрібно обрати наявну лінію або створити нову.",
+              "Для выбранного медикамента нужно выбрать существующую линию или создать новую.",
               "Für das ausgewählte Medikament muss eine bestehende Serie gewählt oder eine neue erstellt werden.",
             ),
       );
@@ -1128,7 +1146,7 @@ export function ClinicalDocumentImportSheet({
       let preparedImport: ClinicalDocumentImport = latestImport;
       if (latestImport.status === "applying") {
         if (!latestImport.reviewed_draft) {
-          throw new Error(tx("Зафіксований імпорт не має знімка перевірки", "Vorbereiteter Import enthält keinen Prüfsnapshot"));
+          throw new Error(tx("Зафиксированный импорт не содержит снимка проверки", "Vorbereiteter Import enthält keinen Prüfsnapshot"));
         }
         reviewedDraft = latestImport.reviewed_draft;
         preparedCountry = latestImport.prepared_source_country ?? "";
@@ -1150,11 +1168,11 @@ export function ClinicalDocumentImportSheet({
         throw new Error(
           invalidCandidate.target === "lab_result"
             ? tx(
-                "Для вибраного аналізу потрібні показник, значення, дата та підтверджена країна.",
+                "Для выбранного анализа нужны показатель, значение, дата и подтверждённая страна.",
                 "Für den ausgewählten Laborwert sind Parameter, Wert, Datum und ein bestätigtes Land erforderlich.",
               )
             : tx(
-                "Для вибраного медикаменту потрібні Wirkstoff і підтверджена країна.",
+                "Для выбранного медикамента нужны Wirkstoff и подтверждённая страна.",
                 "Für das ausgewählte Medikament sind Wirkstoff und ein bestätigtes Land erforderlich.",
               ),
         );
@@ -1192,6 +1210,7 @@ export function ClinicalDocumentImportSheet({
       );
       setDocumentImport(completed);
       setCandidates(completed.reviewed_draft?.candidates ?? candidates);
+      setActiveTab("all");
       void refreshHistory(true);
       toast.success(
         tx(
@@ -1199,7 +1218,7 @@ export function ClinicalDocumentImportSheet({
           "Daten wurden in die Patientenakte übernommen",
         ),
       );
-      handleOpenChange(false);
+      window.requestAnimationFrame(() => appliedNoticeRef.current?.focus());
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : tx("Импорт не удался", "Import fehlgeschlagen"),
@@ -1403,24 +1422,44 @@ export function ClinicalDocumentImportSheet({
               {reviewReady && blockedSelected.length > 0 ? (
                 <p className="font-medium text-amber-700">
                   {tx(
-                    `${blockedSelected.length} медикамент(и) потребують перевірки перед застосуванням`,
+                    `${blockedSelected.length} медикамент(а) требуют проверки перед применением`,
                     `${blockedSelected.length} Medikament(e) müssen vor der Übernahme geprüft werden`,
                   )}
                 </p>
               ) : applyingReady ? (
                 <p className="font-medium text-violet-700">
-                  {tx("Вибір зафіксовано — імпорт можна безпечно продовжити", "Auswahl ist eingefroren – Import kann sicher fortgesetzt werden")}
+                  {tx("Выбор зафиксирован — импорт можно безопасно продолжить", "Auswahl ist eingefroren – Import kann sicher fortgesetzt werden")}
                 </p>
               ) : null}
             </div>
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-              {tx("Отмена", "Abbrechen")}
+              {applyingReady ? tx("Закрыть", "Schließen") : tx("Отмена", "Abbrechen")}
             </Button>
             <Button type="button" disabled={busy || selected.length === 0} onClick={apply}>
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
               {applyingReady
                 ? tx("Продовжити й завершити", "Fortsetzen und abschließen")
                 : tx("Подтвердить и добавить", "Prüfen und übernehmen")}
+            </Button>
+          </>
+        ) : documentImport?.status === "applied" ? (
+          <>
+            <div className="mr-auto flex min-w-0 items-center gap-2 text-xs text-emerald-800">
+              <CheckCircle2 className="size-4 shrink-0" />
+              <span className="truncate font-medium">
+                {tx(
+                  `${appliedObjectCount(documentImport)} объект(ов) добавлено в карту`,
+                  `${appliedObjectCount(documentImport)} Objekt(e) in die Akte übernommen`,
+                )}
+              </span>
+            </div>
+            <Button type="button" variant="outline" onClick={returnToHistory}>
+              <FileUp className="size-4" />
+              {tx("Загрузить ещё документ", "Weiteres Dokument hochladen")}
+            </Button>
+            <Button type="button" onClick={() => handleOpenChange(false)}>
+              <Check className="size-4" />
+              {tx("Закрыть", "Schließen")}
             </Button>
           </>
         ) : undefined
@@ -1612,7 +1651,7 @@ export function ClinicalDocumentImportSheet({
                               aria-label={tx("Удалить обработку", "Verarbeitung löschen")}
                               title={
                                 item.status === "applying"
-                                  ? tx("Спочатку завершіть зафіксований імпорт", "Vorbereitete Übernahme zuerst abschließen")
+                                  ? tx("Сначала завершите зафиксированный импорт", "Vorbereitete Übernahme zuerst abschließen")
                                   : tx("Удалить обработку", "Verarbeitung löschen")
                               }
                             >
@@ -1647,7 +1686,11 @@ export function ClinicalDocumentImportSheet({
           ) : null}
 
           {documentImport && ["queued", "processing"].includes(documentImport.status) ? (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center"
+            >
               <div className="relative flex size-16 items-center justify-center rounded-2xl bg-primary/10">
                 <FileText className="size-7 text-primary" />
                 <LoaderCircle className="absolute -right-1 -bottom-1 size-6 animate-spin rounded-full bg-background text-primary" />
@@ -1658,6 +1701,12 @@ export function ClinicalDocumentImportSheet({
                   {tx(
                     "Распознаём страницы, секции, диагнозы, анамнез, медикаменты, обследования и рекомендации.",
                     "Seiten, Abschnitte, Diagnosen, Anamnese, Medikation, Befunde und Empfehlungen werden erkannt.",
+                  )}
+                </p>
+                <p className="mt-3 max-w-md text-xs font-medium text-foreground/75">
+                  {tx(
+                    "Окно останется открытым. Готовый черновик появится здесь автоматически.",
+                    "Das Fenster bleibt geöffnet. Der fertige Entwurf erscheint hier automatisch.",
                   )}
                 </p>
               </div>
@@ -1686,7 +1735,9 @@ export function ClinicalDocumentImportSheet({
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Badge className="bg-primary/10 text-primary hover:bg-primary/10">
-                      {documentImport.document_type ?? "medical_report"}
+                      {documentTypeLabels[documentImport.document_type ?? "medical_report"]?.[
+                        lang === "de" ? "de" : "ru"
+                      ] ?? documentImport.document_type?.replaceAll("_", " ") ?? tx("Медицинский отчёт", "Medizinischer Bericht")}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       {candidates.length} {tx("найденных объектов", "erkannte Objekte")}
@@ -1726,6 +1777,7 @@ export function ClinicalDocumentImportSheet({
                 >
                   <TabsList
                     variant="line"
+                    aria-label={tx("Категории найденных объектов", "Kategorien der erkannten Objekte")}
                     className="h-10 w-full max-w-full justify-start gap-5 overflow-x-auto overflow-y-hidden rounded-none border-0 border-b border-border/70 bg-transparent px-1 py-0"
                   >
                     <TabsTrigger value="all" className={builderTabClassName}>
@@ -1752,7 +1804,13 @@ export function ClinicalDocumentImportSheet({
 
               <div className="min-h-0 flex-1 overflow-y-auto p-4 xl:p-5">
                 {documentImport.status === "applied" ? (
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+                  <div
+                    ref={appliedNoticeRef}
+                    role="status"
+                    aria-live="polite"
+                    tabIndex={-1}
+                    className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2"
+                  >
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="size-4" />
                       <div>
@@ -1777,11 +1835,11 @@ export function ClinicalDocumentImportSheet({
                       <Clock3 className="size-4" />
                       <div>
                         <p className="text-xs font-semibold">
-                          {tx("Перевірений вибір зафіксовано", "Geprüfte Auswahl ist eingefroren")}
+                          {tx("Проверенный выбор зафиксирован", "Geprüfte Auswahl ist eingefroren")}
                         </p>
                         <p className="text-[11px] text-violet-800/80">
                           {tx(
-                            "Редагування вимкнено. Продовжіть, щоб безпечно завершити всі записи.",
+                            "Редактирование отключено. Продолжите, чтобы безопасно завершить все записи.",
                             "Bearbeitung ist gesperrt. Fortsetzen, um alle Einträge sicher abzuschließen.",
                           )}
                         </p>
@@ -1910,6 +1968,7 @@ export function ClinicalDocumentImportSheet({
                         value={sourceCountry}
                         maxLength={2}
                         disabled={snapshotReadOnly}
+                        aria-describedby="clinical-import-source-country-help"
                         aria-invalid={!isCanonicalClinicalImportSourceCountry(sourceCountry)}
                         className={cn(
                           "w-24 uppercase",
@@ -1920,14 +1979,17 @@ export function ClinicalDocumentImportSheet({
                             event.target.value.toUpperCase().replace(/[^A-Z]/g, ""),
                           )
                         }
-                        placeholder="UA"
+                        placeholder={snapshotReadOnly ? "—" : "UA"}
                       />
                     </label>
-                    <p className="pb-2 text-xs text-muted-foreground">
+                    <p
+                      id="clinical-import-source-country-help"
+                      className="pb-2 text-xs text-muted-foreground"
+                    >
                       {tx(
                         isCanonicalClinicalImportSourceCountry(sourceCountry)
-                          ? "Єдина підтверджена країна буде застосована до всіх вибраних діагнозів, аналізів і медикаментів."
-                          : "Країна в документі відсутня або суперечлива. Підтвердьте ISO-код перед застосуванням.",
+                          ? "Единая подтверждённая страна будет применена ко всем выбранным диагнозам, анализам и медикаментам."
+                          : "Страна в документе отсутствует или противоречива. Подтвердите ISO-код перед применением.",
                         isCanonicalClinicalImportSourceCountry(sourceCountry)
                           ? "Das bestätigte Land gilt für alle ausgewählten Diagnosen, Laborwerte und Medikamente."
                           : "Das Dokument enthält kein eindeutiges Land. ISO-Code vor der Übernahme bestätigen.",

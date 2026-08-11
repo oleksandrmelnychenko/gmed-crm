@@ -31,6 +31,11 @@ models for Latin text and falls back to local Tesseract for failures and
 Cyrillic pages. Set `PARSER_OCR_ENGINE=tesseract` to disable PaddleOCR. No
 document content leaves the host.
 
+Administrative cost estimates are identified before clinical section parsing
+and deliberately produce no clinical candidates. Narrative candidate text also
+repairs only a narrow allowlist of deterministic native-PDF kerning splits;
+unknown word boundaries remain unchanged for reviewer visibility.
+
 Paddle inference runs in a persistent local child process by default. A page
 deadline terminates and recreates that process, so a stuck native inference
 call cannot hold the queue worker indefinitely. Set
@@ -55,8 +60,13 @@ geometrically ordered and handles the common two-column medical-letter layout.
 Repeated aligned numeric cells are treated as a table and kept in row-major
 order with tab-separated cells, so laboratory names remain attached to values
 and units. Tabular laboratory drafts emit one `lab_result` candidate per
-analyte, retaining the original value, unit, reference range, date, page, and
-abnormal marker for human review and longitudinal storage.
+analyte/date cell, retaining the original value, normalized numeric value,
+comparator, unit, reference range, date, page, and abnormal marker for human
+review and longitudinal storage. Both vertical one-result tables and wide
+longitudinal tables with several date columns are supported. Narrative
+admission/discharge laboratory blocks inherit the matching encounter boundary
+date. Text results such as `neg.` remain textual and are compared with textual
+references rather than being coerced into numbers.
 Medication sections and BMP-like tables emit one structured `medication`
 candidate per row. The draft preserves the raw row and extracts explicitly
 supported active/trade names, strength, form, route, four-slot dose schedule,
@@ -71,6 +81,12 @@ structured BMP or a current-medication section. Those contexts are retained as
 review evidence only. Automatic selection requires an explicit or semantically
 explicit active-status statement in addition to an active ingredient and all
 other safety checks.
+Common discharge tables (`Medikation bei Entlassung`, `Empfohlene Medikation`)
+preserve wrapped trade names, remarks, compound strengths, routes, and finite
+course end dates. Template disclaimers and following laboratory rows terminate
+the medication table. A frequency without a time slot such as `1x täglich` is
+kept as an instruction and requires review instead of being guessed as a
+morning dose.
 During draft enrichment, candidate source evidence is matched to these blocks
 in memory. Review confidence then uses the matching blocks instead of a noisy
 page-wide average; only block numbers and aggregate confidence are persisted.
