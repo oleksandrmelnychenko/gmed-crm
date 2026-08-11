@@ -1550,8 +1550,8 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     )
     .await;
     assert_eq!(teamlead_status, StatusCode::OK);
-    assert_eq!(teamlead_body["section"], "interpreter");
-    assert_eq!(teamlead_body["kpi"]["user_id"], teamlead_id.to_string());
+    assert_eq!(teamlead_body["section"], "teamlead_interpreter");
+    assert_eq!(teamlead_body["kpi"]["team_size"], 1);
     assert_eq!(teamlead_body["kpi"]["approved_hours_30d"], "2");
     assert_eq!(teamlead_body["kpi"]["booked_hours_30d"], "2");
     assert_eq!(teamlead_body["kpi"]["completed_appointments_30d"], 1);
