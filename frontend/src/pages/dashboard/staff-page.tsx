@@ -1,13 +1,16 @@
 import { lazy, startTransition, Suspense, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { ALL_STAFF_ROLES } from "@/lib/staff-route-access";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useStaffDashboardData } from "./data/use-staff-dashboard-data";
 import { dashboardProviderHref, greetingFor } from "./model/staff-dashboard-formatters";
 import type { Period } from "./model/staff-dashboard-types";
 import { StaffDashboardOverviewSection } from "./ui/sections/staff-dashboard-overview-section";
 import { DashboardSectionLoading } from "./ui/shared/dashboard-route-loading";
+import { RoleDashboardPage } from "./role-dashboard-page";
 
 const StaffDashboardDemographicsSection = lazy(() =>
   import("./ui/sections/staff-dashboard-demographics-section").then((module) => ({
@@ -34,6 +37,25 @@ const StaffDashboardActivitySection = lazy(() =>
 );
 
 export function StaffDashboardPageNew() {
+  const { user } = useAuth();
+  const location = useLocation();
+
+  const previewRole = import.meta.env.DEV
+    ? new URLSearchParams(location.search).get("dashboardRole")
+    : null;
+  const effectiveRole =
+    previewRole && (ALL_STAFF_ROLES as readonly string[]).includes(previewRole)
+      ? previewRole
+      : user?.role ?? "ceo";
+
+  if (effectiveRole !== "ceo") {
+    return <RoleDashboardPage preview={effectiveRole !== user?.role} role={effectiveRole} />;
+  }
+
+  return <ExecutiveStaffDashboard />;
+}
+
+function ExecutiveStaffDashboard() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;

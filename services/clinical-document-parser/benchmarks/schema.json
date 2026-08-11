@@ -92,7 +92,7 @@
       ]
     },
     "target": {
-      "enum": ["diagnosis", "anamnesis", "medication", "examination", "lab_result", "recommendation"]
+      "enum": ["diagnosis", "anamnesis", "medication", "examination", "lab_result", "vital", "recommendation"]
     },
     "candidate": {
       "type": "object",

@@ -23,11 +23,15 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::documents::{is_iso_country_code, read_document_storage_bytes};
-use crate::routes::patients::normalize_patient_lab_result_payload;
+use crate::routes::patients::{
+    normalize_patient_lab_result_payload, normalize_patient_vital_measurement_payload,
+};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
-const IMPORT_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager, Role::ItAdmin];
+// The first-release workspace exposes clinical imports to the CEO only.
+// Keep this route contract aligned with the global release-role gate.
+const IMPORT_ROLES: &[Role] = &[Role::Ceo];
 const UNSUPPORTED_IMPORT_FILE: &str = "Clinical import supports only PDF, PNG, and JPEG documents";
 const MAX_IMPORT_FILE_BYTES: usize = 25 * 1024 * 1024;
 
@@ -118,7 +122,136 @@ struct PrepareImportRequest {
     reviewed_draft: Value,
     #[serde(default)]
     source_country: Option<String>,
+    #[serde(default)]
+    patient_identity_confirmed: bool,
     candidate_payloads: Value,
+}
+
+#[derive(Deserialize)]
+struct ParsedDocumentSubject {
+    status: String,
+    conflict: bool,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    birth_date: Option<String>,
+    patient_identifier: Option<String>,
+    patient_identifier_namespace: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SubjectIdentityDecision {
+    Missing,
+    Matched,
+    NameConfirmationRequired,
+    ConfirmedNameMismatch,
+    HardMismatch,
+    ConfirmationWithoutSubject,
+}
+
+fn normalize_identity_name(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn normalize_patient_identifier(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
+fn evaluate_document_subject_identity(
+    stored_draft: &Value,
+    patient_first_name: &str,
+    patient_last_name: &str,
+    patient_birth_date: chrono::NaiveDate,
+    patient_identifier: &str,
+    patient_identity_confirmed: bool,
+) -> SubjectIdentityDecision {
+    let Some(subject_value) = stored_draft.get("subject") else {
+        return if patient_identity_confirmed {
+            SubjectIdentityDecision::ConfirmationWithoutSubject
+        } else {
+            SubjectIdentityDecision::Missing
+        };
+    };
+    if subject_value.is_null() {
+        return if patient_identity_confirmed {
+            SubjectIdentityDecision::ConfirmationWithoutSubject
+        } else {
+            SubjectIdentityDecision::Missing
+        };
+    }
+    let Ok(subject) = serde_json::from_value::<ParsedDocumentSubject>(subject_value.clone()) else {
+        return SubjectIdentityDecision::HardMismatch;
+    };
+    if subject.conflict || subject.status != "extracted" {
+        return SubjectIdentityDecision::HardMismatch;
+    }
+    let subject_birth_date = subject.birth_date.as_deref().filter(|value| !value.trim().is_empty());
+    if let Some(birth_date) = subject_birth_date {
+        let Ok(birth_date) = chrono::NaiveDate::parse_from_str(birth_date, "%Y-%m-%d") else {
+            return SubjectIdentityDecision::HardMismatch;
+        };
+        if birth_date != patient_birth_date {
+            return SubjectIdentityDecision::HardMismatch;
+        }
+    }
+    let subject_identifier = subject
+        .patient_identifier
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let identifier_namespace = subject
+        .patient_identifier_namespace
+        .as_deref()
+        .unwrap_or("source_document");
+    if subject_identifier.is_some()
+        && !matches!(identifier_namespace, "source_document" | "gmed_patient_id")
+    {
+        return SubjectIdentityDecision::HardMismatch;
+    }
+    let identifier_mismatch = subject_identifier.is_some_and(|value| {
+        normalize_patient_identifier(value) != normalize_patient_identifier(patient_identifier)
+    });
+    if identifier_namespace == "gmed_patient_id" && identifier_mismatch {
+        return SubjectIdentityDecision::HardMismatch;
+    }
+    let external_identifier_mismatch =
+        identifier_namespace == "source_document" && identifier_mismatch;
+    let subject_first_name = subject
+        .first_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let subject_last_name = subject
+        .last_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    let first_name_mismatch = subject_first_name.is_some_and(|value| {
+        normalize_identity_name(value) != normalize_identity_name(patient_first_name)
+    });
+    let last_name_mismatch = subject_last_name.is_some_and(|value| {
+        normalize_identity_name(value) != normalize_identity_name(patient_last_name)
+    });
+    if first_name_mismatch || last_name_mismatch || external_identifier_mismatch {
+        if patient_identity_confirmed {
+            SubjectIdentityDecision::ConfirmedNameMismatch
+        } else {
+            SubjectIdentityDecision::NameConfirmationRequired
+        }
+    } else if subject_birth_date.is_some()
+        || (identifier_namespace == "gmed_patient_id" && subject_identifier.is_some())
+        || (subject_first_name.is_some() && subject_last_name.is_some())
+    {
+        SubjectIdentityDecision::Matched
+    } else if patient_identity_confirmed {
+        SubjectIdentityDecision::ConfirmationWithoutSubject
+    } else {
+        SubjectIdentityDecision::Missing
+    }
 }
 
 #[derive(Default)]
@@ -1031,7 +1164,7 @@ async fn persist_imported_medication(
     };
     let import_row = match sqlx::query(
         r#"SELECT document_id, reviewed_draft, status, prepared_source_country,
-                  prepared_candidate_payloads
+                  prepared_candidate_payloads, prepared_identity_gate_version
            FROM clinical_document_imports
            WHERE id = $1 AND patient_id = $2 AND status IN ('applying', 'applied')
              AND deleted_at IS NULL
@@ -1057,6 +1190,12 @@ async fn persist_imported_medication(
             );
         }
     };
+    if import_row.get::<i16, _>("prepared_identity_gate_version") < 1 {
+        return err(
+            StatusCode::CONFLICT,
+            "Clinical import identity gate must be completed before medication persistence",
+        );
+    }
     let document_id = import_row.get::<Uuid, _>("document_id");
     let import_status = import_row.get::<String, _>("status");
     let reviewed_draft = import_row
@@ -1932,7 +2071,10 @@ async fn create_import(
                                              AND deleted_at IS NULL
            DO UPDATE SET updated_at = clinical_document_imports.updated_at
            RETURNING id, patient_id, document_id, status, document_type, source_language,
-                     parser_version, draft, reviewed_draft, applied_counts, error_message, worker_id,
+                     parser_version, draft, reviewed_draft, prepared_source_country,
+                     prepared_patient_identity_confirmed, prepared_identity_gate_version,
+                     prepared_at,
+                     applied_counts, error_message, worker_id,
                      requested_by, reviewed_by, applied_by, locked_at, completed_at,
                      applied_at, created_at, updated_at"#,
     )
@@ -2139,6 +2281,7 @@ fn validate_reviewed_draft(
                     | "medication"
                     | "examination"
                     | "lab_result"
+                    | "vital"
                     | "recommendation"
             )
             || !reviewed_ids.insert(candidate.id.clone())
@@ -2204,7 +2347,11 @@ fn validate_prepared_candidate_payloads(
     let expected = reviewed
         .iter()
         .filter(|candidate| {
-            candidate.selected && matches!(candidate.target.as_str(), "medication" | "lab_result")
+            candidate.selected
+                && matches!(
+                    candidate.target.as_str(),
+                    "medication" | "lab_result" | "vital"
+                )
         })
         .map(|candidate| (candidate.id.clone(), candidate.target.clone()))
         .collect::<HashMap<_, _>>();
@@ -2215,7 +2362,7 @@ fn validate_prepared_candidate_payloads(
     {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "candidate_payloads keys must exactly match selected medication and lab_result candidates",
+            "candidate_payloads keys must exactly match selected medication, lab_result, and vital candidates",
         ));
     }
     let mut medication_identity_reviews = HashMap::<String, Vec<(Option<Uuid>, bool)>>::new();
@@ -2258,6 +2405,18 @@ fn validate_prepared_candidate_payloads(
                     ));
                 }
             }
+            "vital" => {
+                let vital = normalize_patient_vital_measurement_payload(payload)?;
+                if vital.source_candidate_id.as_deref() != Some(candidate_id.as_str())
+                    || vital.source_import_id != Some(import_id)
+                    || vital.source_country.as_deref() != source_country
+                {
+                    return Err(err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Vital candidate payload identity or source_country does not match prepare",
+                    ));
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -2297,13 +2456,13 @@ async fn prepare_import(
             candidate.selected
                 && matches!(
                     candidate.target.as_str(),
-                    "diagnosis" | "lab_result" | "medication"
+                    "diagnosis" | "lab_result" | "medication" | "vital"
                 )
         })
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "source_country is required for selected diagnosis, lab_result, or medication candidates",
+            "source_country is required for selected diagnosis, lab_result, medication, or vital candidates",
         );
     }
     if let Err(response) = validate_prepared_candidate_payloads(
@@ -2315,6 +2474,16 @@ async fn prepare_import(
         return response;
     }
     let prepared_fingerprint = medication_regimen_fingerprint(&json!({
+        "reviewed_draft": body.reviewed_draft,
+        "source_country": source_country,
+        "patient_identity_confirmed": body.patient_identity_confirmed,
+        "candidate_payloads": body.candidate_payloads,
+    }));
+    // Applying imports created before the patient-identity gate do not have
+    // the confirmation flag in their frozen fingerprint. Keep an exact legacy
+    // fingerprint so those already-frozen imports can be resumed once and
+    // upgraded without accepting any changed review or candidate payload.
+    let legacy_prepared_fingerprint = medication_regimen_fingerprint(&json!({
         "reviewed_draft": body.reviewed_draft,
         "source_country": source_country,
         "candidate_payloads": body.candidate_payloads,
@@ -2330,10 +2499,13 @@ async fn prepare_import(
         }
     };
     let import = match sqlx::query(
-        r#"SELECT status, draft, prepared_payload_fingerprint
-           FROM clinical_document_imports
-           WHERE id = $1 AND patient_id = $2 AND deleted_at IS NULL
-           FOR UPDATE"#,
+        r#"SELECT i.status, i.draft, i.prepared_payload_fingerprint,
+                  i.prepared_patient_identity_confirmed, i.prepared_identity_gate_version,
+                  p.first_name, p.last_name, p.birth_date, p.patient_id AS patient_identifier
+           FROM clinical_document_imports i
+           JOIN patients p ON p.id = i.patient_id
+           WHERE i.id = $1 AND i.patient_id = $2 AND i.deleted_at IS NULL
+           FOR UPDATE OF i, p"#,
     )
     .bind(import_id)
     .bind(patient_id)
@@ -2351,16 +2523,79 @@ async fn prepare_import(
         }
     };
     let status = import.get::<String, _>("status");
+    let stored_draft = import.get::<Value, _>("draft");
     if status == "applying" {
-        if import
-            .get::<Option<String>, _>("prepared_payload_fingerprint")
-            .as_deref()
-            != Some(prepared_fingerprint.as_str())
-        {
+        let stored_fingerprint = import
+            .get::<Option<String>, _>("prepared_payload_fingerprint");
+        let prepared_identity_confirmed =
+            import.get::<bool, _>("prepared_patient_identity_confirmed");
+        let identity_gate_version = import.get::<i16, _>("prepared_identity_gate_version");
+        let exact_retry = identity_gate_version >= 1
+            && stored_fingerprint.as_deref() == Some(prepared_fingerprint.as_str());
+        let legacy_retry = identity_gate_version == 0
+            && !prepared_identity_confirmed
+            && stored_fingerprint.as_deref() == Some(legacy_prepared_fingerprint.as_str());
+        if !exact_retry && !legacy_retry {
             return err(
                 StatusCode::CONFLICT,
                 "Import was already prepared with a different reviewed selection",
             );
+        }
+        if legacy_retry {
+            match evaluate_document_subject_identity(
+                &stored_draft,
+                &import.get::<String, _>("first_name"),
+                &import.get::<String, _>("last_name"),
+                import.get::<chrono::NaiveDate, _>("birth_date"),
+                &import.get::<String, _>("patient_identifier"),
+                body.patient_identity_confirmed,
+            ) {
+                SubjectIdentityDecision::HardMismatch => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Document subject conflicts with the target patient",
+                    );
+                }
+                SubjectIdentityDecision::NameConfirmationRequired => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Document subject identity differs from the target patient; explicit identity confirmation is required",
+                    );
+                }
+                SubjectIdentityDecision::Missing => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Document subject is unavailable; explicit patient identity confirmation is required",
+                    );
+                }
+                SubjectIdentityDecision::ConfirmationWithoutSubject
+                | SubjectIdentityDecision::Matched
+                | SubjectIdentityDecision::ConfirmedNameMismatch => {}
+            }
+            if let Err(error) = sqlx::query(
+                r#"UPDATE clinical_document_imports
+                   SET prepared_payload_fingerprint = $3,
+                       prepared_patient_identity_confirmed = $5,
+                       prepared_identity_gate_version = 1,
+                       updated_at = now()
+                   WHERE id = $1 AND patient_id = $2 AND status = 'applying'
+                     AND prepared_payload_fingerprint = $4
+                     AND prepared_identity_gate_version = 0"#,
+            )
+            .bind(import_id)
+            .bind(patient_id)
+            .bind(&prepared_fingerprint)
+            .bind(&legacy_prepared_fingerprint)
+            .bind(body.patient_identity_confirmed)
+            .execute(&mut *tx)
+            .await
+            {
+                tracing::error!(error = %error, import_id = %import_id, "upgrade legacy clinical import prepare fingerprint");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to prepare import",
+                );
+            }
         }
         if let Err(error) = tx.commit().await {
             tracing::error!(error = %error, import_id = %import_id, "commit idempotent clinical import prepare");
@@ -2375,23 +2610,60 @@ async fn prepare_import(
             "status": "applying",
             "idempotent": true,
             "source_country": source_country,
+            "patient_identity_confirmed": if legacy_retry {
+                body.patient_identity_confirmed
+            } else {
+                prepared_identity_confirmed
+            },
         }))
         .into_response();
     }
     if status != "review_required" {
         return err(StatusCode::CONFLICT, "Import is not ready to be prepared");
     }
-    if !reviewed_candidates_match_parser_draft(&reviewed, &import.get::<Value, _>("draft")) {
+    if !reviewed_candidates_match_parser_draft(&reviewed, &stored_draft) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reviewed candidates do not match the parser draft",
         );
+    }
+    match evaluate_document_subject_identity(
+        &stored_draft,
+        &import.get::<String, _>("first_name"),
+        &import.get::<String, _>("last_name"),
+        import.get::<chrono::NaiveDate, _>("birth_date"),
+        &import.get::<String, _>("patient_identifier"),
+        body.patient_identity_confirmed,
+    ) {
+        SubjectIdentityDecision::HardMismatch => {
+            return err(
+                StatusCode::CONFLICT,
+                "Document subject conflicts with the target patient",
+            );
+        }
+        SubjectIdentityDecision::NameConfirmationRequired => {
+            return err(
+                StatusCode::CONFLICT,
+                "Document subject identity differs from the target patient; explicit identity confirmation is required",
+            );
+        }
+        SubjectIdentityDecision::Missing => {
+            return err(
+                StatusCode::CONFLICT,
+                "Document subject is unavailable; explicit patient identity confirmation is required",
+            );
+        }
+        SubjectIdentityDecision::ConfirmationWithoutSubject
+        | SubjectIdentityDecision::Matched
+        | SubjectIdentityDecision::ConfirmedNameMismatch => {}
     }
     if let Err(error) = sqlx::query(
         r#"UPDATE clinical_document_imports
            SET status = 'applying', reviewed_draft = $3, reviewed_by = $4,
                prepared_payload_fingerprint = $5, prepared_source_country = $6,
                prepared_candidate_payloads = $7,
+               prepared_patient_identity_confirmed = $8,
+               prepared_identity_gate_version = 1,
                prepared_at = now(), updated_at = now()
            WHERE id = $1 AND patient_id = $2 AND status = 'review_required'
              AND deleted_at IS NULL"#,
@@ -2403,6 +2675,7 @@ async fn prepare_import(
     .bind(&prepared_fingerprint)
     .bind(&source_country)
     .bind(&body.candidate_payloads)
+    .bind(body.patient_identity_confirmed)
     .execute(&mut *tx)
     .await
     {
@@ -2425,6 +2698,7 @@ async fn prepare_import(
         "status": "applying",
         "idempotent": false,
         "source_country": source_country,
+        "patient_identity_confirmed": body.patient_identity_confirmed,
     }))
     .into_response()
 }
@@ -2458,7 +2732,7 @@ async fn complete_import(
         }
     };
     let import_row = match sqlx::query(
-        r#"SELECT document_id, draft, reviewed_draft
+        r#"SELECT document_id, draft, reviewed_draft, prepared_identity_gate_version
            FROM clinical_document_imports
            WHERE id = $1 AND patient_id = $2 AND status = 'applying'
              AND deleted_at IS NULL
@@ -2479,6 +2753,12 @@ async fn complete_import(
             );
         }
     };
+    if import_row.get::<i16, _>("prepared_identity_gate_version") < 1 {
+        return err(
+            StatusCode::CONFLICT,
+            "Clinical import identity gate must be completed before completion",
+        );
+    }
     let document_id: Uuid = import_row.get("document_id");
     let stored_draft: Value = import_row.get("draft");
     if import_row
@@ -2587,6 +2867,20 @@ async fn complete_import(
                 .execute(&mut *tx)
                 .await
             }
+            "vital" => {
+                sqlx::query(
+                    r#"UPDATE patient_vital_measurements
+                       SET source_document_id = $1
+                       WHERE patient_id = $2 AND source_import_id = $3
+                         AND source_candidate_id = $4"#,
+                )
+                .bind(document_id)
+                .bind(patient_id)
+                .bind(import_id)
+                .bind(&candidate.id)
+                .execute(&mut *tx)
+                .await
+            }
             "anamnesis" => {
                 sqlx::query(
                     r#"UPDATE patient_clinical_narrative
@@ -2634,6 +2928,7 @@ async fn complete_import(
                     "medication" => "medications",
                     "examination" => "examinations",
                     "lab_result" => "lab_results",
+                    "vital" => "vitals",
                     "recommendation" => "recommendations",
                     _ => unreachable!(),
                 };
@@ -2663,7 +2958,10 @@ async fn complete_import(
            WHERE id = $1 AND patient_id = $2 AND status = 'applying'
              AND deleted_at IS NULL
            RETURNING id, patient_id, document_id, status, document_type, source_language,
-                     parser_version, draft, reviewed_draft, applied_counts, error_message, worker_id,
+                     parser_version, draft, reviewed_draft, prepared_source_country,
+                     prepared_patient_identity_confirmed, prepared_identity_gate_version,
+                     prepared_at,
+                     applied_counts, error_message, worker_id,
                      requested_by, reviewed_by, applied_by, locked_at, completed_at,
                      applied_at, created_at, updated_at"#,
     )
@@ -2726,7 +3024,8 @@ async fn fetch_import(
 fn import_select() -> &'static str {
     r#"SELECT i.id, i.patient_id, i.document_id, i.status, i.document_type,
               i.source_language, i.parser_version, i.draft, i.reviewed_draft,
-              i.prepared_source_country, i.prepared_at,
+              i.prepared_source_country, i.prepared_patient_identity_confirmed,
+              i.prepared_identity_gate_version, i.prepared_at,
               i.applied_counts, i.error_message, i.worker_id, i.requested_by, i.reviewed_by,
               i.applied_by, i.locked_at, i.completed_at, i.applied_at,
               i.created_at, i.updated_at,
@@ -2738,7 +3037,8 @@ fn import_select() -> &'static str {
 fn import_list_select() -> &'static str {
     r#"SELECT i.id, i.patient_id, i.document_id, i.status, i.document_type,
               i.source_language, i.parser_version, i.applied_counts, i.error_message,
-              i.prepared_source_country, i.prepared_at,
+              i.prepared_source_country, i.prepared_patient_identity_confirmed,
+              i.prepared_identity_gate_version, i.prepared_at,
               i.completed_at, i.applied_at, i.created_at, i.updated_at,
               COALESCE(jsonb_array_length(i.draft->'candidates'), 0)::bigint AS candidate_count,
               d.original_filename AS document_name, d.mime_type
@@ -2759,6 +3059,8 @@ fn import_summary_json(row: &sqlx::postgres::PgRow) -> Value {
         "parser_version": row.get::<Option<String>, _>("parser_version"),
         "candidate_count": row.get::<i64, _>("candidate_count"),
         "prepared_source_country": row.get::<Option<String>, _>("prepared_source_country"),
+        "prepared_patient_identity_confirmed": row.get::<bool, _>("prepared_patient_identity_confirmed"),
+        "prepared_identity_gate_version": row.get::<i16, _>("prepared_identity_gate_version"),
         "prepared_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepared_at"),
         "applied_counts": row.get::<Value, _>("applied_counts"),
         "error_message": row.get::<Option<String>, _>("error_message"),
@@ -2783,6 +3085,8 @@ fn import_json(row: &sqlx::postgres::PgRow) -> Value {
         "draft": row.get::<Value, _>("draft"),
         "reviewed_draft": row.get::<Option<Value>, _>("reviewed_draft"),
         "prepared_source_country": row.try_get::<Option<String>, _>("prepared_source_country").unwrap_or_default(),
+        "prepared_patient_identity_confirmed": row.try_get::<bool, _>("prepared_patient_identity_confirmed").unwrap_or(false),
+        "prepared_identity_gate_version": row.try_get::<i16, _>("prepared_identity_gate_version").unwrap_or(0),
         "prepared_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepared_at").unwrap_or_default(),
         "applied_counts": row.get::<Value, _>("applied_counts"),
         "error_message": row.get::<Option<String>, _>("error_message"),
@@ -2804,8 +3108,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImportedMedicationRequest, is_manual_candidate_id, normalize_imported_medication,
-        validate_clinical_import_file,
+        ImportedMedicationRequest, SubjectIdentityDecision, evaluate_document_subject_identity,
+        is_manual_candidate_id, normalize_imported_medication, validate_clinical_import_file,
     };
     use serde_json::json;
 
@@ -2818,6 +3122,207 @@ mod tests {
             "63f71b6c-b947-4ef3-87ef-c0e6eed6ceeb"
         ));
         assert!(!is_manual_candidate_id("manual:not-a-uuid"));
+    }
+
+    #[test]
+    fn document_subject_identity_blocks_hard_mismatches_and_requires_name_confirmation() {
+        let patient_birth_date = chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap();
+        let base_subject = json!({
+            "subject": {
+                "status": "extracted",
+                "conflict": false,
+                "first_name": "Anna",
+                "last_name": "Muster",
+                "birth_date": "1990-01-01",
+                "patient_identifier": "pt 123",
+                "patient_identifier_namespace": "gmed_patient_id",
+                "field_confidence": {},
+                "source": { "page": 1, "text": "Anna Muster" },
+                "review_reasons": [],
+            }
+        });
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &base_subject,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::Matched
+        );
+
+        let mut wrong_name = base_subject.clone();
+        wrong_name["subject"]["last_name"] = json!("Andere");
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &wrong_name,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::NameConfirmationRequired
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &wrong_name,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                true,
+            ),
+            SubjectIdentityDecision::ConfirmedNameMismatch
+        );
+
+        for hard_mismatch in [
+            {
+                let mut value = base_subject.clone();
+                value["subject"]["status"] = json!("conflict");
+                value["subject"]["conflict"] = json!(true);
+                value
+            },
+            {
+                let mut value = base_subject.clone();
+                value["subject"]["birth_date"] = json!("1991-01-01");
+                value
+            },
+            {
+                let mut value = base_subject.clone();
+                value["subject"]["patient_identifier"] = json!("PT-999");
+                value
+            },
+        ] {
+            assert_eq!(
+                evaluate_document_subject_identity(
+                    &hard_mismatch,
+                    "Anna",
+                    "Muster",
+                    patient_birth_date,
+                    "PT-123",
+                    true,
+                ),
+                SubjectIdentityDecision::HardMismatch
+            );
+        }
+
+        let external_identifier = json!({
+            "subject": {
+                "status": "extracted",
+                "conflict": false,
+                "first_name": "Anna",
+                "last_name": "Muster",
+                "birth_date": "1990-01-01",
+                "patient_identifier": "KLINIK-4711",
+                "patient_identifier_namespace": "source_document"
+            }
+        });
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &external_identifier,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::NameConfirmationRequired
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &external_identifier,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                true,
+            ),
+            SubjectIdentityDecision::ConfirmedNameMismatch
+        );
+
+        let legacy_external_identifier = json!({
+            "subject": {
+                "status": "extracted",
+                "conflict": false,
+                "first_name": null,
+                "last_name": null,
+                "birth_date": null,
+                "patient_identifier": "KLINIK-4711"
+            }
+        });
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &legacy_external_identifier,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::NameConfirmationRequired
+        );
+    }
+
+    #[test]
+    fn missing_or_insufficient_document_subject_requires_manual_confirmation() {
+        let patient_birth_date = chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap();
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &json!({ "subject": null }),
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::Missing
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &json!({}),
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                true,
+            ),
+            SubjectIdentityDecision::ConfirmationWithoutSubject
+        );
+        let insufficient_subject = json!({
+            "subject": {
+                "status": "extracted",
+                "conflict": false,
+                "first_name": "Anna",
+                "last_name": null,
+                "birth_date": null,
+                "patient_identifier": null
+            }
+        });
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &insufficient_subject,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                false,
+            ),
+            SubjectIdentityDecision::Missing
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &insufficient_subject,
+                "Anna",
+                "Muster",
+                patient_birth_date,
+                "PT-123",
+                true,
+            ),
+            SubjectIdentityDecision::ConfirmationWithoutSubject
+        );
     }
 
     #[test]

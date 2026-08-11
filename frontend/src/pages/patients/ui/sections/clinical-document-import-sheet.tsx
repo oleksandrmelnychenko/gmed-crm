@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Check,
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
   Clock3,
   FileText,
   FileUp,
+  FlaskConical,
+  HeartPulse,
   History,
+  Lightbulb,
+  ListChecks,
   LoaderCircle,
+  Pill,
   Plus,
   RefreshCw,
   RotateCcw,
+  Stethoscope,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +39,7 @@ import {
 } from "@/pages/documents/data/document-api";
 import {
   completeClinicalDocumentImport,
+  clinicalDocumentImportAfterPrepare,
   clinicalImportNeedsSourceCountry,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
@@ -49,7 +59,18 @@ import {
   buildClinicalDocumentCandidatePayloads,
   deriveClinicalImportSourceCountry,
   isCanonicalClinicalImportSourceCountry,
+  vitalImportValidation,
+  type VitalImportValidationIssue,
 } from "@/pages/patients/data/clinical-document-import-payloads";
+import {
+  checkClinicalDocumentSubject,
+  clinicalDocumentIdentityConfirmationVisible,
+  clinicalDocumentIdentityConfirmationForPrepare,
+  clinicalDocumentIdentityNeedsExplicitConfirmation,
+  clinicalDocumentIdentityPrepareMode,
+  clinicalDocumentIdentityRequiresCurrentDecision,
+  type PatientIdentityReference,
+} from "@/pages/patients/data/clinical-document-subject";
 import {
   medicationCandidateNeedsWirkstoff,
   medicationCandidateReviewBlockReason,
@@ -75,7 +96,7 @@ const IMPORT_POLL_BASE_DELAY_MS = 1_800;
 const IMPORT_POLL_MAX_DELAY_MS = 15_000;
 const IMPORT_HISTORY_POLL_DELAY_MS = 4_000;
 const builderTabClassName =
-  "h-10 gap-2 rounded-none border-0 bg-transparent px-1 text-muted-foreground hover:bg-transparent hover:text-orange-700 data-active:bg-transparent data-active:text-orange-700 data-active:shadow-none after:bottom-0 after:h-0.5 after:bg-orange-500";
+  "h-14 min-w-0 justify-start gap-2 rounded-none border-0 border-r border-border bg-transparent px-3 py-3 text-left text-muted-foreground whitespace-normal last:border-r-0 hover:bg-muted/30 hover:text-foreground data-active:bg-muted/50 data-active:text-foreground data-active:shadow-none after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--brand)]";
 
 export type ExistingClinicalImportItem = {
   id: string;
@@ -96,6 +117,7 @@ const targetOrder: ClinicalDocumentImportTarget[] = [
   "medication",
   "examination",
   "lab_result",
+  "vital",
   "recommendation",
 ];
 
@@ -105,16 +127,18 @@ const targetLabels: Record<ClinicalDocumentImportTarget, { ru: string; de: strin
   medication: { ru: "Медикаменты", de: "Medikation" },
   examination: { ru: "Обследования", de: "Befunde" },
   lab_result: { ru: "Анализы", de: "Laborwerte" },
+  vital: { ru: "Показатели", de: "Vitalwerte" },
   recommendation: { ru: "Рекомендации", de: "Empfehlungen" },
 };
 
-const documentTypeLabels: Record<string, { ru: string; de: string }> = {
-  medical_report: { ru: "Медицинский отчёт", de: "Medizinischer Bericht" },
-  discharge_summary: { ru: "Выписной эпикриз", de: "Entlassungsbrief" },
-  cardiology_report: { ru: "Кардиологический отчёт", de: "Kardiologischer Bericht" },
-  oncology_report: { ru: "Онкологический отчёт", de: "Onkologischer Bericht" },
-  radiology_report: { ru: "Радиологический отчёт", de: "Radiologischer Bericht" },
-  administrative_cost_estimate: { ru: "Расчёт стоимости", de: "Kostenschätzung" },
+const targetIcons: Record<ClinicalDocumentImportTarget, LucideIcon> = {
+  diagnosis: Stethoscope,
+  anamnesis: ClipboardList,
+  medication: Pill,
+  examination: Activity,
+  lab_result: FlaskConical,
+  vital: HeartPulse,
+  recommendation: Lightbulb,
 };
 
 const targetTone: Record<ClinicalDocumentImportTarget, string> = {
@@ -123,6 +147,7 @@ const targetTone: Record<ClinicalDocumentImportTarget, string> = {
   medication: "border-sky-200 bg-sky-50 text-sky-700",
   examination: "border-amber-200 bg-amber-50 text-amber-800",
   lab_result: "border-cyan-200 bg-cyan-50 text-cyan-800",
+  vital: "border-pink-200 bg-pink-50 text-pink-800",
   recommendation: "border-emerald-200 bg-emerald-50 text-emerald-700",
 };
 
@@ -132,6 +157,7 @@ const targetCardTone: Record<ClinicalDocumentImportTarget, string> = {
   medication: "border-sky-200 bg-sky-50/35",
   examination: "border-amber-200 bg-amber-50/35",
   lab_result: "border-cyan-200 bg-cyan-50/35",
+  vital: "border-pink-200 bg-pink-50/35",
   recommendation: "border-emerald-200 bg-emerald-50/35",
 };
 
@@ -504,22 +530,22 @@ function MedicationCandidateEditor({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {field("wirkstoff", tx("Действующее вещество", "Wirkstoff"), { required: true, className: "xl:col-span-2" })}
-        {field("handelsname", tx("Торгова назва", "Handelsname"), { className: "xl:col-span-2" })}
+        {field("handelsname", tx("Торговое название", "Handelsname"), { className: "xl:col-span-2" })}
         {field("staerke", tx("Дозировка / концентрация", "Stärke / Konzentration"))}
         {field("form", tx("Лекарственная форма", "Darreichungsform"))}
-        {field("einnahmeform", tx("Шлях введення", "Einnahmeform / Applikationsweg"), { className: "sm:col-span-2" })}
+        {field("einnahmeform", tx("Способ введения", "Einnahmeform / Applikationsweg"), { className: "sm:col-span-2" })}
       </div>
 
       <div className="rounded-lg border border-sky-100 bg-sky-50/60 p-3">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
-          {tx("Схема прийому", "Einnahmeschema")}
+          {tx("Схема приёма", "Einnahmeschema")}
         </p>
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
-          {field("dose_morgens", tx("Ранок", "Morgens"))}
+          {field("dose_morgens", tx("Утро", "Morgens"))}
           {field("dose_mittags", tx("День", "Mittags"))}
           {field("dose_abends", tx("Вечер", "Abends"))}
           {field("dose_nachts", tx("Ночь", "Nachts"))}
-          {field("einheit", tx("Одиниця", "Einheit"), { className: "col-span-2 sm:col-span-1 xl:col-span-2" })}
+          {field("einheit", tx("Единица", "Einheit"), { className: "col-span-2 sm:col-span-1 xl:col-span-2" })}
         </div>
         <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-sky-950">
           <input
@@ -529,15 +555,15 @@ function MedicationCandidateEditor({
             className="size-4 rounded border-sky-300 accent-sky-600"
             onChange={(event) => update("as_needed", event.target.checked)}
           />
-          {tx("За потреби (PRN)", "Bei Bedarf (PRN)")}
+          {tx("При необходимости (PRN)", "Bei Bedarf (PRN)")}
         </label>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {field("source_date", tx("Дата документа / действия", "Dokument- / Wirksamkeitsdatum"), { type: "date" })}
-        {field("verordnet_am", tx("Призначено", "Verordnet am"), { type: "date" })}
+        {field("verordnet_am", tx("Назначено", "Verordnet am"), { type: "date" })}
         {field("einnahme_von", tx("Приём с", "Einnahme von"), { type: "date" })}
-        {field("einnahme_bis", tx("Прийом до", "Einnahme bis"), { type: "date" })}
+        {field("einnahme_bis", tx("Приём до", "Einnahme bis"), { type: "date" })}
         <label className="space-y-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
             {tx("Статус", "Status")}
@@ -548,10 +574,10 @@ function MedicationCandidateEditor({
             className="h-11 w-full rounded-md border border-input bg-white px-3 text-sm"
             onChange={(event) => update("status", event.target.value)}
           >
-            <option value="aktiv">{tx("Активний", "Aktiv")}</option>
-            <option value="pausiert">{tx("Призупинений", "Pausiert")}</option>
-            <option value="abgesetzt">{tx("Скасований", "Abgesetzt")}</option>
-            <option value="geplant">{tx("Запланований", "Geplant")}</option>
+            <option value="aktiv">{tx("Активный", "Aktiv")}</option>
+            <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
+            <option value="abgesetzt">{tx("Отменён", "Abgesetzt")}</option>
+            <option value="geplant">{tx("Запланирован", "Geplant")}</option>
           </select>
         </label>
       </div>
@@ -576,7 +602,7 @@ function MedicationCandidateEditor({
         </label>
         <label className="space-y-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {tx("Показання / причина", "Grund / Indikation")}
+            {tx("Показания / причина", "Grund / Indikation")}
           </span>
           <textarea
             value={normalizedValue("grund")}
@@ -616,7 +642,7 @@ function MedicationCandidateEditor({
         </label>
         {onHold ? field("hold_from", tx("Пауза с", "Pause von"), { type: "date" }) : null}
         {onHold ? field("hold_until", tx("Пауза до", "Pause bis"), { type: "date" }) : null}
-        {onHold ? field("hold_note", tx("Причина паузи", "Pausengrund"), { className: "sm:col-span-2 xl:col-span-4" }) : null}
+        {onHold ? field("hold_note", tx("Причина паузы", "Pausengrund"), { className: "sm:col-span-2 xl:col-span-4" }) : null}
       </div>
 
       {identifiers ? (
@@ -625,6 +651,217 @@ function MedicationCandidateEditor({
           {identifiers}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+const vitalEditorFields = [
+  { key: "bp_systolic", ru: "Давление, верхнее", de: "Blutdruck systolisch", unit: "mmHg", min: 40, max: 300, step: 1 },
+  { key: "bp_diastolic", ru: "Давление, нижнее", de: "Blutdruck diastolisch", unit: "mmHg", min: 20, max: 200, step: 1 },
+  { key: "heart_rate", ru: "Пульс", de: "Puls", unit: "bpm", min: 20, max: 300, step: 1 },
+  { key: "temperature_c", ru: "Температура", de: "Temperatur", unit: "°C", min: 25, max: 45, step: 0.1 },
+  { key: "oxygen_saturation", ru: "Сатурация", de: "Sauerstoffsättigung", unit: "%", min: 20, max: 100, step: 0.1 },
+  { key: "respiratory_rate", ru: "Частота дыхания", de: "Atemfrequenz", unit: "/min", min: 3, max: 80, step: 1 },
+  { key: "weight_kg", ru: "Вес", de: "Gewicht", unit: "kg", min: 1, max: 500, step: 0.1 },
+  { key: "height_cm", ru: "Рост", de: "Größe", unit: "cm", min: 20, max: 250, step: 0.1 },
+  { key: "bmi", ru: "BMI", de: "BMI", unit: "kg/m²", min: 5, max: 100, step: 0.1 },
+] as const;
+
+const vitalValidationLabels: Record<VitalImportValidationIssue, { ru: string; de: string }> = {
+  missing_date: { ru: "Укажите дату измерения", de: "Messdatum angeben" },
+  invalid_date: { ru: "Проверьте формат даты измерения", de: "Format des Messdatums prüfen" },
+  missing_measurement: { ru: "Добавьте хотя бы один показатель", de: "Mindestens einen Vitalwert ergänzen" },
+  invalid_number: { ru: "Один из показателей вне допустимого диапазона", de: "Ein Vitalwert liegt außerhalb des zulässigen Bereichs" },
+  incomplete_blood_pressure: { ru: "Для давления нужны оба значения", de: "Für den Blutdruck sind beide Werte erforderlich" },
+  invalid_blood_pressure: { ru: "Верхнее давление должно быть выше нижнего", de: "Der systolische Wert muss über dem diastolischen liegen" },
+  bmi_conflict: { ru: "BMI не совпадает с весом и ростом", de: "BMI stimmt nicht mit Gewicht und Größe überein" },
+  invalid_source_country: { ru: "Подтвердите страну документа", de: "Ursprungsland des Dokuments bestätigen" },
+  invalid_source_page: { ru: "Проверьте страницу источника", de: "Quellseite prüfen" },
+};
+
+function VitalCandidateEditor({
+  candidate,
+  disabled,
+  sourceCountry,
+  importId,
+  tx,
+  onPatch,
+  onFocus,
+  onSourceCountryChange,
+}: {
+  candidate: ClinicalDocumentImportCandidate;
+  disabled: boolean;
+  sourceCountry: string;
+  importId: string;
+  tx: Bilingual;
+  onPatch: (patch: Partial<ClinicalDocumentImportCandidate>) => void;
+  onFocus: () => void;
+  onSourceCountryChange: (country: string) => void;
+}) {
+  const validation = vitalImportValidation(candidate, sourceCountry, importId);
+  const normalizedNumber = (key: string) => {
+    const value = candidate.normalized[key];
+    return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+  };
+  const updateNumber = (key: string, rawValue: string) => {
+    const normalized = { ...candidate.normalized };
+    if (!rawValue.trim()) delete normalized[key];
+    else normalized[key] = localizedLabNumber(rawValue);
+    onPatch({ normalized });
+  };
+  const calculatedBmi = validation.calculatedBmi;
+  const explicitBmi = typeof candidate.normalized.bmi === "number" ? candidate.normalized.bmi : null;
+  const bmiConflict = validation.issues.includes("bmi_conflict");
+
+  return (
+    <div
+      data-clinical-import-candidate-editor
+      className="space-y-4 rounded-xl border border-pink-200/80 bg-white/70 p-4"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-pink-100 bg-pink-50/70 px-3 py-2.5">
+        <div>
+          <p className="text-xs font-semibold text-pink-950">
+            {tx("Проверьте дату и каждое измерение", "Datum und jeden Messwert prüfen")}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-4 text-pink-800">
+            {tx(
+              "В историю попадёт отдельная запись с источником и страницей документа.",
+              "Im Verlauf wird ein eigener Eintrag mit Dokumentquelle und Seite angelegt.",
+            )}
+          </p>
+        </div>
+        <Badge variant="outline" className="border-pink-200 bg-white text-[10px] text-pink-800">
+          {candidate.source.page
+            ? tx(`Страница ${candidate.source.page}`, `Seite ${candidate.source.page}`)
+            : tx("Страница не определена", "Seite nicht erkannt")}
+        </Badge>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="space-y-1 sm:col-span-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Дата / время измерения", "Messdatum / -zeit")} *
+          </span>
+          <Input
+            value={typeof candidate.normalized.measured_at === "string" ? candidate.normalized.measured_at : ""}
+            disabled={disabled}
+            placeholder="YYYY-MM-DD / YYYY-MM-DDTHH:MM:SSZ"
+            aria-invalid={validation.issues.includes("missing_date") || validation.issues.includes("invalid_date")}
+            className="h-11 bg-white font-mono"
+            onFocus={onFocus}
+            onChange={(event) => onPatch({
+              normalized: { ...candidate.normalized, measured_at: event.target.value },
+            })}
+          />
+          <span className="block text-[10px] leading-4 text-muted-foreground">
+            {tx(
+              "Только дата или время с часовым поясом, например 2026-08-10T09:30:00+02:00.",
+              "Nur Datum oder Uhrzeit mit Zeitzone, z. B. 2026-08-10T09:30:00+02:00.",
+            )}
+          </span>
+        </label>
+        <label className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Страна источника", "Ursprungsland")} *
+          </span>
+          <Input
+            value={sourceCountry}
+            maxLength={2}
+            disabled={disabled}
+            aria-invalid={!isCanonicalClinicalImportSourceCountry(sourceCountry)}
+            className="h-11 bg-white uppercase"
+            onFocus={onFocus}
+            onChange={(event) => onSourceCountryChange(
+              event.target.value.toUpperCase().replace(/[^A-Z]/g, ""),
+            )}
+          />
+        </label>
+        <div className="space-y-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {tx("Источник", "Quelle")}
+          </span>
+          <div className="flex h-11 items-center rounded-md border border-input bg-muted/30 px-3 text-xs text-muted-foreground">
+            {candidate.source.section}
+            {candidate.source.page ? ` · S. ${candidate.source.page}` : ""}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {vitalEditorFields.map((field) => (
+          <label key={field.key} className="space-y-1 rounded-lg border border-pink-100 bg-pink-50/35 p-3">
+            <span className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>{tx(field.ru, field.de)}</span>
+              <span className="normal-case text-pink-700">{field.unit}</span>
+            </span>
+            <Input
+              type="number"
+              min={field.min}
+              max={field.max}
+              step={field.step}
+              inputMode="decimal"
+              value={normalizedNumber(field.key)}
+              disabled={disabled}
+              className="h-11 bg-white text-base font-semibold"
+              onFocus={onFocus}
+              onChange={(event) => updateNumber(field.key, event.target.value)}
+            />
+            <span className="block text-[10px] text-muted-foreground">
+              {field.min}–{field.max} {field.unit}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {calculatedBmi != null ? (
+        <div className={cn(
+          "flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-xs",
+          bmiConflict
+            ? "border-amber-300 bg-amber-50 text-amber-950"
+            : "border-emerald-200 bg-emerald-50 text-emerald-900",
+        )}>
+          <div>
+            <p className="font-semibold">
+              {tx("BMI по весу и росту", "BMI aus Gewicht und Größe")}: {calculatedBmi.toFixed(1)} kg/m²
+            </p>
+            {explicitBmi != null ? (
+              <p className="mt-0.5 text-[11px] opacity-80">
+                {tx("В документе", "Im Dokument")}: {explicitBmi.toFixed(1)} kg/m²
+              </p>
+            ) : null}
+          </div>
+          {bmiConflict && !disabled ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 bg-white"
+              onClick={() => updateNumber("bmi", String(calculatedBmi))}
+            >
+              {tx("Использовать расчётный BMI", "Berechneten BMI übernehmen")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {validation.issues.length > 0 ? (
+        <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-950">
+          <p className="font-semibold">
+            {tx("Запись нельзя подготовить, пока не исправлены поля:", "Der Eintrag kann erst nach Korrektur vorbereitet werden:")}
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {validation.issues.map((issue) => (
+              <li key={issue}>{tx(vitalValidationLabels[issue].ru, vitalValidationLabels[issue].de)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+          <CheckCircle2 className="size-4" />
+          {tx("Показатели готовы к фиксации", "Vitalwerte sind zur Vorbereitung bereit")}
+        </div>
+      )}
     </div>
   );
 }
@@ -657,6 +894,7 @@ export function ClinicalDocumentImportSheet({
   open,
   onOpenChange,
   patientId,
+  patientIdentity,
   lang,
   existingItems,
   onApply,
@@ -664,6 +902,7 @@ export function ClinicalDocumentImportSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patientId: string;
+  patientIdentity: PatientIdentityReference;
   lang: string;
   existingItems: ExistingClinicalImportItems;
   onApply: (
@@ -681,6 +920,7 @@ export function ClinicalDocumentImportSheet({
   const [documentImport, setDocumentImport] = useState<ClinicalDocumentImport | null>(null);
   const [candidates, setCandidates] = useState<ClinicalDocumentImportCandidate[]>([]);
   const [sourceCountry, setSourceCountry] = useState("");
+  const [patientIdentityConfirmed, setPatientIdentityConfirmed] = useState(false);
   const [activeTab, setActiveTab] = useState<BuilderTab>("all");
   const [manualTarget, setManualTarget] = useState<ClinicalDocumentImportTarget>("diagnosis");
   const [manualValue, setManualValue] = useState("");
@@ -754,6 +994,7 @@ export function ClinicalDocumentImportSheet({
       setDocumentImport(null);
       setCandidates([]);
       setSourceCountry("");
+      setPatientIdentityConfirmed(false);
       setActiveTab("all");
       setManualTarget("diagnosis");
       setManualValue("");
@@ -829,10 +1070,13 @@ export function ClinicalDocumentImportSheet({
       setActiveTab("all");
       if (detail.status === "applying" || detail.status === "applied") {
         setSourceCountry(detail.prepared_source_country ?? "");
+        setPatientIdentityConfirmed(detail.prepared_patient_identity_confirmed ?? false);
       } else if (detail.status === "review_required") {
         setSourceCountry(deriveClinicalImportSourceCountry(nextCandidates));
+        setPatientIdentityConfirmed(false);
       } else {
         setSourceCountry("");
+        setPatientIdentityConfirmed(false);
       }
       await loadPreview(detail.document_id);
     } catch (error) {
@@ -893,6 +1137,7 @@ export function ClinicalDocumentImportSheet({
     setActiveCandidateId(null);
     setActiveTab("all");
     setSourceCountry("");
+    setPatientIdentityConfirmed(false);
     setFile(null);
     if (fileRef.current) fileRef.current.value = "";
     void refreshHistory(true);
@@ -930,6 +1175,7 @@ export function ClinicalDocumentImportSheet({
         if (next.status === "review_required") {
           setCandidates((current) => mergeReviewCandidates(next.draft.candidates, current));
           setSourceCountry(deriveClinicalImportSourceCountry(next.draft.candidates));
+          setPatientIdentityConfirmed(false);
           setActiveCandidateId((activeId) =>
             activeId && next.draft.candidates.some((item) => item.id === activeId)
               ? activeId
@@ -1016,12 +1262,35 @@ export function ClinicalDocumentImportSheet({
     [activeTab, candidates],
   );
   const activeCandidate = candidates.find((item) => item.id === activeCandidateId) ?? null;
+  const subjectCheck = useMemo(
+    () => checkClinicalDocumentSubject(documentImport?.draft.subject, patientIdentity),
+    [documentImport?.draft.subject, patientIdentity],
+  );
+  const identityPrepareMode = clinicalDocumentIdentityPrepareMode(
+    documentImport?.status,
+    documentImport?.prepared_identity_gate_version,
+  );
+  const requiresCurrentIdentityDecision = clinicalDocumentIdentityRequiresCurrentDecision(
+    identityPrepareMode,
+  );
+  const identityPanelStatus = identityPrepareMode === "frozen_applying"
+    ? "frozen"
+    : subjectCheck.status;
+  const extractedSubject = documentImport?.draft.subject;
+  const extractedSubjectSummary = [
+    [extractedSubject?.first_name, extractedSubject?.last_name].filter(Boolean).join(" "),
+    extractedSubject?.birth_date,
+    extractedSubject?.patient_identifier,
+  ].filter(Boolean).join(" · ");
+  const patientIdentitySummary = [
+    [patientIdentity.firstName, patientIdentity.lastName].filter(Boolean).join(" "),
+    patientIdentity.birthDate,
+    patientIdentity.patientIdentifier,
+  ].filter(Boolean).join(" · ");
   const activePage = activeCandidate?.source.page ?? 1;
   const hasCountryScopedCandidate = clinicalImportNeedsSourceCountry(selected);
   const newCount = (target: ClinicalDocumentImportTarget) =>
     candidates.filter((item) => item.target === target).length;
-  const selectedCount = (target: ClinicalDocumentImportTarget) =>
-    selected.filter((item) => item.target === target).length;
 
   function formatImportDate(value: string) {
     return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
@@ -1053,6 +1322,7 @@ export function ClinicalDocumentImportSheet({
       clearApiCache(`/patients/${patientId}/documents`);
       const created = await createClinicalDocumentImport(patientId, uploaded.id);
       setDocumentImport(created);
+      setPatientIdentityConfirmed(false);
       await loadPreview(uploaded.id);
       void refreshHistory(true);
       toast.success(
@@ -1091,6 +1361,33 @@ export function ClinicalDocumentImportSheet({
 
   async function apply() {
     if (!documentImport || selected.length === 0) return;
+    if (requiresCurrentIdentityDecision && subjectCheck.status === "hard_mismatch") {
+      toast.error(
+        tx(
+          "Дата рождения, номер пациента или противоречивые данные в документе не совпадают с этой картой.",
+          "Geburtsdatum, Patientennummer oder widersprüchliche Identitätsdaten passen nicht zu dieser Akte.",
+        ),
+      );
+      return;
+    }
+    if (
+      requiresCurrentIdentityDecision
+      && clinicalDocumentIdentityNeedsExplicitConfirmation(subjectCheck.status)
+      && !patientIdentityConfirmed
+    ) {
+      toast.error(
+        subjectCheck.status === "unavailable"
+          ? tx(
+              "OCR не подтвердил пациента. Проверьте личность в оригинале документа и подтвердите её вручную.",
+              "OCR konnte den Patienten nicht bestätigen. Identität im Originaldokument prüfen und manuell bestätigen.",
+            )
+          : tx(
+              "Подтвердите расхождение в данных пациента перед импортом.",
+              "Bestätigen Sie die Abweichung bei der Patientenidentität vor dem Import.",
+            ),
+      );
+      return;
+    }
     if (documentImport.status === "review_required" && blockedSelected.length > 0) {
       const blocked = blockedSelected[0];
       const reason = medicationCandidateReviewBlockReason(
@@ -1110,7 +1407,7 @@ export function ClinicalDocumentImportSheet({
       toast.error(
         reason === "missing_wirkstoff"
           ? tx(
-              "У выбранного медикамента нет действующего вещества. Заполните Wirkstoff перед импортом.",
+              "У выбранного медикамента нет действующего вещества. Заполните это поле перед импортом.",
               "Für das ausgewählte Medikament fehlt der Wirkstoff. Bitte vor dem Import ergänzen.",
             )
           : tx(
@@ -1141,6 +1438,48 @@ export function ClinicalDocumentImportSheet({
         throw new Error(tx("Черновик ещё не готов к подтверждению", "Der Entwurf ist noch nicht zur Prüfung bereit"));
       }
 
+      const latestSubjectCheck = checkClinicalDocumentSubject(
+        latestImport.draft.subject,
+        patientIdentity,
+      );
+      const latestIdentityPrepareMode = clinicalDocumentIdentityPrepareMode(
+        latestImport.status,
+        latestImport.prepared_identity_gate_version,
+      );
+      const latestRequiresCurrentIdentityDecision = clinicalDocumentIdentityRequiresCurrentDecision(
+        latestIdentityPrepareMode,
+      );
+      const identityConfirmedForPrepare = clinicalDocumentIdentityConfirmationForPrepare({
+        mode: latestIdentityPrepareMode,
+        preparedIdentityConfirmed: latestImport.prepared_patient_identity_confirmed,
+        newlyConfirmed: patientIdentityConfirmed,
+      });
+      if (latestRequiresCurrentIdentityDecision && latestSubjectCheck.status === "hard_mismatch") {
+        throw new Error(
+          tx(
+            "Документ не соответствует выбранному пациенту по надёжным идентификаторам.",
+            "Das Dokument stimmt bei starken Identifikatoren nicht mit dem ausgewählten Patienten überein.",
+          ),
+        );
+      }
+      if (
+        latestRequiresCurrentIdentityDecision
+        && clinicalDocumentIdentityNeedsExplicitConfirmation(latestSubjectCheck.status)
+        && !identityConfirmedForPrepare
+      ) {
+        throw new Error(
+          latestSubjectCheck.status === "unavailable"
+            ? tx(
+                "Личность пациента в оригинале документа ещё не подтверждена вручную.",
+                "Die Patientenidentität im Originaldokument wurde noch nicht manuell bestätigt.",
+              )
+            : tx(
+                "Расхождение в данных пациента ещё не подтверждено.",
+                "Die Abweichung bei der Patientenidentität wurde noch nicht bestätigt.",
+              ),
+        );
+      }
+
       let reviewedDraft: ClinicalDocumentImportDraft;
       let preparedCountry: string;
       let preparedImport: ClinicalDocumentImport = latestImport;
@@ -1165,14 +1504,26 @@ export function ClinicalDocumentImportSheet({
       if (invalidCandidate) {
         setActiveCandidateId(invalidCandidate.id);
         setActiveTab(invalidCandidate.target);
+        window.requestAnimationFrame(() => {
+          const card = Array.from(
+            document.querySelectorAll<HTMLElement>("[data-clinical-import-candidate-id]"),
+          ).find((element) => element.dataset.clinicalImportCandidateId === invalidCandidate.id);
+          card?.focus();
+          card?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
         throw new Error(
           invalidCandidate.target === "lab_result"
             ? tx(
                 "Для выбранного анализа нужны показатель, значение, дата и подтверждённая страна.",
                 "Für den ausgewählten Laborwert sind Parameter, Wert, Datum und ein bestätigtes Land erforderlich.",
               )
+            : invalidCandidate.target === "vital"
+              ? tx(
+                  "Исправьте отмеченные поля показателей: дата, страна, диапазоны, пара давления и соответствие BMI.",
+                  "Markierte Vitalwert-Felder korrigieren: Datum, Land, Wertebereiche, Blutdruckpaar und BMI-Konsistenz.",
+                )
             : tx(
-                "Для выбранного медикамента нужны Wirkstoff и подтверждённая страна.",
+                "Для выбранного медикамента нужны действующее вещество и подтверждённая страна.",
                 "Für das ausgewählte Medikament sind Wirkstoff und ein bestätigtes Land erforderlich.",
               ),
         );
@@ -1183,18 +1534,18 @@ export function ClinicalDocumentImportSheet({
         reviewedDraft,
         candidatePayloads,
         preparedCountry || null,
+        identityConfirmedForPrepare,
       );
-      if (latestImport.status === "review_required") {
-        preparedImport = {
-          ...latestImport,
-          status: "applying",
-          reviewed_draft: reviewedDraft,
-          prepared_source_country: prepared.source_country,
-          prepared_at: new Date().toISOString(),
-        };
-        setDocumentImport(preparedImport);
-        setCandidates(reviewedDraft.candidates);
-      }
+      preparedCountry = prepared.source_country ?? "";
+      preparedImport = clinicalDocumentImportAfterPrepare(
+        latestImport,
+        reviewedDraft,
+        prepared,
+        new Date().toISOString(),
+      );
+      setDocumentImport(preparedImport);
+      setPatientIdentityConfirmed(prepared.patient_identity_confirmed);
+      setCandidates(reviewedDraft.candidates);
       const preparedCandidates = reviewedDraft.candidates.filter((candidate) => candidate.selected);
       const appliedCounts = await onApply(
         preparedImport,
@@ -1238,7 +1589,7 @@ export function ClinicalDocumentImportSheet({
     setSourceCountry(country);
     setCandidates((current) =>
       current.map((candidate) =>
-        ["diagnosis", "lab_result", "medication"].includes(candidate.target)
+        ["diagnosis", "lab_result", "medication", "vital"].includes(candidate.target)
           ? {
               ...candidate,
               normalized: { ...candidate.normalized, source_country: country },
@@ -1350,6 +1701,17 @@ export function ClinicalDocumentImportSheet({
           confidence_kind: "manual_user_entry",
         };
       }
+      if (manualTarget === "vital") {
+        return {
+          measured_at: new Date().toISOString().slice(0, 10),
+          units: {},
+          assertion: "documented",
+          semantic_role: "vital_measurement",
+          auto_select: true,
+          review_reasons: ["manual_values_required"],
+          confidence_kind: "manual_user_entry",
+        };
+      }
       return {
         description: value,
         section_role: "manual",
@@ -1382,63 +1744,77 @@ export function ClinicalDocumentImportSheet({
     );
   }
 
-  function toggleVisible(selectedState: boolean) {
-    const visibleIds = new Set(visibleCandidates.map((item) => item.id));
-    setCandidates((current) =>
-      current.map((item) =>
-        visibleIds.has(item.id)
-          ? { ...item, selected: selectedState && !candidateSelectionBlocked(item) }
-          : item,
-      ),
-    );
-  }
-
   const reviewReady = documentImport?.status === "review_required";
   const applyingReady = documentImport?.status === "applying";
   const snapshotReady = reviewReady || applyingReady || documentImport?.status === "applied";
   const snapshotReadOnly = applyingReady || documentImport?.status === "applied";
+  const identityImportBlocked = requiresCurrentIdentityDecision
+    && (
+      subjectCheck.status === "hard_mismatch"
+      || (
+        clinicalDocumentIdentityNeedsExplicitConfirmation(subjectCheck.status)
+        && !patientIdentityConfirmed
+      )
+    );
 
   return (
     <PatientSheetScaffold
       open={open}
       onOpenChange={handleOpenChange}
-      maxWidthClassName="sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:rounded-xl"
-      title={tx("Конструктор импорта медицинского документа", "Builder für medizinischen Dokumentimport")}
+      maxWidthClassName="overflow-hidden sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:!rounded-2xl"
+      title={tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
       description={tx(
         "Проверяйте предложения системы рядом с оригиналом.",
         "Systemvorschläge direkt neben dem Original prüfen.",
       )}
-      headerClassName="border-b border-border/70 bg-white px-5 py-3"
+      headerClassName="bg-white px-5 py-3"
       bodyClassName="!space-y-0 !overflow-hidden !bg-white !p-0"
       bodyWrapperClassName="h-full min-h-0"
       footer={
         reviewReady || applyingReady ? (
           <>
-            <div className="mr-auto space-y-0.5 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-foreground">{selected.length}</span>
-                {tx("объектов выбрано", "Objekte ausgewählt")}
-              </div>
-              {reviewReady && blockedSelected.length > 0 ? (
-                <p className="font-medium text-amber-700">
-                  {tx(
-                    `${blockedSelected.length} медикамент(а) требуют проверки перед применением`,
-                    `${blockedSelected.length} Medikament(e) müssen vor der Übernahme geprüft werden`,
-                  )}
-                </p>
-              ) : applyingReady ? (
-                <p className="font-medium text-violet-700">
-                  {tx("Выбор зафиксирован — импорт можно безопасно продолжить", "Auswahl ist eingefroren – Import kann sicher fortgesetzt werden")}
-                </p>
-              ) : null}
-            </div>
+            {identityImportBlocked ? (
+              <p className="mr-auto text-xs font-medium text-rose-700">
+                {subjectCheck.status === "hard_mismatch"
+                  ? tx(
+                      "Импорт заблокирован: документ не соответствует выбранному пациенту",
+                      "Import gesperrt: Dokument passt nicht zum ausgewählten Patienten",
+                    )
+                  : subjectCheck.status === "unavailable"
+                    ? tx(
+                        "Проверьте личность пациента в оригинале документа",
+                        "Patientenidentität im Originaldokument prüfen",
+                      )
+                    : tx(
+                        "Подтвердите расхождение в данных пациента",
+                        "Abweichung bei der Patientenidentität bestätigen",
+                      )}
+              </p>
+            ) : reviewReady && blockedSelected.length > 0 ? (
+              <p className="mr-auto text-xs font-medium text-amber-700">
+                {tx(
+                  `${blockedSelected.length} медикамент(а) требуют проверки перед применением`,
+                  `${blockedSelected.length} Medikament(e) müssen vor der Übernahme geprüft werden`,
+                )}
+              </p>
+            ) : applyingReady ? (
+              <p className="mr-auto text-xs font-medium text-violet-700">
+                {tx("Выбор зафиксирован — импорт можно безопасно продолжить", "Auswahl ist eingefroren – Import kann sicher fortgesetzt werden")}
+              </p>
+            ) : (
+              <span className="mr-auto" />
+            )}
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               {applyingReady ? tx("Закрыть", "Schließen") : tx("Отмена", "Abbrechen")}
             </Button>
-            <Button type="button" disabled={busy || selected.length === 0} onClick={apply}>
+            <Button
+              type="button"
+              disabled={busy || selected.length === 0 || identityImportBlocked}
+              onClick={apply}
+            >
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
               {applyingReady
-                ? tx("Продовжити й завершити", "Fortsetzen und abschließen")
+                ? tx("Продолжить и завершить", "Fortsetzen und abschließen")
                 : tx("Подтвердить и добавить", "Prüfen und übernehmen")}
             </Button>
           </>
@@ -1467,9 +1843,102 @@ export function ClinicalDocumentImportSheet({
     >
       <div
         data-clinical-import-workspace
-        className="grid h-full min-h-0 grid-cols-1 bg-white lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)] xl:grid-cols-[minmax(680px,62fr)_minmax(420px,38fr)]"
+        className="flex h-full min-h-0 flex-col bg-white"
       >
-        <section className="flex min-h-0 flex-col border-r border-border/70 bg-white">
+        {snapshotReady ? (
+          <div className="shrink-0 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b border-border bg-white">
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => {
+                const nextTab = value as BuilderTab;
+                setActiveTab(nextTab);
+                if (nextTab === "source") setActiveCandidateId(null);
+              }}
+            >
+              <TabsList
+                variant="line"
+                aria-label={tx("Разделы конструктора импорта", "Bereiche des Importassistenten")}
+                className="grid !h-14 !w-full min-w-[80rem] grid-cols-9 gap-0 rounded-none border-0 bg-transparent p-0 xl:min-w-0"
+              >
+                <TabsTrigger value="source" className={builderTabClassName}>
+                  <span
+                    className={cn(
+                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
+                      activeTab === "source"
+                        ? "border-[var(--brand)] text-[var(--brand)]"
+                        : "border-muted-foreground/40 text-muted-foreground",
+                    )}
+                  >
+                    <FileText aria-hidden="true" className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 text-[11px] font-medium leading-tight">
+                    {tx("Полный текст", "Volltext")}
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger value="all" className={builderTabClassName}>
+                  <span
+                    className={cn(
+                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
+                      activeTab === "all"
+                        ? "border-[var(--brand)] text-[var(--brand)]"
+                        : "border-muted-foreground/40 text-muted-foreground",
+                    )}
+                  >
+                    <ListChecks aria-hidden="true" className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 text-[11px] font-medium leading-tight">
+                    {tx("Все", "Alle")}
+                  </span>
+                  <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
+                    {candidates.length}
+                  </span>
+                </TabsTrigger>
+                {targetOrder.map((target) => {
+                  const TargetIcon = targetIcons[target];
+                  return (
+                    <TabsTrigger key={target} value={target} className={builderTabClassName}>
+                      <span
+                        className={cn(
+                          "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
+                          activeTab === target
+                            ? "border-[var(--brand)] text-[var(--brand)]"
+                            : "border-muted-foreground/40 text-muted-foreground",
+                        )}
+                      >
+                        <TargetIcon aria-hidden="true" className="size-3.5" />
+                      </span>
+                      <span className="min-w-0 text-[11px] font-medium leading-tight">
+                        {targetLabels[target][lang === "de" ? "de" : "ru"]}
+                      </span>
+                      <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
+                        {newCount(target)}
+                      </span>
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+            </Tabs>
+          </div>
+        ) : documentImport ? (
+          <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background px-4">
+            <Button type="button" size="sm" variant="ghost" onClick={returnToHistory}>
+              <ArrowLeft className="size-4" />
+              {tx("К истории", "Zum Verlauf")}
+            </Button>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="hidden truncate text-xs text-muted-foreground sm:block">
+                {documentImport.document_name}
+              </span>
+              <Badge variant="outline" className={importStatusTone[documentImport.status]}>
+                <ImportStatusGlyph status={documentImport.status} />
+                {importStatusLabels[documentImport.status][lang === "de" ? "de" : "ru"]}
+              </Badge>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 bg-white lg:grid-cols-[minmax(520px,58fr)_minmax(400px,42fr)] xl:grid-cols-[minmax(680px,62fr)_minmax(420px,38fr)]">
+          <section className="flex min-h-0 flex-col bg-white">
           {!documentImport ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="mx-auto w-full max-w-3xl space-y-4">
@@ -1591,7 +2060,7 @@ export function ClinicalDocumentImportSheet({
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {tx(
-                          "После загрузки здесь появится статус worker-а и готовый снимок.",
+                          "После загрузки здесь появятся статус обработки и готовый снимок.",
                           "Nach dem Upload erscheinen hier Worker-Status und fertiger Snapshot.",
                         )}
                       </p>
@@ -1667,24 +2136,6 @@ export function ClinicalDocumentImportSheet({
             </div>
           ) : null}
 
-          {documentImport ? (
-            <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background px-4">
-              <Button type="button" size="sm" variant="ghost" onClick={returnToHistory}>
-                <ArrowLeft className="size-4" />
-                {tx("К истории", "Zum Verlauf")}
-              </Button>
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="hidden truncate text-xs text-muted-foreground sm:block">
-                  {documentImport.document_name}
-                </span>
-                <Badge variant="outline" className={importStatusTone[documentImport.status]}>
-                  <ImportStatusGlyph status={documentImport.status} />
-                  {importStatusLabels[documentImport.status][lang === "de" ? "de" : "ru"]}
-                </Badge>
-              </div>
-            </div>
-          ) : null}
-
           {documentImport && ["queued", "processing"].includes(documentImport.status) ? (
             <div
               role="status"
@@ -1699,8 +2150,8 @@ export function ClinicalDocumentImportSheet({
                 <p className="font-semibold">{tx("Строим клинический черновик…", "Klinischen Entwurf erstellen…")}</p>
                 <p className="mt-1 max-w-md text-sm text-muted-foreground">
                   {tx(
-                    "Распознаём страницы, секции, диагнозы, анамнез, медикаменты, обследования и рекомендации.",
-                    "Seiten, Abschnitte, Diagnosen, Anamnese, Medikation, Befunde und Empfehlungen werden erkannt.",
+                    "Распознаём страницы, секции, диагнозы, анамнез, медикаменты, показатели, обследования и рекомендации.",
+                    "Seiten, Abschnitte, Diagnosen, Anamnese, Medikation, Vitalwerte, Befunde und Empfehlungen werden erkannt.",
                   )}
                 </p>
                 <p className="mt-3 max-w-md text-xs font-medium text-foreground/75">
@@ -1731,77 +2182,6 @@ export function ClinicalDocumentImportSheet({
 
           {snapshotReady ? (
             <>
-              <div className="shrink-0 border-b border-border/70 bg-white px-4 pt-3">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Badge className="bg-primary/10 text-primary hover:bg-primary/10">
-                      {documentTypeLabels[documentImport.document_type ?? "medical_report"]?.[
-                        lang === "de" ? "de" : "ru"
-                      ] ?? documentImport.document_type?.replaceAll("_", " ") ?? tx("Медицинский отчёт", "Medizinischer Bericht")}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">
-                      {candidates.length} {tx("найденных объектов", "erkannte Objekte")}
-                    </span>
-                    {documentImport.draft.extraction ? (
-                      <span className="text-xs text-muted-foreground">
-                        · {documentImport.draft.extraction.page_count} {tx("стр.", "Seiten")}
-                        {documentImport.draft.extraction.used_ocr
-                          ? ` · OCR ${documentImport.draft.extraction.pages.filter((page) => page.source === "ocr").length}${
-                              documentImport.draft.extraction.pages.find((page) => page.source === "ocr")?.ocr_engine
-                                ? ` (${documentImport.draft.extraction.pages.find((page) => page.source === "ocr")?.ocr_engine})`
-                                : ""
-                            }`
-                          : ` · ${tx("текстовый слой", "Textebene")}`}
-                      </span>
-                    ) : null}
-                  </div>
-                  {reviewReady ? (
-                    <div className="flex items-center gap-2">
-                      <Button type="button" size="sm" variant="ghost" onClick={() => toggleVisible(true)}>
-                        <Check className="size-3.5" />
-                        {tx("Выбрать все", "Alle auswählen")}
-                      </Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => toggleVisible(false)}>
-                        {tx("Снять выбор", "Auswahl aufheben")}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-                <Tabs
-                  value={activeTab}
-                  onValueChange={(value) => {
-                    const nextTab = value as BuilderTab;
-                    setActiveTab(nextTab);
-                    if (nextTab === "source") setActiveCandidateId(null);
-                  }}
-                >
-                  <TabsList
-                    variant="line"
-                    aria-label={tx("Категории найденных объектов", "Kategorien der erkannten Objekte")}
-                    className="h-10 w-full max-w-full justify-start gap-5 overflow-x-auto overflow-y-hidden rounded-none border-0 border-b border-border/70 bg-transparent px-1 py-0"
-                  >
-                    <TabsTrigger value="all" className={builderTabClassName}>
-                      {tx("Все", "Alle")}
-                      <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
-                        {candidates.length}
-                      </span>
-                    </TabsTrigger>
-                    <TabsTrigger value="source" className={builderTabClassName}>
-                      <FileText className="size-3.5" />
-                      {tx("Весь текст", "Gesamter Text")}
-                    </TabsTrigger>
-                    {targetOrder.map((target) => (
-                      <TabsTrigger key={target} value={target} className={builderTabClassName}>
-                        {targetLabels[target][lang === "de" ? "de" : "ru"]}
-                        <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
-                          {newCount(target)}
-                        </span>
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
-              </div>
-
               <div className="min-h-0 flex-1 overflow-y-auto p-4 xl:p-5">
                 {documentImport.status === "applied" ? (
                   <div
@@ -1846,10 +2226,107 @@ export function ClinicalDocumentImportSheet({
                       </div>
                     </div>
                     <Badge variant="outline" className="border-violet-300 bg-white/60 text-violet-800">
-                      {selected.length} {tx("вибрано", "ausgewählt")}
+                      {selected.length} {tx("выбрано", "ausgewählt")}
                     </Badge>
                   </div>
                 ) : null}
+                <div
+                  role={identityPanelStatus === "hard_mismatch" ? "alert" : "status"}
+                  className={cn(
+                    "mb-4 rounded-xl border p-3 text-xs",
+                    identityPanelStatus === "frozen"
+                      ? "border-violet-200 bg-violet-50 text-violet-900"
+                      : identityPanelStatus === "verified"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : identityPanelStatus === "hard_mismatch"
+                        ? "border-rose-300 bg-rose-50 text-rose-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900",
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    {identityPanelStatus === "verified" ? (
+                      <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                    ) : identityPanelStatus === "frozen" ? (
+                      <Clock3 className="mt-0.5 size-4 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">
+                        {identityPanelStatus === "frozen"
+                          ? tx(
+                              "Решение о пациенте зафиксировано",
+                              "Patientenentscheidung ist eingefroren",
+                            )
+                          : identityPanelStatus === "verified"
+                          ? tx("Пациент в документе проверен", "Patient im Dokument verifiziert")
+                          : identityPanelStatus === "hard_mismatch"
+                            ? tx("Документ не соответствует этой карте", "Dokument passt nicht zu dieser Akte")
+                            : identityPanelStatus === "confirmation_required"
+                              ? tx("Нужно подтвердить личность пациента", "Patientenidentität muss bestätigt werden")
+                              : tx(
+                                  "В документе недостаточно данных для проверки пациента",
+                                  "Dokument enthält zu wenig Daten zur Patientenprüfung",
+                                )}
+                      </p>
+                      {extractedSubjectSummary ? (
+                        <p className="mt-1 break-words">
+                          {tx("В документе", "Im Dokument")}: {extractedSubjectSummary}
+                        </p>
+                      ) : null}
+                      {patientIdentitySummary ? (
+                        <p className="mt-0.5 break-words opacity-80">
+                          {tx("В карте", "In der Akte")}: {patientIdentitySummary}
+                        </p>
+                      ) : null}
+                      {identityPanelStatus === "hard_mismatch" ? (
+                        <p className="mt-1 font-medium">
+                          {tx(
+                            "Импорт заблокирован. Проверьте документ и выбранную карту пациента.",
+                            "Import gesperrt. Dokument und ausgewählte Patientenakte prüfen.",
+                          )}
+                        </p>
+                      ) : null}
+                      {clinicalDocumentIdentityConfirmationVisible(
+                        identityPrepareMode,
+                        subjectCheck.status,
+                      ) ? (
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-amber-300 bg-white/60 px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={patientIdentityConfirmed}
+                            className="mt-0.5 size-4 accent-amber-700"
+                            onChange={(event) => setPatientIdentityConfirmed(event.target.checked)}
+                          />
+                          <span className="font-medium">
+                            {subjectCheck.status === "unavailable"
+                              ? tx(
+                                  "Я вручную проверил(а) личность в оригинале документа и подтверждаю импорт именно в эту карту",
+                                  "Ich habe die Identität im Originaldokument manuell geprüft und bestätige den Import in genau diese Akte",
+                                )
+                              : tx(
+                                  "Я проверил(а) оригинал и подтверждаю импорт именно в эту карту",
+                                  "Ich habe das Original geprüft und bestätige den Import in genau diese Akte",
+                                )}
+                          </span>
+                        </label>
+                      ) : null}
+                      {identityPanelStatus === "frozen" ? (
+                        <p className="mt-1 font-medium">
+                          {documentImport.prepared_patient_identity_confirmed
+                            ? tx(
+                                "Личность пациента была явно подтверждена при фиксации импорта.",
+                                "Die Patientenidentität wurde beim Einfrieren des Imports ausdrücklich bestätigt.",
+                              )
+                            : tx(
+                                "Проверка была пройдена при фиксации; последующие изменения профиля не меняют снимок.",
+                                "Die Prüfung wurde beim Einfrieren bestanden; spätere Profiländerungen ändern den Snapshot nicht.",
+                              )}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
                 {documentImport.draft.warnings.map((warning) => (
                   <div key={warning} className="mb-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                     <AlertTriangle className="size-4 shrink-0" />
@@ -1863,7 +2340,7 @@ export function ClinicalDocumentImportSheet({
                   <section className="space-y-4">
                     <div>
                       <h4 className="text-sm font-semibold">
-                        {tx("Весь текст документа", "Gesamter Dokumenttext")}
+                        {tx("Полный текст документа", "Vollständiger Dokumenttext")}
                       </h4>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {tx(
@@ -1904,16 +2381,11 @@ export function ClinicalDocumentImportSheet({
                       <div className="rounded-xl border border-border/70 bg-white p-5">
                         <div className="mb-3 flex items-center gap-2">
                           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
-                          <div>
-                            <h5 className="text-sm font-semibold">
-                              {tx("Добавить объект в черновик", "Objekt zum Entwurf hinzufügen")}
-                            </h5>
-                            <p className="text-[11px] text-muted-foreground">
-                              {tx("Фрагмент можно отредактировать перед добавлением.", "Der Ausschnitt kann vor dem Hinzufügen bearbeitet werden.")}
-                            </p>
-                          </div>
+                          <h5 className="text-sm font-semibold">
+                            {tx("Добавить объект в черновик", "Objekt zum Entwurf hinzufügen")}
+                          </h5>
                         </div>
-                        <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)_auto] lg:items-end">
+                        <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)] lg:items-start">
                           <label className="space-y-1">
                             <span className="text-xs font-medium">
                               {tx("Тип объекта", "Objekttyp")}
@@ -1932,70 +2404,34 @@ export function ClinicalDocumentImportSheet({
                               ))}
                             </select>
                           </label>
-                          <label className="space-y-1">
-                            <span className="text-xs font-medium">
-                              {tx("Выделенный фрагмент", "Ausgewählter Ausschnitt")}
-                            </span>
-                            <textarea
-                              value={manualValue}
-                              className="min-h-36 max-h-[50vh] w-full resize-y rounded-lg border border-border bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-                              placeholder={tx("Выделите текст выше или введите его здесь…", "Oben Text markieren oder hier eingeben…")}
-                              onChange={(event) => setManualValue(event.target.value)}
-                            />
-                          </label>
-                          <Button
-                            type="button"
-                            className="h-10 gap-1.5"
-                            disabled={!manualValue.trim()}
-                            onClick={addManualCandidate}
-                          >
-                            <Plus className="size-4" />
-                            {tx("Добавить", "Hinzufügen")}
-                          </Button>
+                          <div className="min-w-0 space-y-3">
+                            <label className="block space-y-1">
+                              <span className="text-xs font-medium">
+                                {tx("Выделенный фрагмент", "Ausgewählter Ausschnitt")}
+                              </span>
+                              <textarea
+                                value={manualValue}
+                                className="min-h-36 max-h-[50vh] w-full resize-y rounded-lg border border-border bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                                placeholder={tx("Выделите текст выше или введите его здесь…", "Oben Text markieren oder hier eingeben…")}
+                                onChange={(event) => setManualValue(event.target.value)}
+                              />
+                            </label>
+                            <div className="flex justify-end">
+                              <Button
+                                type="button"
+                                className="h-10 gap-1.5"
+                                disabled={!manualValue.trim()}
+                                onClick={addManualCandidate}
+                              >
+                                <Plus className="size-4" />
+                                {tx("Добавить", "Hinzufügen")}
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     ) : null}
                   </section>
-                ) : null}
-
-                {activeTab !== "source" && hasCountryScopedCandidate && (activeTab === "all" || activeTab === "diagnosis" || activeTab === "lab_result" || activeTab === "medication") ? (
-                  <div className="mb-4 flex items-end gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
-                    <label className="block space-y-1">
-                      <span className="text-xs font-medium">
-                        {tx("Страна источника", "Ursprungsland")}
-                      </span>
-                      <Input
-                        value={sourceCountry}
-                        maxLength={2}
-                        disabled={snapshotReadOnly}
-                        aria-describedby="clinical-import-source-country-help"
-                        aria-invalid={!isCanonicalClinicalImportSourceCountry(sourceCountry)}
-                        className={cn(
-                          "w-24 uppercase",
-                          !isCanonicalClinicalImportSourceCountry(sourceCountry) && "border-amber-400",
-                        )}
-                        onChange={(event) =>
-                          updateSourceCountry(
-                            event.target.value.toUpperCase().replace(/[^A-Z]/g, ""),
-                          )
-                        }
-                        placeholder={snapshotReadOnly ? "—" : "UA"}
-                      />
-                    </label>
-                    <p
-                      id="clinical-import-source-country-help"
-                      className="pb-2 text-xs text-muted-foreground"
-                    >
-                      {tx(
-                        isCanonicalClinicalImportSourceCountry(sourceCountry)
-                          ? "Единая подтверждённая страна будет применена ко всем выбранным диагнозам, анализам и медикаментам."
-                          : "Страна в документе отсутствует или противоречива. Подтвердите ISO-код перед применением.",
-                        isCanonicalClinicalImportSourceCountry(sourceCountry)
-                          ? "Das bestätigte Land gilt für alle ausgewählten Diagnosen, Laborwerte und Medikamente."
-                          : "Das Dokument enthält kein eindeutiges Land. ISO-Code vor der Übernahme bestätigen.",
-                      )}
-                    </p>
-                  </div>
                 ) : null}
 
                 {activeTab !== "source" ? (activeTab === "all" ? targetOrder : [activeTab]).map((target) => {
@@ -2010,10 +2446,7 @@ export function ClinicalDocumentImportSheet({
                             {targetLabels[target][lang === "de" ? "de" : "ru"]}
                           </h4>
                           <p className="text-[11px] text-muted-foreground">
-                            {currentItems.length} {tx("уже в системе", "bereits im System")} · {selectedCount(target)}{" "}
-                            {snapshotReadOnly
-                              ? tx("в подтверждённом снимке", "im bestätigten Snapshot")
-                              : tx("выбрано для добавления", "zur Übernahme ausgewählt")}
+                            {currentItems.length} {tx("уже у пациента", "bereits beim Patienten")}
                           </p>
                         </div>
                         <Badge variant="outline" className={targetTone[target]}>
@@ -2113,6 +2546,17 @@ export function ClinicalDocumentImportSheet({
                                       }
                                       tx={tx}
                                       onFocus={() => setActiveCandidateId(candidate.id)}
+                                      onPatch={(patch) => patchCandidate(candidate.id, patch)}
+                                    />
+                                  ) : candidate.target === "vital" ? (
+                                    <VitalCandidateEditor
+                                      candidate={candidate}
+                                      disabled={snapshotReadOnly || !candidate.selected}
+                                      sourceCountry={sourceCountry}
+                                      importId={documentImport.id}
+                                      tx={tx}
+                                      onFocus={() => setActiveCandidateId(candidate.id)}
+                                      onSourceCountryChange={updateSourceCountry}
                                       onPatch={(patch) => patchCandidate(candidate.id, patch)}
                                     />
                                   ) : candidate.target === "lab_result" ? (
@@ -2274,32 +2718,11 @@ export function ClinicalDocumentImportSheet({
             </>
           ) : null}
 
-        </section>
+          </section>
 
-        <aside className="flex min-h-0 flex-col bg-white">
-          <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-background px-4">
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold">
-                {documentImport?.document_name ?? file?.name ?? tx("Предпросмотр документа", "Dokumentvorschau")}
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                {activeCandidate?.source.page
-                  ? `${tx("Страница", "Seite")} ${activeCandidate.source.page}`
-                  : tx("Оригинал для сверки", "Original zum Abgleich")}
-              </p>
-            </div>
-            {activeCandidate ? (
-              <Badge variant="outline" className={targetTone[activeCandidate.target]}>
-                {targetLabels[activeCandidate.target][lang === "de" ? "de" : "ru"]}
-              </Badge>
-            ) : null}
-          </div>
-
+          <aside className="flex min-h-0 flex-col bg-white">
           {activeCandidate ? (
             <div className="shrink-0 border-b border-border/70 bg-white px-4 py-3">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {tx("Фрагмент-основание", "Quellenausschnitt")}
-              </p>
               <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-xs leading-5 text-foreground">
                 {activeCandidate.source.text}
               </p>
@@ -2330,14 +2753,15 @@ export function ClinicalDocumentImportSheet({
                 <p className="text-sm font-medium">{tx("Документ появится здесь", "Dokument erscheint hier")}</p>
                 <p className="max-w-xs text-xs text-muted-foreground">
                   {tx(
-                    "Preview останется открытым, пока вы переходите между медицинскими объектами.",
+                    "Предпросмотр останется открытым, пока вы переходите между медицинскими объектами.",
                     "Die Vorschau bleibt beim Wechsel zwischen medizinischen Objekten geöffnet.",
                   )}
                 </p>
               </div>
             )}
           </div>
-        </aside>
+          </aside>
+        </div>
       </div>
       <DirtyDismissConfirmDialog
         open={Boolean(deleteTarget)}

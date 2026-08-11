@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { ClinicalDocumentSubjectEvidence } from "./clinical-document-subject";
 
 export type ClinicalDocumentImportTarget =
   | "diagnosis"
@@ -6,6 +7,7 @@ export type ClinicalDocumentImportTarget =
   | "medication"
   | "examination"
   | "lab_result"
+  | "vital"
   | "recommendation";
 
 export type ClinicalDocumentImportCandidate = {
@@ -51,6 +53,7 @@ export type ClinicalDocumentImportDraft = {
   raw_text?: string;
   candidates: ClinicalDocumentImportCandidate[];
   warnings: string[];
+  subject?: ClinicalDocumentSubjectEvidence | null;
   extraction?: ClinicalDocumentExtraction | null;
 };
 
@@ -76,6 +79,8 @@ export type ClinicalDocumentImportSummary = {
   applied_counts: Record<string, number>;
   error_message: string | null;
   prepared_source_country?: string | null;
+  prepared_patient_identity_confirmed?: boolean;
+  prepared_identity_gate_version?: number;
   prepared_at?: string | null;
   completed_at: string | null;
   applied_at: string | null;
@@ -98,6 +103,8 @@ export type ClinicalDocumentImport = {
   applied_counts: Record<string, number>;
   error_message: string | null;
   prepared_source_country?: string | null;
+  prepared_patient_identity_confirmed?: boolean;
+  prepared_identity_gate_version?: number;
   prepared_at?: string | null;
   completed_at: string | null;
   applied_at: string | null;
@@ -164,9 +171,27 @@ export type ImportedLabResultPayload = {
   source_page: number | null;
 };
 
+export type ImportedVitalPayload = {
+  measured_at: string;
+  bp_systolic: number | null;
+  bp_diastolic: number | null;
+  heart_rate: number | null;
+  temperature_c: number | null;
+  oxygen_saturation: number | null;
+  respiratory_rate: number | null;
+  weight_kg: number | null;
+  height_cm: number | null;
+  bmi: number | null;
+  notes: string | null;
+  source_country: string;
+  source_import_id: string;
+  source_candidate_id: string;
+  source_page: number | null;
+};
+
 export type ClinicalDocumentCandidatePayloads = Record<
   string,
-  ImportedMedicationPayload | ImportedLabResultPayload
+  ImportedMedicationPayload | ImportedLabResultPayload | ImportedVitalPayload
 >;
 
 export function clinicalImportNeedsSourceCountry(
@@ -176,7 +201,8 @@ export function clinicalImportNeedsSourceCountry(
     (candidate) =>
       candidate.target === "diagnosis" ||
       candidate.target === "lab_result" ||
-      candidate.target === "medication",
+      candidate.target === "medication" ||
+      candidate.target === "vital",
   );
 }
 
@@ -235,7 +261,25 @@ export type PreparedClinicalDocumentImport = {
   status: "applying";
   idempotent: boolean;
   source_country: string | null;
+  patient_identity_confirmed: boolean;
 };
+
+export function clinicalDocumentImportAfterPrepare(
+  current: ClinicalDocumentImport,
+  reviewedDraft: ClinicalDocumentImportDraft,
+  prepared: PreparedClinicalDocumentImport,
+  preparedAt: string,
+): ClinicalDocumentImport {
+  return {
+    ...current,
+    status: "applying",
+    reviewed_draft: reviewedDraft,
+    prepared_source_country: prepared.source_country,
+    prepared_patient_identity_confirmed: prepared.patient_identity_confirmed,
+    prepared_identity_gate_version: 1,
+    prepared_at: current.prepared_at ?? preparedAt,
+  };
+}
 
 export function fetchClinicalDocumentImports(patientId: string) {
   return apiFetch<{ items: ClinicalDocumentImportSummary[] }>(
@@ -286,6 +330,16 @@ export function persistClinicalDocumentMedication(
   );
 }
 
+export function persistClinicalDocumentVital(
+  patientId: string,
+  payload: ImportedVitalPayload,
+) {
+  return apiFetch<{ id: string; created_at: string; ok: true; idempotent: boolean }>(
+    `/patients/${patientId}/vitals`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 export function fetchPatientMedicationImportHistory(
   patientId: string,
   options: { limit?: number; offset?: number } = {},
@@ -305,6 +359,7 @@ export function prepareClinicalDocumentImport(
   reviewedDraft: ClinicalDocumentImportDraft,
   candidatePayloads: ClinicalDocumentCandidatePayloads,
   sourceCountry?: string | null,
+  patientIdentityConfirmed = false,
 ) {
   return apiFetch<PreparedClinicalDocumentImport>(
     `/patients/${patientId}/clinical-document-imports/${importId}/prepare`,
@@ -314,6 +369,7 @@ export function prepareClinicalDocumentImport(
         reviewed_draft: reviewedDraft,
         candidate_payloads: candidatePayloads,
         source_country: sourceCountry || undefined,
+        patient_identity_confirmed: patientIdentityConfirmed,
       }),
     },
   );

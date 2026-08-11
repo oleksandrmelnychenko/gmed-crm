@@ -44,6 +44,7 @@ export type FailedLeadResolutionForm = {
 
 export type LeadPermissions = {
   canViewPage: boolean;
+  canOpen: boolean;
   canCreate: boolean;
   canConvert: boolean;
 };

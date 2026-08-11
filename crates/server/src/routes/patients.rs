@@ -265,15 +265,195 @@ struct UpdatePatientRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CreatePatientVitalMeasurementRequest {
     measured_at: String,
     bp_systolic: Option<f64>,
     bp_diastolic: Option<f64>,
     heart_rate: Option<i32>,
+    temperature_c: Option<f64>,
+    oxygen_saturation: Option<f64>,
+    respiratory_rate: Option<i32>,
     weight_kg: Option<f64>,
     height_cm: Option<f64>,
     bmi: Option<f64>,
     notes: Option<String>,
+    source_country: Option<String>,
+    source_import_id: Option<Uuid>,
+    source_candidate_id: Option<String>,
+    source_page: Option<i32>,
+}
+
+pub(crate) struct NormalizedPatientVitalMeasurement {
+    measured_at: chrono::DateTime<chrono::Utc>,
+    measured_at_precision: &'static str,
+    bp_systolic: Option<f64>,
+    bp_diastolic: Option<f64>,
+    heart_rate: Option<i32>,
+    temperature_c: Option<f64>,
+    oxygen_saturation: Option<f64>,
+    respiratory_rate: Option<i32>,
+    weight_kg: Option<f64>,
+    height_cm: Option<f64>,
+    bmi: Option<f64>,
+    notes: Option<String>,
+    pub(crate) source_country: Option<String>,
+    pub(crate) source_import_id: Option<Uuid>,
+    pub(crate) source_candidate_id: Option<String>,
+    source_page: Option<i32>,
+}
+
+#[allow(clippy::result_large_err)]
+pub(crate) fn normalize_patient_vital_measurement_payload(
+    raw_body: &Value,
+) -> Result<NormalizedPatientVitalMeasurement, axum::response::Response> {
+    let body = serde_json::from_value::<CreatePatientVitalMeasurementRequest>(raw_body.clone())
+        .map_err(|_| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid vital measurement payload",
+            )
+        })?;
+    let measured_at = parse_vital_measurement_timestamp(&body.measured_at)?;
+    let measured_at_precision = if chrono::NaiveDate::parse_from_str(
+        body.measured_at.trim(),
+        "%Y-%m-%d",
+    )
+    .is_ok()
+    {
+        "date"
+    } else {
+        "datetime"
+    };
+    let bp_systolic =
+        validate_optional_float_range("bp_systolic", body.bp_systolic, 40.0, 300.0)?;
+    let bp_diastolic =
+        validate_optional_float_range("bp_diastolic", body.bp_diastolic, 20.0, 200.0)?;
+    let heart_rate = validate_optional_int_range("heart_rate", body.heart_rate, 20, 300)?;
+    let temperature_c =
+        validate_optional_float_range("temperature_c", body.temperature_c, 25.0, 45.0)?;
+    let oxygen_saturation = validate_optional_float_range(
+        "oxygen_saturation",
+        body.oxygen_saturation,
+        20.0,
+        100.0,
+    )?;
+    let respiratory_rate =
+        validate_optional_int_range("respiratory_rate", body.respiratory_rate, 3, 80)?;
+    let weight_kg = validate_optional_float_range("weight_kg", body.weight_kg, 1.0, 500.0)?;
+    let height_cm = validate_optional_float_range("height_cm", body.height_cm, 20.0, 250.0)?;
+    let provided_bmi = validate_optional_float_range("bmi", body.bmi, 5.0, 100.0)?;
+    let notes = normalize_optional_text(body.notes, "notes", 2000)?;
+    let source_candidate_id =
+        normalize_optional_text(body.source_candidate_id, "source_candidate_id", 128)?;
+
+    if bp_systolic.is_some() ^ bp_diastolic.is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Both bp_systolic and bp_diastolic are required together",
+        ));
+    }
+    if matches!(
+        (bp_systolic, bp_diastolic),
+        (Some(systolic), Some(diastolic)) if systolic <= diastolic
+    )
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bp_systolic must be greater than bp_diastolic",
+        ));
+    }
+
+    let calculated_bmi = match (weight_kg, height_cm) {
+        (Some(weight), Some(height_cm)) => {
+            let height_m = height_cm / 100.0;
+            (height_m > 0.0)
+                .then(|| ((weight / (height_m * height_m)) * 10.0).round() / 10.0)
+        }
+        _ => None,
+    };
+    if matches!(
+        (provided_bmi, calculated_bmi),
+        (Some(provided), Some(calculated)) if (provided - calculated).abs() > 0.5
+    )
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "bmi conflicts with weight_kg and height_cm",
+        ));
+    }
+    let bmi = provided_bmi.or(calculated_bmi);
+
+    if bp_systolic.is_none()
+        && bp_diastolic.is_none()
+        && heart_rate.is_none()
+        && temperature_c.is_none()
+        && oxygen_saturation.is_none()
+        && respiratory_rate.is_none()
+        && weight_kg.is_none()
+        && height_cm.is_none()
+        && bmi.is_none()
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "At least one vital measurement is required",
+        ));
+    }
+
+    if body.source_page.is_some_and(|page| page <= 0) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid source_page"));
+    }
+    let source_country = match body.source_country {
+        Some(value) => {
+            let normalized = value.trim();
+            if normalized != value
+                || normalized.len() != 2
+                || !normalized.bytes().all(|byte| byte.is_ascii_uppercase())
+                || !is_iso_country_code(normalized)
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid source_country",
+                ));
+            }
+            Some(normalized.to_string())
+        }
+        None => None,
+    };
+    if body.source_import_id.is_some() != source_candidate_id.is_some() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_import_id and source_candidate_id are required together",
+        ));
+    }
+    if body.source_import_id.is_some()
+        && measured_at_precision == "datetime"
+        && chrono::DateTime::parse_from_rfc3339(body.measured_at.trim()).is_err()
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Imported vital measured_at must be a date or include an explicit timezone offset",
+        ));
+    }
+
+    Ok(NormalizedPatientVitalMeasurement {
+        measured_at,
+        measured_at_precision,
+        bp_systolic,
+        bp_diastolic,
+        heart_rate,
+        temperature_c,
+        oxygen_saturation,
+        respiratory_rate,
+        weight_kg,
+        height_cm,
+        bmi,
+        notes,
+        source_country,
+        source_import_id: body.source_import_id,
+        source_candidate_id,
+        source_page: body.source_page,
+    })
 }
 
 #[derive(Deserialize)]
@@ -298,6 +478,7 @@ struct CreatePatientLabResultRequest {
 
 pub(crate) struct NormalizedPatientLabResult {
     measured_at: chrono::DateTime<chrono::Utc>,
+    measured_at_precision: &'static str,
     panel: Option<String>,
     analyte_name: String,
     result_text: String,
@@ -327,6 +508,16 @@ pub(crate) fn normalize_patient_lab_result_payload(
         },
     )?;
     let measured_at = parse_clinical_timestamp(&body.measured_at, "measured_at")?;
+    let measured_at_precision = if chrono::NaiveDate::parse_from_str(
+        body.measured_at.trim(),
+        "%Y-%m-%d",
+    )
+    .is_ok()
+    {
+        "date"
+    } else {
+        "datetime"
+    };
     let analyte_name = body.analyte_name.trim().to_string();
     let result_text = body.result_text.trim().to_string();
     if analyte_name.is_empty() || analyte_name.len() > 160 {
@@ -401,9 +592,19 @@ pub(crate) fn normalize_patient_lab_result_payload(
             "source_import_id and source_candidate_id are required together",
         ));
     }
+    if body.source_import_id.is_some()
+        && measured_at_precision == "datetime"
+        && chrono::DateTime::parse_from_rfc3339(body.measured_at.trim()).is_err()
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Imported lab measured_at must be a date or include an explicit timezone offset",
+        ));
+    }
 
     Ok(NormalizedPatientLabResult {
         measured_at,
+        measured_at_precision,
         panel,
         analyte_name,
         result_text,
@@ -2547,7 +2748,8 @@ async fn list_patient_lab_results(
     }
 
     let rows = sqlx::query(
-        r#"SELECT lr.id, lr.measured_at, lr.panel, lr.analyte_name, lr.result_text,
+        r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
+                  lr.panel, lr.analyte_name, lr.result_text,
                   lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
                   lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
@@ -2576,6 +2778,7 @@ async fn list_patient_lab_results(
             json!({
                 "id": row.get::<Uuid, _>("id"),
                 "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+                "measured_at_precision": row.get::<String, _>("measured_at_precision"),
                 "panel": row.get::<Option<String>, _>("panel"),
                 "analyte_name": row.get::<String, _>("analyte_name"),
                 "result_text": row.get::<String, _>("result_text"),
@@ -2629,7 +2832,7 @@ async fn create_patient_lab_result(
     let source_document_id = if let Some(import_id) = lab.source_import_id {
         match sqlx::query(
             r#"SELECT document_id, prepared_source_country, reviewed_draft,
-                      prepared_candidate_payloads
+                      prepared_candidate_payloads, prepared_identity_gate_version
                FROM clinical_document_imports
                WHERE id = $1 AND patient_id = $2 AND status = 'applying'
                  AND deleted_at IS NULL"#,
@@ -2640,6 +2843,12 @@ async fn create_patient_lab_result(
         .await
         {
             Ok(Some(import)) => {
+                if import.get::<i16, _>("prepared_identity_gate_version") < 1 {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Clinical import identity gate must be completed before lab persistence",
+                    );
+                }
                 let selected = import
                     .get::<Option<Value>, _>("reviewed_draft")
                     .and_then(|draft| draft.get("candidates").and_then(Value::as_array).cloned())
@@ -2703,8 +2912,9 @@ async fn create_patient_lab_result(
                 patient_id, measured_at, panel, analyte_name, result_text,
                 numeric_result, comparator, unit, reference_text, reference_low,
                 reference_high, abnormal_flag, source_country, source_document_id,
-                source_import_id, source_candidate_id, source_page, recorded_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                source_import_id, source_candidate_id, source_page, recorded_by,
+                measured_at_precision
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
            ON CONFLICT (source_import_id, source_candidate_id)
              WHERE source_import_id IS NOT NULL AND source_candidate_id IS NOT NULL
            DO UPDATE SET updated_at = patient_lab_results.updated_at
@@ -2723,7 +2933,8 @@ async fn create_patient_lab_result(
                  patient_lab_results.abnormal_flag,
                  patient_lab_results.source_country,
                  patient_lab_results.source_document_id,
-                 patient_lab_results.source_page
+                 patient_lab_results.source_page,
+                 patient_lab_results.measured_at_precision
              ) IS NOT DISTINCT FROM (
                  EXCLUDED.patient_id,
                  EXCLUDED.measured_at,
@@ -2739,7 +2950,8 @@ async fn create_patient_lab_result(
                  EXCLUDED.abnormal_flag,
                  EXCLUDED.source_country,
                  EXCLUDED.source_document_id,
-                 EXCLUDED.source_page
+                 EXCLUDED.source_page,
+                 EXCLUDED.measured_at_precision
              )
            RETURNING id, created_at"#,
     )
@@ -2761,6 +2973,7 @@ async fn create_patient_lab_result(
     .bind(&lab.source_candidate_id)
     .bind(lab.source_page)
     .bind(auth.user_id)
+    .bind(lab.measured_at_precision)
     .fetch_optional(&state.db)
     .await
     {
@@ -2811,7 +3024,7 @@ async fn list_patient_vitals(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -2820,18 +3033,29 @@ async fn list_patient_vitals(
     let rows = sqlx::query(
         r#"SELECT vm.id,
                   vm.measured_at,
+                  vm.measured_at_precision,
                   vm.bp_systolic,
                   vm.bp_diastolic,
                   vm.heart_rate,
+                  vm.temperature_c,
+                  vm.oxygen_saturation,
+                  vm.respiratory_rate,
                   vm.weight_kg,
                   vm.height_cm,
                   vm.bmi,
                   vm.notes,
+                  vm.source_country,
+                  vm.source_document_id,
+                  vm.source_import_id,
+                  vm.source_candidate_id,
+                  vm.source_page,
                   vm.recorded_by,
                   vm.created_at,
-                  u.name AS recorded_by_name
+                  u.name AS recorded_by_name,
+                  d.original_filename AS source_document_name
            FROM patient_vital_measurements vm
            LEFT JOIN users u ON u.id = vm.recorded_by
+           LEFT JOIN documents d ON d.id = vm.source_document_id
            WHERE vm.patient_id = $1
            ORDER BY vm.measured_at DESC, vm.created_at DESC"#,
     )
@@ -2852,13 +3076,23 @@ async fn list_patient_vitals(
             json!({
                 "id": row.get::<Uuid, _>("id"),
                 "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+                "measured_at_precision": row.get::<String, _>("measured_at_precision"),
                 "bp_systolic": row.get::<Option<f64>, _>("bp_systolic"),
                 "bp_diastolic": row.get::<Option<f64>, _>("bp_diastolic"),
                 "heart_rate": row.get::<Option<i32>, _>("heart_rate"),
+                "temperature_c": row.get::<Option<f64>, _>("temperature_c"),
+                "oxygen_saturation": row.get::<Option<f64>, _>("oxygen_saturation"),
+                "respiratory_rate": row.get::<Option<i32>, _>("respiratory_rate"),
                 "weight_kg": row.get::<Option<f64>, _>("weight_kg"),
                 "height_cm": row.get::<Option<f64>, _>("height_cm"),
                 "bmi": row.get::<Option<f64>, _>("bmi"),
                 "notes": row.get::<Option<String>, _>("notes"),
+                "source_country": row.get::<Option<String>, _>("source_country"),
+                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
+                "source_page": row.get::<Option<i32>, _>("source_page"),
                 "recorded_by": row.get::<Option<Uuid>, _>("recorded_by"),
                 "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
                 "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
@@ -2877,9 +3111,9 @@ async fn create_patient_vital_measurement(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
-    Json(body): Json<CreatePatientVitalMeasurementRequest>,
+    Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
 
@@ -2895,92 +3129,207 @@ async fn create_patient_vital_measurement(
         }
     }
 
-    let measured_at = match parse_vital_measurement_timestamp(&body.measured_at) {
-        Ok(value) => value,
+    let vital = match normalize_patient_vital_measurement_payload(&raw_body) {
+        Ok(vital) => vital,
         Err(response) => return response,
     };
-    let bp_systolic = match validate_optional_positive_float("bp_systolic", body.bp_systolic) {
-        Ok(value) => value,
-        Err(response) => return response,
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, "Failed to begin vital measurement transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record patient vitals",
+            );
+        }
     };
-    let bp_diastolic = match validate_optional_positive_float("bp_diastolic", body.bp_diastolic) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let heart_rate = match validate_optional_positive_int("heart_rate", body.heart_rate) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let weight_kg = match validate_optional_positive_float("weight_kg", body.weight_kg) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let height_cm = match validate_optional_positive_float("height_cm", body.height_cm) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let provided_bmi = match validate_optional_positive_float("bmi", body.bmi) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let notes = match normalize_optional_text(body.notes, "notes", 2000) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-
-    if bp_systolic.is_some() ^ bp_diastolic.is_some() {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Both bp_systolic and bp_diastolic are required together",
-        );
-    }
-
-    let bmi = provided_bmi.or_else(|| match (weight_kg, height_cm) {
-        (Some(weight), Some(height_cm)) => {
-            let height_m = height_cm / 100.0;
-            if height_m > 0.0 {
-                Some(((weight / (height_m * height_m)) * 10.0).round() / 10.0)
-            } else {
-                None
+    let source_document_id = if let Some(import_id) = vital.source_import_id {
+        let import = match sqlx::query(
+            r#"SELECT document_id, status, prepared_source_country, reviewed_draft,
+                      prepared_candidate_payloads, prepared_identity_gate_version
+               FROM clinical_document_imports
+               WHERE id = $1 AND patient_id = $2 AND status IN ('applying', 'applied')
+                 AND deleted_at IS NULL
+               FOR UPDATE"#,
+        )
+        .bind(import_id)
+        .bind(patient_uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(import)) => import,
+            Ok(None) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Clinical import must be prepared before vital persistence",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, import_id = %import_id, "Failed to validate vital import provenance");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to record patient vitals",
+                );
+            }
+        };
+        if import.get::<i16, _>("prepared_identity_gate_version") < 1 {
+            return err(
+                StatusCode::CONFLICT,
+                "Clinical import identity gate must be completed before vital persistence",
+            );
+        }
+        let candidate_id = vital.source_candidate_id.as_deref().unwrap_or_default();
+        let selected = import
+            .get::<Option<Value>, _>("reviewed_draft")
+            .and_then(|draft| draft.get("candidates").and_then(Value::as_array).cloned())
+            .is_some_and(|candidates| {
+                candidates.iter().any(|candidate| {
+                    candidate.get("id").and_then(Value::as_str) == Some(candidate_id)
+                        && candidate.get("target").and_then(Value::as_str) == Some("vital")
+                        && candidate.get("selected").and_then(Value::as_bool) == Some(true)
+                })
+            });
+        if !selected {
+            return err(
+                StatusCode::CONFLICT,
+                "Vital candidate is not selected in the prepared review",
+            );
+        }
+        if import
+            .get::<Option<String>, _>("prepared_source_country")
+            .as_deref()
+            != vital.source_country.as_deref()
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Vital source_country differs from the prepared import country",
+            );
+        }
+        if import
+            .get::<Value, _>("prepared_candidate_payloads")
+            .get(candidate_id)
+            != Some(&raw_body)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Vital payload differs from the immutable prepared candidate payload",
+            );
+        }
+        if import.get::<String, _>("status") == "applied" {
+            let persisted = match sqlx::query_scalar::<_, bool>(
+                r#"SELECT EXISTS(
+                       SELECT 1 FROM patient_vital_measurements
+                       WHERE patient_id = $1 AND source_import_id = $2
+                         AND source_candidate_id = $3
+                   )"#,
+            )
+            .bind(patient_uuid)
+            .bind(import_id)
+            .bind(candidate_id)
+            .fetch_one(&mut *tx)
+            .await
+            {
+                Ok(persisted) => persisted,
+                Err(error) => {
+                    tracing::error!(error = %error, import_id = %import_id, candidate_id = %candidate_id, "Failed to validate idempotent vital retry");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to record patient vitals",
+                    );
+                }
+            };
+            if !persisted {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Applied vital candidate has no persisted measurement",
+                );
             }
         }
-        _ => None,
-    });
-
-    if bp_systolic.is_none()
-        && bp_diastolic.is_none()
-        && heart_rate.is_none()
-        && weight_kg.is_none()
-        && height_cm.is_none()
-        && bmi.is_none()
-    {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "At least one vital measurement is required",
-        );
-    }
+        Some(import.get::<Uuid, _>("document_id"))
+    } else {
+        None
+    };
 
     let row = match sqlx::query(
         r#"INSERT INTO patient_vital_measurements (
                 patient_id, measured_at, bp_systolic, bp_diastolic, heart_rate,
-                weight_kg, height_cm, bmi, notes, recorded_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           RETURNING id, created_at"#,
+                temperature_c, oxygen_saturation, respiratory_rate,
+                weight_kg, height_cm, bmi, notes, source_country, source_document_id,
+                source_import_id, source_candidate_id, source_page, recorded_by,
+                measured_at_precision
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19
+           )
+           ON CONFLICT (source_import_id, source_candidate_id)
+             WHERE source_import_id IS NOT NULL AND source_candidate_id IS NOT NULL
+           DO UPDATE SET updated_at = patient_vital_measurements.updated_at
+             WHERE (
+                 patient_vital_measurements.patient_id,
+                 patient_vital_measurements.measured_at,
+                 patient_vital_measurements.bp_systolic,
+                 patient_vital_measurements.bp_diastolic,
+                 patient_vital_measurements.heart_rate,
+                 patient_vital_measurements.temperature_c,
+                 patient_vital_measurements.oxygen_saturation,
+                 patient_vital_measurements.respiratory_rate,
+                 patient_vital_measurements.weight_kg,
+                 patient_vital_measurements.height_cm,
+                 patient_vital_measurements.bmi,
+                 patient_vital_measurements.notes,
+                 patient_vital_measurements.source_country,
+                 patient_vital_measurements.source_document_id,
+                 patient_vital_measurements.source_page,
+                 patient_vital_measurements.measured_at_precision
+             ) IS NOT DISTINCT FROM (
+                 EXCLUDED.patient_id,
+                 EXCLUDED.measured_at,
+                 EXCLUDED.bp_systolic,
+                 EXCLUDED.bp_diastolic,
+                 EXCLUDED.heart_rate,
+                 EXCLUDED.temperature_c,
+                 EXCLUDED.oxygen_saturation,
+                 EXCLUDED.respiratory_rate,
+                 EXCLUDED.weight_kg,
+                 EXCLUDED.height_cm,
+                 EXCLUDED.bmi,
+                 EXCLUDED.notes,
+                 EXCLUDED.source_country,
+                 EXCLUDED.source_document_id,
+                 EXCLUDED.source_page,
+                 EXCLUDED.measured_at_precision
+             )
+           RETURNING id, created_at, (xmax = 0) AS inserted"#,
     )
     .bind(patient_uuid)
-    .bind(measured_at)
-    .bind(bp_systolic)
-    .bind(bp_diastolic)
-    .bind(heart_rate)
-    .bind(weight_kg)
-    .bind(height_cm)
-    .bind(bmi)
-    .bind(notes.clone())
+    .bind(vital.measured_at)
+    .bind(vital.bp_systolic)
+    .bind(vital.bp_diastolic)
+    .bind(vital.heart_rate)
+    .bind(vital.temperature_c)
+    .bind(vital.oxygen_saturation)
+    .bind(vital.respiratory_rate)
+    .bind(vital.weight_kg)
+    .bind(vital.height_cm)
+    .bind(vital.bmi)
+    .bind(&vital.notes)
+    .bind(&vital.source_country)
+    .bind(source_document_id)
+    .bind(vital.source_import_id)
+    .bind(&vital.source_candidate_id)
+    .bind(vital.source_page)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(vital.measured_at_precision)
+    .fetch_optional(&mut *tx)
     .await
     {
-        Ok(row) => row,
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "This prepared vital candidate was already persisted with different reviewed fields",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to record patient vitals");
             return err(
@@ -2989,27 +3338,54 @@ async fn create_patient_vital_measurement(
             );
         }
     };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_uuid, "Failed to commit vital measurement transaction");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record patient vitals",
+        );
+    }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "record_patient_vitals",
-        Some(auth.user_id),
-        "patient",
-        Some(patient_uuid),
-        json!({
-            "measurement_id": row.get::<Uuid, _>("id"),
-            "measured_at": measured_at.to_rfc3339(),
-            "has_blood_pressure": bp_systolic.is_some(),
-            "has_heart_rate": heart_rate.is_some(),
-            "has_weight": weight_kg.is_some(),
-            "has_height": height_cm.is_some(),
-            "has_notes": notes.is_some(),
-        }),
-    ));
+    let measurement_id = row.get::<Uuid, _>("id");
+    let idempotent = !row.get::<bool, _>("inserted");
+
+    if !idempotent {
+        state.audit_sender.try_send(audit::domain_event(
+            "record_patient_vitals",
+            Some(auth.user_id),
+            "patient",
+            Some(patient_uuid),
+            json!({
+                "measurement_id": measurement_id,
+                "measured_at": vital.measured_at.to_rfc3339(),
+                "measured_at_precision": vital.measured_at_precision,
+                "source_import_id": vital.source_import_id,
+                "source_candidate_id": vital.source_candidate_id,
+                "has_blood_pressure": vital.bp_systolic.is_some(),
+                "has_heart_rate": vital.heart_rate.is_some(),
+                "has_temperature": vital.temperature_c.is_some(),
+                "has_oxygen_saturation": vital.oxygen_saturation.is_some(),
+                "has_respiratory_rate": vital.respiratory_rate.is_some(),
+                "has_weight": vital.weight_kg.is_some(),
+                "has_height": vital.height_cm.is_some(),
+                "has_notes": vital.notes.is_some(),
+            }),
+        ));
+        crate::realtime::publish_patient_event(
+            &state,
+            Some(auth.user_id),
+            "patient.clinical_updated",
+            patient_uuid,
+            json!({ "section": "vitals", "action": "upsert", "vital_measurement_id": measurement_id }),
+        )
+        .await;
+    }
 
     Json(json!({
-        "id": row.get::<Uuid, _>("id"),
+        "id": measurement_id,
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
         "ok": true,
+        "idempotent": idempotent,
     }))
     .into_response()
 }
@@ -3018,7 +3394,7 @@ async fn update_patient_vital_measurement(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((patient_uuid, measurement_uuid)): Path<(Uuid, Uuid)>,
-    Json(body): Json<CreatePatientVitalMeasurementRequest>,
+    Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
@@ -3036,68 +3412,44 @@ async fn update_patient_vital_measurement(
         }
     }
 
-    let measured_at = match parse_vital_measurement_timestamp(&body.measured_at) {
-        Ok(value) => value,
+    let vital = match normalize_patient_vital_measurement_payload(&raw_body) {
+        Ok(vital) => vital,
         Err(response) => return response,
     };
-    let bp_systolic = match validate_optional_positive_float("bp_systolic", body.bp_systolic) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let bp_diastolic = match validate_optional_positive_float("bp_diastolic", body.bp_diastolic) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let heart_rate = match validate_optional_positive_int("heart_rate", body.heart_rate) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let weight_kg = match validate_optional_positive_float("weight_kg", body.weight_kg) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let height_cm = match validate_optional_positive_float("height_cm", body.height_cm) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let provided_bmi = match validate_optional_positive_float("bmi", body.bmi) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let notes = match normalize_optional_text(body.notes, "notes", 2000) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-
-    if bp_systolic.is_some() ^ bp_diastolic.is_some() {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Both bp_systolic and bp_diastolic are required together",
-        );
-    }
-
-    let bmi = provided_bmi.or_else(|| match (weight_kg, height_cm) {
-        (Some(weight), Some(height_cm)) => {
-            let height_m = height_cm / 100.0;
-            if height_m > 0.0 {
-                Some(((weight / (height_m * height_m)) * 10.0).round() / 10.0)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    });
-
-    if bp_systolic.is_none()
-        && bp_diastolic.is_none()
-        && heart_rate.is_none()
-        && weight_kg.is_none()
-        && height_cm.is_none()
-        && bmi.is_none()
+    if vital.source_country.is_some()
+        || vital.source_import_id.is_some()
+        || vital.source_candidate_id.is_some()
+        || vital.source_page.is_some()
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "At least one vital measurement is required",
+            "Vital measurement provenance cannot be changed",
+        );
+    }
+    let imported = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT source_candidate_id IS NOT NULL
+           FROM patient_vital_measurements
+           WHERE id = $1 AND patient_id = $2"#,
+    )
+    .bind(measurement_uuid)
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(imported)) => imported,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Vital measurement not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, measurement_id = %measurement_uuid, "Failed to inspect patient vitals provenance");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient vitals",
+            );
+        }
+    };
+    if imported {
+        return err(
+            StatusCode::CONFLICT,
+            "Imported vital measurements are immutable",
         );
     }
 
@@ -3107,20 +3459,29 @@ async fn update_patient_vital_measurement(
                bp_systolic = $2,
                bp_diastolic = $3,
                heart_rate = $4,
-               weight_kg = $5,
-               height_cm = $6,
-               bmi = $7,
-               notes = $8
-           WHERE id = $9 AND patient_id = $10"#,
+               temperature_c = $5,
+               oxygen_saturation = $6,
+               respiratory_rate = $7,
+               weight_kg = $8,
+               height_cm = $9,
+               bmi = $10,
+               notes = $11,
+               measured_at_precision = $12,
+               updated_at = now()
+           WHERE id = $13 AND patient_id = $14 AND source_candidate_id IS NULL"#,
     )
-    .bind(measured_at)
-    .bind(bp_systolic)
-    .bind(bp_diastolic)
-    .bind(heart_rate)
-    .bind(weight_kg)
-    .bind(height_cm)
-    .bind(bmi)
-    .bind(notes.clone())
+    .bind(vital.measured_at)
+    .bind(vital.bp_systolic)
+    .bind(vital.bp_diastolic)
+    .bind(vital.heart_rate)
+    .bind(vital.temperature_c)
+    .bind(vital.oxygen_saturation)
+    .bind(vital.respiratory_rate)
+    .bind(vital.weight_kg)
+    .bind(vital.height_cm)
+    .bind(vital.bmi)
+    .bind(&vital.notes)
+    .bind(vital.measured_at_precision)
     .bind(measurement_uuid)
     .bind(patient_uuid)
     .execute(&state.db)
@@ -3147,12 +3508,15 @@ async fn update_patient_vital_measurement(
         Some(patient_uuid),
         json!({
             "measurement_id": measurement_uuid,
-            "measured_at": measured_at.to_rfc3339(),
-            "has_blood_pressure": bp_systolic.is_some(),
-            "has_heart_rate": heart_rate.is_some(),
-            "has_weight": weight_kg.is_some(),
-            "has_height": height_cm.is_some(),
-            "has_notes": notes.is_some(),
+            "measured_at": vital.measured_at.to_rfc3339(),
+            "has_blood_pressure": vital.bp_systolic.is_some(),
+            "has_heart_rate": vital.heart_rate.is_some(),
+            "has_temperature": vital.temperature_c.is_some(),
+            "has_oxygen_saturation": vital.oxygen_saturation.is_some(),
+            "has_respiratory_rate": vital.respiratory_rate.is_some(),
+            "has_weight": vital.weight_kg.is_some(),
+            "has_height": vital.height_cm.is_some(),
+            "has_notes": vital.notes.is_some(),
         }),
     ));
 
@@ -3184,9 +3548,36 @@ async fn delete_patient_vital_measurement(
         }
     }
 
+    let imported = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT source_candidate_id IS NOT NULL
+           FROM patient_vital_measurements
+           WHERE id = $1 AND patient_id = $2"#,
+    )
+    .bind(measurement_uuid)
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(imported)) => imported,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Vital measurement not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, measurement_id = %measurement_uuid, "Failed to inspect patient vitals provenance");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete patient vitals",
+            );
+        }
+    };
+    if imported {
+        return err(
+            StatusCode::CONFLICT,
+            "Imported vital measurements are immutable",
+        );
+    }
+
     let deleted = match sqlx::query(
         r#"DELETE FROM patient_vital_measurements
-           WHERE id = $1 AND patient_id = $2
+           WHERE id = $1 AND patient_id = $2 AND source_candidate_id IS NULL
            RETURNING measured_at"#,
     )
     .bind(measurement_uuid)
@@ -4161,6 +4552,38 @@ fn validate_optional_positive_int(
         Some(value) if value <= 0 => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             &format!("{field_name} must be a positive integer"),
+        )),
+        other => Ok(other),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_optional_float_range(
+    field_name: &str,
+    value: Option<f64>,
+    minimum: f64,
+    maximum: f64,
+) -> Result<Option<f64>, axum::response::Response> {
+    match value {
+        Some(value) if !value.is_finite() || value < minimum || value > maximum => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be between {minimum} and {maximum}"),
+        )),
+        other => Ok(other),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_optional_int_range(
+    field_name: &str,
+    value: Option<i32>,
+    minimum: i32,
+    maximum: i32,
+) -> Result<Option<i32>, axum::response::Response> {
+    match value {
+        Some(value) if value < minimum || value > maximum => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("{field_name} must be between {minimum} and {maximum}"),
         )),
         other => Ok(other),
     }
@@ -6990,6 +7413,9 @@ async fn get_patient_timeline(
                            )
                        END,
                        CASE WHEN vital.heart_rate IS NOT NULL THEN concat('HR ', vital.heart_rate) END,
+                       CASE WHEN vital.temperature_c IS NOT NULL THEN concat('Temp ', trim(to_char(vital.temperature_c, 'FM999990.##')), ' C') END,
+                       CASE WHEN vital.oxygen_saturation IS NOT NULL THEN concat('SpO2 ', trim(to_char(vital.oxygen_saturation, 'FM999990.##')), '%') END,
+                       CASE WHEN vital.respiratory_rate IS NOT NULL THEN concat('RR ', vital.respiratory_rate, '/min') END,
                        CASE WHEN vital.weight_kg IS NOT NULL THEN concat(trim(to_char(vital.weight_kg, 'FM999990.##')), ' kg') END,
                        CASE WHEN vital.height_cm IS NOT NULL THEN concat(trim(to_char(vital.height_cm, 'FM999990.##')), ' cm') END,
                        CASE WHEN vital.bmi IS NOT NULL THEN concat('BMI ', trim(to_char(vital.bmi, 'FM999990.##'))) END
@@ -8452,7 +8878,9 @@ async fn delete_patient(
 // See migration 20260604100000_patient_clinical_master.sql.
 // ---------------------------------------------------------------------------
 
-const PATIENT_CLINICAL_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager, Role::ItAdmin];
+// The first-release workspace exposes patient clinical data to the CEO only.
+// Add future clinical roles here only when their workspace is enabled globally.
+const PATIENT_CLINICAL_ROLES: &[Role] = &[Role::Ceo];
 
 #[derive(Deserialize)]
 struct PatientClinicalItems<T> {
@@ -12803,8 +13231,66 @@ async fn get_patient_medikationsplan_pdf(
 
 #[cfg(test)]
 mod unicode_pdf_tests {
-    use super::{ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink, pdf_text_save_options};
+    use super::{
+        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink,
+        normalize_patient_lab_result_payload, normalize_patient_vital_measurement_payload,
+        pdf_text_save_options,
+    };
     use printpdf::{PdfDocument, PdfWarnMsg};
+    use serde_json::json;
+
+    #[test]
+    fn vital_measurement_preserves_date_precision() {
+        let date_only = normalize_patient_vital_measurement_payload(&json!({
+            "measured_at": "2026-08-11",
+            "heart_rate": 68,
+        }))
+        .expect("date-only vital should normalize");
+        assert_eq!(date_only.measured_at_precision, "date");
+
+        let timestamp = normalize_patient_vital_measurement_payload(&json!({
+            "measured_at": "2026-08-11T09:00:00Z",
+            "heart_rate": 68,
+        }))
+        .expect("timestamped vital should normalize");
+        assert_eq!(timestamp.measured_at_precision, "datetime");
+
+        assert!(
+            normalize_patient_vital_measurement_payload(&json!({
+                "measured_at": "2026-08-11T09:00:00",
+                "heart_rate": 68,
+                "source_country": "DE",
+                "source_import_id": uuid::Uuid::nil(),
+                "source_candidate_id": "vital-1",
+            }))
+            .is_err(),
+            "imported naive datetimes must not be interpreted as UTC",
+        );
+    }
+
+    #[test]
+    fn lab_result_preserves_date_precision_and_rejects_imported_naive_time() {
+        let date_only = normalize_patient_lab_result_payload(&json!({
+            "measured_at": "2026-08-11",
+            "analyte_name": "Leukocytes",
+            "result_text": "6.1",
+        }))
+        .expect("date-only lab result should normalize");
+        assert_eq!(date_only.measured_at_precision, "date");
+
+        assert!(
+            normalize_patient_lab_result_payload(&json!({
+                "measured_at": "2026-08-11T09:00:00",
+                "analyte_name": "Leukocytes",
+                "result_text": "6.1",
+                "source_country": "DE",
+                "source_import_id": uuid::Uuid::nil(),
+                "source_candidate_id": "lab-1",
+            }))
+            .is_err(),
+            "imported naive lab datetimes must not be interpreted as UTC",
+        );
+    }
 
     #[test]
     fn arztbrief_pdf_preserves_cyrillic_text() {

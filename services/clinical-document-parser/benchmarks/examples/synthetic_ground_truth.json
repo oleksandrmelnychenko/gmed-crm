@@ -9,7 +9,7 @@
         "mime_type": "text/plain"
       },
       "reference": {
-        "raw_text": "Diagnosen\nLeichte Hypertonie\nAnamnese\nKontrolltermin ohne Beschwerden.",
+        "raw_text": "Diagnosen\nLeichte Hypertonie\nAnamnese\nKontrolltermin ohne Beschwerden.\nKörperliche Untersuchung\nMessdatum: 11.08.2026 RR: 120/80 mmHg, Puls: 72/min, SpO2: 96%",
         "candidates": [
           {
             "target": "diagnosis",
@@ -19,12 +19,21 @@
           {
             "target": "anamnesis",
             "value": "Kontrolltermin ohne Beschwerden."
+          },
+          {
+            "target": "vital",
+            "value": "Messdatum: 11.08.2026 RR: 120/80 mmHg, Puls: 72/min, SpO2: 96%"
+          },
+          {
+            "target": "examination",
+            "value": "Messdatum: 11.08.2026 RR: 120/80 mmHg, Puls: 72/min, SpO2: 96%"
           }
         ]
       },
       "section_rules": [
         { "section": "Diagnosen", "allowed_targets": ["diagnosis"] },
-        { "section": "Anamnese", "allowed_targets": ["anamnesis"] }
+        { "section": "Anamnese", "allowed_targets": ["anamnesis"] },
+        { "section": "Körperliche Untersuchung", "allowed_targets": ["vital", "examination"] }
       ],
       "forbidden_diagnoses": [
         { "value": "Keine Herzinsuffizienz", "reason": "negated finding" }

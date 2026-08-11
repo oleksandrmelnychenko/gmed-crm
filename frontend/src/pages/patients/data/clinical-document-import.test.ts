@@ -5,6 +5,7 @@ vi.mock("@/lib/api", () => ({ apiFetch: vi.fn() }));
 import { apiFetch } from "@/lib/api";
 import {
   completeClinicalDocumentImport,
+  clinicalDocumentImportAfterPrepare,
   clinicalImportNeedsSourceCountry,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
@@ -12,6 +13,7 @@ import {
   fetchClinicalDocumentImports,
   fetchPatientMedicationImportHistory,
   persistClinicalDocumentMedication,
+  persistClinicalDocumentVital,
   prepareClinicalDocumentImport,
   retryClinicalDocumentImport,
   type ClinicalDocumentImportDraft,
@@ -98,10 +100,44 @@ describe("clinical document import API", () => {
     expect(result.source_date).toBe("2026-08-10");
   });
 
-  it("requires source country for role-independent mixed diagnosis, lab, or medication imports", () => {
+  it("posts the exact frozen vital payload without reconstructing it", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({
+      id: "vital-record-1",
+      created_at: "2026-08-10T09:30:00Z",
+      ok: true,
+      idempotent: false,
+    });
+    const frozenPayload = {
+      measured_at: "2026-08-10",
+      bp_systolic: 128,
+      bp_diastolic: 82,
+      heart_rate: 71,
+      temperature_c: 36.7,
+      oxygen_saturation: 98,
+      respiratory_rate: 15,
+      weight_kg: 72.4,
+      height_cm: 175,
+      bmi: 23.6,
+      notes: "RR 128/82",
+      source_country: "DE",
+      source_import_id: "import-1",
+      source_candidate_id: "vital-1",
+      source_page: 3,
+    };
+
+    await persistClinicalDocumentVital("patient-1", frozenPayload);
+
+    expect(apiFetch).toHaveBeenCalledWith("/patients/patient-1/vitals", {
+      method: "POST",
+      body: JSON.stringify(frozenPayload),
+    });
+  });
+
+  it("requires source country for role-independent diagnosis, lab, medication, or vital imports", () => {
     expect(clinicalImportNeedsSourceCountry([{ target: "anamnesis" }, { target: "medication" }])).toBe(true);
     expect(clinicalImportNeedsSourceCountry([{ target: "recommendation" }, { target: "lab_result" }])).toBe(true);
     expect(clinicalImportNeedsSourceCountry([{ target: "examination" }, { target: "diagnosis" }])).toBe(true);
+    expect(clinicalImportNeedsSourceCountry([{ target: "vital" }])).toBe(true);
     expect(clinicalImportNeedsSourceCountry([{ target: "anamnesis" }, { target: "recommendation" }])).toBe(false);
   });
 
@@ -112,6 +148,7 @@ describe("clinical document import API", () => {
       status: "applying",
       idempotent: false,
       source_country: "DE",
+      patient_identity_confirmed: true,
     });
     const draft: ClinicalDocumentImportDraft = {
       document_type: "medication_plan",
@@ -130,6 +167,7 @@ describe("clinical document import API", () => {
       draft,
       candidatePayloads,
       "DE",
+      true,
     );
 
     expect(apiFetch).toHaveBeenCalledWith(
@@ -140,9 +178,62 @@ describe("clinical document import API", () => {
           reviewed_draft: draft,
           candidate_payloads: candidatePayloads,
           source_country: "DE",
+          patient_identity_confirmed: true,
         }),
       },
     );
+  });
+
+  it("marks every successful prepare snapshot as a modern frozen identity decision", () => {
+    const reviewedDraft: ClinicalDocumentImportDraft = {
+      document_type: "discharge_summary",
+      source_language: "de",
+      parser_version: "rules-0.9.3",
+      warnings: [],
+      candidates: [],
+    };
+    const current = {
+      id: "import-1",
+      patient_id: "patient-1",
+      document_id: "document-1",
+      document_name: "Arztbrief.pdf",
+      mime_type: "application/pdf",
+      status: "applying" as const,
+      document_type: "discharge_summary",
+      source_language: "de",
+      parser_version: "rules-0.9.3",
+      draft: reviewedDraft,
+      reviewed_draft: reviewedDraft,
+      applied_counts: {},
+      error_message: null,
+      prepared_source_country: "DE",
+      prepared_patient_identity_confirmed: false,
+      prepared_identity_gate_version: 0,
+      prepared_at: "2026-08-10T10:00:00Z",
+      completed_at: null,
+      applied_at: null,
+      created_at: "2026-08-10T09:00:00Z",
+      updated_at: "2026-08-10T10:00:00Z",
+    };
+
+    const next = clinicalDocumentImportAfterPrepare(
+      current,
+      reviewedDraft,
+      {
+        ok: true,
+        id: "import-1",
+        status: "applying",
+        idempotent: true,
+        source_country: "DE",
+        patient_identity_confirmed: true,
+      },
+      "2026-08-10T11:00:00Z",
+    );
+
+    expect(next.status).toBe("applying");
+    expect(next.prepared_identity_gate_version).toBe(1);
+    expect(next.prepared_patient_identity_confirmed).toBe(true);
+    expect(next.prepared_at).toBe("2026-08-10T10:00:00Z");
   });
 
   it("loads medication import history with offset pagination", async () => {

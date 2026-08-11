@@ -623,7 +623,8 @@ function useLeadsPageContent() {
     });
   }
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
-    () => [
+    () => {
+      const columns: ColumnDef<LeadListItem>[] = [
       {
         id: "lead",
         label: t.leads_title,
@@ -787,14 +788,45 @@ function useLeadsPageContent() {
             <span className="text-xs text-foreground">{t.common_not_set}</span>
           ),
       },
-    ],
+      ];
+      if (permissions.canOpen) return columns;
+      const conciergeColumns = new Set([
+        "lead",
+        "lead_type",
+        "status",
+        "days_in_status",
+        "received_at",
+        "email",
+        "phone",
+        "source",
+        "country",
+      ]);
+      return columns.filter((column) => conciergeColumns.has(column.id));
+    },
     [
       locale,
+      permissions.canOpen,
       t,
     ]
   );
 
   useEffect(() => {
+    if (!permissions.canOpen) {
+      if (searchParams.has("lead") || searchParams.has("view")) {
+        const params = new URLSearchParams(searchParams);
+        params.delete("lead");
+        params.delete("view");
+        setSearchParams(params, { replace: true });
+      }
+      setWizardLeadId(null);
+      dispatchDetailState({
+        selectedLeadId: "",
+        detailOpen: false,
+        detail: null,
+        detailError: "",
+      });
+      return;
+    }
     const leadParam = searchParams.get("lead") ?? "";
     const leadView = searchParams.get("view") === "wizard" && permissions.canConvert
       ? "wizard"
@@ -831,7 +863,7 @@ function useLeadsPageContent() {
         detailOpen: true,
       };
     });
-  }, [permissions.canConvert, searchParams]);
+  }, [permissions.canConvert, permissions.canOpen, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!permissions.canViewPage) return;
@@ -868,7 +900,7 @@ function useLeadsPageContent() {
   }, [failedLoadMessage, leadsPath, localizeLeadError, permissions.canViewPage, version]);
 
   useEffect(() => {
-    if (!detailOpen || !selectedLeadId) return;
+    if (!permissions.canOpen || !detailOpen || !selectedLeadId) return;
 
     let cancelled = false;
     dispatchDetailState({
@@ -899,7 +931,7 @@ function useLeadsPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [detailOpen, failedLoadMessage, localizeLeadError, selectedLeadId, version]);
+  }, [detailOpen, failedLoadMessage, localizeLeadError, permissions.canOpen, selectedLeadId, version]);
 
   useEffect(() => {
     if (!detail) {
@@ -960,6 +992,7 @@ function useLeadsPageContent() {
   }
 
   function openLeadFromRow(lead: LeadListItem) {
+    if (!permissions.canOpen) return;
     if (shouldOpenWizardFromRow(lead, permissions.canConvert)) {
       openLeadWizard(lead.id);
       return;
@@ -2635,8 +2668,8 @@ function useLeadsPageContent() {
                 onPageChange={handleLeadPageChange}
               />
             }
-            activeRowId={wizardLeadId || selectedLeadId || null}
-            onRowClick={openLeadFromRow}
+            activeRowId={permissions.canOpen ? wizardLeadId || selectedLeadId || null : null}
+            onRowClick={permissions.canOpen ? openLeadFromRow : undefined}
             rowAccent={(row) => leadRowAccent(row.qualification_status)}
             emptyState={
               <div className={cn("rounded-xl px-6 py-10 text-center", tokens.surface.dashed)}>

@@ -22,6 +22,9 @@ type FormState = {
   bpSystolic: string;
   bpDiastolic: string;
   heartRate: string;
+  temperatureC: string;
+  oxygenSaturation: string;
+  respiratoryRate: string;
   weightKg: string;
   heightCm: string;
   bmi: string;
@@ -39,6 +42,9 @@ function blankForm(): FormState {
     bpSystolic: "",
     bpDiastolic: "",
     heartRate: "",
+    temperatureC: "",
+    oxygenSaturation: "",
+    respiratoryRate: "",
     weightKg: "",
     heightCm: "",
     bmi: "",
@@ -57,6 +63,9 @@ function formFromMeasurement(measurement: PatientVitalMeasurement | null | undef
     bpSystolic: numberToForm(measurement.bp_systolic),
     bpDiastolic: numberToForm(measurement.bp_diastolic),
     heartRate: numberToForm(measurement.heart_rate),
+    temperatureC: numberToForm(measurement.temperature_c),
+    oxygenSaturation: numberToForm(measurement.oxygen_saturation),
+    respiratoryRate: numberToForm(measurement.respiratory_rate),
     weightKg: numberToForm(measurement.weight_kg),
     heightCm: numberToForm(measurement.height_cm),
     bmi: numberToForm(measurement.bmi),
@@ -105,8 +114,9 @@ export function PatientVitalsSheet({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const [form, setForm] = useState<FormState>(blankForm);
   const [busy, setBusy] = useState(false);
 
@@ -141,10 +151,17 @@ export function PatientVitalsSheet({
           bp_systolic: parseNumber(form.bpSystolic),
           bp_diastolic: parseNumber(form.bpDiastolic),
           heart_rate: parseInteger(form.heartRate),
+          temperature_c: parseNumber(form.temperatureC),
+          oxygen_saturation: parseNumber(form.oxygenSaturation),
+          respiratory_rate: parseInteger(form.respiratoryRate),
           weight_kg: parseNumber(form.weightKg),
           height_cm: parseNumber(form.heightCm),
           bmi: bmiValue,
           notes: form.notes.trim() || null,
+          source_country: initialMeasurement?.source_country ?? undefined,
+          source_import_id: initialMeasurement?.source_import_id ?? undefined,
+          source_candidate_id: initialMeasurement?.source_candidate_id ?? undefined,
+          source_page: initialMeasurement?.source_page ?? undefined,
         }),
       });
       toast.success(l("patients_vital_measurement_saved"));
@@ -258,6 +275,50 @@ export function PatientVitalsSheet({
               }
               className={inputClass}
               placeholder={l("patients_heart_rate_unit_placeholder")}
+            />
+          </FormField>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormField
+            label={tx("Температура, °C", "Temperatur, °C")}
+            htmlFor="patient-vitals-temperature"
+          >
+            <Input
+              id="patient-vitals-temperature"
+              inputMode="decimal"
+              value={form.temperatureC}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, temperatureC: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField
+            label={tx("Сатурация, %", "Sauerstoffsättigung, %")}
+            htmlFor="patient-vitals-oxygen-saturation"
+          >
+            <Input
+              id="patient-vitals-oxygen-saturation"
+              inputMode="decimal"
+              value={form.oxygenSaturation}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, oxygenSaturation: event.target.value }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField
+            label={tx("Частота дыхания, /мин", "Atemfrequenz, /min")}
+            htmlFor="patient-vitals-respiratory-rate"
+          >
+            <Input
+              id="patient-vitals-respiratory-rate"
+              inputMode="numeric"
+              value={form.respiratoryRate}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, respiratoryRate: event.target.value }))
+              }
+              className={inputClass}
             />
           </FormField>
         </div>

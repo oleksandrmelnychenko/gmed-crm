@@ -83,6 +83,12 @@ const InterpretersPage = lazy(() =>
   })),
 );
 
+const EmployeesPage = lazy(() =>
+  import("@/pages/employees").then((module) => ({
+    default: module.EmployeesPage,
+  })),
+);
+
 const ProvidersPage = lazy(() =>
   import("@/pages/providers").then((module) => ({
     default: module.ProvidersPage,
@@ -360,6 +366,7 @@ function AppRoutes() {
             <Route path="cases" element={<LegacyCasesRedirect />} />
             <Route path="cases/:caseId" element={<LegacyCasesRedirect />} />
             <Route path="appointments" element={<AppointmentsPage />} />
+            <Route path="employees" element={<EmployeesPage />} />
             <Route path="interpreters" element={<InterpretersPage />} />
             <Route path="interpreters/:interpreterId" element={<InterpretersPage />} />
             <Route path="admin/users" element={<AdminUsersPage />} />

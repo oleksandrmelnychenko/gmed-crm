@@ -395,6 +395,14 @@ async fn my_kpis(
 ) -> axum::response::Response {
     let user_id = auth.user_id.to_string();
     let (section, kpi_result) = match auth.role {
+        Role::Ceo => (
+            "ceo",
+            load_ceo_summary(&state).await.map(Some),
+        ),
+        Role::CeoAssistant => (
+            "ceo_assistant",
+            load_ceo_assistant_kpis(&state, auth.user_id).await.map(Some),
+        ),
         Role::PatientManager => (
             "patient_manager",
             load_patient_manager_kpis(&state).await.map(|rows| {
@@ -402,7 +410,11 @@ async fn my_kpis(
                     .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
             }),
         ),
-        Role::TeamleadInterpreter | Role::Interpreter => (
+        Role::TeamleadInterpreter => (
+            "teamlead_interpreter",
+            load_interpreter_team_kpis(&state).await.map(Some),
+        ),
+        Role::Interpreter => (
             "interpreter",
             load_interpreter_kpis(&state).await.map(|rows| {
                 rows.into_iter()
@@ -415,6 +427,18 @@ async fn my_kpis(
                 rows.into_iter()
                     .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
             }),
+        ),
+        Role::Billing => (
+            "billing",
+            load_billing_kpis(&state).await.map(Some),
+        ),
+        Role::Sales => (
+            "sales",
+            load_sales_kpis(&state).await.map(Some),
+        ),
+        Role::ItAdmin => (
+            "it_admin",
+            load_it_admin_kpis(&state).await.map(Some),
         ),
         _ => return err(StatusCode::FORBIDDEN, "Forbidden"),
     };
@@ -1487,6 +1511,79 @@ async fn load_ceo_service_mix(state: &AppState) -> Result<Vec<Value>, sqlx::Erro
         .collect())
 }
 
+async fn load_ceo_assistant_kpis(
+    state: &AppState,
+    user_id: uuid::Uuid,
+) -> Result<Value, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT
+                (SELECT COUNT(*)::bigint
+                 FROM tasks
+                 WHERE assigned_to = $1
+                   AND status NOT IN ('completed', 'cancelled')) AS open_tasks,
+                (SELECT COUNT(*)::bigint
+                 FROM tasks
+                 WHERE assigned_to = $1
+                   AND status NOT IN ('completed', 'cancelled')
+                   AND due_date < now()) AS overdue_tasks,
+                (SELECT COUNT(*)::bigint
+                 FROM appointments
+                 WHERE date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+                   AND status IN ('planned', 'confirmed')) AS appointments_next_7d,
+                (SELECT COUNT(*)::bigint
+                 FROM orders
+                 WHERE status = 'active') AS active_orders,
+                (SELECT COUNT(*)::bigint
+                 FROM leads
+                 WHERE qualification_status = 'qualified') AS qualified_leads,
+                (SELECT COUNT(*)::bigint
+                 FROM workflow_checklist_items
+                 WHERE owner_user_id = $1
+                   AND is_completed = false) AS open_checklist_items"#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(json!({
+        "open_tasks": row.try_get::<i64, _>("open_tasks").unwrap_or(0),
+        "overdue_tasks": row.try_get::<i64, _>("overdue_tasks").unwrap_or(0),
+        "appointments_next_7d": row.try_get::<i64, _>("appointments_next_7d").unwrap_or(0),
+        "active_orders": row.try_get::<i64, _>("active_orders").unwrap_or(0),
+        "qualified_leads": row.try_get::<i64, _>("qualified_leads").unwrap_or(0),
+        "open_checklist_items": row.try_get::<i64, _>("open_checklist_items").unwrap_or(0),
+    }))
+}
+
+async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT
+                (SELECT COUNT(*)::bigint FROM users WHERE is_active = true) AS active_users,
+                (SELECT COUNT(*)::bigint FROM users
+                 WHERE locked_until IS NOT NULL AND locked_until > now()) AS locked_accounts,
+                (SELECT COUNT(*)::bigint FROM pending_logins WHERE status = 'pending') AS pending_logins,
+                (SELECT COUNT(DISTINCT user_id)::bigint
+                 FROM token_families
+                 WHERE is_revoked = false) AS active_sessions,
+                (SELECT COUNT(*)::bigint FROM audit_log
+                 WHERE created_at >= now() - interval '24 hours') AS audit_events_24h,
+                (SELECT COUNT(*)::bigint FROM audit_log
+                 WHERE created_at >= now() - interval '24 hours'
+                   AND action IN ('login_failure', 'login_blocked')) AS auth_alerts_24h"#,
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(json!({
+        "active_users": row.try_get::<i64, _>("active_users").unwrap_or(0),
+        "locked_accounts": row.try_get::<i64, _>("locked_accounts").unwrap_or(0),
+        "pending_logins": row.try_get::<i64, _>("pending_logins").unwrap_or(0),
+        "active_sessions": row.try_get::<i64, _>("active_sessions").unwrap_or(0),
+        "audit_events_24h": row.try_get::<i64, _>("audit_events_24h").unwrap_or(0),
+        "auth_alerts_24h": row.try_get::<i64, _>("auth_alerts_24h").unwrap_or(0),
+    }))
+}
+
 async fn load_patient_manager_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT
@@ -1574,6 +1671,79 @@ async fn load_patient_manager_kpis(state: &AppState) -> Result<Vec<Value>, sqlx:
             })
         })
         .collect())
+}
+
+async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT
+                (SELECT COUNT(*)::bigint FROM users
+                 WHERE role IN ('teamlead_interpreter', 'interpreter')
+                   AND is_active = true) AS team_size,
+                (SELECT COALESCE(SUM(hours), 0)
+                 FROM interpreter_reports
+                 WHERE approval_status = 'approved'
+                   AND created_at >= now() - interval '30 days') AS approved_hours_30d,
+                (SELECT COALESCE(SUM(
+                    EXTRACT(EPOCH FROM (time_end - time_start)) / 3600.0
+                 )::numeric, 0)
+                 FROM appointments
+                 WHERE interpreter_id IS NOT NULL
+                   AND status = 'completed'
+                   AND date >= CURRENT_DATE - 30
+                   AND time_start IS NOT NULL
+                   AND time_end IS NOT NULL) AS booked_hours_30d,
+                (SELECT COALESCE(SUM(
+                    EXTRACT(EPOCH FROM (time_end - time_start)) / 3600.0
+                 )::numeric, 0)
+                 FROM appointments
+                 WHERE interpreter_id IS NOT NULL
+                   AND status IN ('planned', 'confirmed', 'in_progress')
+                   AND date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30
+                   AND time_start IS NOT NULL
+                   AND time_end IS NOT NULL) AS upcoming_hours_30d,
+                (SELECT COUNT(*)::bigint
+                 FROM appointments
+                 WHERE interpreter_id IS NOT NULL
+                   AND status = 'completed'
+                   AND date >= CURRENT_DATE - 30) AS completed_appointments_30d,
+                (SELECT ROUND(AVG(interpreter_score)::numeric, 2)
+                 FROM patient_feedback_forms
+                 WHERE interpreter_id IS NOT NULL
+                   AND interpreter_score IS NOT NULL) AS avg_feedback_score"#,
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    let booked = row
+        .try_get::<Decimal, _>("booked_hours_30d")
+        .unwrap_or(Decimal::ZERO);
+    let approved = row
+        .try_get::<Decimal, _>("approved_hours_30d")
+        .unwrap_or(Decimal::ZERO);
+    let utilization_rate_pct = if booked > Decimal::ZERO {
+        ((approved / booked) * Decimal::from(100))
+            .round_dp(1)
+            .to_f64()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    Ok(json!({
+        "team_size": row.try_get::<i64, _>("team_size").unwrap_or(0),
+        "approved_hours_30d": decimal_to_string(approved),
+        "booked_hours_30d": decimal_to_string(booked),
+        "upcoming_hours_30d": decimal_to_string(
+            row.try_get::<Decimal, _>("upcoming_hours_30d").unwrap_or(Decimal::ZERO)
+        ),
+        "completed_appointments_30d": row
+            .try_get::<i64, _>("completed_appointments_30d")
+            .unwrap_or(0),
+        "utilization_rate_pct": utilization_rate_pct,
+        "avg_feedback_score": optional_decimal_to_f64(
+            row.try_get::<Option<Decimal>, _>("avg_feedback_score").unwrap_or_default()
+        ),
+    }))
 }
 
 async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {

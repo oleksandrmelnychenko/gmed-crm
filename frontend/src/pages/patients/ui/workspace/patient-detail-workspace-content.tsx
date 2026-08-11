@@ -907,6 +907,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           {activeTab === "clinical" && id ? (
             <LazyPatientClinicalTab
               patientId={id}
+              patientIdentity={{
+                firstName: detail.first_name,
+                lastName: detail.last_name,
+                birthDate: detail.birth_date,
+                patientIdentifier: detail.patient_id,
+              }}
               canManage={canManageDocuments}
               documentImportOpen={clinicalDocumentImportOpen}
               onDocumentImportOpenChange={setClinicalDocumentImportOpen}
