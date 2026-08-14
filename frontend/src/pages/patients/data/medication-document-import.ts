@@ -18,6 +18,16 @@ const medicationStatuses = new Set<MedicationStatus>([
 ]);
 const medicationCategories = new Set<MedicationCategory>(["dauer", "besondere", "selbst"]);
 
+export type MedicationReviewDecision = "include" | "exclude";
+
+export type MedicationReviewDecisionSummary = {
+  total: number;
+  included: number;
+  excluded: number;
+  unresolved: number;
+  unresolvedCandidates: ClinicalDocumentImportCandidate[];
+};
+
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -103,6 +113,56 @@ export function medicationCandidateNeedsWirkstoff(
   candidate: Pick<ClinicalDocumentImportCandidate, "normalized" | "target">,
 ): boolean {
   return candidate.target === "medication" && !medicationCandidateWirkstoff(candidate);
+}
+
+export function medicationCandidateReviewDecision(
+  candidate: Pick<ClinicalDocumentImportCandidate, "normalized" | "target">,
+): MedicationReviewDecision | null {
+  if (candidate.target !== "medication") return null;
+  const decision = candidate.normalized.medication_review_decision;
+  return decision === "include" || decision === "exclude" ? decision : null;
+}
+
+export function setMedicationCandidateReviewDecision(
+  candidate: ClinicalDocumentImportCandidate,
+  decision: MedicationReviewDecision,
+): ClinicalDocumentImportCandidate {
+  return {
+    ...candidate,
+    selected: decision === "include",
+    normalized: {
+      ...candidate.normalized,
+      medication_review_decision: decision,
+    },
+  };
+}
+
+export function medicationReviewDecisionSummary(
+  candidates: ClinicalDocumentImportCandidate[],
+): MedicationReviewDecisionSummary {
+  const medications = candidates.filter((candidate) => candidate.target === "medication");
+  const summary: MedicationReviewDecisionSummary = {
+    total: medications.length,
+    included: 0,
+    excluded: 0,
+    unresolved: 0,
+    unresolvedCandidates: [],
+  };
+
+  for (const candidate of medications) {
+    const decision = medicationCandidateReviewDecision(candidate);
+    if (decision === "include" && candidate.selected) {
+      summary.included += 1;
+    } else if (decision === "exclude" && !candidate.selected) {
+      summary.excluded += 1;
+    } else {
+      // Missing and inconsistent decision/selection pairs both fail closed.
+      summary.unresolved += 1;
+      summary.unresolvedCandidates.push(candidate);
+    }
+  }
+
+  return summary;
 }
 
 export function medicationCandidateReviewBlockReason(

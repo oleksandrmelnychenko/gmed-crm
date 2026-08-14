@@ -16,6 +16,7 @@ import type { ProviderSummary } from "@/pages/providers/model/types";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import {
   CLINICAL_PROVIDER_QUERY,
+  PatientClinicalTab,
   PatientMedicationTable,
   PatientRecommendationsSection,
   attributionLabel,
@@ -357,13 +358,40 @@ describe("groupPatientLabResults", () => {
     ]);
 
     expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.name)).toEqual(["CRP", "Leukocytes"]);
+    expect(groups.every((group) => (
+      group.rows.every((row) => row.analyte_name.toLocaleLowerCase() === group.name.toLocaleLowerCase())
+    ))).toBe(true);
     const leukocytes = groups.find((group) => group.name === "Leukocytes");
     expect(leukocytes?.rows.map((row) => row.id)).toEqual(["new", "old"]);
     expect(leukocytes?.rows.map((row) => row.unit)).toEqual(["cells/µL", "G/L"]);
   });
 });
 
+describe("PatientClinicalTab laboratory history", () => {
+  it("does not retain the removed OCR chronology helper copy", () => {
+    expect(PatientClinicalTab.toString()).not.toContain(
+      "Каждый показатель хранит отдельную хронологию; новые OCR-документы добавляют новые даты.",
+    );
+  });
+});
+
 describe("DiagnosisTreeSection", () => {
+  it("renders a decorative brand marker immediately before the section title", () => {
+    const html = renderToStaticMarkup(
+      <DiagnosisTreeSection
+        allDoctors={[]}
+        canManage={false}
+        items={[diagnosis()]}
+        lang="ru"
+        onSave={async () => undefined}
+        providers={[]}
+      />,
+    );
+
+    expect(html).toMatch(/<span aria-hidden="true"[^>]*><\/span><h3[^>]*>Диагнозы<\/h3>/);
+  });
+
   it("keeps long diagnosis values out of the action column", () => {
     const longValue = "A".repeat(80);
     const html = renderToStaticMarkup(
@@ -439,7 +467,7 @@ describe("DiagnosisTreeSection", () => {
     expect(html).toContain("border-l border-border/70 pl-4");
     expect(html).toContain("absolute -left-4 top-5 h-px w-4");
     expect(html).toContain("border-violet-300 bg-violet-50 text-violet-700");
-    expect(html).toContain("border-violet-300 bg-violet-50/40");
+    expect(html).toContain("border-border/40 bg-white");
     expect(html).not.toContain("bg-muted/10");
     expect(html).not.toContain("bg-muted/20");
   });

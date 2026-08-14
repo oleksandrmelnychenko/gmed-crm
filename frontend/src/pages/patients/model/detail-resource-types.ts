@@ -45,6 +45,10 @@ export type PatientLabResult = {
   source_page?: number | null;
   recorded_by?: string | null;
   recorded_by_name?: string | null;
+  corrected_at?: string | null;
+  corrected_by?: string | null;
+  corrected_by_name?: string | null;
+  correction_note?: string | null;
   created_at: string;
 };
 

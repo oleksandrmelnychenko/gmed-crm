@@ -61,6 +61,7 @@ export type DataTableProps<T> = {
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
   rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
+  disableRowHover?: boolean;
   loading?: boolean;
   emptyState?: ReactNode;
   loadingState?: ReactNode;
@@ -130,6 +131,7 @@ function useDataTableContent<T>({
   rowActionsLabel,
   rowActionsWidth = 144,
   rowHeightOverrides,
+  disableRowHover = false,
   loading = false,
   emptyState,
   loadingState,
@@ -500,6 +502,9 @@ function useDataTableContent<T>({
               const isOdd = vRow.index % 2 === 1;
               const accent = rowAccent?.(row);
               const rowTone = rowToneStyle({ isActive, isOdd, isSelected });
+              const effectiveRowTone: DataTableRowStyle = disableRowHover
+                ? { ...rowTone, "--dt-row-hover-bg": rowTone["--dt-row-bg"] }
+                : rowTone;
 
               return (
                 <div
@@ -521,7 +526,7 @@ function useDataTableContent<T>({
                     top: vRow.start,
                     height: vRow.size,
                     gridTemplateColumns: gridTemplate,
-                    ...rowTone,
+                    ...effectiveRowTone,
                   }}
                 >
                   {accent ? (

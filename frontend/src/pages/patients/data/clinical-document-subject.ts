@@ -24,13 +24,20 @@ export type PatientIdentityReference = {
 };
 
 export type ClinicalDocumentSubjectCheck = {
-  status: "verified" | "unavailable" | "confirmation_required" | "hard_mismatch";
+  status:
+    | "verified"
+    | "verified_variant"
+    | "unavailable"
+    | "profile_incomplete"
+    | "confirmation_required"
+    | "hard_mismatch";
+  nameMatch: "exact" | "german_variant" | "mismatch" | "unavailable";
   reasons: Array<
     | "conflicting_subjects"
     | "birth_date_mismatch"
     | "identifier_mismatch"
-    | "external_identifier_mismatch"
     | "identifier_namespace_invalid"
+    | "patient_profile_incomplete"
     | "name_mismatch"
   >;
 };
@@ -82,25 +89,132 @@ export function clinicalDocumentIdentityConfirmationVisible(
 export function clinicalDocumentIdentityNeedsExplicitConfirmation(
   subjectStatus: ClinicalDocumentSubjectCheck["status"],
 ): boolean {
-  return subjectStatus === "confirmation_required" || subjectStatus === "unavailable";
+  return subjectStatus === "confirmation_required"
+    || subjectStatus === "unavailable"
+    || subjectStatus === "profile_incomplete";
+}
+
+const identityTitleTokens = new Set([
+  "dr",
+  "dent",
+  "dipl",
+  "doktor",
+  "frau",
+  "fraulein",
+  "fräulein",
+  "habil",
+  "herr",
+  "herrn",
+  "med",
+  "md",
+  "nat",
+  "patient",
+  "patientin",
+  "phd",
+  "prof",
+  "professor",
+  "rer",
+]);
+
+function identityNameTokens(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("de-DE")
+    .replace(/[\u2018\u2019\u02bc'`´.,_\-/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean);
 }
 
 function normalizedName(value: string | null | undefined) {
-  return (value ?? "")
-    .trim()
-    .toLocaleLowerCase("de-DE")
-    .replace(/\s+/g, " ");
+  const tokens = identityNameTokens(value);
+  while (tokens.length > 0 && identityTitleTokens.has(tokens[0])) tokens.shift();
+  return tokens.join(" ");
+}
+
+function germanCanonicalName(value: string | null | undefined) {
+  return normalizedName(value)
+    .replaceAll("ä", "ae")
+    .replaceAll("ö", "oe")
+    .replaceAll("ü", "ue")
+    .replaceAll("ß", "ss");
 }
 
 function normalizedIdentifier(value: string | null | undefined) {
   return (value ?? "").toUpperCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+function namePartMatch(
+  subjectValue: string | null | undefined,
+  patientValue: string | null | undefined,
+): ClinicalDocumentSubjectCheck["nameMatch"] {
+  const subject = normalizedName(subjectValue);
+  const patient = normalizedName(patientValue);
+  if (!subject || !patient) return "unavailable";
+  if (subject === patient) return "exact";
+  if (germanCanonicalName(subject) === germanCanonicalName(patient)) {
+    return "german_variant";
+  }
+  return "mismatch";
+}
+
+function combinedNameMatch(
+  subject: ClinicalDocumentSubjectEvidence,
+  patient: PatientIdentityReference,
+): ClinicalDocumentSubjectCheck["nameMatch"] {
+  const first = namePartMatch(subject.first_name, patient.firstName);
+  const last = namePartMatch(subject.last_name, patient.lastName);
+  const hasBothNames = Boolean(
+    normalizedName(subject.first_name)
+      && normalizedName(subject.last_name)
+      && normalizedName(patient.firstName)
+      && normalizedName(patient.lastName),
+  );
+
+  if (hasBothNames && (first === "mismatch" || last === "mismatch")) {
+    const swappedFirst = namePartMatch(subject.first_name, patient.lastName);
+    const swappedLast = namePartMatch(subject.last_name, patient.firstName);
+    if (
+      swappedFirst !== "mismatch"
+      && swappedFirst !== "unavailable"
+      && swappedLast !== "mismatch"
+      && swappedLast !== "unavailable"
+    ) {
+      return "german_variant";
+    }
+  }
+
+  if (first === "mismatch" || last === "mismatch") return "mismatch";
+  if (first === "german_variant" || last === "german_variant") return "german_variant";
+  if (first === "exact" && last === "exact") return "exact";
+  return "unavailable";
+}
+
+export function patientIdentityNameIsPlaceholder(patient: PatientIdentityReference) {
+  const first = normalizedName(patient.firstName);
+  const last = normalizedName(patient.lastName);
+  if (!first || !last) return true;
+  const compactFirst = first.replace(/\s+/g, "");
+  const compactLast = last.replace(/\s+/g, "");
+  return /^\d{4,}$/.test(compactFirst)
+    && /^\d{4,}$/.test(compactLast);
+}
+
 export function checkClinicalDocumentSubject(
   subject: ClinicalDocumentSubjectEvidence | null | undefined,
   patient: PatientIdentityReference,
 ): ClinicalDocumentSubjectCheck {
-  if (!subject) return { status: "unavailable", reasons: [] };
+  const unavailableName = { nameMatch: "unavailable" as const };
+  if (!subject) {
+    return patientIdentityNameIsPlaceholder(patient)
+      ? {
+          status: "profile_incomplete",
+          reasons: ["patient_profile_incomplete"],
+          ...unavailableName,
+        }
+      : { status: "unavailable", reasons: [], ...unavailableName };
+  }
 
   const reasons: ClinicalDocumentSubjectCheck["reasons"] = [];
   if (subject.conflict || subject.status === "conflict") reasons.push("conflicting_subjects");
@@ -119,33 +233,25 @@ export function checkClinicalDocumentSubject(
     reasons.push("identifier_namespace_invalid");
   } else if (hasIdentifierMismatch && identifierNamespace === "gmed_patient_id") {
     reasons.push("identifier_mismatch");
-  } else if (hasIdentifierMismatch) {
-    reasons.push("external_identifier_mismatch");
   }
 
-  const subjectFirst = normalizedName(subject.first_name);
-  const subjectLast = normalizedName(subject.last_name);
-  const patientFirst = normalizedName(patient.firstName);
-  const patientLast = normalizedName(patient.lastName);
-  const hasComparableName = Boolean(subjectFirst && subjectLast && patientFirst && patientLast);
-  const hasFirstNameMismatch = Boolean(
-    subjectFirst && patientFirst && subjectFirst !== patientFirst,
-  );
-  const hasLastNameMismatch = Boolean(
-    subjectLast && patientLast && subjectLast !== patientLast,
-  );
-  if (hasFirstNameMismatch || hasLastNameMismatch) {
-    reasons.push("name_mismatch");
-  }
+  const nameMatch = combinedNameMatch(subject, patient);
+  if (nameMatch === "mismatch") reasons.push("name_mismatch");
 
-  if (
-    reasons.some((reason) => !["name_mismatch", "external_identifier_mismatch"].includes(reason))
-  ) {
-    return { status: "hard_mismatch", reasons };
+  if (reasons.some((reason) => reason !== "name_mismatch")) {
+    return { status: "hard_mismatch", reasons, nameMatch };
   }
-  if (reasons.includes("name_mismatch") || reasons.includes("external_identifier_mismatch")) {
-    return { status: "confirmation_required", reasons };
+  if (patientIdentityNameIsPlaceholder(patient)) {
+    return {
+      status: "profile_incomplete",
+      reasons: ["patient_profile_incomplete"],
+      nameMatch,
+    };
   }
+  if (reasons.includes("name_mismatch")) {
+    return { status: "confirmation_required", reasons, nameMatch };
+  }
+  const hasComparableName = nameMatch === "exact" || nameMatch === "german_variant";
   if (
     hasComparableName ||
     (Boolean(subject.birth_date) && Boolean(patient.birthDate)) ||
@@ -153,7 +259,11 @@ export function checkClinicalDocumentSubject(
       && Boolean(subjectIdentifier)
       && Boolean(patientIdentifier))
   ) {
-    return { status: "verified", reasons: [] };
+    return {
+      status: nameMatch === "german_variant" ? "verified_variant" : "verified",
+      reasons: [],
+      nameMatch,
+    };
   }
-  return { status: "unavailable", reasons: [] };
+  return { status: "unavailable", reasons: [], nameMatch };
 }

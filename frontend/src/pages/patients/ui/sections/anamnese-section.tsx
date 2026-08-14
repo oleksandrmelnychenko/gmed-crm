@@ -269,9 +269,12 @@ export function AnamneseSection({
   const anamnesisTimeMissing = Boolean(editing && !editing.anamnese_at);
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card">
+    <section className="rounded-xl border border-border/70 bg-slate-50/60">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{tx("Анамнез", "Anamnese")}</h3>
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="text-sm font-semibold text-foreground">{tx("Анамнез", "Anamnese")}</h3>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -340,7 +343,7 @@ export function AnamneseSection({
       <div className="space-y-2.5 p-3">
         {active ? (
           <div className="space-y-3">
-            <div className="grid gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2.5 md:grid-cols-2">
+            <div className="grid gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2.5 md:grid-cols-2">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
@@ -363,9 +366,12 @@ export function AnamneseSection({
               </div>
             </div>
             {activeNonEmpty.length > 0 ? (
-              <dl className="grid gap-2.5 md:grid-cols-2">
+              <dl className="grid gap-2 md:grid-cols-2">
                 {activeNonEmpty.map((field) => (
-                  <div key={field.key} className="min-w-0">
+                  <div
+                    key={field.key}
+                    className="min-w-0 rounded-lg border border-border/40 bg-white px-3 py-2.5"
+                  >
                     <dt className="mb-1 text-[11px] font-medium text-muted-foreground">{field.label}</dt>
                     <dd className="whitespace-pre-line break-words text-sm text-foreground">
                       {active[field.key]}
@@ -396,7 +402,10 @@ export function AnamneseSection({
                 {(active.specializations ?? [])
                   .filter((item) => item.narrative_text || item.assessment_text)
                   .map((item) => (
-                    <div key={`${item.id}-details`} className="rounded-lg border border-border/60 p-3">
+                    <div
+                      key={`${item.id}-details`}
+                      className="rounded-lg border border-border/40 bg-white p-3"
+                    >
                       <p className="text-xs font-semibold text-foreground">
                         {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
                       </p>
@@ -445,7 +454,7 @@ export function AnamneseSection({
         )}
 
         {historyOpen ? (
-          <div className="space-y-1.5 rounded-lg border border-border/50 bg-background p-3">
+          <div className="space-y-1.5 rounded-lg border border-border/40 bg-white p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {tx("История версий", "Versionsverlauf")}
             </p>
@@ -462,7 +471,7 @@ export function AnamneseSection({
                   return (
                     <li
                       key={version.id ?? `${version.updated_at}`}
-                      className="flex items-start justify-between gap-2.5 rounded-lg border border-border/50 bg-card px-3 py-2"
+                      className="flex items-start justify-between gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2"
                     >
                       <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
                         <div className="min-w-0">

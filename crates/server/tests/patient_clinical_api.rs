@@ -670,6 +670,82 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
 }
 
 #[tokio::test]
+async fn clinical_import_prepare_requires_explicit_exclusion_for_unselected_medications() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-import-medication-review-decision");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "decision-med", &tag).await;
+    let prepare_path =
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/prepare");
+    let manual_recommendation_id = format!("manual:{}", Uuid::new_v4());
+    let reviewed_draft = |decision: Option<&str>| {
+        let mut medication = json!({
+            "id": "decision-med",
+            "target": "medication",
+            "value": "Reviewed medication candidate",
+            "selected": false,
+            "normalized": { "wirkstoff": "Metformin" },
+        });
+        if let Some(decision) = decision {
+            medication["normalized"]["medication_review_decision"] = json!(decision);
+        }
+        json!({
+            "candidates": [
+                medication,
+                {
+                    "id": manual_recommendation_id,
+                    "target": "recommendation",
+                    "value": "Reviewed recommendation",
+                    "selected": true,
+                    "normalized": { "description": "Reviewed recommendation" },
+                }
+            ],
+            "warnings": [],
+        })
+    };
+
+    let (status, unresolved) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft(None),
+            "patient_identity_confirmed": true,
+            "candidate_payloads": {},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{unresolved:?}");
+    let import_status: String =
+        sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(import_status, "review_required");
+
+    let (status, prepared) = json_request(
+        &app,
+        "POST",
+        &prepare_path,
+        &bearer,
+        Some(json!({
+            "reviewed_draft": reviewed_draft(Some("exclude")),
+            "patient_identity_confirmed": true,
+            "candidate_payloads": {},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prepared:?}");
+    assert_eq!(prepared["status"], "applying");
+}
+
+#[tokio::test]
 async fn reviewed_medication_import_is_idempotent_and_keeps_regimen_history() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -1654,6 +1730,447 @@ async fn ceo_can_persist_and_read_lab_results_during_clinical_import_review() {
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["items"][0]["analyte_name"], "Leukocytes");
     assert_eq!(listed["items"][0]["measured_at_precision"], "datetime");
+}
+
+#[tokio::test]
+async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("correct-imported-lab");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "lab-correction-1", &tag).await;
+    let document_id: Uuid =
+        sqlx::query_scalar("SELECT document_id FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let lab_result_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_lab_results (
+                patient_id, measured_at, measured_at_precision, panel, analyte_name,
+                result_text, numeric_result, comparator, unit, reference_text,
+                reference_low, reference_high, abnormal_flag, source_country,
+                source_document_id, source_import_id, source_candidate_id, source_page,
+                recorded_by
+           ) VALUES (
+                $1, '2026-08-12T00:00:00Z', 'date', 'Blood count', 'Hemoglobin',
+                '13.2', 13.2, '=', 'g/dL', '12.0 - 16.0',
+                12.0, 16.0, 'normal', 'DE', $2, $3, 'lab-correction-1', 2, $4
+           )
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .bind(import_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let correction_path =
+        format!("/api/v1/patients/{patient_id}/lab-results/{lab_result_id}");
+    let valid_correction = json!({
+        "measured_at": "2026-08-12",
+        "panel": "Blood count",
+        "analyte_name": "Leukozyten",
+        "result_text": "14.000",
+        "numeric_result": 14000.0,
+        "comparator": "=",
+        "unit": "/μL",
+        "reference_text": "4.000 - 10.000 /μL",
+        "reference_low": 4000.0,
+        "reference_high": 10000.0,
+        "abnormal_flag": "high",
+        "correction_note": "OCR digit checked against source document",
+    });
+
+    for import_status in ["review_required", "applying"] {
+        sqlx::query("UPDATE clinical_document_imports SET status = $2 WHERE id = $1")
+            .bind(import_id)
+            .bind(import_status)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, blocked) = json_request(
+            &app,
+            "PATCH",
+            &correction_path,
+            &bearer,
+            Some(valid_correction.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{import_status}: {blocked:?}");
+        let (status, blocked_delete) = json_request(
+            &app,
+            "DELETE",
+            &correction_path,
+            &bearer,
+            Some(json!({ "deletion_note": "Must wait for applied import" })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "{import_status}: {blocked_delete:?}"
+        );
+        let unchanged = sqlx::query_as::<_, (String, Option<chrono::DateTime<chrono::Utc>>)>(
+            "SELECT result_text, corrected_at FROM patient_lab_results WHERE id = $1",
+        )
+        .bind(lab_result_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unchanged.0, "13.2");
+        assert!(unchanged.1.is_none());
+    }
+    sqlx::query("UPDATE clinical_document_imports SET status = 'applied' WHERE id = $1")
+        .bind(import_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut stale_numeric = valid_correction.clone();
+    stale_numeric["result_text"] = json!("13,4 g/dL");
+    stale_numeric["numeric_result"] = json!(134.0);
+    stale_numeric["unit"] = json!("g/dL");
+    let (status, invalid) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(stale_numeric),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
+
+    let mut stale_flag = valid_correction.clone();
+    stale_flag["result_text"] = json!("18.0");
+    stale_flag["numeric_result"] = json!(18.0);
+    stale_flag["reference_low"] = json!(12.0);
+    stale_flag["reference_high"] = json!(16.0);
+    stale_flag["abnormal_flag"] = json!("normal");
+    let (status, invalid) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(stale_flag),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
+    let unchanged: (String, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT result_text, corrected_at FROM patient_lab_results WHERE id = $1",
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unchanged.0, "13.2");
+    assert!(unchanged.1.is_none());
+    let correction_audit_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'correct_patient_lab_result' AND entity_id = $1",
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(correction_audit_count, 0);
+    sqlx::query("UPDATE clinical_document_imports SET deleted_at = now() WHERE id = $1")
+        .bind(import_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, corrected) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(valid_correction.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected:?}");
+    assert_eq!(corrected["item"]["result_text"], "14.000");
+    assert_eq!(corrected["item"]["numeric_result"], 14000.0);
+    assert_eq!(corrected["item"]["measured_at_precision"], "date");
+    assert_eq!(corrected["item"]["source_country"], "DE");
+    assert_eq!(
+        corrected["item"]["source_document_id"],
+        document_id.to_string()
+    );
+    assert_eq!(
+        corrected["item"]["source_import_id"],
+        import_id.to_string()
+    );
+    assert_eq!(corrected["item"]["source_candidate_id"], "lab-correction-1");
+    assert_eq!(corrected["item"]["source_page"], 2);
+    assert_eq!(corrected["item"]["corrected_by"], admin_id.to_string());
+    assert!(corrected["item"]["corrected_by_name"].is_string());
+    assert!(corrected["item"]["corrected_at"].is_string());
+    assert_eq!(
+        corrected["item"]["correction_note"],
+        "OCR digit checked against source document"
+    );
+
+    let persisted = sqlx::query_as::<
+        _,
+        (
+            String,
+            Option<f64>,
+            Option<String>,
+            Option<Uuid>,
+            Option<Uuid>,
+            Option<String>,
+            Option<i32>,
+            Option<Uuid>,
+            Option<String>,
+        ),
+    >(
+        r#"SELECT result_text, numeric_result, source_country, source_document_id,
+                  source_import_id, source_candidate_id, source_page, corrected_by,
+                  correction_note
+           FROM patient_lab_results
+           WHERE id = $1"#,
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(persisted.0, "14.000");
+    assert_eq!(persisted.1, Some(14000.0));
+    assert_eq!(persisted.2.as_deref(), Some("DE"));
+    assert_eq!(persisted.3, Some(document_id));
+    assert_eq!(persisted.4, Some(import_id));
+    assert_eq!(persisted.5.as_deref(), Some("lab-correction-1"));
+    assert_eq!(persisted.6, Some(2));
+    assert_eq!(persisted.7, Some(admin_id));
+    assert_eq!(
+        persisted.8.as_deref(),
+        Some("OCR digit checked against source document")
+    );
+
+    support::wait_until("lab result correction audit entry", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'correct_patient_lab_result'
+                     AND entity_type = 'patient_lab_result' AND entity_id = $1
+               )"#,
+        )
+        .bind(lab_result_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(false)
+    })
+    .await;
+    let audit = sqlx::query_as::<_, (Value, Value, Value)>(
+        r#"SELECT old_value, new_value, context
+           FROM audit_log
+           WHERE action = 'correct_patient_lab_result'
+             AND entity_type = 'patient_lab_result' AND entity_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.0["result_text"], "13.2");
+    assert_eq!(audit.1["result_text"], "14.000");
+    assert_eq!(
+        audit.2["reason"],
+        "OCR digit checked against source document"
+    );
+    assert_eq!(audit.2["provenance"]["source_document_id"], document_id.to_string());
+    assert_eq!(audit.2["provenance"]["source_import_id"], import_id.to_string());
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/lab-results"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed:?}");
+    assert_eq!(listed["items"][0]["corrected_by"], admin_id.to_string());
+    assert!(listed["items"][0]["corrected_by_name"].is_string());
+    assert!(listed["items"][0]["corrected_at"].is_string());
+    assert_eq!(
+        listed["items"][0]["correction_note"],
+        "OCR digit checked against source document"
+    );
+
+    let mut missing_note = valid_correction.clone();
+    missing_note.as_object_mut().unwrap().remove("correction_note");
+    missing_note["result_text"] = json!("11.0");
+    let (status, invalid) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(missing_note),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
+
+    let mut invalid_range = valid_correction.clone();
+    invalid_range["reference_low"] = json!(20.0);
+    invalid_range["reference_high"] = json!(10.0);
+    let (status, invalid) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(invalid_range),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
+
+    let mut provenance_mutation = valid_correction;
+    provenance_mutation["source_page"] = json!(7);
+    let (status, invalid) = json_request(
+        &app,
+        "PATCH",
+        &correction_path,
+        &bearer,
+        Some(provenance_mutation),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
+
+    let (status, wrong_patient) = json_request(
+        &app,
+        "PATCH",
+        &format!("/api/v1/patients/{other_patient_id}/lab-results/{lab_result_id}"),
+        &bearer,
+        Some(json!({
+            "measured_at": "2026-08-12",
+            "panel": "Blood count",
+            "analyte_name": "Hemoglobin",
+            "result_text": "11.0",
+            "numeric_result": 11.0,
+            "comparator": "=",
+            "unit": "g/dL",
+            "reference_text": "12.0 - 16.0",
+            "reference_low": 12.0,
+            "reference_high": 16.0,
+            "abnormal_flag": "low",
+            "correction_note": "Must not update a different patient",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{wrong_patient:?}");
+
+    let result_after_rejections: String =
+        sqlx::query_scalar("SELECT result_text FROM patient_lab_results WHERE id = $1")
+            .bind(lab_result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(result_after_rejections, "14.000");
+
+    let (status, invalid_delete) = json_request(
+        &app,
+        "DELETE",
+        &correction_path,
+        &bearer,
+        Some(json!({ "deletion_note": "" })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_delete:?}"
+    );
+
+    let (status, deleted) = json_request(
+        &app,
+        "DELETE",
+        &correction_path,
+        &bearer,
+        Some(json!({
+            "deletion_note": "Duplicate result confirmed against the source document"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted:?}");
+    assert_eq!(deleted["id"], lab_result_id.to_string());
+
+    let deletion = sqlx::query_as::<
+        _,
+        (
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<Uuid>,
+            Option<String>,
+            Option<Uuid>,
+            Option<Uuid>,
+            Option<String>,
+        ),
+    >(
+        r#"SELECT deleted_at, deleted_by, deletion_note, source_document_id,
+                  source_import_id, source_candidate_id
+           FROM patient_lab_results WHERE id = $1"#,
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(deletion.0.is_some());
+    assert_eq!(deletion.1, Some(admin_id));
+    assert_eq!(
+        deletion.2.as_deref(),
+        Some("Duplicate result confirmed against the source document")
+    );
+    assert_eq!(deletion.3, Some(document_id));
+    assert_eq!(deletion.4, Some(import_id));
+    assert_eq!(deletion.5.as_deref(), Some("lab-correction-1"));
+
+    let (status, listed_after_delete) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/lab-results"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed_after_delete:?}");
+    assert_eq!(listed_after_delete["count"], 0);
+
+    support::wait_until("lab result deletion audit entry", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'delete_patient_lab_result'
+                     AND entity_type = 'patient_lab_result' AND entity_id = $1
+               )"#,
+        )
+        .bind(lab_result_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(false)
+    })
+    .await;
+    let deletion_audit = sqlx::query_as::<_, (Value, Value, Value)>(
+        r#"SELECT old_value, new_value, context
+           FROM audit_log
+           WHERE action = 'delete_patient_lab_result'
+             AND entity_type = 'patient_lab_result' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(deletion_audit.0["result_text"], "14.000");
+    assert_eq!(
+        deletion_audit.1["deletion_note"],
+        "Duplicate result confirmed against the source document"
+    );
+    assert_eq!(deletion_audit.2["provenance"]["source_import_id"], import_id.to_string());
 }
 
 #[tokio::test]

@@ -109,17 +109,8 @@ function kindPillClass(kind: DiagnosisKind): string {
   }
 }
 
-function diagnosisRowClass(kind: DiagnosisKind): string {
-  switch (kind) {
-    case "main":
-      return "border-sky-300 bg-sky-50/40";
-    case "secondary":
-      return "border-violet-300 bg-violet-50/40";
-    case "prozedur":
-      return "border-emerald-300 bg-emerald-50/40";
-    default:
-      return "border-border/70";
-  }
+function diagnosisRowClass(): string {
+  return "border-border/40 bg-white";
 }
 
 function childActionLabel(kind: DiagnosisKind, tx: Bilingual): string {
@@ -540,7 +531,7 @@ function DiagnosisRow({
       <div
         className={cn(
           "grid grid-cols-1 items-start gap-3 rounded-lg border px-3 py-2 lg:grid-cols-[minmax(0,1fr)_minmax(8rem,max-content)_auto]",
-          diagnosisRowClass(node.kind),
+          diagnosisRowClass(),
         )}
       >
         <div className="min-w-0 space-y-1">
@@ -1135,9 +1126,12 @@ export function DiagnosisTreeSection({
   const editingParentLabel = editingParent ? displayLabel(editingParent) : null;
 
   return (
-    <section className="rounded-xl border border-border/70">
+    <section className="rounded-xl border border-border/70 bg-slate-50/60">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3>
+        <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="text-sm font-semibold text-foreground">{tx("Диагнозы", "Diagnosen")}</h3>
+        </div>
         {canManage ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button

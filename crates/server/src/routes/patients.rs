@@ -3,7 +3,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use chrono::Datelike;
 use serde::Deserialize;
@@ -23,6 +23,7 @@ use printpdf::{
     Rgb, WindingOrder,
 };
 use sqlx::types::Json as SqlxJson;
+use sqlx::postgres::PgRow;
 use sqlx::{Postgres, Row, Transaction};
 
 pub fn router() -> Router<AppState> {
@@ -44,6 +45,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/patients/{patient_id}/lab-results",
             get(list_patient_lab_results).post(create_patient_lab_result),
+        )
+        .route(
+            "/patients/{patient_id}/lab-results/{lab_result_id}",
+            patch(update_patient_lab_result).delete(delete_patient_lab_result),
         )
         .route("/patients/{patient_id}/clinical", get(get_patient_clinical))
         .route("/doctors", get(list_all_doctors))
@@ -464,6 +469,12 @@ struct CreatePatientLabResultRequest {
     source_page: Option<i32>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeletePatientLabResultRequest {
+    deletion_note: String,
+}
+
 pub(crate) struct NormalizedPatientLabResult {
     measured_at: chrono::DateTime<chrono::Utc>,
     measured_at_precision: &'static str,
@@ -604,6 +615,466 @@ pub(crate) fn normalize_patient_lab_result_payload(
         source_candidate_id,
         source_page: body.source_page,
     })
+}
+
+#[allow(clippy::result_large_err)]
+fn normalize_patient_lab_result_correction_payload(
+    raw_body: &Value,
+) -> Result<(NormalizedPatientLabResult, String), axum::response::Response> {
+    const EDITABLE_FIELDS: &[&str] = &[
+        "measured_at",
+        "panel",
+        "analyte_name",
+        "result_text",
+        "numeric_result",
+        "comparator",
+        "unit",
+        "reference_text",
+        "reference_low",
+        "reference_high",
+        "abnormal_flag",
+        "correction_note",
+    ];
+
+    let Some(object) = raw_body.as_object() else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid lab result correction payload",
+        ));
+    };
+    if object
+        .keys()
+        .any(|key| !EDITABLE_FIELDS.contains(&key.as_str()))
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid lab result correction payload",
+        ));
+    }
+    let correction_note = object
+        .get("correction_note")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.chars().count() <= 500)
+        .ok_or_else(|| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "correction_note is required and must not exceed 500 characters",
+            )
+        })?
+        .to_string();
+
+    let mut measurement = raw_body.clone();
+    measurement
+        .as_object_mut()
+        .expect("validated lab correction object")
+        .remove("correction_note");
+    let normalized = normalize_patient_lab_result_payload(&measurement)?;
+    validate_patient_lab_result_correction_consistency(&normalized)?;
+    Ok((normalized, correction_note))
+}
+
+enum ParsedLabResultText {
+    Textual,
+    ComplexTextual,
+    InvalidNumeric,
+    Numeric {
+        candidates: Vec<f64>,
+        comparator: Option<&'static str>,
+        unit_suffix: Option<String>,
+        annotated_flag: Option<&'static str>,
+    },
+}
+
+fn split_lab_flag_annotation(value: &str) -> (&str, Option<&'static str>) {
+    for (annotation, flag) in [
+        ("(H)", "high"),
+        ("(h)", "high"),
+        ("[H]", "high"),
+        ("[h]", "high"),
+        ("(L)", "low"),
+        ("(l)", "low"),
+        ("[L]", "low"),
+        ("[l]", "low"),
+        ("(A)", "abnormal"),
+        ("(a)", "abnormal"),
+        ("[A]", "abnormal"),
+        ("[a]", "abnormal"),
+        ("(N)", "normal"),
+        ("(n)", "normal"),
+        ("[N]", "normal"),
+        ("[n]", "normal"),
+    ] {
+        if let Some(unit) = value.strip_suffix(annotation) {
+            return (unit.trim_end(), Some(flag));
+        }
+    }
+    (value, None)
+}
+
+fn plausible_lab_unit_suffix(value: &str) -> bool {
+    let Some(first) = value.chars().next() else {
+        return false;
+    };
+    (first.is_alphabetic()
+        || first.is_ascii_digit()
+        || matches!(first, '/' | '%' | '‰' | 'µ' | 'μ' | '°'))
+        && !value
+            .chars()
+            .any(|character| matches!(character, ':' | ';' | '+' | '(' | ')' | '[' | ']'))
+        && (value.chars().any(char::is_alphanumeric) || matches!(value, "%" | "‰"))
+}
+
+fn grouped_lab_integer(value: &str, separator: char) -> bool {
+    let groups = value.split(separator).collect::<Vec<_>>();
+    groups.len() > 1
+        && (1..=3).contains(&groups[0].len())
+        && groups[0].bytes().all(|byte| byte.is_ascii_digit())
+        && groups[1..].iter().all(|group| {
+            group.len() == 3 && group.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
+fn parse_localized_lab_number_candidates(token: &str) -> Vec<f64> {
+    let (sign, unsigned) = if let Some(rest) = token.strip_prefix('-') {
+        ("-", rest)
+    } else {
+        ("", token.strip_prefix('+').unwrap_or(token))
+    };
+    let (mantissa, exponent) = unsigned
+        .find(|character| matches!(character, 'e' | 'E'))
+        .map_or((unsigned, ""), |index| (&unsigned[..index], &unsigned[index..]));
+    let dots = mantissa.matches('.').count();
+    let commas = mantissa.matches(',').count();
+    let mut normalized = Vec::new();
+
+    if dots == 0 && commas == 0 {
+        if !mantissa.is_empty() && mantissa.bytes().all(|byte| byte.is_ascii_digit()) {
+            normalized.push(mantissa.to_string());
+        }
+    } else if dots == 0 || commas == 0 {
+        let separator = if dots > 0 { '.' } else { ',' };
+        let separator_count = dots + commas;
+        if separator_count == 1 {
+            let (integer, fraction) = mantissa
+                .split_once(separator)
+                .expect("single localized numeric separator");
+            if (integer.is_empty() || integer.bytes().all(|byte| byte.is_ascii_digit()))
+                && !fraction.is_empty()
+                && fraction.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                normalized.push(format!(
+                    "{}.{}",
+                    if integer.is_empty() { "0" } else { integer },
+                    fraction
+                ));
+            }
+        }
+        if grouped_lab_integer(mantissa, separator) {
+            normalized.push(mantissa.replace(separator, ""));
+        }
+    } else {
+        let last_dot = mantissa.rfind('.').expect("dot count checked");
+        let last_comma = mantissa.rfind(',').expect("comma count checked");
+        let (decimal_separator, grouping_separator, decimal_index) = if last_comma > last_dot {
+            (',', '.', last_comma)
+        } else {
+            ('.', ',', last_dot)
+        };
+        let integer = &mantissa[..decimal_index];
+        let fraction = &mantissa[decimal_index + decimal_separator.len_utf8()..];
+        let valid_integer = if integer.contains(grouping_separator) {
+            grouped_lab_integer(integer, grouping_separator)
+        } else {
+            !integer.is_empty() && integer.bytes().all(|byte| byte.is_ascii_digit())
+        };
+        if valid_integer
+            && !fraction.is_empty()
+            && fraction.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            normalized.push(format!(
+                "{}.{}",
+                integer.replace(grouping_separator, ""),
+                fraction
+            ));
+        }
+    }
+
+    let mut candidates = Vec::new();
+    for mantissa in normalized {
+        if let Ok(value) = format!("{sign}{mantissa}{exponent}").parse::<f64>()
+            && value.is_finite()
+            && !candidates
+                .iter()
+                .any(|candidate| lab_numbers_match(*candidate, value))
+        {
+            candidates.push(value);
+        }
+    }
+    candidates
+}
+
+fn parse_lab_result_text_projection(result_text: &str) -> ParsedLabResultText {
+    let trimmed = result_text.trim();
+    let (comparator, numeric_text) = if let Some(rest) = trimmed.strip_prefix("<=") {
+        (Some("<="), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix(">=") {
+        (Some(">="), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix('≤') {
+        (Some("<="), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix('≥') {
+        (Some(">="), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix('<') {
+        (Some("<"), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix('>') {
+        (Some(">"), rest.trim_start())
+    } else if let Some(rest) = trimmed.strip_prefix('=') {
+        (Some("="), rest.trim_start())
+    } else {
+        (None, trimmed)
+    };
+    let Some(first_character) = numeric_text.chars().next() else {
+        return if comparator.is_some() {
+            ParsedLabResultText::InvalidNumeric
+        } else {
+            ParsedLabResultText::Textual
+        };
+    };
+    if !first_character.is_ascii_digit()
+        && !matches!(first_character, '+' | '-' | '.' | ',')
+    {
+        return if comparator.is_some() {
+            ParsedLabResultText::InvalidNumeric
+        } else {
+            ParsedLabResultText::Textual
+        };
+    }
+
+    let mut index = 0usize;
+    let mut token = String::new();
+    if matches!(first_character, '+' | '-') {
+        token.push(first_character);
+        index += first_character.len_utf8();
+    }
+    let mut digit_count = 0usize;
+    while index < numeric_text.len() {
+        let character = numeric_text[index..]
+            .chars()
+            .next()
+            .expect("index remains on a character boundary");
+        if character.is_ascii_digit() || matches!(character, '.' | ',') {
+            digit_count += usize::from(character.is_ascii_digit());
+            token.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        if character.is_whitespace() {
+            let mut after_spaces = index;
+            while after_spaces < numeric_text.len() {
+                let next = numeric_text[after_spaces..]
+                    .chars()
+                    .next()
+                    .expect("index remains on a character boundary");
+                if !next.is_whitespace() {
+                    break;
+                }
+                after_spaces += next.len_utf8();
+            }
+            if after_spaces < numeric_text.len()
+                && numeric_text[after_spaces..]
+                    .chars()
+                    .next()
+                    .is_some_and(|next| next.is_ascii_digit())
+            {
+                index = after_spaces;
+                continue;
+            }
+        }
+        break;
+    }
+    if digit_count == 0 {
+        return ParsedLabResultText::InvalidNumeric;
+    }
+    if index < numeric_text.len()
+        && numeric_text[index..]
+            .chars()
+            .next()
+            .is_some_and(|character| matches!(character, 'e' | 'E'))
+    {
+        token.push('e');
+        index += 1;
+        if index < numeric_text.len()
+            && numeric_text[index..]
+                .chars()
+                .next()
+                .is_some_and(|character| matches!(character, '+' | '-'))
+        {
+            token.push(numeric_text.as_bytes()[index] as char);
+            index += 1;
+        }
+        let exponent_digits_start = index;
+        while index < numeric_text.len() && numeric_text.as_bytes()[index].is_ascii_digit() {
+            token.push(numeric_text.as_bytes()[index] as char);
+            index += 1;
+        }
+        if index == exponent_digits_start {
+            return ParsedLabResultText::InvalidNumeric;
+        }
+    }
+
+    let candidates = parse_localized_lab_number_candidates(&token);
+    if candidates.is_empty() {
+        return ParsedLabResultText::InvalidNumeric;
+    }
+    let raw_suffix = numeric_text[index..].trim();
+    let (unit_suffix, annotated_flag) = split_lab_flag_annotation(raw_suffix);
+    if !unit_suffix.is_empty() && !plausible_lab_unit_suffix(unit_suffix) {
+        return if comparator.is_some() {
+            ParsedLabResultText::InvalidNumeric
+        } else {
+            ParsedLabResultText::ComplexTextual
+        };
+    }
+    ParsedLabResultText::Numeric {
+        candidates,
+        comparator,
+        unit_suffix: (!unit_suffix.is_empty()).then(|| unit_suffix.to_string()),
+        annotated_flag,
+    }
+}
+
+fn normalized_lab_unit(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn lab_numbers_match(left: f64, right: f64) -> bool {
+    let tolerance = left.abs().max(right.abs()).max(1.0) * 1e-9;
+    (left - right).abs() <= tolerance
+}
+
+fn canonical_lab_comparator(value: Option<&str>) -> &str {
+    match value {
+        None | Some("") | Some("=") => "=",
+        Some(value) => value,
+    }
+}
+
+fn unambiguous_lab_flag(
+    numeric_result: f64,
+    comparator: Option<&str>,
+    reference_low: f64,
+    reference_high: f64,
+) -> Option<&'static str> {
+    match comparator {
+        None | Some("") | Some("=") => Some(if numeric_result < reference_low {
+            "low"
+        } else if numeric_result > reference_high {
+            "high"
+        } else {
+            "normal"
+        }),
+        Some("<") if numeric_result <= reference_low => Some("low"),
+        Some("<=") if numeric_result < reference_low => Some("low"),
+        Some(">") if numeric_result >= reference_high => Some("high"),
+        Some(">=") if numeric_result > reference_high => Some("high"),
+        _ => None,
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_patient_lab_result_correction_consistency(
+    lab: &NormalizedPatientLabResult,
+) -> Result<(), axum::response::Response> {
+    // Correction contract: numeric-looking display text must carry the same
+    // numeric projection (with an omitted comparator equivalent to `=`).
+    // Direct numeric observations with complete bounds use a canonical
+    // normal/low/high flag; inequalities are checked only when classification
+    // is mathematically unambiguous.
+    match parse_lab_result_text_projection(&lab.result_text) {
+        ParsedLabResultText::Textual | ParsedLabResultText::ComplexTextual => {
+            if lab.numeric_result.is_some() || lab.comparator.is_some() {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Textual or complex result_text cannot retain numeric_result or comparator",
+                ));
+            }
+        }
+        ParsedLabResultText::InvalidNumeric => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid numeric result_text",
+            ));
+        }
+        ParsedLabResultText::Numeric {
+            candidates,
+            comparator,
+            unit_suffix,
+            annotated_flag,
+        } => {
+            let Some(numeric_result) = lab.numeric_result else {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Numeric result_text requires numeric_result",
+                ));
+            };
+            if !candidates
+                .iter()
+                .any(|candidate| lab_numbers_match(*candidate, numeric_result))
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "result_text does not match numeric_result",
+                ));
+            }
+            if canonical_lab_comparator(comparator)
+                != canonical_lab_comparator(lab.comparator.as_deref())
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "result_text comparator does not match comparator",
+                ));
+            }
+            if let Some(unit_suffix) = unit_suffix {
+                if lab
+                    .unit
+                    .as_deref()
+                    .is_none_or(|unit| normalized_lab_unit(unit) != normalized_lab_unit(&unit_suffix))
+                {
+                    return Err(err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "result_text unit does not match unit",
+                    ));
+                }
+            }
+            if annotated_flag.is_some_and(|expected| lab.abnormal_flag != expected) {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "result_text abnormal annotation contradicts abnormal_flag",
+                ));
+            }
+        }
+    }
+
+    if let (Some(numeric_result), Some(reference_low), Some(reference_high)) =
+        (lab.numeric_result, lab.reference_low, lab.reference_high)
+        && let Some(expected) = unambiguous_lab_flag(
+            numeric_result,
+            lab.comparator.as_deref(),
+            reference_low,
+            reference_high,
+        )
+        && lab.abnormal_flag != expected
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "abnormal_flag contradicts numeric_result and reference range",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -2738,11 +3209,14 @@ async fn list_patient_lab_results(
                   lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
                   lr.source_page, lr.recorded_by, lr.created_at,
-                  u.name AS recorded_by_name, d.original_filename AS source_document_name
+                  lr.corrected_at, lr.corrected_by, lr.correction_note,
+                  u.name AS recorded_by_name, cu.name AS corrected_by_name,
+                  d.original_filename AS source_document_name
            FROM patient_lab_results lr
            LEFT JOIN users u ON u.id = lr.recorded_by
+           LEFT JOIN users cu ON cu.id = lr.corrected_by
            LEFT JOIN documents d ON d.id = lr.source_document_id
-           WHERE lr.patient_id = $1
+           WHERE lr.patient_id = $1 AND lr.deleted_at IS NULL
            ORDER BY lr.measured_at DESC, lr.panel NULLS LAST, lr.created_at, lr.analyte_name"#,
     )
     .bind(patient_uuid)
@@ -2757,36 +3231,476 @@ async fn list_patient_lab_results(
     })?;
 
     let items = rows
-        .into_iter()
-        .map(|row| {
-            json!({
-                "id": row.get::<Uuid, _>("id"),
-                "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
-                "measured_at_precision": row.get::<String, _>("measured_at_precision"),
-                "panel": row.get::<Option<String>, _>("panel"),
-                "analyte_name": row.get::<String, _>("analyte_name"),
-                "result_text": row.get::<String, _>("result_text"),
-                "numeric_result": row.get::<Option<f64>, _>("numeric_result"),
-                "comparator": row.get::<Option<String>, _>("comparator"),
-                "unit": row.get::<Option<String>, _>("unit"),
-                "reference_text": row.get::<Option<String>, _>("reference_text"),
-                "reference_low": row.get::<Option<f64>, _>("reference_low"),
-                "reference_high": row.get::<Option<f64>, _>("reference_high"),
-                "abnormal_flag": row.get::<String, _>("abnormal_flag"),
-                "source_country": row.get::<Option<String>, _>("source_country"),
-                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
-                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
-                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
-                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
-                "source_page": row.get::<Option<i32>, _>("source_page"),
-                "recorded_by": row.get::<Option<Uuid>, _>("recorded_by"),
-                "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
-                "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
-            })
-        })
+        .iter()
+        .map(patient_lab_result_json)
         .collect::<Vec<_>>();
     let count = items.len();
     Ok(Json(json!({ "items": items, "count": count })))
+}
+
+fn patient_lab_result_json(row: &PgRow) -> Value {
+    json!({
+        "id": row.get::<Uuid, _>("id"),
+        "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+        "measured_at_precision": row.get::<String, _>("measured_at_precision"),
+        "panel": row.get::<Option<String>, _>("panel"),
+        "analyte_name": row.get::<String, _>("analyte_name"),
+        "result_text": row.get::<String, _>("result_text"),
+        "numeric_result": row.get::<Option<f64>, _>("numeric_result"),
+        "comparator": row.get::<Option<String>, _>("comparator"),
+        "unit": row.get::<Option<String>, _>("unit"),
+        "reference_text": row.get::<Option<String>, _>("reference_text"),
+        "reference_low": row.get::<Option<f64>, _>("reference_low"),
+        "reference_high": row.get::<Option<f64>, _>("reference_high"),
+        "abnormal_flag": row.get::<String, _>("abnormal_flag"),
+        "source_country": row.get::<Option<String>, _>("source_country"),
+        "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+        "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+        "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+        "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
+        "source_page": row.get::<Option<i32>, _>("source_page"),
+        "recorded_by": row.get::<Option<Uuid>, _>("recorded_by"),
+        "recorded_by_name": row.get::<Option<String>, _>("recorded_by_name"),
+        "corrected_at": row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("corrected_at")
+            .map(|value| value.to_rfc3339()),
+        "corrected_by": row.get::<Option<Uuid>, _>("corrected_by"),
+        "corrected_by_name": row.get::<Option<String>, _>("corrected_by_name"),
+        "correction_note": row.get::<Option<String>, _>("correction_note"),
+        "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+    })
+}
+
+async fn update_patient_lab_result(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Path((patient_uuid, lab_result_id)): Path<(Uuid, Uuid)>,
+    Json(raw_body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return response;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_response) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access for lab correction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update lab result",
+            );
+        }
+    }
+    let (lab, correction_note) =
+        match normalize_patient_lab_result_correction_payload(&raw_body) {
+            Ok(normalized) => normalized,
+            Err(response) => return response,
+        };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to begin lab correction transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update lab result",
+            );
+        }
+    };
+    let previous = match sqlx::query(
+        r#"SELECT measured_at, measured_at_precision, panel, analyte_name, result_text,
+                  numeric_result, comparator, unit, reference_text, reference_low,
+                  reference_high, abnormal_flag, source_country, source_document_id,
+                  source_import_id, source_candidate_id, source_page,
+                  corrected_at, corrected_by, correction_note
+           FROM patient_lab_results
+           WHERE id = $1 AND patient_id = $2 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(lab_result_id)
+    .bind(patient_uuid)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lab result not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to lock lab result for correction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update lab result",
+            );
+        }
+    };
+
+    let old_value = json!({
+        "measured_at": previous.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+        "measured_at_precision": previous.get::<String, _>("measured_at_precision"),
+        "panel": previous.get::<Option<String>, _>("panel"),
+        "analyte_name": previous.get::<String, _>("analyte_name"),
+        "result_text": previous.get::<String, _>("result_text"),
+        "numeric_result": previous.get::<Option<f64>, _>("numeric_result"),
+        "comparator": previous.get::<Option<String>, _>("comparator"),
+        "unit": previous.get::<Option<String>, _>("unit"),
+        "reference_text": previous.get::<Option<String>, _>("reference_text"),
+        "reference_low": previous.get::<Option<f64>, _>("reference_low"),
+        "reference_high": previous.get::<Option<f64>, _>("reference_high"),
+        "abnormal_flag": previous.get::<String, _>("abnormal_flag"),
+        "correction_note": previous.get::<Option<String>, _>("correction_note"),
+        "corrected_at": previous
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("corrected_at")
+            .map(|value| value.to_rfc3339()),
+        "corrected_by": previous.get::<Option<Uuid>, _>("corrected_by"),
+    });
+    let provenance = json!({
+        "source_country": previous.get::<Option<String>, _>("source_country"),
+        "source_document_id": previous.get::<Option<Uuid>, _>("source_document_id"),
+        "source_import_id": previous.get::<Option<Uuid>, _>("source_import_id"),
+        "source_candidate_id": previous.get::<Option<String>, _>("source_candidate_id"),
+        "source_page": previous.get::<Option<i32>, _>("source_page"),
+    });
+    let source_import_id = previous.get::<Option<Uuid>, _>("source_import_id");
+    if let Some(source_import_id) = source_import_id {
+        let import_status = match sqlx::query_scalar::<_, String>(
+            r#"SELECT status
+               FROM clinical_document_imports
+               WHERE id = $1 AND patient_id = $2
+               FOR SHARE"#,
+        )
+        .bind(source_import_id)
+        .bind(patient_uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, import_id = %source_import_id, "Failed to validate lab correction import state");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update lab result",
+                );
+            }
+        };
+        if import_status.as_deref() != Some("applied") {
+            return err(
+                StatusCode::CONFLICT,
+                "Imported lab result can only be corrected after the clinical import is applied",
+            );
+        }
+    }
+    if source_import_id.is_some()
+        && lab.measured_at_precision == "datetime"
+        && raw_body
+            .get("measured_at")
+            .and_then(Value::as_str)
+            .is_none_or(|value| chrono::DateTime::parse_from_rfc3339(value.trim()).is_err())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Imported lab measured_at must be a date or include an explicit timezone offset",
+        );
+    }
+
+    if let Err(error) = sqlx::query(
+        r#"UPDATE patient_lab_results
+           SET measured_at = $3,
+               measured_at_precision = $4,
+               panel = $5,
+               analyte_name = $6,
+               result_text = $7,
+               numeric_result = $8,
+               comparator = $9,
+               unit = $10,
+               reference_text = $11,
+               reference_low = $12,
+               reference_high = $13,
+               abnormal_flag = $14,
+               corrected_at = now(),
+               corrected_by = $15,
+               correction_note = $16,
+               updated_at = now()
+           WHERE id = $1 AND patient_id = $2"#,
+    )
+    .bind(lab_result_id)
+    .bind(patient_uuid)
+    .bind(lab.measured_at)
+    .bind(lab.measured_at_precision)
+    .bind(&lab.panel)
+    .bind(&lab.analyte_name)
+    .bind(&lab.result_text)
+    .bind(lab.numeric_result)
+    .bind(&lab.comparator)
+    .bind(&lab.unit)
+    .bind(&lab.reference_text)
+    .bind(lab.reference_low)
+    .bind(lab.reference_high)
+    .bind(&lab.abnormal_flag)
+    .bind(auth.user_id)
+    .bind(&correction_note)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to update patient lab result");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update lab result",
+        );
+    }
+
+    let updated = match sqlx::query(
+        r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
+                  lr.panel, lr.analyte_name, lr.result_text,
+                  lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
+                  lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
+                  lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
+                  lr.source_page, lr.recorded_by, lr.created_at,
+                  lr.corrected_at, lr.corrected_by, lr.correction_note,
+                  u.name AS recorded_by_name, cu.name AS corrected_by_name,
+                  d.original_filename AS source_document_name
+           FROM patient_lab_results lr
+           LEFT JOIN users u ON u.id = lr.recorded_by
+           LEFT JOIN users cu ON cu.id = lr.corrected_by
+           LEFT JOIN documents d ON d.id = lr.source_document_id
+           WHERE lr.id = $1 AND lr.patient_id = $2"#,
+    )
+    .bind(lab_result_id)
+    .bind(patient_uuid)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to reload corrected lab result");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update lab result",
+            );
+        }
+    };
+    let item = patient_lab_result_json(&updated);
+    let new_value = json!({
+        "measured_at": item["measured_at"],
+        "measured_at_precision": item["measured_at_precision"],
+        "panel": item["panel"],
+        "analyte_name": item["analyte_name"],
+        "result_text": item["result_text"],
+        "numeric_result": item["numeric_result"],
+        "comparator": item["comparator"],
+        "unit": item["unit"],
+        "reference_text": item["reference_text"],
+        "reference_low": item["reference_low"],
+        "reference_high": item["reference_high"],
+        "abnormal_flag": item["abnormal_flag"],
+        "correction_note": item["correction_note"],
+        "corrected_at": item["corrected_at"],
+        "corrected_by": item["corrected_by"],
+    });
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to commit lab result correction");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update lab result",
+        );
+    }
+
+    audit_context.set_entity("patient_lab_result", lab_result_id);
+    audit_context.set_action("correct_patient_lab_result");
+    audit_context.set_old_value(old_value);
+    audit_context.set_new_value(new_value);
+    audit_context.set_context(json!({
+        "patient_id": patient_uuid,
+        "reason": correction_note,
+        "provenance": provenance,
+    }));
+
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "lab_results", "action": "correct", "lab_result_id": lab_result_id }),
+    )
+    .await;
+
+    Json(json!({ "ok": true, "item": item })).into_response()
+}
+
+async fn delete_patient_lab_result(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Path((patient_uuid, lab_result_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<DeletePatientLabResultRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return response;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(_response) => {
+            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access for lab deletion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete lab result",
+            );
+        }
+    }
+    let deletion_note = body.deletion_note.trim();
+    if deletion_note.is_empty() || deletion_note.chars().count() > 500 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "deletion_note is required and must not exceed 500 characters",
+        );
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to begin lab deletion transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete lab result",
+            );
+        }
+    };
+    let previous = match sqlx::query(
+        r#"SELECT measured_at, measured_at_precision, panel, analyte_name, result_text,
+                  numeric_result, comparator, unit, reference_text, reference_low,
+                  reference_high, abnormal_flag, source_country, source_document_id,
+                  source_import_id, source_candidate_id, source_page,
+                  corrected_at, corrected_by, correction_note
+           FROM patient_lab_results
+           WHERE id = $1 AND patient_id = $2 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(lab_result_id)
+    .bind(patient_uuid)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lab result not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to lock lab result for deletion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete lab result",
+            );
+        }
+    };
+
+    let source_import_id = previous.get::<Option<Uuid>, _>("source_import_id");
+    if let Some(source_import_id) = source_import_id {
+        let import_status = match sqlx::query_scalar::<_, String>(
+            r#"SELECT status
+               FROM clinical_document_imports
+               WHERE id = $1 AND patient_id = $2
+               FOR SHARE"#,
+        )
+        .bind(source_import_id)
+        .bind(patient_uuid)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, import_id = %source_import_id, "Failed to validate lab deletion import state");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to delete lab result",
+                );
+            }
+        };
+        if import_status.as_deref() != Some("applied") {
+            return err(
+                StatusCode::CONFLICT,
+                "Imported lab result can only be deleted after the clinical import is applied",
+            );
+        }
+    }
+
+    let old_value = json!({
+        "measured_at": previous.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
+        "measured_at_precision": previous.get::<String, _>("measured_at_precision"),
+        "panel": previous.get::<Option<String>, _>("panel"),
+        "analyte_name": previous.get::<String, _>("analyte_name"),
+        "result_text": previous.get::<String, _>("result_text"),
+        "numeric_result": previous.get::<Option<f64>, _>("numeric_result"),
+        "comparator": previous.get::<Option<String>, _>("comparator"),
+        "unit": previous.get::<Option<String>, _>("unit"),
+        "reference_text": previous.get::<Option<String>, _>("reference_text"),
+        "reference_low": previous.get::<Option<f64>, _>("reference_low"),
+        "reference_high": previous.get::<Option<f64>, _>("reference_high"),
+        "abnormal_flag": previous.get::<String, _>("abnormal_flag"),
+        "corrected_at": previous
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("corrected_at")
+            .map(|value| value.to_rfc3339()),
+        "corrected_by": previous.get::<Option<Uuid>, _>("corrected_by"),
+        "correction_note": previous.get::<Option<String>, _>("correction_note"),
+    });
+    let provenance = json!({
+        "source_country": previous.get::<Option<String>, _>("source_country"),
+        "source_document_id": previous.get::<Option<Uuid>, _>("source_document_id"),
+        "source_import_id": source_import_id,
+        "source_candidate_id": previous.get::<Option<String>, _>("source_candidate_id"),
+        "source_page": previous.get::<Option<i32>, _>("source_page"),
+    });
+    let deleted_at = match sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+        r#"UPDATE patient_lab_results
+           SET deleted_at = now(), deleted_by = $3, deletion_note = $4, updated_at = now()
+           WHERE id = $1 AND patient_id = $2 AND deleted_at IS NULL
+           RETURNING deleted_at"#,
+    )
+    .bind(lab_result_id)
+    .bind(patient_uuid)
+    .bind(auth.user_id)
+    .bind(deletion_note)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(deleted_at) => deleted_at,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to soft-delete lab result");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete lab result",
+            );
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_uuid, lab_result_id = %lab_result_id, "Failed to commit lab deletion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete lab result",
+        );
+    }
+
+    audit_context.set_entity("patient_lab_result", lab_result_id);
+    audit_context.set_action("delete_patient_lab_result");
+    audit_context.set_old_value(old_value);
+    audit_context.set_new_value(json!({
+        "deleted_at": deleted_at.to_rfc3339(),
+        "deleted_by": auth.user_id,
+        "deletion_note": deletion_note,
+    }));
+    audit_context.set_context(json!({
+        "patient_id": patient_uuid,
+        "reason": deletion_note,
+        "provenance": provenance,
+    }));
+
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.clinical_updated",
+        patient_uuid,
+        json!({ "section": "lab_results", "action": "delete", "lab_result_id": lab_result_id }),
+    )
+    .await;
+
+    Json(json!({ "ok": true, "id": lab_result_id })).into_response()
 }
 
 async fn create_patient_lab_result(
@@ -13202,7 +14116,8 @@ async fn get_patient_medikationsplan_pdf(
 #[cfg(test)]
 mod unicode_pdf_tests {
     use super::{
-        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink, normalize_patient_lab_result_payload,
+        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink,
+        normalize_patient_lab_result_correction_payload, normalize_patient_lab_result_payload,
         normalize_patient_vital_measurement_payload, pdf_text_save_options,
     };
     use printpdf::{PdfDocument, PdfWarnMsg};
@@ -13258,6 +14173,160 @@ mod unicode_pdf_tests {
             }))
             .is_err(),
             "imported naive lab datetimes must not be interpreted as UTC",
+        );
+    }
+
+    #[test]
+    fn lab_correction_note_limit_counts_unicode_characters() {
+        let payload = |correction_note: String| {
+            json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Hemoglobin",
+                "result_text": "12.8",
+                "numeric_result": 12.8,
+                "abnormal_flag": "normal",
+                "correction_note": correction_note,
+            })
+        };
+
+        assert!(
+            normalize_patient_lab_result_correction_payload(&payload("я".repeat(500))).is_ok(),
+            "500 Unicode characters must be accepted",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&payload("я".repeat(501))).is_err(),
+            "501 Unicode characters must be rejected",
+        );
+    }
+
+    #[test]
+    fn lab_correction_requires_consistent_text_and_numeric_projection() {
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Leukozyten",
+                "result_text": "14.000",
+                "numeric_result": 14000.0,
+                "unit": "/μL",
+                "abnormal_flag": "unknown",
+                "correction_note": "Checked against source",
+            }))
+            .is_ok(),
+            "German thousands grouping must match the explicit numeric projection",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "CRP",
+                "result_text": "≤ 0,5 mg/L",
+                "numeric_result": 0.5,
+                "comparator": "<=",
+                "unit": "mg/L",
+                "abnormal_flag": "unknown",
+                "correction_note": "Checked against source",
+            }))
+            .is_ok(),
+            "comma decimals with a canonicalized Unicode comparator must be accepted",
+        );
+        for grouped in ["14 000", "14\u{00a0}000", "14\u{202f}000"] {
+            assert!(
+                normalize_patient_lab_result_correction_payload(&json!({
+                    "measured_at": "2026-08-11",
+                    "analyte_name": "Leukozyten",
+                    "result_text": grouped,
+                    "numeric_result": 14000.0,
+                    "unit": "/μL",
+                    "abnormal_flag": "unknown",
+                    "correction_note": "Checked against source",
+                }))
+                .is_ok(),
+                "grouping whitespace in {grouped:?} must be accepted",
+            );
+        }
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Qualitative result",
+                "result_text": "negative",
+                "numeric_result": 0.0,
+                "abnormal_flag": "normal",
+                "correction_note": "Checked against source",
+            }))
+            .is_err(),
+            "textual results must not retain a stale numeric projection",
+        );
+        for complex_result in ["2+", "1:80", "0-1"] {
+            assert!(
+                normalize_patient_lab_result_correction_payload(&json!({
+                    "measured_at": "2026-08-11",
+                    "analyte_name": "Complex qualitative result",
+                    "result_text": complex_result,
+                    "abnormal_flag": "unknown",
+                    "correction_note": "Checked against source",
+                }))
+                .is_ok(),
+                "{complex_result:?} must remain a correctable complex textual value",
+            );
+        }
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Semi-quantitative result",
+                "result_text": "2+",
+                "numeric_result": 2.0,
+                "abnormal_flag": "unknown",
+                "correction_note": "Checked against source",
+            }))
+            .is_err(),
+            "complex textual values must reject a stale numeric projection",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Hemoglobin",
+                "result_text": "13.2 (H)",
+                "numeric_result": 13.2,
+                "abnormal_flag": "high",
+                "correction_note": "Checked against source",
+            }))
+            .is_ok(),
+            "a known high annotation must not be interpreted as a unit",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Hemoglobin",
+                "result_text": "13.2 (H)",
+                "numeric_result": 13.2,
+                "abnormal_flag": "normal",
+                "correction_note": "Checked against source",
+            }))
+            .is_err(),
+            "a high annotation must reject a contradictory abnormal_flag",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Localized value",
+                "result_text": "1.234,5",
+                "numeric_result": 1234.5,
+                "abnormal_flag": "unknown",
+                "correction_note": "Checked against source",
+            }))
+            .is_ok(),
+            "mixed German grouping/decimal separators must be supported",
+        );
+        assert!(
+            normalize_patient_lab_result_correction_payload(&json!({
+                "measured_at": "2026-08-11",
+                "analyte_name": "Localized value",
+                "result_text": "1,234.5",
+                "numeric_result": 1234.5,
+                "abnormal_flag": "unknown",
+                "correction_note": "Checked against source",
+            }))
+            .is_ok(),
+            "mixed English grouping/decimal separators must be supported",
         );
     }
 

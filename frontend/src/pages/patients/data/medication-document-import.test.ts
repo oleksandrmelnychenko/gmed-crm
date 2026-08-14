@@ -8,10 +8,13 @@ import {
   groupMedicationImportHistory,
   medicationCandidateDisplay,
   medicationCandidateNeedsWirkstoff,
+  medicationCandidateReviewDecision,
   medicationCandidateReviewBlockReason,
   medicationFieldConfidence,
   medicationImportPayload,
+  medicationReviewDecisionSummary,
   partitionMedicationReviewSelection,
+  setMedicationCandidateReviewDecision,
   updateMedicationCandidateField,
 } from "./medication-document-import";
 import type { ClinicalMedication } from "./patient-clinical";
@@ -49,6 +52,51 @@ const structured = {
 };
 
 describe("structured medication document import", () => {
+  it("keeps five OCR medications with zero selected fail-closed until each has a decision", () => {
+    const medications = Array.from({ length: 5 }, (_, index) => ({
+      ...candidate({ wirkstoff: `Wirkstoff ${index + 1}` }),
+      id: `med-${index + 1}`,
+      selected: false,
+    }));
+
+    expect(medicationReviewDecisionSummary(medications)).toMatchObject({
+      total: 5,
+      included: 0,
+      excluded: 0,
+      unresolved: 5,
+    });
+    expect(medications.every((item) => medicationCandidateReviewDecision(item) === null)).toBe(true);
+  });
+
+  it("records an intentional skip durably and permits a zero-medication review snapshot", () => {
+    const medications = Array.from({ length: 5 }, (_, index) => ({
+      ...candidate({ wirkstoff: `Wirkstoff ${index + 1}` }),
+      id: `med-${index + 1}`,
+      selected: false,
+    })).map((item) => setMedicationCandidateReviewDecision(item, "exclude"));
+
+    expect(medicationReviewDecisionSummary(medications)).toMatchObject({
+      total: 5,
+      included: 0,
+      excluded: 5,
+      unresolved: 0,
+    });
+    expect(medications.every((item) => item.selected === false)).toBe(true);
+    expect(
+      medications.every(
+        (item) => item.normalized.medication_review_decision === "exclude",
+      ),
+    ).toBe(true);
+
+    const included = setMedicationCandidateReviewDecision(medications[0], "include");
+    expect(included.selected).toBe(true);
+    expect(included.normalized.medication_review_decision).toBe("include");
+
+    expect(
+      medicationReviewDecisionSummary([{ ...medications[0], selected: true }]),
+    ).toMatchObject({ unresolved: 1, included: 0, excluded: 0 });
+  });
+
   it("blocks a brand-only OCR candidate until the active ingredient is reviewed", () => {
     const item = candidate({ handelsname: "Metohexal", wirkstoff: "" });
 

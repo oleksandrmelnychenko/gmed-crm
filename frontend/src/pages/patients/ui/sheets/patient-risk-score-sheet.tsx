@@ -86,7 +86,6 @@ type FormState = {
   scaleMax: string;
   interpretation: string;
   source: string;
-  inputsJson: string;
 };
 
 function blankForm(): FormState {
@@ -97,7 +96,6 @@ function blankForm(): FormState {
     scaleMax: "",
     interpretation: "",
     source: "",
-    inputsJson: "",
   };
 }
 
@@ -112,7 +110,6 @@ function formFromScore(score: PatientRiskScore | null | undefined): FormState {
     scaleMax: score.scale_max == null ? "" : String(score.scale_max),
     interpretation: score.interpretation ?? "",
     source: score.source ?? "",
-    inputsJson: score.inputs ? JSON.stringify(score.inputs, null, 2) : "",
   };
 }
 
@@ -157,24 +154,6 @@ export function PatientRiskScoreSheet({
       toast.error(l("patients_score_value_exceeds_scale_max"));
       return;
     }
-    let inputs: Record<string, unknown> | null = null;
-    if (form.inputsJson.trim()) {
-      try {
-        const parsed: unknown = JSON.parse(form.inputsJson);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error("not an object");
-        }
-        inputs = parsed as Record<string, unknown>;
-      } catch {
-        toast.error(
-          lang === "de"
-            ? "Eingaben müssen ein gültiges JSON-Objekt sein."
-            : "Входные данные должны быть корректным JSON-объектом.",
-        );
-        return;
-      }
-    }
-
     setBusy(true);
     try {
       const endpoint = initialScore?.id
@@ -189,7 +168,7 @@ export function PatientRiskScoreSheet({
           scale_max: scaleMax,
           interpretation: form.interpretation.trim() || null,
           source: form.source.trim() || null,
-          inputs,
+          inputs: initialScore?.inputs ?? null,
         }),
       });
       toast.success(l("patients_risk_score_saved"));
@@ -316,21 +295,6 @@ export function PatientRiskScoreSheet({
             onChange={(event) =>
               setForm((current) => ({ ...current, interpretation: event.target.value }))
             }
-          />
-        </FormField>
-        <FormField
-          label={lang === "de" ? "Eingaben (JSON)" : "Входные данные (JSON)"}
-          htmlFor="patient-risk-score-inputs"
-        >
-          <textarea
-            id="patient-risk-score-inputs"
-            className={riskScoreTextareaClassName}
-            value={form.inputsJson}
-            onChange={(event) =>
-              setForm((current) => ({ ...current, inputsJson: event.target.value }))
-            }
-            spellCheck={false}
-            placeholder={'{\n  "age": 68\n}'}
           />
         </FormField>
       </FormSection>

@@ -73,11 +73,14 @@ import {
 } from "@/pages/patients/data/clinical-document-subject";
 import {
   medicationCandidateNeedsWirkstoff,
+  medicationCandidateReviewDecision,
   medicationCandidateReviewBlockReason,
   medicationCandidateDisplay,
   medicationFieldConfidence,
   medicationIdentifiers,
+  medicationReviewDecisionSummary,
   partitionMedicationReviewSelection,
+  setMedicationCandidateReviewDecision,
   updateMedicationCandidateField,
 } from "@/pages/patients/data/medication-document-import";
 import { cn } from "@/lib/utils";
@@ -874,18 +877,24 @@ function mergeReviewCandidates(
   return incoming.map((item) => {
     const existing = currentById.get(item.id);
     const lowConfidenceDiagnosis = item.target === "diagnosis" && item.confidence < 0.75;
+    const normalized = existing?.normalized ?? item.normalized;
+    const medicationDecision = medicationCandidateReviewDecision({
+      target: item.target,
+      normalized,
+    });
     return {
       ...item,
       value: existing?.value ?? item.value,
-      normalized: existing?.normalized ?? item.normalized,
+      normalized,
       selected:
-        existing?.selected ??
-        (
-          item.selected !== false &&
-          !lowConfidenceDiagnosis &&
-          !isRiskyCandidate(item) &&
-          !medicationCandidateNeedsWirkstoff(item)
-        ),
+        item.target === "medication"
+          ? medicationDecision === "include"
+          : existing?.selected ??
+            (
+              item.selected !== false &&
+              !lowConfidenceDiagnosis &&
+              !isRiskyCandidate(item)
+            ),
     };
   });
 }
@@ -1257,6 +1266,13 @@ export function ClinicalDocumentImportSheet({
     (candidate) => medicationSeriesOptionsFor(candidate).length,
     matchingBatchMedicationCountFor,
   );
+  const medicationReview = medicationReviewDecisionSummary(candidates);
+  const frozenMedicationSelectionCount = candidates.filter(
+    (candidate) => candidate.target === "medication" && candidate.selected,
+  ).length;
+  const medicationSelectedCount = documentImport?.status === "review_required"
+    ? medicationReview.included
+    : frozenMedicationSelectionCount;
   const visibleCandidates = useMemo(
     () => candidates.filter((item) => activeTab === "all" || item.target === activeTab),
     [activeTab, candidates],
@@ -1360,7 +1376,31 @@ export function ClinicalDocumentImportSheet({
   }
 
   async function apply() {
-    if (!documentImport || selected.length === 0) return;
+    if (!documentImport) return;
+    if (documentImport.status === "review_required" && medicationReview.unresolved > 0) {
+      const unresolved = medicationReview.unresolvedCandidates[0];
+      if (!unresolved) return;
+      setActiveCandidateId(unresolved.id);
+      setActiveTab("medication");
+      window.requestAnimationFrame(() => {
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-clinical-import-candidate-id]"),
+        ).find((element) => element.dataset.clinicalImportCandidateId === unresolved.id);
+        card?.focus();
+        card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      toast.error(
+        tx(
+          `Примите решение по каждому медикаменту: осталось ${medicationReview.unresolved}.`,
+          `Für jedes Medikament eine Entscheidung treffen: ${medicationReview.unresolved} offen.`,
+        ),
+      );
+      return;
+    }
+    if (
+      documentImport.status === "review_required" &&
+      selected.length === 0
+    ) return;
     if (requiresCurrentIdentityDecision && subjectCheck.status === "hard_mismatch") {
       toast.error(
         tx(
@@ -1376,7 +1416,12 @@ export function ClinicalDocumentImportSheet({
       && !patientIdentityConfirmed
     ) {
       toast.error(
-        subjectCheck.status === "unavailable"
+        subjectCheck.status === "profile_incomplete"
+          ? tx(
+              "В карточке пациента нет корректного имени. Проверьте оригинал и подтвердите импорт вручную.",
+              "In der Patientenakte fehlt ein verlässlicher Name. Original prüfen und Import manuell bestätigen.",
+            )
+          : subjectCheck.status === "unavailable"
           ? tx(
               "OCR не подтвердил пациента. Проверьте личность в оригинале документа и подтвердите её вручную.",
               "OCR konnte den Patienten nicht bestätigen. Identität im Originaldokument prüfen und manuell bestätigen.",
@@ -1468,7 +1513,12 @@ export function ClinicalDocumentImportSheet({
         && !identityConfirmedForPrepare
       ) {
         throw new Error(
-          latestSubjectCheck.status === "unavailable"
+          latestSubjectCheck.status === "profile_incomplete"
+            ? tx(
+                "В карточке пациента всё ещё нет корректного имени; требуется ручное подтверждение.",
+                "In der Patientenakte fehlt weiterhin ein verlässlicher Name; manuelle Bestätigung ist erforderlich.",
+              )
+            : latestSubjectCheck.status === "unavailable"
             ? tx(
                 "Личность пациента в оригинале документа ещё не подтверждена вручную.",
                 "Die Patientenidentität im Originaldokument wurde noch nicht manuell bestätigt.",
@@ -1585,6 +1635,14 @@ export function ClinicalDocumentImportSheet({
     );
   }
 
+  function setMedicationDecision(id: string, decision: "include" | "exclude") {
+    setCandidates((current) =>
+      current.map((item) =>
+        item.id === id ? setMedicationCandidateReviewDecision(item, decision) : item,
+      ),
+    );
+  }
+
   function updateSourceCountry(country: string) {
     setSourceCountry(country);
     setCandidates((current) =>
@@ -1665,6 +1723,7 @@ export function ClinicalDocumentImportSheet({
           auto_select: true,
           review_reasons: [],
           confidence_kind: "manual_user_entry",
+          medication_review_decision: "include",
         };
       }
       if (manualTarget === "examination") {
@@ -1780,6 +1839,11 @@ export function ClinicalDocumentImportSheet({
                       "Импорт заблокирован: документ не соответствует выбранному пациенту",
                       "Import gesperrt: Dokument passt nicht zum ausgewählten Patienten",
                     )
+                  : subjectCheck.status === "profile_incomplete"
+                    ? tx(
+                        "Исправьте имя в карточке или подтвердите пациента по оригиналу документа",
+                        "Name in der Akte korrigieren oder Patienten anhand des Originals bestätigen",
+                      )
                   : subjectCheck.status === "unavailable"
                     ? tx(
                         "Проверьте личность пациента в оригинале документа",
@@ -1789,6 +1853,13 @@ export function ClinicalDocumentImportSheet({
                         "Подтвердите расхождение в данных пациента",
                         "Abweichung bei der Patientenidentität bestätigen",
                       )}
+              </p>
+            ) : reviewReady && medicationReview.unresolved > 0 ? (
+              <p className="mr-auto text-xs font-semibold text-amber-800">
+                {tx(
+                  `${medicationReview.unresolved} медикамент(а): выберите «Добавить» или «Не добавлять»`,
+                  `${medicationReview.unresolved} Medikament(e): „Übernehmen“ oder „Nicht übernehmen“ wählen`,
+                )}
               </p>
             ) : reviewReady && blockedSelected.length > 0 ? (
               <p className="mr-auto text-xs font-medium text-amber-700">
@@ -1804,12 +1875,30 @@ export function ClinicalDocumentImportSheet({
             ) : (
               <span className="mr-auto" />
             )}
+            {medicationReview.total > 0 ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "shrink-0 bg-white text-xs",
+                  reviewReady && medicationReview.unresolved > 0
+                    ? "border-amber-300 text-amber-900"
+                    : "border-sky-300 text-sky-900",
+                )}
+              >
+                {tx("Медикаменты", "Medikation")}: {medicationSelectedCount}/{medicationReview.total}
+              </Badge>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               {applyingReady ? tx("Закрыть", "Schließen") : tx("Отмена", "Abbrechen")}
             </Button>
             <Button
               type="button"
-              disabled={busy || selected.length === 0 || identityImportBlocked}
+              disabled={
+                busy ||
+                identityImportBlocked ||
+                (reviewReady && medicationReview.unresolved > 0) ||
+                (reviewReady && selected.length === 0)
+              }
               onClick={apply}
             >
               {busy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
@@ -1829,6 +1918,11 @@ export function ClinicalDocumentImportSheet({
                 )}
               </span>
             </div>
+            {medicationReview.total > 0 ? (
+              <Badge variant="outline" className="border-emerald-300 bg-white text-emerald-800">
+                {tx("Медикаменты добавлены", "Medikamente übernommen")}: {documentImport.applied_counts.medications ?? 0}
+              </Badge>
+            ) : null}
             <Button type="button" variant="outline" onClick={returnToHistory}>
               <FileUp className="size-4" />
               {tx("Загрузить ещё документ", "Weiteres Dokument hochladen")}
@@ -2204,9 +2298,16 @@ export function ClinicalDocumentImportSheet({
                         </p>
                       </div>
                     </div>
-                    <Badge variant="outline" className="border-emerald-300 bg-white/60 text-emerald-800">
-                      {appliedObjectCount(documentImport)} {tx("объектов", "Objekte")}
-                    </Badge>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {medicationReview.total > 0 ? (
+                        <Badge variant="outline" className="border-emerald-300 bg-white/60 text-emerald-800">
+                          {tx("Медикаменты добавлены", "Medikamente übernommen")}: {documentImport.applied_counts.medications ?? 0}
+                        </Badge>
+                      ) : null}
+                      <Badge variant="outline" className="border-emerald-300 bg-white/60 text-emerald-800">
+                        {appliedObjectCount(documentImport)} {tx("объектов", "Objekte")}
+                      </Badge>
+                    </div>
                   </div>
                 ) : null}
                 {documentImport.status === "applying" ? (
@@ -2236,7 +2337,7 @@ export function ClinicalDocumentImportSheet({
                     "mb-4 rounded-xl border p-3 text-xs",
                     identityPanelStatus === "frozen"
                       ? "border-violet-200 bg-violet-50 text-violet-900"
-                      : identityPanelStatus === "verified"
+                      : identityPanelStatus === "verified" || identityPanelStatus === "verified_variant"
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
                       : identityPanelStatus === "hard_mismatch"
                         ? "border-rose-300 bg-rose-50 text-rose-900"
@@ -2244,7 +2345,7 @@ export function ClinicalDocumentImportSheet({
                   )}
                 >
                   <div className="flex items-start gap-2">
-                    {identityPanelStatus === "verified" ? (
+                    {identityPanelStatus === "verified" || identityPanelStatus === "verified_variant" ? (
                       <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
                     ) : identityPanelStatus === "frozen" ? (
                       <Clock3 className="mt-0.5 size-4 shrink-0" />
@@ -2260,10 +2361,20 @@ export function ClinicalDocumentImportSheet({
                             )
                           : identityPanelStatus === "verified"
                           ? tx("Пациент в документе проверен", "Patient im Dokument verifiziert")
+                          : identityPanelStatus === "verified_variant"
+                            ? tx(
+                                "Пациент подтверждён по немецкому варианту написания",
+                                "Patient über eine deutsche Namensvariante bestätigt",
+                              )
                           : identityPanelStatus === "hard_mismatch"
                             ? tx("Документ не соответствует этой карте", "Dokument passt nicht zu dieser Akte")
                             : identityPanelStatus === "confirmation_required"
                               ? tx("Нужно подтвердить личность пациента", "Patientenidentität muss bestätigt werden")
+                              : identityPanelStatus === "profile_incomplete"
+                                ? tx(
+                                    "В карточке нет корректного имени пациента",
+                                    "In der Akte fehlt ein verlässlicher Patientenname",
+                                  )
                               : tx(
                                   "В документе недостаточно данных для проверки пациента",
                                   "Dokument enthält zu wenig Daten zur Patientenprüfung",
@@ -2287,6 +2398,22 @@ export function ClinicalDocumentImportSheet({
                           )}
                         </p>
                       ) : null}
+                      {identityPanelStatus === "verified_variant" ? (
+                        <p className="mt-1 font-medium">
+                          {tx(
+                            "Имя совпадает после безопасной немецкой нормализации: ä/ae, ö/oe, ü/ue, ß/ss, титулы и пунктуация.",
+                            "Der Name stimmt nach sicherer deutscher Normalisierung überein: ä/ae, ö/oe, ü/ue, ß/ss, Titel und Interpunktion.",
+                          )}
+                        </p>
+                      ) : null}
+                      {identityPanelStatus === "profile_incomplete" ? (
+                        <p className="mt-1 font-medium">
+                          {tx(
+                            "Текущее имя выглядит как техническое значение. Исправьте профиль или проверьте личность по оригиналу.",
+                            "Der aktuelle Name wirkt wie ein technischer Platzhalter. Profil korrigieren oder Identität im Original prüfen.",
+                          )}
+                        </p>
+                      ) : null}
                       {clinicalDocumentIdentityConfirmationVisible(
                         identityPrepareMode,
                         subjectCheck.status,
@@ -2299,7 +2426,7 @@ export function ClinicalDocumentImportSheet({
                             onChange={(event) => setPatientIdentityConfirmed(event.target.checked)}
                           />
                           <span className="font-medium">
-                            {subjectCheck.status === "unavailable"
+                            {subjectCheck.status === "unavailable" || subjectCheck.status === "profile_incomplete"
                               ? tx(
                                   "Я вручную проверил(а) личность в оригинале документа и подтверждаю импорт именно в эту карту",
                                   "Ich habe die Identität im Originaldokument manuell geprüft und bestätige den Import in genau diese Akte",
@@ -2496,6 +2623,12 @@ export function ClinicalDocumentImportSheet({
                           const medicationDisposition = medicationDispositionFor(candidate);
                           const selectionBlocked = candidateSelectionBlocked(candidate);
                           const candidateSelected = candidate.selected;
+                          const explicitMedicationDecision = medicationCandidateReviewDecision(candidate);
+                          const medicationDecision = explicitMedicationDecision ?? (
+                            snapshotReadOnly
+                              ? candidateSelected ? "include" : "exclude"
+                              : null
+                          );
                           const reviewReasons = normalizedStringArray(candidate, "review_reasons");
                           const semanticKey =
                             normalizedString(candidate, "semantic_role") ??
@@ -2516,22 +2649,99 @@ export function ClinicalDocumentImportSheet({
                                   ? "border-orange-400 shadow-sm ring-2 ring-orange-100"
                                   : "hover:border-orange-300 hover:shadow-sm",
                                 !candidateSelected && candidate.target !== "medication" && "opacity-60",
+                                candidate.target === "medication" && medicationDecision === "include" &&
+                                  "border-emerald-300 bg-emerald-50/45",
+                                candidate.target === "medication" && medicationDecision === "exclude" &&
+                                  "border-slate-300 bg-slate-50",
+                                candidate.target === "medication" && medicationDecision === null &&
+                                  "border-amber-400 bg-amber-50/55",
                               )}
                               onClick={() => setActiveCandidateId(candidate.id)}
                             >
                               <div className="flex items-start gap-3">
-                                <input
-                                  type="checkbox"
-                                  className="mt-2 size-4 shrink-0 rounded border-border accent-orange-500"
-                                  checked={candidateSelected}
-                                  disabled={snapshotReadOnly || selectionBlocked}
-                                  onChange={(event) =>
-                                    patchCandidate(candidate.id, { selected: event.target.checked })
-                                  }
-                                  onClick={(event) => event.stopPropagation()}
-                                  aria-label={tx("Импортировать запись", "Eintrag importieren")}
-                                />
+                                {candidate.target !== "medication" ? (
+                                  <input
+                                    type="checkbox"
+                                    className="mt-2 size-4 shrink-0 rounded border-border accent-orange-500"
+                                    checked={candidateSelected}
+                                    disabled={snapshotReadOnly || selectionBlocked}
+                                    onChange={(event) =>
+                                      patchCandidate(candidate.id, { selected: event.target.checked })
+                                    }
+                                    onClick={(event) => event.stopPropagation()}
+                                    aria-label={tx("Импортировать запись", "Eintrag importieren")}
+                                  />
+                                ) : null}
                                 <div className="min-w-0 flex-1">
+                                  {candidate.target === "medication" ? (
+                                    <div
+                                      role="group"
+                                      aria-label={tx("Решение по медикаменту", "Entscheidung zum Medikament")}
+                                      className={cn(
+                                        "mb-3 flex flex-col gap-3 rounded-lg border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between",
+                                        medicationDecision === "include"
+                                          ? "border-emerald-300 bg-emerald-100/80 text-emerald-950"
+                                          : medicationDecision === "exclude"
+                                            ? "border-slate-300 bg-slate-100 text-slate-900"
+                                            : "border-amber-400 bg-amber-100 text-amber-950",
+                                      )}
+                                      onClick={(event) => event.stopPropagation()}
+                                    >
+                                      <div className="flex min-w-0 items-start gap-2">
+                                        {medicationDecision === "include" ? (
+                                          <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                                        ) : (
+                                          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                                        )}
+                                        <div>
+                                          <p className="text-xs font-bold">
+                                            {medicationDecision === "include"
+                                              ? tx("Будет добавлен в карту пациента", "Wird in die Patientenakte übernommen")
+                                              : medicationDecision === "exclude"
+                                                ? tx("Не будет добавлен в карту пациента", "Wird nicht in die Patientenakte übernommen")
+                                                : tx("Решение не принято — в карту не попадёт", "Keine Entscheidung – wird nicht in die Akte übernommen")}
+                                          </p>
+                                          {medicationDecision === null ? (
+                                            <p className="mt-0.5 text-[11px] leading-4">
+                                              {tx(
+                                                "Редактирование карточки не включает медикамент автоматически.",
+                                                "Das Bearbeiten der Karte übernimmt das Medikament nicht automatisch.",
+                                              )}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                      <div className="flex shrink-0 flex-wrap gap-2">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant={medicationDecision === "include" ? "default" : "outline"}
+                                          className={cn(
+                                            "h-8 bg-white",
+                                            medicationDecision === "include" && "bg-emerald-700 text-white hover:bg-emerald-800",
+                                          )}
+                                          disabled={snapshotReadOnly || selectionBlocked}
+                                          onClick={() => setMedicationDecision(candidate.id, "include")}
+                                        >
+                                          <Check className="size-3.5" />
+                                          {tx("Добавить", "Übernehmen")}
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant={medicationDecision === "exclude" ? "default" : "outline"}
+                                          className={cn(
+                                            "h-8 bg-white",
+                                            medicationDecision === "exclude" && "bg-slate-700 text-white hover:bg-slate-800",
+                                          )}
+                                          disabled={snapshotReadOnly}
+                                          onClick={() => setMedicationDecision(candidate.id, "exclude")}
+                                        >
+                                          {tx("Не добавлять", "Nicht übernehmen")}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : null}
                                   {candidate.target === "medication" && medicationDisposition ? (
                                     <MedicationCandidateEditor
                                       candidate={candidate}

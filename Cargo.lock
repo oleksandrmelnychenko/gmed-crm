@@ -1307,6 +1307,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ttf-parser",
+ "unicode-normalization",
  "uuid",
  "windows",
  "zip",

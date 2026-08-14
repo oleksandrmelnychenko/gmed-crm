@@ -4,6 +4,8 @@ import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import {
@@ -118,6 +120,13 @@ import {
   patientSpecializationRecords,
 } from "./clinical-specialization-filter";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import {
+  PatientLabCorrectionMetadata,
+  PatientLabResultDeleteAction,
+  PatientLabResultDeleteSheet,
+  PatientLabResultEditAction,
+  PatientLabResultEditSheet,
+} from "../sheets/patient-lab-result-edit-sheet";
 
 const loadPatientVitalsSheet = () => import("../sheets/patient-vitals-sheet");
 const loadPatientRiskScoreSheet = () => import("../sheets/patient-risk-score-sheet");
@@ -652,7 +661,7 @@ export function PatientMedicationTable({
   const bodyDoseCell = "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
+    <div className="overflow-x-auto rounded-lg border border-border/40 bg-white">
       <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
         <thead className="border-b border-border bg-muted/40">
           <tr>
@@ -878,6 +887,8 @@ function ClinicalSection<T extends { id?: string | null }>({
   groups,
   groupOf,
   tone = "neutral",
+  sectionClassName,
+  rowClassName,
 }: {
   title: string;
   count?: ReactNode;
@@ -895,6 +906,8 @@ function ClinicalSection<T extends { id?: string | null }>({
   groups?: ClinicalSectionGroup[];
   groupOf?: (item: T) => string;
   tone?: ClinicalSectionTone;
+  sectionClassName?: string;
+  rowClassName?: string;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -969,6 +982,7 @@ function ClinicalSection<T extends { id?: string | null }>({
       className={cn(
         "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border px-3 py-2",
         toneClasses.row,
+        rowClassName,
       )}
     >
       <div className="min-w-0">{rowView ? rowView(item) : null}</div>
@@ -979,9 +993,10 @@ function ClinicalSection<T extends { id?: string | null }>({
   const indexed = list.map((item, index) => ({ item, index }));
 
   return (
-    <section className={cn("rounded-xl border", toneClasses.section)}>
+    <section className={cn("rounded-xl border", toneClasses.section, sectionClassName)}>
       <header className={cn("flex items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
         <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
         </div>
@@ -1434,8 +1449,8 @@ export function PatientRecommendationsSection({
     <div
       key={rec.id}
       className={cn(
-        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/50 px-3 py-2",
-        muted ? "bg-muted/40" : "bg-background",
+        "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2",
+        muted && "opacity-70",
       )}
     >
       <div className="min-w-0 space-y-1">
@@ -1502,9 +1517,10 @@ export function PatientRecommendationsSection({
   );
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card">
+    <section className="rounded-xl border border-border/70 bg-slate-50/60">
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="text-sm font-semibold text-foreground">{tx("Рекомендации", "Empfehlungen")}</h3>
           <Badge variant="outline" className="rounded-full text-[11px]">{recommendations.length}</Badge>
         </div>
@@ -1765,6 +1781,408 @@ function ClinicalWrapper({
   );
 }
 
+function PatientLabHistoryTable({
+  rows,
+  canManage,
+  tx,
+  onEdit,
+  onDelete,
+}: {
+  rows: PatientLabResult[];
+  canManage: boolean;
+  tx: Bilingual;
+  onEdit: (row: PatientLabResult) => void;
+  onDelete: (row: PatientLabResult) => void;
+}) {
+  const columns = useMemo<ColumnDef<PatientLabResult>[]>(
+    () => [
+      {
+        id: "measured_at",
+        label: tx("Дата", "Datum"),
+        accessor: (row) => row.measured_at,
+        width: 190,
+        render: (row) => (
+          <span className={datePillClass}>
+            {patientVitalDateTime(row.measured_at, row.measured_at, row.measured_at_precision)}
+          </span>
+        ),
+      },
+      {
+        id: "result",
+        label: tx("Значение", "Wert"),
+        accessor: (row) => row.result_text,
+        width: 120,
+        align: "left",
+        render: (row) => (
+          <span
+            className={cn(
+              "font-mono font-semibold tabular-nums",
+              row.abnormal_flag === "normal" && "text-emerald-700",
+              (row.abnormal_flag === "low"
+                || row.abnormal_flag === "high"
+                || row.abnormal_flag === "abnormal")
+                && "text-rose-700",
+            )}
+          >
+            {row.result_text}
+          </span>
+        ),
+      },
+      {
+        id: "unit",
+        label: tx("Единица", "Einheit"),
+        accessor: (row) => row.unit,
+        width: 110,
+        render: (row) => <span className="text-muted-foreground">{row.unit || "—"}</span>,
+      },
+      {
+        id: "reference",
+        label: tx("Референс", "Referenz"),
+        accessor: (row) => row.reference_text,
+        width: 170,
+        render: (row) => <span className="text-muted-foreground">{row.reference_text || "—"}</span>,
+      },
+      {
+        id: "source",
+        label: tx("Источник", "Quelle"),
+        accessor: (row) => row.source_document_name ?? row.recorded_by_name,
+        width: 320,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <div className="min-w-0 text-muted-foreground">
+            <span className="block truncate" title={row.source_document_name ?? undefined}>
+              {row.source_document_name ?? row.recorded_by_name ?? tx("Ручной ввод", "Manuelle Eingabe")}
+              {row.source_country ? ` · ${row.source_country}` : ""}
+              {row.source_page ? ` · S. ${row.source_page}` : ""}
+            </span>
+            <PatientLabCorrectionMetadata item={row} tx={tx} />
+          </div>
+        ),
+      },
+    ],
+    [tx],
+  );
+
+  return (
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowId={(row) => row.id}
+      density="compact"
+      disableRowHover
+      rowHeightOverrides={{ comfortable: 52, compact: 46, condensed: 40 }}
+      rowActions={canManage ? (row) => (
+        <div className="flex items-center justify-end gap-1">
+          <PatientLabResultEditAction
+            label={tx("Исправить", "Korrigieren")}
+            onEdit={() => onEdit(row)}
+          />
+          <PatientLabResultDeleteAction
+            label={tx("Удалить", "Löschen")}
+            onDelete={() => onDelete(row)}
+          />
+        </div>
+      ) : undefined}
+      rowActionsLabel={tx("Действия", "Aktionen")}
+      rowActionsWidth={80}
+      className="rounded-none border-0 bg-white shadow-none"
+      footer={
+        <span className="tabular-nums">
+          {rows.length} {tx("результатов", "Ergebnisse")}
+        </span>
+      }
+    />
+  );
+}
+
+function PatientVitalsHistoryTable({
+  rows,
+  canManage,
+  tx,
+  onEdit,
+  onDelete,
+}: {
+  rows: PatientVitalMeasurement[];
+  canManage: boolean;
+  tx: Bilingual;
+  onEdit: (row: PatientVitalMeasurement) => void;
+  onDelete: (row: PatientVitalMeasurement) => void;
+}) {
+  const notSet = tx("Не указано", "Nicht gesetzt");
+  const value = (number: number | null | undefined, suffix = "", maximumFractionDigits = 1) => {
+    const formatted = formatVitalNumber(number, { maximumFractionDigits });
+    return formatted ? `${formatted}${suffix}` : "—";
+  };
+  const columns = useMemo<ColumnDef<PatientVitalMeasurement>[]>(
+    () => [
+      {
+        id: "measured_at",
+        label: tx("Дата", "Datum"),
+        accessor: (row) => row.measured_at,
+        width: 180,
+        render: (row) => (
+          <span className={datePillClass}>
+            {patientVitalDateTime(row.measured_at, notSet, row.measured_at_precision)}
+          </span>
+        ),
+      },
+      {
+        id: "blood_pressure",
+        label: tx("АД", "RR"),
+        accessor: (row) => row.bp_systolic,
+        width: 100,
+        align: "right",
+        render: (row) => (
+          <span className="font-mono tabular-nums">
+            {row.bp_systolic != null && row.bp_diastolic != null
+              ? `${value(row.bp_systolic, "", 0)}/${value(row.bp_diastolic, "", 0)}`
+              : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "heart_rate",
+        label: tx("ЧСС", "Herzfrequenz"),
+        accessor: (row) => row.heart_rate,
+        width: 100,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.heart_rate, "", 0)}</span>,
+      },
+      {
+        id: "temperature",
+        label: tx("Темп.", "Temp."),
+        accessor: (row) => row.temperature_c,
+        width: 100,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.temperature_c, " °C")}</span>,
+      },
+      {
+        id: "oxygen_saturation",
+        label: "SpO₂",
+        accessor: (row) => row.oxygen_saturation,
+        width: 90,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.oxygen_saturation, " %")}</span>,
+      },
+      {
+        id: "respiratory_rate",
+        label: tx("ЧД", "AF"),
+        accessor: (row) => row.respiratory_rate,
+        width: 90,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.respiratory_rate, " /min", 0)}</span>,
+      },
+      {
+        id: "weight",
+        label: tx("Вес", "Gewicht"),
+        accessor: (row) => row.weight_kg,
+        width: 100,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.weight_kg, " kg")}</span>,
+      },
+      {
+        id: "height",
+        label: tx("Рост", "Größe"),
+        accessor: (row) => row.height_cm,
+        width: 100,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.height_cm, " cm")}</span>,
+      },
+      {
+        id: "bmi",
+        label: "BMI",
+        accessor: (row) => row.bmi,
+        width: 80,
+        align: "right",
+        render: (row) => <span className="font-mono tabular-nums">{value(row.bmi)}</span>,
+      },
+      {
+        id: "source",
+        label: tx("Источник", "Quelle"),
+        accessor: (row) => row.source_document_name ?? row.recorded_by_name,
+        width: 300,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <div className="min-w-0 text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate">
+                {row.source_document_name ?? row.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
+                {row.source_page ? ` · S. ${row.source_page}` : ""}
+              </span>
+              {patientVitalIsImported(row) ? (
+                <Badge variant="outline" className="shrink-0 rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-800">
+                  {tx("Из документа", "Aus Dokument")}
+                </Badge>
+              ) : null}
+            </div>
+            {row.notes ? <p className="truncate text-[11px]" title={row.notes}>{row.notes}</p> : null}
+          </div>
+        ),
+      },
+    ],
+    [notSet, tx],
+  );
+
+  return (
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowId={(row) => row.id}
+      density="compact"
+      disableRowHover
+      rowHeightOverrides={{ comfortable: 56, compact: 50, condensed: 42 }}
+      rowActions={canManage ? (row) => (
+        patientVitalIsImported(row) ? null : (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="size-7 rounded-md p-0"
+              aria-label={tx("Редактировать", "Bearbeiten")}
+              title={tx("Редактировать", "Bearbeiten")}
+              onClick={() => onEdit(row)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="size-7 rounded-md p-0 text-destructive"
+              aria-label={tx("Удалить показатель", "Vitalwert löschen")}
+              title={tx("Удалить показатель", "Vitalwert löschen")}
+              onClick={() => onDelete(row)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </>
+        )
+      ) : undefined}
+      rowActionsLabel={tx("Действия", "Aktionen")}
+      rowActionsWidth={88}
+      className="rounded-lg border-border/60 bg-white shadow-none"
+    />
+  );
+}
+
+function PatientRiskScoresTable({
+  rows,
+  canManage,
+  tx,
+  onEdit,
+  onDelete,
+}: {
+  rows: PatientRiskScore[];
+  canManage: boolean;
+  tx: Bilingual;
+  onEdit: (row: PatientRiskScore) => void;
+  onDelete: (row: PatientRiskScore) => void;
+}) {
+  const notSet = tx("Не указано", "Nicht gesetzt");
+  const columns = useMemo<ColumnDef<PatientRiskScore>[]>(
+    () => [
+      {
+        id: "computed_at",
+        label: tx("Дата", "Datum"),
+        accessor: (row) => row.computed_at,
+        width: 180,
+        render: (row) => (
+          <span className={datePillClass}>{patientVitalDateTime(row.computed_at, notSet)}</span>
+        ),
+      },
+      {
+        id: "score_type",
+        label: tx("Тип", "Typ"),
+        accessor: (row) => patientRiskScoreTypeLabel(row.score_type, tx),
+        width: 190,
+        render: (row) => (
+          <span className="font-medium text-foreground">{patientRiskScoreTypeLabel(row.score_type, tx)}</span>
+        ),
+      },
+      {
+        id: "score_value",
+        label: tx("Оценка риска", "Risikowert"),
+        accessor: (row) => row.score_value,
+        width: 130,
+        align: "right",
+        render: (row) => {
+          const score = formatVitalNumber(row.score_value) ?? notSet;
+          const scale = row.scale_max != null ? formatVitalNumber(row.scale_max) : null;
+          return <span className="font-mono font-semibold tabular-nums">{scale ? `${score} / ${scale}` : score}</span>;
+        },
+      },
+      {
+        id: "interpretation",
+        label: tx("Интерпретация", "Interpretation"),
+        accessor: (row) => row.interpretation,
+        width: 280,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <span className="block truncate text-muted-foreground" title={row.interpretation ?? undefined}>
+            {row.interpretation || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "source",
+        label: tx("Источник", "Quelle"),
+        accessor: (row) => row.source ?? row.recorded_by_name,
+        width: 240,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <div className="min-w-0 text-muted-foreground">
+            <p className="truncate" title={row.source ?? undefined}>{row.source || "—"}</p>
+            <p className="truncate text-[11px]">
+              {tx("Записал", "Erfasst von")}: {row.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
+            </p>
+          </div>
+        ),
+      },
+    ],
+    [notSet, tx],
+  );
+
+  return (
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowId={(row) => row.id}
+      density="compact"
+      rowHeightOverrides={{ comfortable: 56, compact: 50, condensed: 42 }}
+      rowActions={canManage ? (row) => (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="size-7 rounded-md p-0"
+            aria-label={tx("Редактировать", "Bearbeiten")}
+            title={tx("Редактировать", "Bearbeiten")}
+            onClick={() => onEdit(row)}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="size-7 rounded-md p-0 text-destructive"
+            aria-label={tx("Удалить риск-скор", "Risikoscore löschen")}
+            title={tx("Удалить риск-скор", "Risikoscore löschen")}
+            onClick={() => onDelete(row)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </>
+      ) : undefined}
+      rowActionsLabel={tx("Действия", "Aktionen")}
+      rowActionsWidth={88}
+      className="rounded-lg border-border/60 bg-white shadow-none"
+    />
+  );
+}
+
 function medicationHistoryText(snapshot: Record<string, unknown>, key: string) {
   const value = snapshot[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -1816,16 +2234,17 @@ function MedicationHistoryTree({
   };
 
   return (
-    <section className="rounded-xl border border-border/70 bg-card">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
+    <section className="rounded-xl border border-border/70 bg-slate-50/60">
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">
               {tx("Дерево історії медикаментів", "Medikationsverlauf")}
             </h3>
             <CountBadge>{series.length} {tx("ліній", "Serien")}</CountBadge>
           </div>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+          <p className="mt-0.5 max-w-3xl text-xs leading-4 text-muted-foreground">
             {tx(
               "Кожна лінія показує поточний стан і незмінну хронологію OCR-документів, схем та статусів.",
               "Jede Serie zeigt den aktuellen Stand und die unveränderliche Chronologie aus OCR-Dokumenten, Schemata und Statuswechseln.",
@@ -1837,7 +2256,7 @@ function MedicationHistoryTree({
         </Badge>
       </header>
 
-      <div className="space-y-3 p-4 lg:p-5">
+      <div className="space-y-2 p-3">
         {series.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-5 py-8 text-sm text-muted-foreground">
             {tx(
@@ -1862,13 +2281,13 @@ function MedicationHistoryTree({
           return (
             <details
               key={group.key}
-              open={index < 3}
-              className="group rounded-xl border border-border/70 bg-background shadow-sm"
+              open={index === 0}
+              className="group rounded-lg border border-border/60 bg-white"
             >
-              <summary className="grid cursor-pointer list-none gap-4 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:px-5 [&::-webkit-details-marker]:hidden">
+              <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-base font-semibold text-foreground">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="truncate text-sm font-semibold text-foreground">
                       {current?.handelsname || group.identity || tx("Медикамент", "Medikament")}
                     </p>
                     {current?.wirkstoff && current.handelsname ? (
@@ -1880,50 +2299,50 @@ function MedicationHistoryTree({
                       </Badge>
                     ) : null}
                   </div>
-                  <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
+                  <p className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
                     {currentRegimen || tx("Поточна схема відсутня", "Kein aktuelles Schema")}
                   </p>
                 </div>
-                <div className="flex items-center gap-3 sm:justify-end">
+                <div className="flex items-center gap-2 sm:justify-end">
                   <span className="text-xs text-muted-foreground">
                     {group.events.length} {tx("подій", "Ereignisse")}
                   </span>
-                  <span aria-hidden className="text-lg text-muted-foreground transition-transform group-open:rotate-90">›</span>
+                  <span aria-hidden className="text-base text-muted-foreground transition-transform group-open:rotate-90">›</span>
                 </div>
               </summary>
 
-              <div className="border-t border-border/60 p-4 lg:p-5">
+              <div className="border-t border-border/50 p-3">
                 {current ? (
-                  <div className="mb-4 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="mb-2.5 grid gap-2 rounded-lg border border-emerald-200/80 bg-emerald-50/40 p-3 sm:grid-cols-2 xl:grid-cols-4">
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Поточний стан", "Aktueller Stand")}</p>
-                      <p className="mt-1 text-sm font-semibold text-foreground">{current.status}</p>
+                      <p className="mt-0.5 text-xs font-semibold text-foreground">{current.status}</p>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Схема", "Schema")}</p>
-                      <p className="mt-1 break-words text-sm text-foreground">{currentRegimen || "—"}</p>
+                      <p className="mt-0.5 break-words text-xs text-foreground">{currentRegimen || "—"}</p>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Дата джерела", "Quelldatum")}</p>
-                      <p className="mt-1 text-sm text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
+                      <p className="mt-0.5 text-xs text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
                     </div>
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Країна", "Land")}</p>
-                      <p className="mt-1 text-sm text-foreground">{current.source_country || "—"}</p>
+                      <p className="mt-0.5 text-xs text-foreground">{current.source_country || "—"}</p>
                     </div>
                   </div>
                 ) : null}
 
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {group.events.map((event) => {
                     const action = actionMeta(event.event_type);
                     const regimen = medicationHistoryRegimen(event.new_value);
                     const status = medicationHistoryText(event.new_value, "status");
                     return (
-                      <article key={event.id} className="rounded-xl border border-border/60 bg-card px-4 py-4">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
+                      <article key={event.id} className="rounded-lg border border-border/50 bg-white px-3 py-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <Badge variant="outline" className={cn("rounded-full text-[10px]", action.tone)}>
                                 {action.label}
                               </Badge>
@@ -1932,7 +2351,7 @@ function MedicationHistoryTree({
                               </span>
                               {status ? <span className="text-xs text-muted-foreground">{status}</span> : null}
                             </div>
-                            <p className="mt-2 break-words text-sm font-medium leading-6 text-foreground">
+                            <p className="mt-1 break-words text-xs font-medium leading-5 text-foreground">
                               {regimen || tx("Схема не вказана", "Kein Schema angegeben")}
                             </p>
                           </div>
@@ -1947,16 +2366,16 @@ function MedicationHistoryTree({
                           </div>
                         </div>
                         {event.reviewed_by_name ? (
-                          <p className="mt-2 text-[11px] text-muted-foreground">
+                            <p className="mt-1.5 text-[11px] text-muted-foreground">
                             {tx("Перевірив", "Geprüft von")}: {event.reviewed_by_name}
                           </p>
                         ) : null}
                         {event.source_raw_text ? (
-                          <details className="mt-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                          <details className="mt-2 rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5">
                             <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">
                               {tx("OCR-фрагмент", "OCR-Quelltext")}
                             </summary>
-                            <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground">
+                            <p className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-foreground">
                               {event.source_raw_text}
                             </p>
                           </details>
@@ -2037,6 +2456,8 @@ export function PatientClinicalTab({
   const [version, setVersion] = useState(0);
   const [vitalsSheetOpen, setVitalsSheetOpen] = useState(false);
   const [vitalsEditor, setVitalsEditor] = useState<PatientVitalMeasurement | null>(null);
+  const [labResultEditor, setLabResultEditor] = useState<PatientLabResult | null>(null);
+  const [labResultDeleteTarget, setLabResultDeleteTarget] = useState<PatientLabResult | null>(null);
   const [riskScoreSheetOpen, setRiskScoreSheetOpen] = useState(false);
   const [riskScoreEditor, setRiskScoreEditor] = useState<PatientRiskScore | null>(null);
   const [vitalDeleteTarget, setVitalDeleteTarget] = useState<PatientVitalMeasurement | null>(null);
@@ -2868,6 +3289,8 @@ export function PatientClinicalTab({
       <ClinicalSection<ClinicalProcedure>
         title={tx("Терапия / Процедуры", "Therapie / Eingriffe")}
         items={procedures}
+        sectionClassName="bg-slate-50/60"
+        rowClassName="border-border/40 bg-white"
         blank={blankProcedure}
         isValid={(p) => p.label.trim() !== ""}
         canManage={canManage}
@@ -2969,6 +3392,8 @@ export function PatientClinicalTab({
       {/* ---- Verlauf ---- */}
       <ClinicalSection<ClinicalVerlaufEntry>
         title={tx("Течение", "Verlauf")}
+        sectionClassName="bg-slate-50/60"
+        rowClassName="border-border/40 bg-white"
         items={verlauf}
         blank={blankVerlaufEntry}
         isValid={(item) => item.note.trim() !== ""}
@@ -3034,6 +3459,8 @@ export function PatientClinicalTab({
       {/* ---- Medications (Medikationsplan) ---- */}
       <ClinicalSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
+        sectionClassName="bg-slate-50/60"
+        rowClassName="border-border/40 bg-white"
         items={medications}
         blank={blankMedication}
         isValid={(m) =>
@@ -3365,6 +3792,8 @@ export function PatientClinicalTab({
       {/* ---- Examinations / Befunde ---- */}
       <ClinicalSection<ClinicalExamination>
         title={tx("Обследования", "Befunde")}
+        sectionClassName="bg-slate-50/60"
+        rowClassName="border-border/40 bg-white"
         items={visibleExaminations}
         blank={blankExamination}
         isValid={(e) => e.title.trim() !== ""}
@@ -3511,9 +3940,10 @@ export function PatientClinicalTab({
       />
 
       {/* ---- Impfstatus (patient state, moved from the case per RFC D4) ---- */}
-      <section className="rounded-xl border border-border/70 bg-card">
+      <section className="rounded-xl border border-border/70 bg-slate-50/60">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">
               {tx("Статус вакцинации", "Impfstatus")}
             </h3>
@@ -3530,7 +3960,7 @@ export function PatientClinicalTab({
           <textarea
             value={impfstatusDraft}
             onChange={(e) => setImpfstatusDraft(e.target.value)}
-            className={cn(inputClass, "h-24 py-2")}
+            className={cn(inputClass, "h-24 border-border/40 bg-white py-2")}
             placeholder={tx(
               "Свободный текст о статусе вакцинации",
               "Freitext zum Impfstatus",
@@ -3574,9 +4004,10 @@ export function PatientClinicalTab({
 
       {/* ---- Vitalwerte-Verlauf (moved from Profile) ---- */}
       {(canManage || vitalsHistory.length > 0) && (
-      <section className="rounded-xl border border-border/70 bg-card">
+      <section className="rounded-xl border border-border/70 bg-slate-50/60">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("История показателей", "Vitalwerte-Verlauf")}</h3>
             <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
               {vitalsHistory.length} {tx("Записи", "Einträge")}
@@ -3608,109 +4039,16 @@ export function PatientClinicalTab({
           ) : null}
 
           {vitalsHistory.length > 0 ? (
-            <div className="max-h-[540px] overflow-y-auto rounded-lg border border-border/70 bg-card">
-              {vitalsHistory.map((item) => {
-                const notSet = tx("Не указано", "Nicht gesetzt");
-                const vitalMetrics = patientVitalMetrics(item, {
-                  bloodPressure: tx("АД", "RR"),
-                  heartRate: tx("ЧСС", "Herzfrequenz"),
-                  temperature: tx("Темп.", "Temp."),
-                  oxygenSaturation: "SpO₂",
-                  respiratoryRate: tx("ЧД", "AF"),
-                  weight: tx("Вес", "Gewicht"),
-                  height: tx("Рост", "Größe"),
-                  bmi: "BMI",
-                  notSet,
-                });
-
-                return (
-                  <div
-                    key={item.id}
-                    className="grid gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] md:items-center"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <p className="text-sm font-medium text-foreground">
-                          {patientVitalDateTime(item.measured_at, notSet, item.measured_at_precision)}
-                        </p>
-                        <span className="size-1 rounded-full bg-muted-foreground/35" />
-                        <span className="text-xs text-muted-foreground">
-                          {tx("Записал", "Erfasst von")} {item.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
-                        </span>
-                        {item.source_document_name || item.source_page ? (
-                          <Badge variant="outline" className="rounded-full border-pink-200 bg-pink-50 text-[10px] text-pink-800">
-                            {item.source_document_name ?? tx("Медицинский документ", "Medizinisches Dokument")}
-                            {item.source_page ? ` · S. ${item.source_page}` : ""}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      {item.notes ? (
-                        <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
-                          {item.notes}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex min-w-0 items-start gap-2 md:justify-end">
-                      <div className="flex min-w-0 flex-wrap gap-1.5 md:justify-end">
-                        {vitalMetrics.length > 0 ? (
-                          vitalMetrics.map((metric) => (
-                            <span
-                              key={metric.label}
-                              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs text-muted-foreground"
-                            >
-                              <span>{metric.label}</span>
-                              <span className="font-medium text-foreground">{metric.value}</span>
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{notSet}</span>
-                        )}
-                      </div>
-                      {canManage && !patientVitalIsImported(item) ? (
-                        <div className="flex shrink-0 items-center gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="size-7 rounded-md p-0"
-                            aria-label={tx("Редактировать", "Bearbeiten")}
-                            title={tx("Редактировать", "Bearbeiten")}
-                            onClick={() => {
-                              setVitalsEditor(item);
-                              setVitalsSheetOpen(true);
-                            }}
-                          >
-                            <Pencil className="size-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="size-7 rounded-md p-0 text-destructive"
-                            aria-label={tx("Удалить показатель", "Vitalwert löschen")}
-                            title={tx("Удалить показатель", "Vitalwert löschen")}
-                            onClick={() => setVitalDeleteTarget(item)}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
-                      ) : patientVitalIsImported(item) ? (
-                        <Badge
-                          variant="outline"
-                          className="shrink-0 rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-800"
-                          title={tx(
-                            "Импортированная запись остаётся неизменяемым снимком документа.",
-                            "Der importierte Eintrag bleibt ein unveränderlicher Dokument-Snapshot.",
-                          )}
-                        >
-                          {tx("Из документа", "Aus Dokument")}
-                        </Badge>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <PatientVitalsHistoryTable
+              rows={vitalsHistory}
+              canManage={canManage}
+              tx={tx}
+              onEdit={(item) => {
+                setVitalsEditor(item);
+                setVitalsSheetOpen(true);
+              }}
+              onDelete={setVitalDeleteTarget}
+            />
           ) : null}
         </div>
       </section>
@@ -3718,19 +4056,12 @@ export function PatientClinicalTab({
 
       {/* ---- Structured laboratory history ---- */}
       {canManage || labResults.length > 0 ? (
-        <section className="rounded-xl border border-border/70 bg-card">
+        <section className="rounded-xl border border-border/70 bg-slate-50/60">
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
-                <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
-              </div>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {tx(
-                  "Каждый показатель хранит отдельную хронологию; новые OCR-документы добавляют новые даты.",
-                  "Jeder Parameter hat einen eigenen Verlauf; neue OCR-Dokumente ergänzen weitere Messzeitpunkte.",
-                )}
-              </p>
+            <div className="flex items-center gap-2">
+              <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+              <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
+              <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
             </div>
             <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
               {labResults.length} {tx("результатов", "Ergebnisse")}
@@ -3752,75 +4083,47 @@ export function PatientClinicalTab({
                 <details
                   key={group.name.toLocaleLowerCase()}
                   open={groupIndex < 3}
-                  className="group rounded-lg border border-border/60 bg-background"
+                  className="group overflow-hidden rounded-lg border border-border/60 bg-white"
                 >
-                  <summary className="grid cursor-pointer list-none gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
+                  <summary className="grid cursor-pointer list-none gap-2 px-3 py-3 sm:grid-cols-[minmax(220px,300px)_140px_minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{group.name}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">
-                        {group.rows.length} {tx("измерений", "Messungen")} · {patientVitalDateTime(
-                          latest.measured_at,
-                          latest.measured_at,
-                          latest.measured_at_precision,
-                        )}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground">
+                          {group.rows.length} {tx("измерений", "Messungen")}
+                        </span>
+                        <span className={datePillClass}>
+                          {patientVitalDateTime(
+                            latest.measured_at,
+                            latest.measured_at,
+                            latest.measured_at_precision,
+                          )}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 sm:justify-end">
-                      <span className="text-sm font-semibold text-foreground">
+                    <div className="flex items-center">
+                      <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
                         {latest.result_text}{latest.unit ? ` ${latest.unit}` : ""}
                       </span>
+                    </div>
+                    <div className="flex items-center">
                       {latest.abnormal_flag !== "normal" && latest.abnormal_flag !== "unknown" ? (
                         <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
                           {tx("Отклонение", "Auffällig")}
                         </Badge>
                       ) : null}
-                      <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
                     </div>
+                    <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
                   </summary>
 
-                  <div className="overflow-x-auto border-t border-border/60">
-                    <table className="w-full min-w-[760px] text-left text-xs">
-                      <thead className="bg-muted/30 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2">{tx("Дата", "Datum")}</th>
-                          <th className="px-3 py-2">{tx("Значение", "Wert")}</th>
-                          <th className="px-3 py-2">{tx("Единица", "Einheit")}</th>
-                          <th className="px-3 py-2">{tx("Референс", "Referenz")}</th>
-                          <th className="px-3 py-2">{tx("Источник", "Quelle")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.rows.map((row) => (
-                          <tr key={row.id} className="border-t border-border/50 first:border-t-0">
-                            <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">
-                              {patientVitalDateTime(
-                                row.measured_at,
-                                row.measured_at,
-                                row.measured_at_precision,
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <span className={cn(
-                                "font-semibold",
-                                row.abnormal_flag === "normal" && "text-emerald-700",
-                                (row.abnormal_flag === "low" || row.abnormal_flag === "high" || row.abnormal_flag === "abnormal") && "text-rose-700",
-                              )}>
-                                {row.result_text}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground">{row.unit || "—"}</td>
-                            <td className="px-3 py-2.5 text-muted-foreground">{row.reference_text || "—"}</td>
-                            <td className="max-w-[260px] px-3 py-2.5 text-muted-foreground">
-                              <span className="block truncate" title={row.source_document_name ?? undefined}>
-                                {row.source_document_name ?? row.recorded_by_name ?? tx("Ручной ввод", "Manuelle Eingabe")}
-                                {row.source_country ? ` · ${row.source_country}` : ""}
-                                {row.source_page ? ` · S. ${row.source_page}` : ""}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="border-t border-border/50 bg-white">
+                    <PatientLabHistoryTable
+                      rows={group.rows}
+                      canManage={canManage}
+                      tx={tx}
+                      onEdit={setLabResultEditor}
+                      onDelete={setLabResultDeleteTarget}
+                    />
                   </div>
                 </details>
               );
@@ -3831,9 +4134,10 @@ export function PatientClinicalTab({
 
       {/* ---- Risikoscores (moved from Profile) ---- */}
       {(canManage || riskScores.length > 0) && (
-      <section className="rounded-xl border border-border/70 bg-card">
+      <section className="rounded-xl border border-border/70 bg-slate-50/60">
         <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
           <div className="flex items-center gap-2">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("Риск-скоры", "Risikoscores")}</h3>
             <CountBadge>
               {riskScores.length} {tx("Оценки", "Scores")}
@@ -3863,108 +4167,51 @@ export function PatientClinicalTab({
               )}
             </EmptyCell>
           ) : (
-            <div className="space-y-1.5">
-              {riskScores.map((score) => {
-                const notSet = tx("Не указано", "Nicht gesetzt");
-                const scoreValue = formatVitalNumber(score.score_value) ?? notSet;
-                const scaleValue = score.scale_max != null ? formatVitalNumber(score.scale_max) : null;
-                const riskValue = scaleValue ? `${scoreValue} / ${scaleValue}` : scoreValue;
-
-                return (
-                  <article
-                    key={score.id}
-                    className="grid items-start gap-2.5 rounded-lg border border-border/50 bg-background px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-                  >
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="min-w-0 max-w-full break-words text-sm font-medium text-foreground">
-                          {patientRiskScoreTypeLabel(score.score_type, tx)}
-                        </span>
-                        <span className={datePillClass}>
-                          {patientVitalDateTime(score.computed_at, notSet)}
-                        </span>
-                      </div>
-
-                      <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
-                        <span className="inline-flex items-baseline gap-1">
-                          <span className="text-muted-foreground">{tx("Записал", "Erfasst von")}</span>
-                          <span className="font-medium text-foreground">
-                            {score.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
-                          </span>
-                        </span>
-                        {score.source ? (
-                          <span className="inline-flex min-w-0 items-baseline gap-1">
-                            <span className="shrink-0 text-muted-foreground">{tx("Источник", "Quelle")}</span>
-                            <span className="min-w-0 break-words font-medium text-foreground">{score.source}</span>
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {score.interpretation ? (
-                        <p className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
-                          {score.interpretation}
-                        </p>
-                      ) : null}
-
-                      {score.inputs ? (
-                        <details className="mt-2 rounded-lg border border-border/50 bg-card">
-                          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground [&::-webkit-details-marker]:hidden">
-                            {tx("Входные данные", "Eingaben")}
-                          </summary>
-                          <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border/50 px-3 py-2 text-[12px] text-foreground">
-                            {JSON.stringify(score.inputs, null, 2)}
-                          </pre>
-                        </details>
-                      ) : null}
-                    </div>
-
-                    <div className="flex shrink-0 items-start gap-2 sm:justify-end">
-                      <div className="sm:text-right">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          {tx("Оценка риска", "Risikowert")}
-                        </span>
-                        <p className="mt-1 text-base font-semibold leading-none text-foreground">
-                          {riskValue}
-                        </p>
-                      </div>
-                      {canManage ? (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="size-7 rounded-md p-0"
-                            aria-label={tx("Редактировать", "Bearbeiten")}
-                            title={tx("Редактировать", "Bearbeiten")}
-                            onClick={() => {
-                              setRiskScoreEditor(score);
-                              setRiskScoreSheetOpen(true);
-                            }}
-                          >
-                            <Pencil className="size-3.5" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="size-7 rounded-md p-0 text-destructive"
-                            aria-label={tx("Удалить риск-скор", "Risikoscore löschen")}
-                            title={tx("Удалить риск-скор", "Risikoscore löschen")}
-                            onClick={() => setRiskScoreDeleteTarget(score)}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            <PatientRiskScoresTable
+              rows={riskScores}
+              canManage={canManage}
+              tx={tx}
+              onEdit={(score) => {
+                setRiskScoreEditor(score);
+                setRiskScoreSheetOpen(true);
+              }}
+              onDelete={setRiskScoreDeleteTarget}
+            />
           )}
         </div>
       </section>
       )}
+
+      {canManage ? (
+        <>
+          <PatientLabResultEditSheet
+            patientId={patientId}
+            item={labResultEditor}
+            open={Boolean(labResultEditor)}
+            onOpenChange={(open) => {
+              if (!open) setLabResultEditor(null);
+            }}
+            onSaved={(updated) => {
+              setLabResults((current) =>
+                current.map((item) => (item.id === updated.id ? updated : item)),
+              );
+              setLabResultEditor(null);
+            }}
+          />
+          <PatientLabResultDeleteSheet
+            patientId={patientId}
+            item={labResultDeleteTarget}
+            open={Boolean(labResultDeleteTarget)}
+            onOpenChange={(open) => {
+              if (!open) setLabResultDeleteTarget(null);
+            }}
+            onDeleted={(labResultId) => {
+              setLabResults((current) => current.filter((item) => item.id !== labResultId));
+              setLabResultDeleteTarget(null);
+            }}
+          />
+        </>
+      ) : null}
 
       {canManage && vitalsSheetOpen ? (
         <Suspense fallback={null}>

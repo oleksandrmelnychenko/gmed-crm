@@ -47,6 +47,7 @@ pdf-extract = "0.12.0"
 ttf-parser = "0.25.1"
 datamatrix = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+unicode-normalization = "0.1"
 
 secrecy = { version = "0.10", features = ["serde"] }
 gmed-domain = { path = "../domain" }

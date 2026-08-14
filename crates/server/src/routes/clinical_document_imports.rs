@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::collections::{HashMap, HashSet};
 use tower_http::set_header::SetResponseHeaderLayer;
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 use crate::access;
@@ -142,18 +143,146 @@ struct ParsedDocumentSubject {
 enum SubjectIdentityDecision {
     Missing,
     Matched,
+    MatchedGermanVariant,
     NameConfirmationRequired,
     ConfirmedNameMismatch,
+    ProfileIncomplete,
+    ConfirmedProfileIncomplete,
     HardMismatch,
     ConfirmationWithoutSubject,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IdentityNameMatch {
+    Unavailable,
+    Exact,
+    GermanVariant,
+    Mismatch,
+}
+
+fn is_identity_title_token(value: &str) -> bool {
+    matches!(
+        value,
+        "dr"
+            | "dent"
+            | "dipl"
+            | "doktor"
+            | "frau"
+            | "fraulein"
+            | "fräulein"
+            | "habil"
+            | "herr"
+            | "herrn"
+            | "med"
+            | "md"
+            | "nat"
+            | "patient"
+            | "patientin"
+            | "phd"
+            | "prof"
+            | "professor"
+            | "rer"
+    )
+}
+
 fn normalize_identity_name(value: &str) -> String {
-    value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    let lowered = value.nfkc().collect::<String>().to_lowercase();
+    let normalized_punctuation = lowered
+        .chars()
+        .map(|character| match character {
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' | '\'' | '`' | '´' | '.' | ',' | '_'
+            | '-' | '/' => ' ',
+            _ => character,
+        })
+        .collect::<String>();
+    let mut tokens = normalized_punctuation.split_whitespace().peekable();
+    while tokens.peek().is_some_and(|token| is_identity_title_token(token)) {
+        tokens.next();
+    }
+    tokens.collect::<Vec<_>>().join(" ")
+}
+
+fn german_canonical_identity_name(value: &str) -> String {
+    normalize_identity_name(value)
+        .replace('ä', "ae")
+        .replace('ö', "oe")
+        .replace('ü', "ue")
+        .replace('ß', "ss")
+}
+
+fn compare_identity_name_part(subject: Option<&str>, patient: &str) -> IdentityNameMatch {
+    let subject = subject.map(normalize_identity_name).unwrap_or_default();
+    let patient = normalize_identity_name(patient);
+    if subject.is_empty() || patient.is_empty() {
+        return IdentityNameMatch::Unavailable;
+    }
+    if subject == patient {
+        return IdentityNameMatch::Exact;
+    }
+    if german_canonical_identity_name(&subject) == german_canonical_identity_name(&patient) {
+        return IdentityNameMatch::GermanVariant;
+    }
+    IdentityNameMatch::Mismatch
+}
+
+fn compare_identity_names(
+    subject_first_name: Option<&str>,
+    subject_last_name: Option<&str>,
+    patient_first_name: &str,
+    patient_last_name: &str,
+) -> IdentityNameMatch {
+    let first = compare_identity_name_part(subject_first_name, patient_first_name);
+    let last = compare_identity_name_part(subject_last_name, patient_last_name);
+    let has_both_names = subject_first_name
+        .is_some_and(|value| !normalize_identity_name(value).is_empty())
+        && subject_last_name.is_some_and(|value| !normalize_identity_name(value).is_empty())
+        && !normalize_identity_name(patient_first_name).is_empty()
+        && !normalize_identity_name(patient_last_name).is_empty();
+
+    if has_both_names
+        && (matches!(first, IdentityNameMatch::Mismatch)
+            || matches!(last, IdentityNameMatch::Mismatch))
+    {
+        let swapped_first = compare_identity_name_part(subject_first_name, patient_last_name);
+        let swapped_last = compare_identity_name_part(subject_last_name, patient_first_name);
+        if matches!(
+            swapped_first,
+            IdentityNameMatch::Exact | IdentityNameMatch::GermanVariant
+        ) && matches!(
+            swapped_last,
+            IdentityNameMatch::Exact | IdentityNameMatch::GermanVariant
+        ) {
+            return IdentityNameMatch::GermanVariant;
+        }
+    }
+
+    if matches!(first, IdentityNameMatch::Mismatch)
+        || matches!(last, IdentityNameMatch::Mismatch)
+    {
+        IdentityNameMatch::Mismatch
+    } else if matches!(first, IdentityNameMatch::GermanVariant)
+        || matches!(last, IdentityNameMatch::GermanVariant)
+    {
+        IdentityNameMatch::GermanVariant
+    } else if matches!(first, IdentityNameMatch::Exact)
+        && matches!(last, IdentityNameMatch::Exact)
+    {
+        IdentityNameMatch::Exact
+    } else {
+        IdentityNameMatch::Unavailable
+    }
+}
+
+fn patient_identity_name_is_placeholder(first_name: &str, last_name: &str) -> bool {
+    let first_name = normalize_identity_name(first_name).replace(' ', "");
+    let last_name = normalize_identity_name(last_name).replace(' ', "");
+    if first_name.is_empty() || last_name.is_empty() {
+        return true;
+    }
+    first_name.len() >= 4
+        && last_name.len() >= 4
+        && first_name.chars().all(|character| character.is_ascii_digit())
+        && last_name.chars().all(|character| character.is_ascii_digit())
 }
 
 fn normalize_patient_identifier(value: &str) -> String {
@@ -172,16 +301,30 @@ fn evaluate_document_subject_identity(
     patient_identifier: &str,
     patient_identity_confirmed: bool,
 ) -> SubjectIdentityDecision {
+    let patient_profile_incomplete =
+        patient_identity_name_is_placeholder(patient_first_name, patient_last_name);
     let Some(subject_value) = stored_draft.get("subject") else {
         return if patient_identity_confirmed {
-            SubjectIdentityDecision::ConfirmationWithoutSubject
+            if patient_profile_incomplete {
+                SubjectIdentityDecision::ConfirmedProfileIncomplete
+            } else {
+                SubjectIdentityDecision::ConfirmationWithoutSubject
+            }
+        } else if patient_profile_incomplete {
+            SubjectIdentityDecision::ProfileIncomplete
         } else {
             SubjectIdentityDecision::Missing
         };
     };
     if subject_value.is_null() {
         return if patient_identity_confirmed {
-            SubjectIdentityDecision::ConfirmationWithoutSubject
+            if patient_profile_incomplete {
+                SubjectIdentityDecision::ConfirmedProfileIncomplete
+            } else {
+                SubjectIdentityDecision::ConfirmationWithoutSubject
+            }
+        } else if patient_profile_incomplete {
+            SubjectIdentityDecision::ProfileIncomplete
         } else {
             SubjectIdentityDecision::Missing
         };
@@ -223,8 +366,6 @@ fn evaluate_document_subject_identity(
     if identifier_namespace == "gmed_patient_id" && identifier_mismatch {
         return SubjectIdentityDecision::HardMismatch;
     }
-    let external_identifier_mismatch =
-        identifier_namespace == "source_document" && identifier_mismatch;
     let subject_first_name = subject
         .first_name
         .as_deref()
@@ -233,21 +374,30 @@ fn evaluate_document_subject_identity(
         .last_name
         .as_deref()
         .filter(|value| !value.trim().is_empty());
-    let first_name_mismatch = subject_first_name.is_some_and(|value| {
-        normalize_identity_name(value) != normalize_identity_name(patient_first_name)
-    });
-    let last_name_mismatch = subject_last_name.is_some_and(|value| {
-        normalize_identity_name(value) != normalize_identity_name(patient_last_name)
-    });
-    if first_name_mismatch || last_name_mismatch || external_identifier_mismatch {
+    let name_match = compare_identity_names(
+        subject_first_name,
+        subject_last_name,
+        patient_first_name,
+        patient_last_name,
+    );
+    if patient_profile_incomplete {
+        return if patient_identity_confirmed {
+            SubjectIdentityDecision::ConfirmedProfileIncomplete
+        } else {
+            SubjectIdentityDecision::ProfileIncomplete
+        };
+    }
+    if matches!(name_match, IdentityNameMatch::Mismatch) {
         if patient_identity_confirmed {
             SubjectIdentityDecision::ConfirmedNameMismatch
         } else {
             SubjectIdentityDecision::NameConfirmationRequired
         }
+    } else if matches!(name_match, IdentityNameMatch::GermanVariant) {
+        SubjectIdentityDecision::MatchedGermanVariant
     } else if subject_birth_date.is_some()
         || (identifier_namespace == "gmed_patient_id" && subject_identifier.is_some())
-        || (subject_first_name.is_some() && subject_last_name.is_some())
+        || matches!(name_match, IdentityNameMatch::Exact)
     {
         SubjectIdentityDecision::Matched
     } else if patient_identity_confirmed {
@@ -2305,6 +2455,46 @@ fn validate_reviewed_draft(
     Ok(reviewed)
 }
 
+fn validate_medication_review_decisions(
+    reviewed_draft: &Value,
+) -> Result<(), axum::response::Response> {
+    let Some(candidates) = reviewed_draft.get("candidates").and_then(Value::as_array) else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "reviewed_draft.candidates must be an array",
+        ));
+    };
+    for candidate in candidates.iter().filter(|candidate| {
+        candidate.get("target").and_then(Value::as_str) == Some("medication")
+    }) {
+        let selected = candidate
+            .get("selected")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let decision = candidate
+            .get("normalized")
+            .and_then(Value::as_object)
+            .and_then(|normalized| normalized.get("medication_review_decision"))
+            .and_then(Value::as_str);
+        match (selected, decision) {
+            (false, Some("exclude")) | (true, Some("include") | None) => {}
+            (false, _) => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Every unselected medication candidate must be explicitly reviewed and excluded",
+                ));
+            }
+            (true, _) => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Selected medication candidate has an inconsistent review decision",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn reviewed_candidates_match_parser_draft(
     reviewed: &[ReviewedCandidate],
     stored_draft: &Value,
@@ -2570,8 +2760,16 @@ async fn prepare_import(
                         "Document subject is unavailable; explicit patient identity confirmation is required",
                     );
                 }
+                SubjectIdentityDecision::ProfileIncomplete => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "Target patient profile has no reliable name; explicit patient identity confirmation is required",
+                    );
+                }
                 SubjectIdentityDecision::ConfirmationWithoutSubject
                 | SubjectIdentityDecision::Matched
+                | SubjectIdentityDecision::MatchedGermanVariant
+                | SubjectIdentityDecision::ConfirmedProfileIncomplete
                 | SubjectIdentityDecision::ConfirmedNameMismatch => {}
             }
             if let Err(error) = sqlx::query(
@@ -2623,6 +2821,9 @@ async fn prepare_import(
     if status != "review_required" {
         return err(StatusCode::CONFLICT, "Import is not ready to be prepared");
     }
+    if let Err(response) = validate_medication_review_decisions(&body.reviewed_draft) {
+        return response;
+    }
     if !reviewed_candidates_match_parser_draft(&reviewed, &stored_draft) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2655,8 +2856,16 @@ async fn prepare_import(
                 "Document subject is unavailable; explicit patient identity confirmation is required",
             );
         }
+        SubjectIdentityDecision::ProfileIncomplete => {
+            return err(
+                StatusCode::CONFLICT,
+                "Target patient profile has no reliable name; explicit patient identity confirmation is required",
+            );
+        }
         SubjectIdentityDecision::ConfirmationWithoutSubject
         | SubjectIdentityDecision::Matched
+        | SubjectIdentityDecision::MatchedGermanVariant
+        | SubjectIdentityDecision::ConfirmedProfileIncomplete
         | SubjectIdentityDecision::ConfirmedNameMismatch => {}
     }
     if let Err(error) = sqlx::query(
@@ -3115,6 +3324,7 @@ mod tests {
     use super::{
         ImportedMedicationRequest, SubjectIdentityDecision, evaluate_document_subject_identity,
         is_manual_candidate_id, normalize_imported_medication, validate_clinical_import_file,
+        validate_medication_review_decisions,
     };
     use serde_json::json;
 
@@ -3127,6 +3337,62 @@ mod tests {
             "63f71b6c-b947-4ef3-87ef-c0e6eed6ceeb"
         ));
         assert!(!is_manual_candidate_id("manual:not-a-uuid"));
+    }
+
+    #[test]
+    fn medication_omission_requires_an_explicit_review_decision() {
+        let unresolved = json!({
+            "candidates": [{
+                "id": "med-1",
+                "target": "medication",
+                "value": "Metformin",
+                "selected": false,
+                "normalized": { "wirkstoff": "Metformin" }
+            }]
+        });
+        assert!(validate_medication_review_decisions(&unresolved).is_err());
+
+        let excluded = json!({
+            "candidates": [{
+                "id": "med-1",
+                "target": "medication",
+                "value": "Metformin",
+                "selected": false,
+                "normalized": {
+                    "wirkstoff": "Metformin",
+                    "medication_review_decision": "exclude"
+                }
+            }]
+        });
+        assert!(validate_medication_review_decisions(&excluded).is_ok());
+    }
+
+    #[test]
+    fn medication_selection_rejects_an_inconsistent_exclude_decision() {
+        let selected = json!({
+            "candidates": [{
+                "id": "med-1",
+                "target": "medication",
+                "value": "Metformin",
+                "selected": true,
+                "normalized": { "wirkstoff": "Metformin" }
+            }]
+        });
+        assert!(validate_medication_review_decisions(&selected).is_ok());
+
+        let inconsistent = json!({
+            "candidates": [{
+                "id": "med-1",
+                "target": "medication",
+                "value": "Metformin",
+                "selected": true,
+                "normalized": {
+                    "wirkstoff": "Metformin",
+                    "medication_review_decision": "exclude"
+                }
+            }]
+        });
+        assert!(validate_medication_review_decisions(&inconsistent).is_err());
     }
 
     #[test]
@@ -3234,7 +3500,7 @@ mod tests {
                 "PT-123",
                 false,
             ),
-            SubjectIdentityDecision::NameConfirmationRequired
+            SubjectIdentityDecision::Matched
         );
         assert_eq!(
             evaluate_document_subject_identity(
@@ -3245,7 +3511,7 @@ mod tests {
                 "PT-123",
                 true,
             ),
-            SubjectIdentityDecision::ConfirmedNameMismatch
+            SubjectIdentityDecision::Matched
         );
 
         let legacy_external_identifier = json!({
@@ -3267,7 +3533,118 @@ mod tests {
                 "PT-123",
                 false,
             ),
-            SubjectIdentityDecision::NameConfirmationRequired
+            SubjectIdentityDecision::Missing
+        );
+    }
+
+    #[test]
+    fn document_subject_identity_recognizes_german_name_variants_without_fuzzy_matching() {
+        let patient_birth_date = chrono::NaiveDate::from_ymd_opt(1990, 1, 1).unwrap();
+        for (subject_first, subject_last, patient_first, patient_last) in [
+            ("Joerg", "Mueller", "Jörg", "Müller"),
+            ("Prof. Dr. Karl-Heinz", "Gross", "Karl Heinz", "Groß"),
+            ("Anna", "Goethe", "Anna", "Göthe"),
+            ("Müller", "Anna", "Anna", "Mueller"),
+        ] {
+            let subject = json!({
+                "subject": {
+                    "status": "extracted",
+                    "conflict": false,
+                    "first_name": subject_first,
+                    "last_name": subject_last,
+                    "birth_date": "1990-01-01",
+                    "patient_identifier": null,
+                    "patient_identifier_namespace": "source_document"
+                }
+            });
+            assert_eq!(
+                evaluate_document_subject_identity(
+                    &subject,
+                    patient_first,
+                    patient_last,
+                    patient_birth_date,
+                    "PT-123",
+                    false,
+                ),
+                SubjectIdentityDecision::MatchedGermanVariant
+            );
+        }
+
+        for (subject_first, subject_last, patient_first, patient_last) in [
+            ("Jorg", "Muller", "Jörg", "Müller"),
+            ("Oleksandr", "Schmidt", "Alexander", "Schmidt"),
+        ] {
+            let subject = json!({
+                "subject": {
+                    "status": "extracted",
+                    "conflict": false,
+                    "first_name": subject_first,
+                    "last_name": subject_last,
+                    "birth_date": "1990-01-01",
+                    "patient_identifier": null,
+                    "patient_identifier_namespace": "source_document"
+                }
+            });
+            assert_eq!(
+                evaluate_document_subject_identity(
+                    &subject,
+                    patient_first,
+                    patient_last,
+                    patient_birth_date,
+                    "PT-123",
+                    false,
+                ),
+                SubjectIdentityDecision::NameConfirmationRequired
+            );
+        }
+    }
+
+    #[test]
+    fn placeholder_patient_profile_requires_explicit_confirmation() {
+        let patient_birth_date = chrono::NaiveDate::from_ymd_opt(2005, 7, 4).unwrap();
+        let subject = json!({
+            "subject": {
+                "status": "extracted",
+                "conflict": false,
+                "first_name": "Anna",
+                "last_name": "Müller",
+                "birth_date": "2005-07-04",
+                "patient_identifier": null,
+                "patient_identifier_namespace": "source_document"
+            }
+        });
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &subject,
+                "789578",
+                "789578",
+                patient_birth_date,
+                "P-20260704-0020",
+                false,
+            ),
+            SubjectIdentityDecision::ProfileIncomplete
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &subject,
+                "789578",
+                "789578",
+                patient_birth_date,
+                "P-20260704-0020",
+                true,
+            ),
+            SubjectIdentityDecision::ConfirmedProfileIncomplete
+        );
+        assert_eq!(
+            evaluate_document_subject_identity(
+                &json!({ "subject": null }),
+                "789578",
+                "789578",
+                patient_birth_date,
+                "P-20260704-0020",
+                false,
+            ),
+            SubjectIdentityDecision::ProfileIncomplete
         );
     }
 
