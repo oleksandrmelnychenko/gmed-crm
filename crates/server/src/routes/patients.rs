@@ -741,11 +741,9 @@ fn parse_localized_lab_number_candidates(token: &str) -> Vec<f64> {
     } else {
         ("", token.strip_prefix('+').unwrap_or(token))
     };
-    let (mantissa, exponent) = unsigned
-        .find(|character| matches!(character, 'e' | 'E'))
-        .map_or((unsigned, ""), |index| {
-            (&unsigned[..index], &unsigned[index..])
-        });
+    let (mantissa, exponent) = unsigned.find(['e', 'E']).map_or((unsigned, ""), |index| {
+        (&unsigned[..index], &unsigned[index..])
+    });
     let dots = mantissa.matches('.').count();
     let commas = mantissa.matches(',').count();
     let mut normalized = Vec::new();
@@ -1038,15 +1036,15 @@ fn validate_patient_lab_result_correction_consistency(
                     "result_text comparator does not match comparator",
                 ));
             }
-            if let Some(unit_suffix) = unit_suffix {
-                if lab.unit.as_deref().is_none_or(|unit| {
+            if let Some(unit_suffix) = unit_suffix
+                && lab.unit.as_deref().is_none_or(|unit| {
                     normalized_lab_unit(unit) != normalized_lab_unit(&unit_suffix)
-                }) {
-                    return Err(err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "result_text unit does not match unit",
-                    ));
-                }
+                })
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "result_text unit does not match unit",
+                ));
             }
             if annotated_flag.is_some_and(|expected| lab.abnormal_flag != expected) {
                 return Err(err(
