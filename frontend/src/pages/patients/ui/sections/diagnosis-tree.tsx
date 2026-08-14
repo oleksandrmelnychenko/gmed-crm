@@ -18,6 +18,7 @@ import { specializationLabelForItem } from "@/pages/providers/model/specializati
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { ClinicalRecordSource } from "./clinical-record-source";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -593,6 +594,7 @@ function DiagnosisRow({
               {tx("Назначил", "Verordnet von")}: {attribution}
             </p>
           ) : null}
+          <ClinicalRecordSource item={node} tx={tx} />
         </div>
         {(node.specializations ?? []).length > 0 ? (
           <div

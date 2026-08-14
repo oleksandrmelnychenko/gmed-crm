@@ -25,6 +25,7 @@ export type PatientLabResultCorrectionForm = {
   measuredAt: string;
   measuredAtPrecision: "date" | "datetime";
   panel: string;
+  laboratoryName: string;
   analyteName: string;
   resultText: string;
   numericResult: string;
@@ -42,6 +43,7 @@ export type PatientLabCorrectionValidationError =
   | "analyte_name"
   | "result_text"
   | "panel"
+  | "laboratory_name"
   | "numeric_result"
   | "unit"
   | "reference_text"
@@ -83,6 +85,7 @@ export function patientLabCorrectionFormFromResult(
         : toLocalDateTimeInput(result.measured_at),
     measuredAtPrecision,
     panel: result.panel ?? "",
+    laboratoryName: result.laboratory_name ?? "",
     analyteName: result.analyte_name,
     resultText: result.result_text,
     numericResult: numberToForm(result.numeric_result),
@@ -320,6 +323,7 @@ export function buildPatientLabCorrectionPayload(
   const resultText = canonicalizeDisplayedLabComparator(form.resultText.trim());
   const correctionNote = form.correctionNote.trim();
   const panel = form.panel.trim();
+  const laboratoryName = form.laboratoryName.trim();
   const unit = form.unit.trim();
   const referenceText = form.referenceText.trim();
 
@@ -338,6 +342,7 @@ export function buildPatientLabCorrectionPayload(
   if (!analyteName || analyteName.length > 160) return { ok: false, error: "analyte_name" };
   if (!resultText || resultText.length > 160) return { ok: false, error: "result_text" };
   if (panel.length > 160) return { ok: false, error: "panel" };
+  if (laboratoryName.length > 160) return { ok: false, error: "laboratory_name" };
   if (unit.length > 80) return { ok: false, error: "unit" };
   if (referenceText.length > 240) return { ok: false, error: "reference_text" };
   if (!correctionNote || Array.from(correctionNote).length > 500) {
@@ -395,6 +400,7 @@ export function buildPatientLabCorrectionPayload(
     payload: {
       measured_at: measuredAt,
       panel: panel || null,
+      laboratory_name: laboratoryName || null,
       analyte_name: analyteName,
       result_text: resultText,
       numeric_result: numericResult.value,
@@ -415,6 +421,7 @@ function validationErrorLabel(error: PatientLabCorrectionValidationError, tx: Bi
     analyte_name: tx("Название показателя обязательно (до 160 символов).", "Der Parametername ist erforderlich (max. 160 Zeichen)."),
     result_text: tx("Отображаемое значение обязательно (до 160 символов).", "Der Anzeigewert ist erforderlich (max. 160 Zeichen)."),
     panel: tx("Название панели не должно превышать 160 символов.", "Der Panelname darf höchstens 160 Zeichen enthalten."),
+    laboratory_name: tx("Название лаборатории не должно превышать 160 символов.", "Der Laborname darf höchstens 160 Zeichen enthalten."),
     numeric_result: tx("Числовое значение имеет неверный формат.", "Der numerische Wert hat ein ungültiges Format."),
     unit: tx("Единица не должна превышать 80 символов.", "Die Einheit darf höchstens 80 Zeichen enthalten."),
     reference_text: tx("Референс не должен превышать 240 символов.", "Die Referenz darf höchstens 240 Zeichen enthalten."),
@@ -625,6 +632,16 @@ export function PatientLabResultEditSheet({
                 />
               </Field>
             </div>
+            <Field label={tx("Лаборатория", "Labor")} htmlFor="lab-correction-laboratory">
+              <Input
+                id="lab-correction-laboratory"
+                value={form.laboratoryName}
+                onChange={(event) => patchForm({ laboratoryName: event.target.value })}
+                className={inputClass}
+                maxLength={160}
+                placeholder={tx("Например: SYNLAB Berlin", "Zum Beispiel: SYNLAB Berlin")}
+              />
+            </Field>
             <div className="grid gap-3 md:grid-cols-2">
               <Field label={tx("Показатель", "Parameter")} htmlFor="lab-correction-analyte">
                 <Input

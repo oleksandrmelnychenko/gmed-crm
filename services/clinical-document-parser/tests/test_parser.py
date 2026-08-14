@@ -333,6 +333,35 @@ Nierenfunktion\nGeschätzte GFR\t> 60\tml/min\t(> 60)
     assert rows[3].source.page == 1
 
 
+def test_laboratory_report_attributes_explicit_organisation_to_every_observation() -> None:
+    text = """
+SYNLAB Medizinisches Versorgungszentrum Berlin GmbH
+Laborbefund vom 08.08.2026
+Parameter\tErgebnis\tEinheit\tReferenzbereich
+Leukozyten\t6,4\tG/l\t(3,7 - 9,9)
+CRP\t2,1\tmg/l\t(< 5,0)
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert len(rows) == 2
+    assert {row.normalized["laboratory_name"] for row in rows} == {
+        "SYNLAB Medizinisches Versorgungszentrum Berlin GmbH"
+    }
+
+
+def test_generic_laboratory_heading_is_not_used_as_organisation() -> None:
+    text = """
+Laborbefund vom 08.08.2026
+Parameter\tErgebnis\tEinheit\tReferenzbereich
+CRP\t2,1\tmg/l\t(< 5,0)
+"""
+
+    row = next(item for item in parse_clinical_text(text).candidates if item.target == "lab_result")
+
+    assert row.normalized["laboratory_name"] is None
+
+
 def test_german_ocr_lab_header_and_sidebar_noise_create_observations() -> None:
     text = """
 München, den 28.05.2026

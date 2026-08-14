@@ -17,6 +17,7 @@ function labResult(overrides: Partial<PatientLabResult> = {}): PatientLabResult 
     measured_at: "2026-08-10T00:00:00Z",
     measured_at_precision: "date",
     panel: "Blutbild",
+    laboratory_name: "SYNLAB Berlin",
     analyte_name: "Hämoglobin",
     result_text: "134",
     numeric_result: 134,
@@ -58,6 +59,7 @@ describe("lab result correction form", () => {
       payload: {
         measured_at: "2026-08-10",
         panel: "Blutbild",
+        laboratory_name: "SYNLAB Berlin",
         analyte_name: "Hämoglobin",
         result_text: "13,4",
         numeric_result: 13.4,

@@ -4,6 +4,7 @@ import type { PatientLabResult } from "@/pages/patients/model/detail-resource-ty
 export type PatientLabResultCorrectionPayload = {
   measured_at: string;
   panel: string | null;
+  laboratory_name: string | null;
   analyte_name: string;
   result_text: string;
   numeric_result: number | null;

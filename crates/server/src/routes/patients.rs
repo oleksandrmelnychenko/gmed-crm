@@ -454,6 +454,7 @@ pub(crate) fn normalize_patient_vital_measurement_payload(
 struct CreatePatientLabResultRequest {
     measured_at: String,
     panel: Option<String>,
+    laboratory_name: Option<String>,
     analyte_name: String,
     result_text: String,
     numeric_result: Option<f64>,
@@ -479,6 +480,7 @@ pub(crate) struct NormalizedPatientLabResult {
     measured_at: chrono::DateTime<chrono::Utc>,
     measured_at_precision: &'static str,
     panel: Option<String>,
+    laboratory_name: Option<String>,
     analyte_name: String,
     result_text: String,
     numeric_result: Option<f64>,
@@ -525,6 +527,8 @@ pub(crate) fn normalize_patient_lab_result_payload(
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid result_text"));
     }
     let panel = normalize_optional_text(body.panel, "panel", 160)?;
+    let laboratory_name =
+        normalize_optional_text(body.laboratory_name, "laboratory_name", 160)?;
     let unit = normalize_optional_text(body.unit, "unit", 80)?;
     let reference_text = normalize_optional_text(body.reference_text, "reference_text", 240)?;
     let source_candidate_id =
@@ -601,6 +605,7 @@ pub(crate) fn normalize_patient_lab_result_payload(
         measured_at,
         measured_at_precision,
         panel,
+        laboratory_name,
         analyte_name,
         result_text,
         numeric_result: body.numeric_result,
@@ -624,6 +629,7 @@ fn normalize_patient_lab_result_correction_payload(
     const EDITABLE_FIELDS: &[&str] = &[
         "measured_at",
         "panel",
+        "laboratory_name",
         "analyte_name",
         "result_text",
         "numeric_result",
@@ -3200,14 +3206,14 @@ async fn list_patient_lab_results(
 
     let rows = sqlx::query(
         r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
-                  lr.panel, lr.analyte_name, lr.result_text,
+                  lr.panel, lr.laboratory_name, lr.analyte_name, lr.result_text,
                   lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
                   lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
                   lr.source_page, lr.recorded_by, lr.created_at,
                   lr.corrected_at, lr.corrected_by, lr.correction_note,
                   u.name AS recorded_by_name, cu.name AS corrected_by_name,
-                  d.original_filename AS source_document_name
+                  COALESCE(d.original_filename, d.auto_name) AS source_document_name
            FROM patient_lab_results lr
            LEFT JOIN users u ON u.id = lr.recorded_by
            LEFT JOIN users cu ON cu.id = lr.corrected_by
@@ -3237,6 +3243,7 @@ fn patient_lab_result_json(row: &PgRow) -> Value {
         "measured_at": row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
         "measured_at_precision": row.get::<String, _>("measured_at_precision"),
         "panel": row.get::<Option<String>, _>("panel"),
+        "laboratory_name": row.get::<Option<String>, _>("laboratory_name"),
         "analyte_name": row.get::<String, _>("analyte_name"),
         "result_text": row.get::<String, _>("result_text"),
         "numeric_result": row.get::<Option<f64>, _>("numeric_result"),
@@ -3301,7 +3308,7 @@ async fn update_patient_lab_result(
         }
     };
     let previous = match sqlx::query(
-        r#"SELECT measured_at, measured_at_precision, panel, analyte_name, result_text,
+        r#"SELECT measured_at, measured_at_precision, panel, laboratory_name, analyte_name, result_text,
                   numeric_result, comparator, unit, reference_text, reference_low,
                   reference_high, abnormal_flag, source_country, source_document_id,
                   source_import_id, source_candidate_id, source_page,
@@ -3330,6 +3337,7 @@ async fn update_patient_lab_result(
         "measured_at": previous.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
         "measured_at_precision": previous.get::<String, _>("measured_at_precision"),
         "panel": previous.get::<Option<String>, _>("panel"),
+        "laboratory_name": previous.get::<Option<String>, _>("laboratory_name"),
         "analyte_name": previous.get::<String, _>("analyte_name"),
         "result_text": previous.get::<String, _>("result_text"),
         "numeric_result": previous.get::<Option<f64>, _>("numeric_result"),
@@ -3399,18 +3407,19 @@ async fn update_patient_lab_result(
            SET measured_at = $3,
                measured_at_precision = $4,
                panel = $5,
-               analyte_name = $6,
-               result_text = $7,
-               numeric_result = $8,
-               comparator = $9,
-               unit = $10,
-               reference_text = $11,
-               reference_low = $12,
-               reference_high = $13,
-               abnormal_flag = $14,
+               laboratory_name = $6,
+               analyte_name = $7,
+               result_text = $8,
+               numeric_result = $9,
+               comparator = $10,
+               unit = $11,
+               reference_text = $12,
+               reference_low = $13,
+               reference_high = $14,
+               abnormal_flag = $15,
                corrected_at = now(),
-               corrected_by = $15,
-               correction_note = $16,
+               corrected_by = $16,
+               correction_note = $17,
                updated_at = now()
            WHERE id = $1 AND patient_id = $2"#,
     )
@@ -3419,6 +3428,7 @@ async fn update_patient_lab_result(
     .bind(lab.measured_at)
     .bind(lab.measured_at_precision)
     .bind(&lab.panel)
+    .bind(&lab.laboratory_name)
     .bind(&lab.analyte_name)
     .bind(&lab.result_text)
     .bind(lab.numeric_result)
@@ -3442,14 +3452,14 @@ async fn update_patient_lab_result(
 
     let updated = match sqlx::query(
         r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
-                  lr.panel, lr.analyte_name, lr.result_text,
+                  lr.panel, lr.laboratory_name, lr.analyte_name, lr.result_text,
                   lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
                   lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
                   lr.source_page, lr.recorded_by, lr.created_at,
                   lr.corrected_at, lr.corrected_by, lr.correction_note,
                   u.name AS recorded_by_name, cu.name AS corrected_by_name,
-                  d.original_filename AS source_document_name
+                  COALESCE(d.original_filename, d.auto_name) AS source_document_name
            FROM patient_lab_results lr
            LEFT JOIN users u ON u.id = lr.recorded_by
            LEFT JOIN users cu ON cu.id = lr.corrected_by
@@ -3475,6 +3485,7 @@ async fn update_patient_lab_result(
         "measured_at": item["measured_at"],
         "measured_at_precision": item["measured_at_precision"],
         "panel": item["panel"],
+        "laboratory_name": item["laboratory_name"],
         "analyte_name": item["analyte_name"],
         "result_text": item["result_text"],
         "numeric_result": item["numeric_result"],
@@ -3558,7 +3569,7 @@ async fn delete_patient_lab_result(
         }
     };
     let previous = match sqlx::query(
-        r#"SELECT measured_at, measured_at_precision, panel, analyte_name, result_text,
+        r#"SELECT measured_at, measured_at_precision, panel, laboratory_name, analyte_name, result_text,
                   numeric_result, comparator, unit, reference_text, reference_low,
                   reference_high, abnormal_flag, source_country, source_document_id,
                   source_import_id, source_candidate_id, source_page,
@@ -3617,6 +3628,7 @@ async fn delete_patient_lab_result(
         "measured_at": previous.get::<chrono::DateTime<chrono::Utc>, _>("measured_at").to_rfc3339(),
         "measured_at_precision": previous.get::<String, _>("measured_at_precision"),
         "panel": previous.get::<Option<String>, _>("panel"),
+        "laboratory_name": previous.get::<Option<String>, _>("laboratory_name"),
         "analyte_name": previous.get::<String, _>("analyte_name"),
         "result_text": previous.get::<String, _>("result_text"),
         "numeric_result": previous.get::<Option<f64>, _>("numeric_result"),
@@ -3799,12 +3811,12 @@ async fn create_patient_lab_result(
 
     let row = match sqlx::query(
         r#"INSERT INTO patient_lab_results (
-                patient_id, measured_at, panel, analyte_name, result_text,
+                patient_id, measured_at, panel, laboratory_name, analyte_name, result_text,
                 numeric_result, comparator, unit, reference_text, reference_low,
                 reference_high, abnormal_flag, source_country, source_document_id,
                 source_import_id, source_candidate_id, source_page, recorded_by,
                 measured_at_precision
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
            ON CONFLICT (source_import_id, source_candidate_id)
              WHERE source_import_id IS NOT NULL AND source_candidate_id IS NOT NULL
            DO UPDATE SET updated_at = patient_lab_results.updated_at
@@ -3812,6 +3824,7 @@ async fn create_patient_lab_result(
                  patient_lab_results.patient_id,
                  patient_lab_results.measured_at,
                  patient_lab_results.panel,
+                 patient_lab_results.laboratory_name,
                  patient_lab_results.analyte_name,
                  patient_lab_results.result_text,
                  patient_lab_results.numeric_result,
@@ -3829,6 +3842,7 @@ async fn create_patient_lab_result(
                  EXCLUDED.patient_id,
                  EXCLUDED.measured_at,
                  EXCLUDED.panel,
+                 EXCLUDED.laboratory_name,
                  EXCLUDED.analyte_name,
                  EXCLUDED.result_text,
                  EXCLUDED.numeric_result,
@@ -3848,6 +3862,7 @@ async fn create_patient_lab_result(
     .bind(patient_uuid)
     .bind(lab.measured_at)
     .bind(&lab.panel)
+    .bind(&lab.laboratory_name)
     .bind(&lab.analyte_name)
     .bind(&lab.result_text)
     .bind(lab.numeric_result)
@@ -3942,7 +3957,7 @@ async fn list_patient_vitals(
                   vm.recorded_by,
                   vm.created_at,
                   u.name AS recorded_by_name,
-                  d.original_filename AS source_document_name
+                  COALESCE(d.original_filename, d.auto_name) AS source_document_name
            FROM patient_vital_measurements vm
            LEFT JOIN users u ON u.id = vm.recorded_by
            LEFT JOIN documents d ON d.id = vm.source_document_id
@@ -9895,6 +9910,8 @@ struct PatientMedicationInput {
 #[derive(Deserialize)]
 struct PatientExaminationInput {
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
     case_id: Option<String>,
     #[serde(default)]
     provider_id: Option<String>,
@@ -10029,6 +10046,9 @@ fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
         "beurteilung": row.get::<Option<String>, _>("beurteilung"),
         "red_flags": row.get::<Option<String>, _>("red_flags"),
+        "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
+        "source_document_name": row.try_get::<Option<String>, _>("source_document_name").unwrap_or_default(),
+        "source_import_id": row.try_get::<Option<Uuid>, _>("source_import_id").unwrap_or_default(),
         "specialization_ids": row.get::<Vec<Uuid>, _>("specialization_ids"),
         "specializations": row.get::<serde_json::Value, _>("specializations"),
         "anamnese_at": row.get::<chrono::DateTime<chrono::Utc>, _>("anamnese_at").to_rfc3339(),
@@ -10048,6 +10068,11 @@ fn verlauf_row_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "doctor_name": row.get::<Option<String>, _>("doctor_name"),
         "doctor_title": row.get::<Option<String>, _>("doctor_title"),
         "doctor_fachbereich": row.get::<Option<String>, _>("doctor_fachbereich"),
+        "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+        "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+        "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+        "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
+        "source_page": row.get::<Option<i32>, _>("source_page"),
         "occurred_on": row.get::<Option<chrono::NaiveDate>, _>("occurred_on").map(|value| value.to_string()),
         "note": row.get::<String, _>("note"),
     })
@@ -10235,6 +10260,8 @@ async fn get_patient_clinical(
         r#"SELECT d.id, d.case_id, d.parent_id, d.kind, d.label, d.icd_code, d.ops_code, d.grade, d.laterality,
                   d.status, d.certainty, d.chronifizierung, d.diagnosed_on, d.note, d.red_flags,
                   d.source_mode, d.external_clinic, d.external_doctor, d.external_country,
+                  d.source_document_id, d.source_import_id, d.source_candidate_id,
+                  COALESCE(dd.original_filename, dd.auto_name) AS source_document_name,
                   d.provider_id, p.name AS provider_name,
                   d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
                   d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title,
@@ -10244,6 +10271,7 @@ async fn get_patient_clinical(
            LEFT JOIN providers p ON p.id = d.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
            LEFT JOIN provider_doctors td ON td.id = d.treating_doctor_id
+           LEFT JOIN documents dd ON dd.id = d.source_document_id
            LEFT JOIN LATERAL (
                SELECT array_agg(ms.id ORDER BY pds.sort_order) AS specialization_ids,
                       jsonb_agg(
@@ -10283,11 +10311,13 @@ async fn get_patient_clinical(
                   m.medication_series_id, m.supersedes_medication_id,
                   m.regimen_fingerprint, m.source_country, m.source_date, m.source_page,
                   m.source_document_id, m.source_import_id, m.source_candidate_id,
+                  COALESCE(md.original_filename, md.auto_name) AS source_document_name,
                   m.provider_id, p.name AS provider_name,
                   m.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
            FROM patient_medications m
            LEFT JOIN providers p ON p.id = m.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
+           LEFT JOIN documents md ON md.id = m.source_document_id
            WHERE m.patient_id = $1 AND m.superseded_at IS NULL
            ORDER BY m.sort_order, m.created_at"#,
     )
@@ -10301,6 +10331,8 @@ async fn get_patient_clinical(
 
     let exam_rows = sqlx::query(
         r#"SELECT e.id, e.case_id, e.kind, e.title, e.performed_on, e.status, e.result, e.note, e.red_flags,
+                  e.source_document_id, e.source_import_id, e.source_candidate_id,
+                  COALESCE(ed.original_filename, ed.auto_name) AS source_document_name,
                   e.provider_id, p.name AS provider_name,
                   e.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
                   COALESCE(es.specialization_ids, ARRAY[]::uuid[]) AS specialization_ids,
@@ -10308,6 +10340,7 @@ async fn get_patient_clinical(
            FROM patient_examinations e
            LEFT JOIN providers p ON p.id = e.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
+           LEFT JOIN documents ed ON ed.id = e.source_document_id
            LEFT JOIN LATERAL (
                SELECT array_agg(ms.id ORDER BY pes.sort_order) AS specialization_ids,
                       jsonb_agg(
@@ -10363,6 +10396,10 @@ async fn get_patient_clinical(
                 "external_clinic": row.get::<Option<String>, _>("external_clinic"),
                 "external_doctor": row.get::<Option<String>, _>("external_doctor"),
                 "external_country": row.get::<Option<String>, _>("external_country"),
+                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
                 "doctor_id": row.get::<Option<Uuid>, _>("doctor_id"),
@@ -10416,6 +10453,7 @@ async fn get_patient_clinical(
                 "source_date": row.get::<Option<chrono::NaiveDate>, _>("source_date"),
                 "source_page": row.get::<Option<i32>, _>("source_page"),
                 "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
                 "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
                 "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
@@ -10441,6 +10479,10 @@ async fn get_patient_clinical(
                 "result": row.get::<Option<String>, _>("result"),
                 "note": row.get::<Option<String>, _>("note"),
                 "red_flags": row.get::<Option<String>, _>("red_flags"),
+                "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
+                "source_document_name": row.get::<Option<String>, _>("source_document_name"),
+                "source_import_id": row.get::<Option<Uuid>, _>("source_import_id"),
+                "source_candidate_id": row.get::<Option<String>, _>("source_candidate_id"),
                 "specialization_ids": row.get::<Vec<Uuid>, _>("specialization_ids"),
                 "specializations": row.get::<serde_json::Value, _>("specializations"),
                 "provider_id": row.get::<Option<Uuid>, _>("provider_id"),
@@ -10530,10 +10572,13 @@ async fn get_patient_clinical(
     let verlauf_rows = sqlx::query(
         r#"SELECT v.id, v.case_id, v.provider_id, p.name AS provider_name,
                   v.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
+                  v.source_document_id, v.source_import_id, v.source_candidate_id, v.source_page,
+                  COALESCE(vd.original_filename, vd.auto_name) AS source_document_name,
                   v.occurred_on, v.note
            FROM patient_clinical_verlauf v
            LEFT JOIN providers p ON p.id = v.provider_id
            LEFT JOIN provider_doctors dr ON dr.id = v.doctor_id
+           LEFT JOIN documents vd ON vd.id = v.source_document_id
            WHERE v.patient_id = $1
            ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
     )
@@ -10552,10 +10597,13 @@ async fn get_patient_clinical(
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
         r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
-                  n.beurteilung, n.red_flags, n.anamnese_at, n.is_active, n.created_at, n.updated_at,
+                  n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
+                  COALESCE(d.original_filename, d.auto_name) AS source_document_name,
+                  n.anamnese_at, n.is_active, n.created_at, n.updated_at,
                   COALESCE(ns.specialization_ids, ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(ns.specializations, '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
+           LEFT JOIN documents d ON d.id = n.source_document_id
            LEFT JOIN LATERAL (
                SELECT array_agg(ms.id ORDER BY pns.sort_order) AS specialization_ids,
                       jsonb_agg(
@@ -10925,19 +10973,33 @@ async fn save_patient_diagnoses(
         }
     };
     let merge_only = query.merge_only();
-    let existing_ids: HashSet<Uuid> = if merge_only {
-        match sqlx::query_scalar("SELECT id FROM patient_diagnoses WHERE patient_id = $1")
-            .bind(patient_uuid)
-            .fetch_all(&mut *tx)
-            .await
-        {
-            Ok(ids) => ids.into_iter().collect(),
-            Err(e) => {
-                tracing::error!(error = %e, patient_id = %patient_uuid, "load patient diagnosis ids");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-            }
+    let existing_provenance = match sqlx::query(
+        "SELECT id, source_document_id, source_import_id, source_candidate_id
+         FROM patient_diagnoses WHERE patient_id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<Uuid, _>("id"),
+                    (
+                        row.get::<Option<Uuid>, _>("source_document_id"),
+                        row.get::<Option<Uuid>, _>("source_import_id"),
+                        row.get::<Option<String>, _>("source_candidate_id"),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient diagnosis provenance");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-    } else {
+    };
+    if !merge_only {
         if let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
             .bind(patient_uuid)
             .execute(&mut *tx)
@@ -10946,8 +11008,7 @@ async fn save_patient_diagnoses(
             tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        HashSet::new()
-    };
+    }
     // Items arrive ordered parent-before-child. We map each item's client id
     // (cid) onto the freshly generated server uuid so a child can resolve its
     // parent_id from parent_cid, and track each node's kind to enforce nesting.
@@ -10960,7 +11021,7 @@ async fn save_patient_diagnoses(
             .id
             .as_deref()
             .and_then(|value| Uuid::parse_str(value.trim()).ok())
-            .filter(|value| existing_ids.contains(value));
+            .filter(|value| existing_provenance.contains_key(value));
         let Some(label) = clinical_opt_text(item.label) else {
             continue;
         };
@@ -11100,14 +11161,19 @@ async fn save_patient_diagnoses(
             }
         };
         let new_id = row_id.unwrap_or_else(Uuid::new_v4);
+        let (source_document_id, source_import_id, source_candidate_id) = row_id
+            .and_then(|id| existing_provenance.get(&id).cloned())
+            .unwrap_or((None, None, None));
         if let Err(e) = sqlx::query(
             r#"INSERT INTO patient_diagnoses AS diagnosis
                     (id, patient_id, case_id, parent_id, provider_id, doctor_id, kind, label,
                      icd_code, ops_code, certainty, chronifizierung, grade, laterality, status,
                      diagnosed_on, note, red_flags, sort_order, source_mode, external_clinic, external_doctor,
-                     external_country, treating_doctor_id, treating_none)
+                     external_country, treating_doctor_id, treating_none,
+                     source_document_id, source_import_id, source_candidate_id)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                       $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+                       $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+                       $26, $27, $28)
                ON CONFLICT (id) DO UPDATE SET
                    case_id = EXCLUDED.case_id,
                    parent_id = EXCLUDED.parent_id,
@@ -11171,6 +11237,9 @@ async fn save_patient_diagnoses(
         })
         .bind(treating_doctor_id)
         .bind(treating_none)
+        .bind(source_document_id)
+        .bind(source_import_id)
+        .bind(source_candidate_id)
         .execute(&mut *tx)
         .await
         {
@@ -11565,6 +11634,32 @@ async fn save_patient_examinations(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let existing_provenance = match sqlx::query(
+        "SELECT id, source_document_id, source_import_id, source_candidate_id
+         FROM patient_examinations WHERE patient_id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<Uuid, _>("id"),
+                    (
+                        row.get::<Option<Uuid>, _>("source_document_id"),
+                        row.get::<Option<Uuid>, _>("source_import_id"),
+                        row.get::<Option<String>, _>("source_candidate_id"),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient examination provenance");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = sqlx::query("DELETE FROM patient_examinations WHERE patient_id = $1")
         .bind(patient_uuid)
         .execute(&mut *tx)
@@ -11576,6 +11671,11 @@ async fn save_patient_examinations(
     let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
+        let row_id = item
+            .id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .filter(|value| existing_provenance.contains_key(value));
         let Some(title) = clinical_opt_text(item.title) else {
             continue;
         };
@@ -11614,11 +11714,16 @@ async fn save_patient_examinations(
                 Ok(pair) => pair,
                 Err(resp) => return resp,
             };
+        let examination_id = row_id.unwrap_or_else(Uuid::new_v4);
+        let (source_document_id, source_import_id, source_candidate_id) = row_id
+            .and_then(|id| existing_provenance.get(&id).cloned())
+            .unwrap_or((None, None, None));
         let examination_id = match sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO patient_examinations (patient_id, case_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, red_flags, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            "INSERT INTO patient_examinations (id, patient_id, case_id, provider_id, doctor_id, kind, title, performed_on, status, result, note, red_flags, sort_order, source_document_id, source_import_id, source_candidate_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              RETURNING id",
         )
+        .bind(examination_id)
         .bind(patient_uuid)
         .bind(item_case_id)
         .bind(provider_id)
@@ -11631,6 +11736,9 @@ async fn save_patient_examinations(
         .bind(clinical_opt_text(item.note))
         .bind(clinical_opt_text(item.red_flags))
         .bind(saved)
+        .bind(source_document_id)
+        .bind(source_import_id)
+        .bind(source_candidate_id)
         .fetch_one(&mut *tx)
         .await
         {
@@ -11992,7 +12100,9 @@ async fn save_patient_narrative(
     // consistent with what was committed.
     let saved_row = match sqlx::query(
         r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
-                  n.beurteilung, n.red_flags, n.anamnese_at, n.is_active, n.created_at, n.updated_at,
+                  n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
+                  MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
+                  n.anamnese_at, n.is_active, n.created_at, n.updated_at,
                   COALESCE(array_agg(ms.id ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
@@ -12000,6 +12110,7 @@ async fn save_patient_narrative(
                       'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
+           LEFT JOIN documents d ON d.id = n.source_document_id
            LEFT JOIN patient_narrative_specializations pns ON pns.narrative_id = n.id
            LEFT JOIN medical_specializations ms ON ms.id = pns.specialization_id
            WHERE n.id = $1
@@ -12090,7 +12201,9 @@ async fn list_patient_narrative_history(
 
     let rows = match sqlx::query(
         r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
-                  n.beurteilung, n.red_flags, n.anamnese_at, n.is_active, n.created_at, n.updated_at,
+                  n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
+                  MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
+                  n.anamnese_at, n.is_active, n.created_at, n.updated_at,
                   COALESCE(array_agg(ms.id ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
@@ -12098,6 +12211,7 @@ async fn list_patient_narrative_history(
                       'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
+           LEFT JOIN documents d ON d.id = n.source_document_id
            LEFT JOIN patient_narrative_specializations pns ON pns.narrative_id = n.id
            LEFT JOIN medical_specializations ms ON ms.id = pns.specialization_id
            WHERE n.patient_id = $1
@@ -12188,7 +12302,9 @@ async fn delete_patient_narrative(
 
     let active_row = match sqlx::query(
         r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
-                  n.beurteilung, n.red_flags, n.anamnese_at, n.is_active, n.created_at, n.updated_at,
+                  n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
+                  MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
+                  n.anamnese_at, n.is_active, n.created_at, n.updated_at,
                   COALESCE(array_agg(ms.id ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
@@ -12196,6 +12312,7 @@ async fn delete_patient_narrative(
                       'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
+           LEFT JOIN documents d ON d.id = n.source_document_id
            LEFT JOIN patient_narrative_specializations pns ON pns.narrative_id = n.id
            LEFT JOIN medical_specializations ms ON ms.id = pns.specialization_id
            WHERE n.patient_id = $1 AND n.is_active = true
@@ -12228,7 +12345,8 @@ async fn delete_patient_narrative(
                    LIMIT 1
                )
                RETURNING id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                         beurteilung, red_flags, anamnese_at, is_active, created_at, updated_at,
+                         beurteilung, red_flags, source_document_id, source_import_id,
+                         anamnese_at, is_active, created_at, updated_at,
                          COALESCE((SELECT array_agg(ms.id ORDER BY pns.sort_order)
                                    FROM patient_narrative_specializations pns
                                    JOIN medical_specializations ms ON ms.id = pns.specialization_id
@@ -12321,6 +12439,8 @@ struct PatientVerlaufSave {
 #[derive(Deserialize)]
 struct PatientVerlaufItem {
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
     case_id: Option<String>,
     #[serde(default)]
     provider_id: Option<String>,
@@ -12366,6 +12486,33 @@ async fn save_patient_verlauf(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+    let existing_provenance = match sqlx::query(
+        "SELECT id, source_document_id, source_import_id, source_candidate_id, source_page
+         FROM patient_clinical_verlauf WHERE patient_id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<Uuid, _>("id"),
+                    (
+                        row.get::<Option<Uuid>, _>("source_document_id"),
+                        row.get::<Option<Uuid>, _>("source_import_id"),
+                        row.get::<Option<String>, _>("source_candidate_id"),
+                        row.get::<Option<i32>, _>("source_page"),
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient verlauf provenance");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = sqlx::query("DELETE FROM patient_clinical_verlauf WHERE patient_id = $1")
         .bind(patient_uuid)
         .execute(&mut *tx)
@@ -12378,6 +12525,11 @@ async fn save_patient_verlauf(
     let mut used_cases: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
     let mut saved = 0i32;
     for item in body.items {
+        let row_id = item
+            .id
+            .as_deref()
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .filter(|value| existing_provenance.contains_key(value));
         let Some(note) = clinical_opt_text(item.note) else {
             continue;
         };
@@ -12401,11 +12553,17 @@ async fn save_patient_verlauf(
                 Err(resp) => return resp,
             };
 
+        let saved_id = row_id.unwrap_or_else(Uuid::new_v4);
+        let (source_document_id, source_import_id, source_candidate_id, source_page) = row_id
+            .and_then(|id| existing_provenance.get(&id).cloned())
+            .unwrap_or((None, None, None, None));
         if let Err(e) = sqlx::query(
             r#"INSERT INTO patient_clinical_verlauf
-                   (patient_id, case_id, provider_id, doctor_id, occurred_on, note, sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+                   (id, patient_id, case_id, provider_id, doctor_id, occurred_on, note, sort_order,
+                    source_document_id, source_import_id, source_candidate_id, source_page)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
         )
+        .bind(saved_id)
         .bind(patient_uuid)
         .bind(item_case_id)
         .bind(provider_id)
@@ -12413,6 +12571,10 @@ async fn save_patient_verlauf(
         .bind(occurred_on)
         .bind(&note)
         .bind(saved)
+        .bind(source_document_id)
+        .bind(source_import_id)
+        .bind(source_candidate_id)
+        .bind(source_page)
         .execute(&mut *tx)
         .await
         {

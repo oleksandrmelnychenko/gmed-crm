@@ -108,6 +108,7 @@ import { AnamneseSection } from "./anamnese-section";
 import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
+import { ClinicalRecordSource } from "./clinical-record-source";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
   collectAttachedClinicalSpecializations,
@@ -676,7 +677,7 @@ export function PatientMedicationTable({
   tx: Bilingual;
 }) {
   const sections = groupedClinicalItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
-  const columnCount = canManage ? 12 : 11;
+  const columnCount = canManage ? 13 : 12;
   const doseCell = (value: string | null) => (value && value.trim() ? value.trim() : "");
 
   // Design-system table styling (soft borders, muted header, hover rows).
@@ -687,7 +688,7 @@ export function PatientMedicationTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border/40 bg-white">
-      <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
+      <table className="w-full min-w-[1200px] border-collapse text-left text-xs">
         <thead className="border-b border-border bg-muted/40">
           <tr>
             <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
@@ -701,6 +702,7 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Ед.", "Einheit")}</th>
             <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
+            <th scope="col" className={headCell}>{tx("Источник", "Quelle")}</th>
             {canManage ? (
               <th scope="col" className="px-2 py-2 text-right">
                 <span className="sr-only">{tx("Действия", "Aktionen")}</span>
@@ -786,6 +788,9 @@ export function PatientMedicationTable({
                       ) : null}
                     </td>
                     <td className={bodyCell}>{item.grund || ""}</td>
+                    <td className={cn(bodyCell, "min-w-40")}>
+                      <ClinicalRecordSource item={item} tx={tx} />
+                    </td>
                     {canManage ? (
                       <td className="px-2 py-2 text-right align-top">
                         {renderActions(item, index)}
@@ -1510,6 +1515,7 @@ export function PatientRecommendationsSection({
             <span className="min-w-0 max-w-full break-words text-foreground">{doctorName(rec)}</span>
           ) : null}
         </div>
+        <ClinicalRecordSource item={rec} tx={tx} />
       </div>
       {canManage ? (
         <div className="flex shrink-0 gap-1">
@@ -1827,7 +1833,9 @@ function PatientLabHistoryTable({
         id: "measured_at",
         label: tx("Дата", "Datum"),
         accessor: (row) => row.measured_at,
-        width: 220,
+        width: 180,
+        pinned: "left",
+        required: true,
         render: (row) => (
           <span className={datePillClass}>
             {patientVitalDateTime(row.measured_at, row.measured_at, row.measured_at_precision)}
@@ -1838,7 +1846,7 @@ function PatientLabHistoryTable({
         id: "result",
         label: tx("Значение", "Wert"),
         accessor: (row) => row.result_text,
-        width: 120,
+        width: 105,
         align: "left",
         render: (row) => (
           <span
@@ -1859,28 +1867,42 @@ function PatientLabHistoryTable({
         id: "unit",
         label: tx("Единица", "Einheit"),
         accessor: (row) => row.unit,
-        width: 120,
+        width: 105,
         render: (row) => <span className="text-muted-foreground">{row.unit || "—"}</span>,
       },
       {
         id: "reference",
         label: tx("Референс", "Referenz"),
         accessor: (row) => row.reference_text,
-        width: 180,
+        width: 150,
         render: (row) => <span className="text-muted-foreground">{row.reference_text || "—"}</span>,
       },
       {
-        id: "source",
-        label: tx("Источник", "Quelle"),
-        accessor: (row) => row.source_document_name ?? row.recorded_by_name,
+        id: "laboratory",
+        label: tx("Лаборатория", "Labor"),
+        accessor: (row) => row.laboratory_name,
+        width: 180,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <span className={cn("block truncate", !row.laboratory_name && "text-muted-foreground")} title={row.laboratory_name ?? undefined}>
+            {row.laboratory_name ?? tx("Не указана", "Nicht angegeben")}
+          </span>
+        ),
+      },
+      {
+        id: "document",
+        label: tx("Документ", "Dokument"),
+        accessor: (row) => row.source_document_name,
         cellClassName: "whitespace-normal",
         render: (row) => (
           <div className="min-w-0 text-muted-foreground">
-            <span className="block truncate" title={row.source_document_name ?? undefined}>
-              {row.source_document_name ?? row.recorded_by_name ?? tx("Ручной ввод", "Manuelle Eingabe")}
-              {row.source_country ? ` · ${row.source_country}` : ""}
-              {row.source_page ? ` · S. ${row.source_page}` : ""}
-            </span>
+            <ClinicalRecordSource item={row} tx={tx} />
+            {row.source_country ? <span className="block text-[10px]">{row.source_country}</span> : null}
+            {row.recorded_by_name ? (
+              <span className="block truncate text-[10px]" title={row.recorded_by_name}>
+                {tx("Внёс", "Erfasst von")}: {row.recorded_by_name}
+              </span>
+            ) : null}
             <PatientLabCorrectionMetadata item={row} tx={tx} />
           </div>
         ),
@@ -1897,7 +1919,7 @@ function PatientLabHistoryTable({
       storageKey={storageKey}
       density="compact"
       disableRowHover
-      rowHeightOverrides={{ comfortable: 72, compact: 66, condensed: 58 }}
+      rowHeightOverrides={{ comfortable: 62, compact: 56, condensed: 50 }}
       rowActions={canManage ? (row) => (
         <div className="flex items-center justify-end gap-1">
           <PatientLabResultEditAction
@@ -1912,7 +1934,7 @@ function PatientLabHistoryTable({
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
       rowActionsWidth={80}
-      className="w-full min-w-0 rounded-none border-0 bg-white shadow-none"
+      className="w-full min-w-0 shadow-none"
       footer={
         <span className="tabular-nums">
           {rows.length} {tx("результатов", "Ergebnisse")}
@@ -2031,17 +2053,12 @@ function PatientVitalsHistoryTable({
         cellClassName: "whitespace-normal",
         render: (row) => (
           <div className="min-w-0 text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">
-                {row.source_document_name ?? row.recorded_by_name ?? tx("Неизвестно", "Unbekannt")}
-                {row.source_page ? ` · S. ${row.source_page}` : ""}
-              </span>
-              {patientVitalIsImported(row) ? (
-                <Badge variant="outline" className="shrink-0 rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-800">
-                  {tx("Из документа", "Aus Dokument")}
-                </Badge>
-              ) : null}
-            </div>
+            <ClinicalRecordSource item={row} tx={tx} />
+            {row.recorded_by_name ? (
+              <p className="truncate text-[10px]" title={row.recorded_by_name}>
+                {tx("Внёс", "Erfasst von")}: {row.recorded_by_name}
+              </p>
+            ) : null}
             {row.notes ? <p className="truncate text-[11px]" title={row.notes}>{row.notes}</p> : null}
           </div>
         ),
@@ -3487,6 +3504,7 @@ export function PatientClinicalTab({
             <p className="min-w-0 max-w-full whitespace-pre-line break-words text-sm text-foreground">
               {item.note}
             </p>
+            <ClinicalRecordSource item={item} tx={tx} />
             {verlaufAttributionRow(item)}
           </div>
         )}
@@ -3904,6 +3922,7 @@ export function PatientClinicalTab({
                 <span className="font-semibold">Red flags:</span> {e.red_flags}
               </p>
             ) : null}
+            <ClinicalRecordSource item={e} tx={tx} />
             {attributionRow(e)}
           </div>
         )}
@@ -4132,7 +4151,7 @@ export function PatientClinicalTab({
             </Badge>
           </header>
 
-          <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto_auto]">
+          <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto]">
             <Field label={tx("С", "Von")}>
               <Input
                 type="date"
@@ -4157,25 +4176,27 @@ export function PatientClinicalTab({
                 className="h-9 rounded-lg border-border/60 bg-white"
               />
             </Field>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9 rounded-lg px-4"
-              disabled={!labPeriodDraft.dateFrom || !labPeriodDraft.dateTo || labResults.length === 0}
-              onClick={applyLabPeriod}
-            >
-              {tx("Выполнить", "Anwenden")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9 rounded-lg px-4"
-              disabled={labResults.length === 0}
-              onClick={resetLabPeriod}
-            >
-              {tx("Сбросить", "Zurücksetzen")}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 rounded-lg px-4"
+                disabled={!labPeriodDraft.dateFrom || !labPeriodDraft.dateTo || labResults.length === 0}
+                onClick={applyLabPeriod}
+              >
+                {tx("Выполнить", "Anwenden")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 rounded-lg px-4"
+                disabled={labResults.length === 0}
+                onClick={resetLabPeriod}
+              >
+                {tx("Сбросить", "Zurücksetzen")}
+              </Button>
+            </div>
           </div>
 
           <div className="max-h-[680px] space-y-2 overflow-y-auto p-3">
@@ -4231,7 +4252,7 @@ export function PatientClinicalTab({
                     <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
                   </summary>
 
-                  <div className="border-t border-border/50 bg-white">
+                  <div className="border-t border-border/50 bg-slate-50/40 p-2">
                     <PatientLabHistoryTable
                       rows={group.rows}
                       storageKey={`patient-clinical:lab-history:${group.name.toLocaleLowerCase()}`}

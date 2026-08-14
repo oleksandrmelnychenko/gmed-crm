@@ -1031,7 +1031,7 @@ fn recommendation_select_sql(where_clause: &str) -> String {
                   creator.name AS created_by_name,
                   updater.name AS updated_by_name,
                   appointment.title AS source_appointment_title,
-                  document.auto_name AS source_document_name,
+                  COALESCE(document.original_filename, document.auto_name) AS source_document_name,
                   source_order.order_number AS source_order_number,
                   request.status AS appointment_request_status
            FROM patient_recommendations pr
