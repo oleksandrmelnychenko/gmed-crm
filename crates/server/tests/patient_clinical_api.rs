@@ -634,6 +634,9 @@ async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_write
                         "target": "medication",
                         "value": "Reviewed medication candidate",
                         "selected": false,
+                        "normalized": {
+                            "medication_review_decision": "exclude",
+                        },
                     },
                     {
                         "id": format!("manual:{}", Uuid::new_v4()),
