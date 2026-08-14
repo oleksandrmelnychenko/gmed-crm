@@ -64,6 +64,7 @@ async fn main() {
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
+    spawn_audit_retention_purger(app_state.db.clone());
 
     let cors_origin = match cfg.cors_origin.parse::<http::HeaderValue>() {
         Ok(v) => v,
@@ -253,6 +254,28 @@ fn spawn_blacklist_purger(pool: gmed_db::DbPool) {
                 Ok(0) => {}
                 Ok(n) => tracing::info!(rows = n, "Purged expired access-token blacklist rows"),
                 Err(e) => tracing::warn!(error = %e, "Blacklist purge failed"),
+            }
+        }
+    });
+}
+
+/// Applies the two-tier audit retention policy immediately on startup and
+/// then once per day. Raw `http_request` rows use the short technical window;
+/// meaningful domain and security events keep the longer compliance window.
+fn spawn_audit_retention_purger(pool: gmed_db::DbPool) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(86_400));
+        loop {
+            ticker.tick().await;
+            match audit::purge_expired(&pool).await {
+                Ok(report) if report.deleted > 0 => tracing::info!(
+                    deleted = report.deleted,
+                    technical_days = report.technical_days,
+                    meaningful_days = report.meaningful_days,
+                    "Audit retention sweep complete"
+                ),
+                Ok(_) => {}
+                Err(error) => tracing::warn!(error = %error, "Audit retention sweep failed"),
             }
         }
     });

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 
 import {
   compactDateTime,
+  providerPeopleCount,
+  providerPeopleCountLabel,
   providerTypeLabel,
 } from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
@@ -422,15 +424,21 @@ export function buildProviderColumns(
     },
     {
       id: "doctors",
-      label: tr.providers_doctors ?? notSet,
-      accessor: (provider) => provider.doctor_count,
+      label: tr.providers_people_catalog ?? tr.providers_people_count ?? notSet,
+      accessor: (provider) => providerPeopleCount(provider),
       filterType: "number",
       sortable: true,
-      width: 96,
+      width: 148,
       group: "activity",
-      render: (provider) => (
-        <span className="tabular-nums text-xs text-foreground">{provider.doctor_count}</span>
-      ),
+      render: (provider) => {
+        const count = providerPeopleCount(provider);
+        const label = providerPeopleCountLabel(provider, tr);
+        return (
+          <span className="tabular-nums text-xs text-foreground" title={`${label}: ${count}`}>
+            {count}
+          </span>
+        );
+      },
     },
     {
       id: "patients",

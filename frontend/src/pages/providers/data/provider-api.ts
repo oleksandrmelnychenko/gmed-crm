@@ -162,6 +162,7 @@ export function fetchProviders(path: string) {
       taxonomy_attributes: recordOrEmpty(provider.taxonomy_attributes),
       internal_rating: provider.internal_rating ?? null,
       internal_rating_note: provider.internal_rating_note ?? null,
+      staff_count: Number.isFinite(provider.staff_count) ? provider.staff_count : undefined,
       specializations: arrayOrEmpty<ProviderSummary["specializations"][number]>(provider.specializations).map(normalizeSpecializationItem),
       insurance_providers: arrayOrEmpty<ProviderSummary["insurance_providers"][number]>(provider.insurance_providers).map(normalizeInsuranceProviderItem),
       doctor_insurance_providers: arrayOrEmpty<InsuranceProviderItem>(provider.doctor_insurance_providers).map(normalizeInsuranceProviderItem),

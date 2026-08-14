@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
-import { Building2, ChevronLeft, ChevronRight, Stethoscope } from "lucide-react";
+import { Building2, ChevronLeft, ChevronRight, Stethoscope, UserRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,11 @@ import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
-import { providerTypeLabel } from "../model/list-model";
+import {
+  providerPeopleCount,
+  providerPeopleCountLabel,
+  providerTypeLabel,
+} from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
 
@@ -616,15 +620,11 @@ function TimelineNode({
                 value={children.length}
               />
             ) : null}
-            {provider.doctor_count > 0 ? (
+            {providerPeopleCount(provider) > 0 ? (
               <TimelineMetric
-                icon="doctors"
-                label={
-                  tr.providers_hierarchy_metric_doctors ??
-                  tr.providers_doctors ??
-                  "doctors"
-                }
-                value={provider.doctor_count}
+                icon={provider.provider_type === "medical" ? "doctors" : "staff"}
+                label={providerPeopleCountLabel(provider, tr)}
+                value={providerPeopleCount(provider)}
               />
             ) : null}
           </span>
@@ -639,7 +639,7 @@ function TimelineMetric({
   label,
   value,
 }: {
-  icon: "children" | "doctors";
+  icon: "children" | "doctors" | "staff";
   label: string;
   value: number;
 }) {
@@ -650,6 +650,8 @@ function TimelineMetric({
     >
       {icon === "children" ? (
         <Building2 className="size-3 shrink-0" />
+      ) : icon === "staff" ? (
+        <UserRound className="size-3 shrink-0" />
       ) : (
         <Stethoscope className="size-3 shrink-0" />
       )}

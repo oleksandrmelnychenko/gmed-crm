@@ -154,6 +154,7 @@ export type ProviderSummary = {
   is_active: boolean;
   has_contract: boolean;
   doctor_count: number;
+  staff_count?: number;
   patient_count: number;
   appointment_count: number;
   service_count: number;

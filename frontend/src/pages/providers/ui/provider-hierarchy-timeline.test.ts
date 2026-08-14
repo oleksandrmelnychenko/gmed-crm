@@ -117,4 +117,27 @@ describe("buildProviderTimelineTree", () => {
 
     expect(html.match(/aria-expanded="true"/g)).toHaveLength(2);
   });
+
+  it("renders staff instead of doctors for non-medical providers", () => {
+    const nonMedicalProvider: ProviderSummary = {
+      ...provider("andreiver", "Andreiver", "organization"),
+      provider_type: "non_medical",
+      doctor_count: 5,
+      staff_count: 2,
+    };
+    const html = renderToStaticMarkup(
+      createElement(ProviderHierarchyTimeline, {
+        lang: "ru",
+        onProviderClick: () => undefined,
+        providers: [nonMedicalProvider],
+        tr: {
+          providers_doctors: "Doctors",
+          providers_staff: "Staff",
+        },
+      }),
+    );
+
+    expect(html).toContain("2 Staff");
+    expect(html).not.toContain("Doctors");
+  });
 });

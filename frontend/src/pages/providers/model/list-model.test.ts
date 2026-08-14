@@ -22,6 +22,8 @@ import {
   formatWeeklyAvailabilityValue,
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
+  providerPeopleCount,
+  providerPeopleCountLabel,
   providerLoadErrorMessage,
   splitDoctorTitleValue,
   taxonomyAttributeValueOptions,
@@ -34,11 +36,44 @@ import {
   updateWeeklyAvailabilityIntervalValue,
 } from "./list-model";
 import type { ProviderPeopleRow } from "./people-types";
-import type { ProviderFilters } from "./types";
+import type { ProviderFilters, ProviderSummary } from "./types";
 
 function paramsFromPath(path: string) {
   return new URL(path, "https://crm.test").searchParams;
 }
+
+describe("provider people metrics", () => {
+  it("uses doctors for medical providers and staff for non-medical providers", () => {
+    const medical = {
+      provider_type: "medical",
+      doctor_count: 4,
+      staff_count: 9,
+    } as ProviderSummary;
+    const nonMedical = {
+      provider_type: "non_medical",
+      doctor_count: 7,
+      staff_count: 2,
+    } as ProviderSummary;
+    const labels = {
+      providers_doctors: "Doctors",
+      providers_staff: "Staff",
+    };
+
+    expect(providerPeopleCount(medical)).toBe(4);
+    expect(providerPeopleCountLabel(medical, labels)).toBe("Doctors");
+    expect(providerPeopleCount(nonMedical)).toBe(2);
+    expect(providerPeopleCountLabel(nonMedical, labels)).toBe("Staff");
+  });
+
+  it("falls back to the legacy people count for older API responses", () => {
+    const nonMedical = {
+      provider_type: "non_medical",
+      doctor_count: 5,
+    } as ProviderSummary;
+
+    expect(providerPeopleCount(nonMedical)).toBe(5);
+  });
+});
 
 function providerPeopleDoctorRow(overrides: Partial<ProviderPeopleRow> = {}): ProviderPeopleRow {
   return {

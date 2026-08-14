@@ -163,6 +163,8 @@ export type AdminActivityQuery = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+  search?: string;
+  view?: "activity" | "security" | "technical" | "all";
 };
 
 export type AdminActivityResponse<TActivity> = {
@@ -171,6 +173,18 @@ export type AdminActivityResponse<TActivity> = {
   limit: number;
   offset: number;
   has_more: boolean;
+  view?: "activity" | "security" | "technical" | "all";
+  summary?: {
+    activity_24h: number;
+    active_users_24h: number;
+    changes_24h: number;
+    security_24h: number;
+    technical_24h: number;
+  };
+  retention?: {
+    technical_days: number;
+    meaningful_days: number;
+  };
 };
 
 export function fetchAdminActivity<TActivity>(
@@ -183,6 +197,8 @@ export function fetchAdminActivity<TActivity>(
   if (input.action) query.set("action", input.action);
   if (input.dateFrom) query.set("date_from", input.dateFrom);
   if (input.dateTo) query.set("date_to", input.dateTo);
+  if (input.search) query.set("search", input.search);
+  if (input.view) query.set("view", input.view);
   return apiFetch<AdminActivityResponse<TActivity>>(`/admin/activity?${query.toString()}`, {
     cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
   });

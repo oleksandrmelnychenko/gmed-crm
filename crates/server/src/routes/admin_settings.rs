@@ -227,10 +227,20 @@ async fn revoke_all_sessions(
 struct ActivityQuery {
     user_id: Option<Uuid>,
     action: Option<String>,
+    view: Option<String>,
+    search: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
     date_from: Option<String>,
     date_to: Option<String>,
+}
+
+fn normalize_activity_view(value: Option<String>) -> Result<String, &'static str> {
+    let view = value.unwrap_or_else(|| "activity".to_string());
+    match view.as_str() {
+        "activity" | "security" | "technical" | "all" => Ok(view),
+        _ => Err("Invalid activity view"),
+    }
 }
 
 fn parse_activity_date_start(
@@ -289,12 +299,22 @@ async fn list_activity(
     let ActivityQuery {
         user_id,
         action,
+        view,
+        search,
         limit,
         offset,
         date_from,
         date_to,
     } = q;
     let action = action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let view = match normalize_activity_view(view) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let search = search
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
@@ -320,16 +340,46 @@ async fn list_activity(
     let total = match sqlx::query(
         r#"SELECT COUNT(*) AS count
            FROM audit_log al
-           JOIN users u ON u.id = al.user_id
+           LEFT JOIN users u ON u.id = al.user_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
              AND ($2::TEXT IS NULL OR al.action = $2)
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
-             AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)"#,
+             AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)
+             AND (
+                 $5 = 'all'
+                 OR ($5 = 'activity' AND al.action <> 'http_request')
+                 OR ($5 = 'technical' AND al.action = 'http_request')
+                 OR ($5 = 'security' AND (
+                     al.entity_type IN ('auth', 'security', 'session')
+                     OR al.action IN (
+                         'login', 'login_success', 'login_failure', 'login_failed',
+                         'login_blocked', 'login_mfa_requested',
+                         'refresh_token_theft', 'refresh_family_revoked',
+                         'token_theft_detected', 'session.revoked',
+                         'session.revoked_all', 'admin_force_logout_user',
+                         'revoke_all_sessions', 'revoke_all_users_sessions',
+                         'pending_login.approved', 'pending_login.rejected',
+                         'user.password_reset', 'user.unlocked',
+                         'user.force_password_reset', 'user.mfa_toggled'
+                     )
+                 ))
+             )
+             AND (
+                 $6::TEXT IS NULL
+                 OR u.name ILIKE '%' || $6 || '%'
+                 OR u.email ILIKE '%' || $6 || '%'
+                 OR al.action ILIKE '%' || $6 || '%'
+                 OR al.entity_type ILIKE '%' || $6 || '%'
+                 OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+             )"#,
     )
     .bind(user_id)
     .bind(action)
     .bind(date_from)
     .bind(date_to_exclusive)
+    .bind(&view)
+    .bind(search)
     .fetch_one(&state.db)
     .await
     {
@@ -344,23 +394,111 @@ async fn list_activity(
         r#"SELECT al.id, al.user_id, u.name AS user_name, u.email AS user_email,
                   al.action, al.entity_type, al.entity_id, al.context, al.created_at
            FROM audit_log al
-           JOIN users u ON u.id = al.user_id
+           LEFT JOIN users u ON u.id = al.user_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
              AND ($2::TEXT IS NULL OR al.action = $2)
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
              AND ($4::TIMESTAMPTZ IS NULL OR al.created_at < $4)
-           ORDER BY al.created_at DESC LIMIT $5 OFFSET $6"#,
+             AND (
+                 $5 = 'all'
+                 OR ($5 = 'activity' AND al.action <> 'http_request')
+                 OR ($5 = 'technical' AND al.action = 'http_request')
+                 OR ($5 = 'security' AND (
+                     al.entity_type IN ('auth', 'security', 'session')
+                     OR al.action IN (
+                         'login', 'login_success', 'login_failure', 'login_failed',
+                         'login_blocked', 'login_mfa_requested',
+                         'refresh_token_theft', 'refresh_family_revoked',
+                         'token_theft_detected', 'session.revoked',
+                         'session.revoked_all', 'admin_force_logout_user',
+                         'revoke_all_sessions', 'revoke_all_users_sessions',
+                         'pending_login.approved', 'pending_login.rejected',
+                         'user.password_reset', 'user.unlocked',
+                         'user.force_password_reset', 'user.mfa_toggled'
+                     )
+                 ))
+             )
+             AND (
+                 $6::TEXT IS NULL
+                 OR u.name ILIKE '%' || $6 || '%'
+                 OR u.email ILIKE '%' || $6 || '%'
+                 OR al.action ILIKE '%' || $6 || '%'
+                 OR al.entity_type ILIKE '%' || $6 || '%'
+                 OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+             )
+           ORDER BY al.created_at DESC LIMIT $7 OFFSET $8"#,
     )
     .bind(user_id)
     .bind(action)
     .bind(date_from)
     .bind(date_to_exclusive)
+    .bind(&view)
+    .bind(search)
     .bind(limit)
     .bind(offset)
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => {
+            let summary = match sqlx::query(
+                r#"SELECT
+                       COUNT(*) FILTER (
+                           WHERE created_at >= now() - interval '24 hours'
+                             AND action <> 'http_request'
+                       )::BIGINT AS activity_24h,
+                       COUNT(DISTINCT user_id) FILTER (
+                           WHERE created_at >= now() - interval '24 hours'
+                             AND action <> 'http_request'
+                       )::BIGINT AS active_users_24h,
+                       COUNT(*) FILTER (
+                           WHERE created_at >= now() - interval '24 hours'
+                             AND action <> 'http_request'
+                             AND context->>'method' IN ('POST', 'PUT', 'PATCH', 'DELETE')
+                       )::BIGINT AS changes_24h,
+                       COUNT(*) FILTER (
+                           WHERE created_at >= now() - interval '24 hours'
+                             AND (
+                                 entity_type IN ('auth', 'security', 'session')
+                                 OR action IN (
+                                     'login', 'login_success', 'login_failure', 'login_failed',
+                                     'login_blocked', 'login_mfa_requested',
+                                     'refresh_token_theft', 'refresh_family_revoked',
+                                     'token_theft_detected', 'session.revoked',
+                                     'session.revoked_all', 'admin_force_logout_user',
+                                     'revoke_all_sessions', 'revoke_all_users_sessions'
+                                 )
+                             )
+                       )::BIGINT AS security_24h,
+                       COUNT(*) FILTER (
+                           WHERE created_at >= now() - interval '24 hours'
+                             AND action = 'http_request'
+                       )::BIGINT AS technical_24h
+                   FROM audit_log"#,
+            )
+            .fetch_one(&state.db)
+            .await
+            {
+                Ok(row) => serde_json::json!({
+                    "activity_24h": row.try_get::<i64, _>("activity_24h").unwrap_or_default(),
+                    "active_users_24h": row.try_get::<i64, _>("active_users_24h").unwrap_or_default(),
+                    "changes_24h": row.try_get::<i64, _>("changes_24h").unwrap_or_default(),
+                    "security_24h": row.try_get::<i64, _>("security_24h").unwrap_or_default(),
+                    "technical_24h": row.try_get::<i64, _>("technical_24h").unwrap_or_default(),
+                }),
+                Err(e) => {
+                    tracing::error!(error = %e, "summarize activity");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            let (technical_days, meaningful_days) =
+                match audit::configured_retention_days(&state.db).await {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, "load audit retention policy");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                };
             let data: Vec<serde_json::Value> = rows
                 .into_iter()
                 .map(|r| {
@@ -384,6 +522,12 @@ async fn list_activity(
                 "limit": limit,
                 "offset": offset,
                 "has_more": offset + count < total,
+                "view": view,
+                "summary": summary,
+                "retention": {
+                    "technical_days": technical_days,
+                    "meaningful_days": meaningful_days,
+                },
             }))
             .into_response()
         }
@@ -578,4 +722,25 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_activity_view;
+
+    #[test]
+    fn activity_view_defaults_to_meaningful_activity() {
+        assert_eq!(normalize_activity_view(None).unwrap(), "activity");
+    }
+
+    #[test]
+    fn activity_view_accepts_supported_streams_only() {
+        for view in ["activity", "security", "technical", "all"] {
+            assert_eq!(
+                normalize_activity_view(Some(view.to_string())).unwrap(),
+                view
+            );
+        }
+        assert!(normalize_activity_view(Some("noise".to_string())).is_err());
+    }
 }

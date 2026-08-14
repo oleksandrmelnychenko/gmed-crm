@@ -79,8 +79,9 @@ fn build_app_with_workspace_gate(
     // Protected routes get three concentric middlewares, applied in
     // `.layer()` order (outermost first runtime-wise):
     //   1. require_auth — attaches AuthUser to the request extensions
-    //   2. audit::middleware — records one audit_log row per request,
-    //      using the AuthUser left behind by require_auth
+    //   2. audit::middleware — records authenticated activity while skipping
+    //      successful unannotated background polls, using the AuthUser left
+    //      behind by require_auth
     //   3. rate_limit::apply_general — per-IP token bucket
     let protected_routes = routes::protected_router().layer(middleware::from_fn_with_state(
         app_state.clone(),
