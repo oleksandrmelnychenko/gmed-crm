@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -230,6 +230,31 @@ export function groupPatientLabResults(rows: PatientLabResult[]) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function patientLabMeasuredDate(row: Pick<PatientLabResult, "measured_at">): string | null {
+  const value = row.measured_at.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+export function patientLabLatestDate(rows: PatientLabResult[]): string {
+  return rows.reduce((latest, row) => {
+    const measuredDate = patientLabMeasuredDate(row);
+    return measuredDate && measuredDate > latest ? measuredDate : latest;
+  }, "");
+}
+
+export function filterPatientLabResultsByPeriod(
+  rows: PatientLabResult[],
+  dateFrom: string,
+  dateTo: string,
+): PatientLabResult[] {
+  if (!dateFrom && !dateTo) return rows;
+  return rows.filter((row) => {
+    const measuredDate = patientLabMeasuredDate(row);
+    if (!measuredDate) return false;
+    return (!dateFrom || measuredDate >= dateFrom) && (!dateTo || measuredDate <= dateTo);
+  });
+}
+
 type PatientVitalMetricLabels = {
   bloodPressure: string;
   heartRate: string;
@@ -303,7 +328,7 @@ export function patientVitalMetrics(
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const datePillClass =
-  "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
+  "inline-flex items-center whitespace-nowrap rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 const periodPillClass =
   "inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700";
 const reminderPillClass =
@@ -1783,12 +1808,14 @@ function ClinicalWrapper({
 
 function PatientLabHistoryTable({
   rows,
+  storageKey,
   canManage,
   tx,
   onEdit,
   onDelete,
 }: {
   rows: PatientLabResult[];
+  storageKey: string;
   canManage: boolean;
   tx: Bilingual;
   onEdit: (row: PatientLabResult) => void;
@@ -1800,7 +1827,7 @@ function PatientLabHistoryTable({
         id: "measured_at",
         label: tx("Дата", "Datum"),
         accessor: (row) => row.measured_at,
-        width: 190,
+        width: 220,
         render: (row) => (
           <span className={datePillClass}>
             {patientVitalDateTime(row.measured_at, row.measured_at, row.measured_at_precision)}
@@ -1832,21 +1859,20 @@ function PatientLabHistoryTable({
         id: "unit",
         label: tx("Единица", "Einheit"),
         accessor: (row) => row.unit,
-        width: 110,
+        width: 120,
         render: (row) => <span className="text-muted-foreground">{row.unit || "—"}</span>,
       },
       {
         id: "reference",
         label: tx("Референс", "Referenz"),
         accessor: (row) => row.reference_text,
-        width: 170,
+        width: 180,
         render: (row) => <span className="text-muted-foreground">{row.reference_text || "—"}</span>,
       },
       {
         id: "source",
         label: tx("Источник", "Quelle"),
         accessor: (row) => row.source_document_name ?? row.recorded_by_name,
-        width: 320,
         cellClassName: "whitespace-normal",
         render: (row) => (
           <div className="min-w-0 text-muted-foreground">
@@ -1868,9 +1894,10 @@ function PatientLabHistoryTable({
       rows={rows}
       columns={columns}
       rowId={(row) => row.id}
+      storageKey={storageKey}
       density="compact"
       disableRowHover
-      rowHeightOverrides={{ comfortable: 52, compact: 46, condensed: 40 }}
+      rowHeightOverrides={{ comfortable: 72, compact: 66, condensed: 58 }}
       rowActions={canManage ? (row) => (
         <div className="flex items-center justify-end gap-1">
           <PatientLabResultEditAction
@@ -1885,7 +1912,7 @@ function PatientLabHistoryTable({
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
       rowActionsWidth={80}
-      className="rounded-none border-0 bg-white shadow-none"
+      className="w-full min-w-0 rounded-none border-0 bg-white shadow-none"
       footer={
         <span className="tabular-nums">
           {rows.length} {tx("результатов", "Ergebnisse")}
@@ -2446,6 +2473,9 @@ export function PatientClinicalTab({
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
   const [vitalsHistory, setVitalsHistory] = useState<PatientVitalMeasurement[]>([]);
   const [labResults, setLabResults] = useState<PatientLabResult[]>([]);
+  const [labPeriodDraft, setLabPeriodDraft] = useState({ dateFrom: "", dateTo: "" });
+  const [labPeriodApplied, setLabPeriodApplied] = useState({ dateFrom: "", dateTo: "" });
+  const labPeriodPatientIdRef = useRef<string | null>(null);
   const [riskScores, setRiskScores] = useState<PatientRiskScore[]>([]);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [allDoctors, setAllDoctors] = useState<AllDoctorOption[]>([]);
@@ -2520,7 +2550,14 @@ export function PatientClinicalTab({
         setAllDoctors(doctorRows ?? []);
         setSpecializations(specializationRows ?? []);
         setVitalsHistory(Array.isArray(vitals?.items) ? vitals.items : []);
-        setLabResults(Array.isArray(labs?.items) ? labs.items : []);
+        const nextLabResults = Array.isArray(labs?.items) ? labs.items : [];
+        setLabResults(nextLabResults);
+        if (labPeriodPatientIdRef.current !== patientId) {
+          const latestLabDate = patientLabLatestDate(nextLabResults);
+          setLabPeriodDraft({ dateFrom: latestLabDate, dateTo: latestLabDate });
+          setLabPeriodApplied({ dateFrom: "", dateTo: "" });
+          labPeriodPatientIdRef.current = patientId;
+        }
         setRiskScores(Array.isArray(scores?.items) ? scores.items : []);
         setMedicationImportHistory(Array.isArray(medicationHistory.items) ? medicationHistory.items : []);
         setMedicationHistoryTotal(medicationHistory.total ?? medicationHistory.items.length);
@@ -2537,9 +2574,35 @@ export function PatientClinicalTab({
     };
   }, [patientId, version]);
 
+  const filteredLabResults = useMemo(
+    () => filterPatientLabResultsByPeriod(
+      labResults,
+      labPeriodApplied.dateFrom,
+      labPeriodApplied.dateTo,
+    ),
+    [labPeriodApplied.dateFrom, labPeriodApplied.dateTo, labResults],
+  );
+
   const labResultGroups = useMemo(() => {
-    return groupPatientLabResults(labResults);
-  }, [labResults]);
+    return groupPatientLabResults(filteredLabResults);
+  }, [filteredLabResults]);
+
+  const labPeriodIsApplied = Boolean(labPeriodApplied.dateFrom || labPeriodApplied.dateTo);
+
+  function applyLabPeriod() {
+    if (!labPeriodDraft.dateFrom || !labPeriodDraft.dateTo) return;
+    if (labPeriodDraft.dateFrom > labPeriodDraft.dateTo) {
+      toast.error(tx("Дата начала должна быть не позже даты окончания.", "Das Startdatum darf nicht nach dem Enddatum liegen."));
+      return;
+    }
+    setLabPeriodApplied(labPeriodDraft);
+  }
+
+  function resetLabPeriod() {
+    const latestLabDate = patientLabLatestDate(labResults);
+    setLabPeriodDraft({ dateFrom: latestLabDate, dateTo: latestLabDate });
+    setLabPeriodApplied({ dateFrom: "", dateTo: "" });
+  }
 
   const medicationHistorySeries = useMemo(
     () => groupMedicationImportHistory(medications, medicationImportHistory),
@@ -4064,17 +4127,69 @@ export function PatientClinicalTab({
               <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
             </div>
             <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
-              {labResults.length} {tx("результатов", "Ergebnisse")}
+              {filteredLabResults.length}
+              {labPeriodIsApplied ? ` / ${labResults.length}` : ""} {tx("результатов", "Ergebnisse")}
             </Badge>
           </header>
+
+          <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto_auto]">
+            <Field label={tx("С", "Von")}>
+              <Input
+                type="date"
+                value={labPeriodDraft.dateFrom}
+                max={labPeriodDraft.dateTo || undefined}
+                onChange={(event) => setLabPeriodDraft((current) => ({
+                  ...current,
+                  dateFrom: event.target.value,
+                }))}
+                className="h-9 rounded-lg border-border/60 bg-white"
+              />
+            </Field>
+            <Field label={tx("По", "Bis")}>
+              <Input
+                type="date"
+                value={labPeriodDraft.dateTo}
+                min={labPeriodDraft.dateFrom || undefined}
+                onChange={(event) => setLabPeriodDraft((current) => ({
+                  ...current,
+                  dateTo: event.target.value,
+                }))}
+                className="h-9 rounded-lg border-border/60 bg-white"
+              />
+            </Field>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 rounded-lg px-4"
+              disabled={!labPeriodDraft.dateFrom || !labPeriodDraft.dateTo || labResults.length === 0}
+              onClick={applyLabPeriod}
+            >
+              {tx("Выполнить", "Anwenden")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-lg px-4"
+              disabled={labResults.length === 0}
+              onClick={resetLabPeriod}
+            >
+              {tx("Сбросить", "Zurücksetzen")}
+            </Button>
+          </div>
 
           <div className="max-h-[680px] space-y-2 overflow-y-auto p-3">
             {labResultGroups.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/60 bg-muted/25 px-4 py-6 text-sm text-muted-foreground">
-                {tx(
-                  "Анализов пока нет. Загрузите лабораторный документ через OCR-билдер, чтобы создать историю.",
-                  "Noch keine Laborwerte. Laden Sie einen Laborbefund über den OCR-Builder hoch, um den Verlauf anzulegen.",
-                )}
+                {labResults.length === 0
+                  ? tx(
+                      "Анализов пока нет. Загрузите лабораторный документ через OCR-билдер, чтобы создать историю.",
+                      "Noch keine Laborwerte. Laden Sie einen Laborbefund über den OCR-Builder hoch, um den Verlauf anzulegen.",
+                    )
+                  : tx(
+                      "За выбранный период результатов нет.",
+                      "Für den gewählten Zeitraum liegen keine Ergebnisse vor.",
+                    )}
               </div>
             ) : null}
             {labResultGroups.map((group, groupIndex) => {
@@ -4119,6 +4234,7 @@ export function PatientClinicalTab({
                   <div className="border-t border-border/50 bg-white">
                     <PatientLabHistoryTable
                       rows={group.rows}
+                      storageKey={`patient-clinical:lab-history:${group.name.toLocaleLowerCase()}`}
                       canManage={canManage}
                       tx={tx}
                       onEdit={setLabResultEditor}

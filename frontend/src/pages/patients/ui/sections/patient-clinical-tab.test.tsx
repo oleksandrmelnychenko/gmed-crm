@@ -27,6 +27,8 @@ import {
   patientVitalDateTime,
   patientVitalIsImported,
   patientVitalMetrics,
+  patientLabLatestDate,
+  filterPatientLabResultsByPeriod,
   groupPatientLabResults,
 } from "./patient-clinical-tab";
 import {
@@ -365,6 +367,40 @@ describe("groupPatientLabResults", () => {
     const leukocytes = groups.find((group) => group.name === "Leukocytes");
     expect(leukocytes?.rows.map((row) => row.id)).toEqual(["new", "old"]);
     expect(leukocytes?.rows.map((row) => row.unit)).toEqual(["cells/µL", "G/L"]);
+  });
+
+  it("prefills the latest date and filters the applied period inclusively", () => {
+    const rows: PatientLabResult[] = [
+      {
+        id: "old",
+        measured_at: "2026-06-10T09:00:00Z",
+        analyte_name: "CRP",
+        result_text: "0.2",
+        abnormal_flag: "normal",
+        created_at: "2026-06-10T09:00:00Z",
+      },
+      {
+        id: "middle",
+        measured_at: "2026-07-10T09:00:00Z",
+        analyte_name: "CRP",
+        result_text: "0.3",
+        abnormal_flag: "normal",
+        created_at: "2026-07-10T09:00:00Z",
+      },
+      {
+        id: "latest",
+        measured_at: "2026-08-10T09:00:00Z",
+        analyte_name: "CRP",
+        result_text: "0.4",
+        abnormal_flag: "normal",
+        created_at: "2026-08-10T09:00:00Z",
+      },
+    ];
+
+    expect(patientLabLatestDate(rows)).toBe("2026-08-10");
+    expect(filterPatientLabResultsByPeriod(rows, "2026-07-10", "2026-08-10").map((row) => row.id))
+      .toEqual(["middle", "latest"]);
+    expect(filterPatientLabResultsByPeriod(rows, "", "")).toBe(rows);
   });
 });
 
