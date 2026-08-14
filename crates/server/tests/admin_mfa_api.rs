@@ -408,6 +408,8 @@ async fn activity_list_ok_for_it_admin() {
     assert_eq!(body["offset"], 0);
     assert!(body["total"].is_number());
     assert!(body["has_more"].is_boolean());
+    assert_eq!(body["retention"]["technical_days"], 3);
+    assert_eq!(body["retention"]["meaningful_days"], 365);
 }
 
 #[tokio::test]

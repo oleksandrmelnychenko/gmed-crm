@@ -407,10 +407,12 @@ fn normalize_retention_days(raw: Option<&str>, default: i64) -> i64 {
 }
 
 async fn retention_days(pool: &DbPool, key: &str, default: i64) -> Result<i64, sqlx::Error> {
-    let raw = sqlx::query_scalar::<_, String>("SELECT value FROM system_settings WHERE key = $1")
-        .bind(key)
-        .fetch_optional(pool)
-        .await?;
+    let raw = sqlx::query_scalar::<_, String>(
+        "SELECT value #>> '{}' FROM system_settings WHERE key = $1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(normalize_retention_days(raw.as_deref(), default))
 }
