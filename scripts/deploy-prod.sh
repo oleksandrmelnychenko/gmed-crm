@@ -31,6 +31,7 @@ REPO_DIR="${REPO_DIR:-/opt/gmed/repo}"
 RELEASE_ENV="${RELEASE_ENV:-/opt/gmed/release.env}"
 AGE_KEY_FILE="${AGE_KEY_FILE:-/etc/gmed/age.key}"
 SECRETS_PATH="${SECRETS_PATH:-infra/terraform/environments/prod-hetzner/secrets.sops.yaml}"
+IMAGE_PINS_PATH="${IMAGE_PINS_PATH:-infra/terraform/environments/prod-hetzner/release-images.pins}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 LOG_FILE="${LOG_FILE:-/var/log/gmed-deploy.log}"
 TMP_ENV=""
@@ -80,7 +81,7 @@ trap finish EXIT
 
 echo "deploy-prod started branch=$GIT_BRANCH repo=$REPO_DIR"
 
-for path in "$REPO_DIR/.git" "$AGE_KEY_FILE"; do
+for path in "$REPO_DIR/.git" "$AGE_KEY_FILE" "$REPO_DIR/$IMAGE_PINS_PATH"; do
   if [[ ! -e "$path" ]]; then
     echo "ERROR: $path missing. See the script header for first-time setup steps." >&2
     exit 1
@@ -144,6 +145,12 @@ install -m 600 "$TMP_ENV" "$RELEASE_ENV"
 set -a
 # shellcheck disable=SC1090
 . "$RELEASE_ENV"
+# Image digests are public release metadata, not secrets. Keep them in a
+# separately reviewable Git-tracked file so promoting a signed release never
+# requires distributing the production age private key. The repository is
+# already the trusted source of this root-run deployment script.
+# shellcheck disable=SC1090
+. "$REPO_DIR/$IMAGE_PINS_PATH"
 set +a
 
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
@@ -217,9 +224,22 @@ fi
 # one if the tag rotated between calls.
 for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE; do
   ref="${!image_var}"
-  if [[ "$ref" != *"@sha256:"* ]]; then
-    echo "ERROR: $image_var must be digest-pinned (ends with @sha256:...). Got: $ref" >&2
-    echo "Pick a digest from the release workflow run summary on GitHub Actions." >&2
+  case "$image_var" in
+    GMED_BACKEND_IMAGE)
+      expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-server"
+      ;;
+    GMED_FRONTEND_IMAGE)
+      expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-frontend"
+      ;;
+    GMED_PARSER_IMAGE)
+      expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser"
+      ;;
+  esac
+  expected_prefix="${expected_repository}@sha256:"
+  digest="${ref#"$expected_prefix"}"
+  if [[ "$ref" != "${expected_prefix}${digest}" || ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: $image_var must pin the expected GHCR repository by sha256 digest. Got: $ref" >&2
+    echo "Update $IMAGE_PINS_PATH from the successful release workflow summary." >&2
     exit 1
   fi
   echo "Verifying cosign signature on $ref"

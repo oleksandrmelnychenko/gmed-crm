@@ -128,21 +128,23 @@ The script:
 1. `git fetch + reset --hard origin/main`
 2. Decrypts `secrets.sops.yaml` to `/opt/gmed/release.env` (atomic
    write).
-3. Validates all required keys exist.
-4. Installs / refreshes `rclone` + `age`, the backup cron entry
+3. Loads the public immutable GHCR refs from `release-images.pins`; promoting
+   a signed release does not require access to the production age private key.
+4. Validates all required keys and signed image pins.
+5. Installs / refreshes `rclone` + `age`, the backup cron entry
    (`/etc/cron.d/gmed-backup`, daily 02:30 UTC), and the external
    Healthchecks.io `/health` ping cron if `HEALTHCHECKS_PING_URL` is
    set.
-5. `docker compose up -d` with digest-pinned GHCR images.
-6. If `PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true` and
+6. `docker compose up -d` with digest-pinned GHCR images.
+7. If `PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true` and
    `/etc/gmed/prod-db-sanitized` does not exist, waits for migrations,
    stops public app services, removes business/demo rows, and leaves
    only `PROD_ADMIN_EMAIL`. The sanitizer also records
    key `prod_db_sanitized_at` in `system_settings`, so a restored PROD
    database is protected even if the host marker file is missing.
-7. Creates / rotates the read-only `postgres_exporter` role via
+8. Creates / rotates the read-only `postgres_exporter` role via
    `scripts/ensure-prod-metrics-user.sh`.
-8. Prunes dangling images older than 24h.
+9. Prunes dangling images older than 24h.
 
 It is idempotent — re-running on a healthy host is a `git pull` plus
 a compose reconciliation. The one-time data sanitizer is marker-gated
