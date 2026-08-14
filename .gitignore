@@ -4,6 +4,7 @@
 /dist
 /pkg
 .env
+release.env
 *.wasm
 node_modules/
 *.log

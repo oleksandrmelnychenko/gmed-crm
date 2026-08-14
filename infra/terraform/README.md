@@ -36,16 +36,19 @@ vehicle for code changes.
 
 ## DEV Publish
 
-For the current DEV host, publish the checked-out commit from a local
+For the current DEV host, publish the local working tree directly from a
 workstation:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish-dev-current.ps1
 ```
 
-The script creates a `git archive` of `HEAD`, uploads it to the DEV
-host, runs `scripts/deploy-dev-current.sh` remotely, and checks
-`https://console-dev.gmed-health.com/health`.
+The script snapshots tracked and new non-ignored files without touching the
+real Git index, uploads the archive and the current remote runner, builds with
+the DEV host's Docker cache, keeps a rollback copy, and checks
+`https://console-dev.gmed-health.com/health`. It intentionally does not run CI
+or require a commit. Use `-CommittedOnly` when the remote build must contain
+exactly `HEAD`, or `-DryRun` to validate snapshot creation without SSH.
 
 For a Terraform-managed `/opt/gmed/repo` DEV host, SSH to the host and
 run:

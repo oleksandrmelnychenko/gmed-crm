@@ -121,8 +121,8 @@ running until the separate publish step.
 
 ## Publish Application
 
-For the current DEV host layout (`/home/gmed/gmed-crm`), publish the
-checked-out commit from a workstation:
+For the current DEV host layout (`/home/gmed/gmed-crm`), publish the current
+local snapshot from a workstation:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\publish-dev-current.ps1
@@ -130,11 +130,17 @@ powershell -ExecutionPolicy Bypass -File scripts\publish-dev-current.ps1
 
 The script:
 
-1. Requires a clean local working tree.
-2. Archives `HEAD`.
-3. Uploads it to `/home/gmed/deploy/gmed-crm-current.tgz`.
-4. Runs `/home/gmed/gmed-crm/scripts/deploy-dev-current.sh`.
-5. Checks `https://console-dev.gmed-health.com/health`.
+1. Snapshots tracked changes and new non-ignored files without changing the
+   real Git index; no commit is required.
+2. Rejects untracked credential-like files and excludes ignored files.
+3. Uploads the snapshot to `/home/gmed/deploy/gmed-crm-current.tgz`.
+4. Uploads and runs the current `scripts/deploy-dev-current.sh` through
+   `/home/gmed/deploy`, so runner changes take effect on the same publish.
+5. Builds with the host Docker cache, retains a rollback release, and checks
+   `https://console-dev.gmed-health.com/health`.
+
+Add `-CommittedOnly` to publish exactly `HEAD`, or `-DryRun` to validate the
+snapshot locally without contacting the server.
 
 For a Terraform-managed `/opt/gmed/repo` host, deploy from the host:
 
