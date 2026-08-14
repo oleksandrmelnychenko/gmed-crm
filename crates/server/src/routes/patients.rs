@@ -22,8 +22,8 @@ use printpdf::{
     Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rect,
     Rgb, WindingOrder,
 };
-use sqlx::types::Json as SqlxJson;
 use sqlx::postgres::PgRow;
+use sqlx::types::Json as SqlxJson;
 use sqlx::{Postgres, Row, Transaction};
 
 pub fn router() -> Router<AppState> {
@@ -730,9 +730,9 @@ fn grouped_lab_integer(value: &str, separator: char) -> bool {
     groups.len() > 1
         && (1..=3).contains(&groups[0].len())
         && groups[0].bytes().all(|byte| byte.is_ascii_digit())
-        && groups[1..].iter().all(|group| {
-            group.len() == 3 && group.bytes().all(|byte| byte.is_ascii_digit())
-        })
+        && groups[1..]
+            .iter()
+            .all(|group| group.len() == 3 && group.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn parse_localized_lab_number_candidates(token: &str) -> Vec<f64> {
@@ -743,7 +743,9 @@ fn parse_localized_lab_number_candidates(token: &str) -> Vec<f64> {
     };
     let (mantissa, exponent) = unsigned
         .find(|character| matches!(character, 'e' | 'E'))
-        .map_or((unsigned, ""), |index| (&unsigned[..index], &unsigned[index..]));
+        .map_or((unsigned, ""), |index| {
+            (&unsigned[..index], &unsigned[index..])
+        });
     let dots = mantissa.matches('.').count();
     let commas = mantissa.matches(',').count();
     let mut normalized = Vec::new();
@@ -840,9 +842,7 @@ fn parse_lab_result_text_projection(result_text: &str) -> ParsedLabResultText {
             ParsedLabResultText::Textual
         };
     };
-    if !first_character.is_ascii_digit()
-        && !matches!(first_character, '+' | '-' | '.' | ',')
-    {
+    if !first_character.is_ascii_digit() && !matches!(first_character, '+' | '-' | '.' | ',') {
         return if comparator.is_some() {
             ParsedLabResultText::InvalidNumeric
         } else {
@@ -1039,11 +1039,9 @@ fn validate_patient_lab_result_correction_consistency(
                 ));
             }
             if let Some(unit_suffix) = unit_suffix {
-                if lab
-                    .unit
-                    .as_deref()
-                    .is_none_or(|unit| normalized_lab_unit(unit) != normalized_lab_unit(&unit_suffix))
-                {
+                if lab.unit.as_deref().is_none_or(|unit| {
+                    normalized_lab_unit(unit) != normalized_lab_unit(&unit_suffix)
+                }) {
                     return Err(err(
                         StatusCode::UNPROCESSABLE_ENTITY,
                         "result_text unit does not match unit",
@@ -3230,10 +3228,7 @@ async fn list_patient_lab_results(
         )
     })?;
 
-    let items = rows
-        .iter()
-        .map(patient_lab_result_json)
-        .collect::<Vec<_>>();
+    let items = rows.iter().map(patient_lab_result_json).collect::<Vec<_>>();
     let count = items.len();
     Ok(Json(json!({ "items": items, "count": count })))
 }
@@ -3292,11 +3287,10 @@ async fn update_patient_lab_result(
             );
         }
     }
-    let (lab, correction_note) =
-        match normalize_patient_lab_result_correction_payload(&raw_body) {
-            Ok(normalized) => normalized,
-            Err(response) => return response,
-        };
+    let (lab, correction_note) = match normalize_patient_lab_result_correction_payload(&raw_body) {
+        Ok(normalized) => normalized,
+        Err(response) => return response,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,

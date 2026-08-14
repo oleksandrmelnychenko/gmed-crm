@@ -1770,8 +1770,7 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    let correction_path =
-        format!("/api/v1/patients/{patient_id}/lab-results/{lab_result_id}");
+    let correction_path = format!("/api/v1/patients/{patient_id}/lab-results/{lab_result_id}");
     let valid_correction = json!({
         "measured_at": "2026-08-12",
         "panel": "Blood count",
@@ -1852,22 +1851,15 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
     stale_flag["reference_low"] = json!(12.0);
     stale_flag["reference_high"] = json!(16.0);
     stale_flag["abnormal_flag"] = json!("normal");
-    let (status, invalid) = json_request(
-        &app,
-        "PATCH",
-        &correction_path,
-        &bearer,
-        Some(stale_flag),
-    )
-    .await;
+    let (status, invalid) =
+        json_request(&app, "PATCH", &correction_path, &bearer, Some(stale_flag)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
-    let unchanged: (String, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
-        "SELECT result_text, corrected_at FROM patient_lab_results WHERE id = $1",
-    )
-    .bind(lab_result_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let unchanged: (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT result_text, corrected_at FROM patient_lab_results WHERE id = $1")
+            .bind(lab_result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(unchanged.0, "13.2");
     assert!(unchanged.1.is_none());
     let correction_audit_count: i64 = sqlx::query_scalar(
@@ -1901,10 +1893,7 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
         corrected["item"]["source_document_id"],
         document_id.to_string()
     );
-    assert_eq!(
-        corrected["item"]["source_import_id"],
-        import_id.to_string()
-    );
+    assert_eq!(corrected["item"]["source_import_id"], import_id.to_string());
     assert_eq!(corrected["item"]["source_candidate_id"], "lab-correction-1");
     assert_eq!(corrected["item"]["source_page"], 2);
     assert_eq!(corrected["item"]["corrected_by"], admin_id.to_string());
@@ -1984,8 +1973,14 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
         audit.2["reason"],
         "OCR digit checked against source document"
     );
-    assert_eq!(audit.2["provenance"]["source_document_id"], document_id.to_string());
-    assert_eq!(audit.2["provenance"]["source_import_id"], import_id.to_string());
+    assert_eq!(
+        audit.2["provenance"]["source_document_id"],
+        document_id.to_string()
+    );
+    assert_eq!(
+        audit.2["provenance"]["source_import_id"],
+        import_id.to_string()
+    );
 
     let (status, listed) = json_request(
         &app,
@@ -2005,16 +2000,13 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
     );
 
     let mut missing_note = valid_correction.clone();
-    missing_note.as_object_mut().unwrap().remove("correction_note");
+    missing_note
+        .as_object_mut()
+        .unwrap()
+        .remove("correction_note");
     missing_note["result_text"] = json!("11.0");
-    let (status, invalid) = json_request(
-        &app,
-        "PATCH",
-        &correction_path,
-        &bearer,
-        Some(missing_note),
-    )
-    .await;
+    let (status, invalid) =
+        json_request(&app, "PATCH", &correction_path, &bearer, Some(missing_note)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid:?}");
 
     let mut invalid_range = valid_correction.clone();
@@ -2170,7 +2162,10 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
         deletion_audit.1["deletion_note"],
         "Duplicate result confirmed against the source document"
     );
-    assert_eq!(deletion_audit.2["provenance"]["source_import_id"], import_id.to_string());
+    assert_eq!(
+        deletion_audit.2["provenance"]["source_import_id"],
+        import_id.to_string()
+    );
 }
 
 #[tokio::test]

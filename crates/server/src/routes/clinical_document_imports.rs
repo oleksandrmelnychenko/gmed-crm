@@ -163,8 +163,7 @@ enum IdentityNameMatch {
 fn is_identity_title_token(value: &str) -> bool {
     matches!(
         value,
-        "dr"
-            | "dent"
+        "dr" | "dent"
             | "dipl"
             | "doktor"
             | "frau"
@@ -190,13 +189,16 @@ fn normalize_identity_name(value: &str) -> String {
     let normalized_punctuation = lowered
         .chars()
         .map(|character| match character {
-            '\u{2018}' | '\u{2019}' | '\u{02bc}' | '\'' | '`' | '´' | '.' | ',' | '_'
-            | '-' | '/' => ' ',
+            '\u{2018}' | '\u{2019}' | '\u{02bc}' | '\'' | '`' | '´' | '.' | ',' | '_' | '-'
+            | '/' => ' ',
             _ => character,
         })
         .collect::<String>();
     let mut tokens = normalized_punctuation.split_whitespace().peekable();
-    while tokens.peek().is_some_and(|token| is_identity_title_token(token)) {
+    while tokens
+        .peek()
+        .is_some_and(|token| is_identity_title_token(token))
+    {
         tokens.next();
     }
     tokens.collect::<Vec<_>>().join(" ")
@@ -256,16 +258,13 @@ fn compare_identity_names(
         }
     }
 
-    if matches!(first, IdentityNameMatch::Mismatch)
-        || matches!(last, IdentityNameMatch::Mismatch)
-    {
+    if matches!(first, IdentityNameMatch::Mismatch) || matches!(last, IdentityNameMatch::Mismatch) {
         IdentityNameMatch::Mismatch
     } else if matches!(first, IdentityNameMatch::GermanVariant)
         || matches!(last, IdentityNameMatch::GermanVariant)
     {
         IdentityNameMatch::GermanVariant
-    } else if matches!(first, IdentityNameMatch::Exact)
-        && matches!(last, IdentityNameMatch::Exact)
+    } else if matches!(first, IdentityNameMatch::Exact) && matches!(last, IdentityNameMatch::Exact)
     {
         IdentityNameMatch::Exact
     } else {
@@ -281,8 +280,12 @@ fn patient_identity_name_is_placeholder(first_name: &str, last_name: &str) -> bo
     }
     first_name.len() >= 4
         && last_name.len() >= 4
-        && first_name.chars().all(|character| character.is_ascii_digit())
-        && last_name.chars().all(|character| character.is_ascii_digit())
+        && first_name
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        && last_name
+            .chars()
+            .all(|character| character.is_ascii_digit())
 }
 
 fn normalize_patient_identifier(value: &str) -> String {
@@ -2464,9 +2467,10 @@ fn validate_medication_review_decisions(
             "reviewed_draft.candidates must be an array",
         ));
     };
-    for candidate in candidates.iter().filter(|candidate| {
-        candidate.get("target").and_then(Value::as_str) == Some("medication")
-    }) {
+    for candidate in candidates
+        .iter()
+        .filter(|candidate| candidate.get("target").and_then(Value::as_str) == Some("medication"))
+    {
         let selected = candidate
             .get("selected")
             .and_then(Value::as_bool)
