@@ -406,17 +406,11 @@ fn normalize_retention_days(raw: Option<&str>, default: i64) -> i64 {
         .clamp(1, 3_650)
 }
 
-async fn retention_days(
-    pool: &DbPool,
-    key: &str,
-    default: i64,
-) -> Result<i64, sqlx::Error> {
-    let raw = sqlx::query_scalar::<_, String>(
-        "SELECT value FROM system_settings WHERE key = $1",
-    )
-    .bind(key)
-    .fetch_optional(pool)
-    .await?;
+async fn retention_days(pool: &DbPool, key: &str, default: i64) -> Result<i64, sqlx::Error> {
+    let raw = sqlx::query_scalar::<_, String>("SELECT value FROM system_settings WHERE key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(normalize_retention_days(raw.as_deref(), default))
 }
@@ -512,9 +506,7 @@ pub async fn middleware(
     let is_annotated = annotation.action.is_some()
         || annotation.entity_type.is_some()
         || annotation.entity_id.is_some();
-    if !is_annotated
-        && is_routine_background_read(&method, &route, response.status().as_u16())
-    {
+    if !is_annotated && is_routine_background_read(&method, &route, response.status().as_u16()) {
         return response;
     }
     let base_context = build_context_json(&method, &route, response.status().as_u16(), latency_ms);
