@@ -1218,6 +1218,21 @@ export function providerTypeLabel(value: string, tr: Record<string, string>) {
   });
 }
 
+export function providerPeopleCount(provider: Pick<ProviderSummary, "provider_type" | "doctor_count" | "staff_count">) {
+  return provider.provider_type === "non_medical"
+    ? provider.staff_count ?? provider.doctor_count
+    : provider.doctor_count;
+}
+
+export function providerPeopleCountLabel(
+  provider: Pick<ProviderSummary, "provider_type">,
+  tr: Record<string, string>,
+) {
+  return provider.provider_type === "non_medical"
+    ? tr.providers_staff ?? tr.providers_people_count ?? tr.common_not_set ?? "-"
+    : tr.providers_doctors ?? tr.providers_people_count ?? tr.common_not_set ?? "-";
+}
+
 export function doctorRoleLabel(value?: string | null) {
   if (!value) return translateCatalog(getLang()).common_not_set;
   const translations = translateCatalog(getLang());

@@ -49,6 +49,51 @@ final result: passed
 
 ---
 
+# Design QA — Build release widget
+
+- Source screenshot: `C:\Users\oleks\OneDrive\Documents\ChatGPT\gmed\build-widget-source-header.png`
+- Implementation screenshots: `C:\Users\oleks\OneDrive\Documents\ChatGPT\gmed\build-widget-closed.png`, `C:\Users\oleks\OneDrive\Documents\ChatGPT\gmed\build-widget-open.png`
+- Viewport: 1514 × 1272 CSS px at device pixel ratio 1.5
+- State: authenticated Russian leads screen, expanded navigation, DEV build details open
+
+## Full-view comparison evidence
+
+The final header keeps the existing white application chrome and adds one compact black build control beside the status area. The build channel, label, date, and time use the requested monospaced treatment. The green was reduced to a muted sage (`#789487`) with a restrained hover state (`#8fa99c`) so it stays readable without competing with the orange product accent.
+
+## Focused region comparison evidence
+
+The open state uses a white, site-style panel with factual release copy, a build identifier, the exact build date and time, and separate DEV/PROD release data. The panel is rendered in a document-level portal and remains above the leads toolbar and table.
+
+## Required fidelity surfaces
+
+- Fonts and typography: monospace is limited to build metadata; release titles and descriptions use the application typography.
+- Spacing and layout rhythm: the 28 px header control fits the existing top bar without increasing its height; the panel uses the established compact card rhythm.
+- Colors and visual tokens: black control, muted sage metadata, white panel, neutral borders, and the existing orange brand accent.
+- Image quality and assets: no raster asset or custom SVG was introduced; interface icons use Lucide.
+- Copy and content: customer-facing copy is factual and localized for Russian and German; DEV and PROD content are resolved independently.
+
+## Findings and fixes
+
+- Initial P1: the popup was trapped in the topbar stacking context and could be covered by the leads toolbar.
+- Fix: render the popup through a portal with fixed positioning and a dedicated z-index.
+- Follow-up P2: the original green was visually too bright against black.
+- Fix: changed the build metadata to muted sage and removed the peach background from release-item icons.
+- No actionable P0, P1, or P2 differences remain.
+
+## Interaction and runtime checks
+
+- Click opens the panel; outside click, close button, and Escape close it.
+- The panel repositions on resize and fits a 390 px mobile viewport.
+- Russian and German states were checked.
+- Clean browser reload: no errors or warnings.
+- Targeted ESLint: passed.
+- Release-note Vitest suite: 2/2 passed.
+- TypeScript project build: passed.
+
+final result: passed
+
+---
+
 # Design QA — role dashboards
 
 - Source visual truth: `C:\Users\oleks\OneDrive\Documents\ChatGPT\gmed\role-dashboard-source-ceo.png`

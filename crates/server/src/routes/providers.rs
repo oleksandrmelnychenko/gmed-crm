@@ -474,6 +474,11 @@ async fn list_providers(
                     WHERE l.provider_id = p.id
                   ) AS doctor_count,
                   (
+                    SELECT COUNT(*)
+                    FROM provider_staff staff
+                    WHERE staff.provider_id = p.id
+                  ) AS staff_count,
+                  (
                     SELECT COUNT(DISTINCT a.patient_id)
                     FROM appointments a
                     WHERE a.provider_id = p.id
@@ -1240,6 +1245,7 @@ fn provider_row_json(
     let name: String = row.try_get("name").map_err(|_| decode_err())?;
     let provider_type: String = row.try_get("provider_type").map_err(|_| decode_err())?;
     let doctor_count: i64 = row.try_get("doctor_count").map_err(|_| decode_err())?;
+    let staff_count: i64 = row.try_get("staff_count").map_err(|_| decode_err())?;
     let specializations = enrichment
         .specializations
         .get(&id)
@@ -1286,6 +1292,7 @@ fn provider_row_json(
             "has_contract": row.try_get::<bool, _>("has_contract").unwrap_or(false),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
             "doctor_count": doctor_count,
+            "staff_count": staff_count,
             "patient_count": row.try_get::<i64, _>("patient_count").unwrap_or_default(),
             "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
             "service_count": row.try_get::<i64, _>("service_count").unwrap_or_default(),

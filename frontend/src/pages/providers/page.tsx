@@ -2138,6 +2138,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       is_active: detail.is_active,
       has_contract: detail.kooperationsvertrag !== null && detail.kooperationsvertrag !== undefined,
       doctor_count: detail.doctors.length,
+      staff_count: detail.staff.length,
       patient_count: detail.linked_patients.length,
       appointment_count: 0,
       service_count: detail.services.length,

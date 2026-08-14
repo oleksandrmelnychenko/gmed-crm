@@ -1,4 +1,6 @@
-//! Systematic append-only audit log for every authenticated HTTP request.
+//! Systematic append-only audit log for authenticated HTTP requests, with a
+//! narrow exclusion for successful background polling that carries no domain
+//! or security meaning.
 //!
 //! Three things live here:
 //!
@@ -9,7 +11,7 @@
 //!    and middleware.
 //!
 //! 2. [`middleware`] is the axum `middleware::from_fn_with_state` that
-//!    wraps the protected route tree. It records one event per request
+//!    wraps the protected route tree. It records one event per auditable request
 //!    after the response status is known, using the `AuthUser` that
 //!    `require_auth` inserted into the request extensions, and submits
 //!    the event over the mpsc channel.
@@ -20,8 +22,8 @@
 //!    (`action = "http_request"`, `entity_type = "http"`) into a
 //!    semantically meaningful one (`action = "read_patient"`,
 //!    `entity_type = "patient"`, `entity_id = <uuid>`). Handlers that do
-//!    nothing still get the base event — coverage is guaranteed at the
-//!    middleware layer and the auditor can prove it.
+//!    nothing still get the base event unless it is one of the explicitly
+//!    excluded successful background-poll routes.
 //!
 //! ## Immutability
 //!
@@ -88,9 +90,9 @@
 //!    should surface an audit row. If an error after the first snapshot
 //!    must still be audited, leave the manual insert.
 //!
-//! 3. **Coverage by middleware is already guaranteed.** A handler that
-//!    does nothing still produces an `action = "http_request"` row —
-//!    enrichment is optional. Migration is about replacing the
+//! 3. **Coverage by middleware is the default.** A handler that does nothing
+//!    still produces an `action = "http_request"` row except for the documented
+//!    low-signal background polls below. Migration is about replacing the
 //!    semantically-rich manual row with a semantically-rich enriched
 //!    row, not about adding coverage.
 
@@ -114,9 +116,23 @@ use crate::state::AppState;
 /// Bounded channel depth between the middleware and the writer task.
 pub const CHANNEL_CAPACITY: usize = 10_000;
 
+/// Technical request rows are intentionally short-lived: they are useful for
+/// incident reconstruction, but they are too noisy for the long-lived
+/// business activity trail.
+pub const DEFAULT_TECHNICAL_RETENTION_DAYS: i64 = 3;
+pub const DEFAULT_MEANINGFUL_RETENTION_DAYS: i64 = 365;
+
 const HTTP_ACTION: &str = "http_request";
 const HTTP_ENTITY_TYPE: &str = "http";
 const UNMATCHED_ROUTE: &str = "<unmatched>";
+const ROUTINE_READ_ROUTE_SUFFIXES: &[&str] = &[
+    "/admin/activity",
+    "/me",
+    "/messages/unread-total",
+    "/notifications/unread-count",
+    "/stats/leads/by-status",
+    "/users/online",
+];
 
 /// One row destined for `audit_log`.
 #[derive(Debug, Clone)]
@@ -129,6 +145,13 @@ pub struct AuditEvent {
     pub old_value: Option<Value>,
     pub new_value: Option<Value>,
     pub ip_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditRetentionReport {
+    pub deleted: u64,
+    pub technical_days: i64,
+    pub meaningful_days: i64,
 }
 
 /// Per-request mutable enrichment slot. Handlers obtain one via
@@ -377,6 +400,75 @@ async fn write_event(pool: &DbPool, event: &AuditEvent) -> Result<(), sqlx::Erro
     .map(|_| ())
 }
 
+fn normalize_retention_days(raw: Option<&str>, default: i64) -> i64 {
+    raw.and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(default)
+        .clamp(1, 3_650)
+}
+
+async fn retention_days(
+    pool: &DbPool,
+    key: &str,
+    default: i64,
+) -> Result<i64, sqlx::Error> {
+    let raw = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM system_settings WHERE key = $1",
+    )
+    .bind(key)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(normalize_retention_days(raw.as_deref(), default))
+}
+
+pub async fn configured_retention_days(pool: &DbPool) -> Result<(i64, i64), sqlx::Error> {
+    let technical_days = retention_days(
+        pool,
+        "cleanup_audit_http_days",
+        DEFAULT_TECHNICAL_RETENTION_DAYS,
+    )
+    .await?;
+    let meaningful_days = retention_days(
+        pool,
+        "cleanup_audit_log_days",
+        DEFAULT_MEANINGFUL_RETENTION_DAYS,
+    )
+    .await?;
+    Ok((technical_days, meaningful_days))
+}
+
+/// Delete expired rows in one explicitly marked transaction. The database
+/// trigger rejects every ordinary UPDATE/DELETE, so application code cannot
+/// accidentally mutate the audit trail outside this narrow retention path.
+pub async fn purge_expired(pool: &DbPool) -> Result<AuditRetentionReport, sqlx::Error> {
+    let (technical_days, meaningful_days) = configured_retention_days(pool).await?;
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET LOCAL gmed.audit_retention_cleanup = 'on'")
+        .execute(&mut *tx)
+        .await?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM audit_log
+        WHERE (action = 'http_request'
+               AND created_at < now() - make_interval(days => $1))
+           OR (action <> 'http_request'
+               AND created_at < now() - make_interval(days => $2))
+        "#,
+    )
+    .bind(technical_days as i32)
+    .bind(meaningful_days as i32)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(AuditRetentionReport {
+        deleted: result.rows_affected(),
+        technical_days,
+        meaningful_days,
+    })
+}
+
 /// Deterministic SHA-256 of `ip || "::" || salt`. The delimiter prevents
 /// a trivial IP/salt collision and the `sha256:` prefix makes the storage
 /// format self-describing for future algorithm upgrades.
@@ -388,9 +480,10 @@ pub fn hash_client_ip(ip: IpAddr, salt: &str) -> String {
     format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
-/// axum middleware that records one `audit_log` row per authenticated
-/// request. Install it on the protected route tree *after* `require_auth`
-/// so the request extensions already carry [`AuthUser`].
+/// axum middleware that records authenticated requests except a narrow list
+/// of successful, unannotated background polls. Install it on the protected
+/// route tree *after* `require_auth` so request extensions already carry
+/// [`AuthUser`].
 pub async fn middleware(
     State(state): State<AppState>,
     mut request: Request<Body>,
@@ -416,6 +509,14 @@ pub async fn middleware(
     let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     let annotation = context.take();
+    let is_annotated = annotation.action.is_some()
+        || annotation.entity_type.is_some()
+        || annotation.entity_id.is_some();
+    if !is_annotated
+        && is_routine_background_read(&method, &route, response.status().as_u16())
+    {
+        return response;
+    }
     let base_context = build_context_json(&method, &route, response.status().as_u16(), latency_ms);
     let merged_context = match annotation.context {
         Some(overlay) => merge_json_objects(base_context, overlay),
@@ -436,6 +537,14 @@ pub async fn middleware(
     state.audit_sender.try_send(event);
 
     response
+}
+
+fn is_routine_background_read(method: &Method, route: &str, status: u16) -> bool {
+    (method == Method::GET || method == Method::HEAD || method == Method::OPTIONS)
+        && status < 400
+        && ROUTINE_READ_ROUTE_SUFFIXES
+            .iter()
+            .any(|suffix| route.ends_with(suffix))
 }
 
 fn build_context_json(method: &Method, route: &str, status: u16, latency_ms: u64) -> Value {
@@ -503,6 +612,48 @@ mod tests {
         let hash = hash_client_ip(ip, "salt");
         assert!(!hash.contains("203"));
         assert!(!hash.contains("113"));
+    }
+
+    #[test]
+    fn retention_days_are_bounded_and_fall_back_safely() {
+        assert_eq!(normalize_retention_days(Some("14"), 7), 14);
+        assert_eq!(normalize_retention_days(Some("0"), 7), 1);
+        assert_eq!(normalize_retention_days(Some("99999"), 7), 3_650);
+        assert_eq!(normalize_retention_days(Some("invalid"), 7), 7);
+        assert_eq!(normalize_retention_days(None, 365), 365);
+    }
+
+    #[test]
+    fn successful_background_polls_are_not_audit_events() {
+        for route in [
+            "/api/v1/me",
+            "/api/v1/users/online",
+            "/api/v1/notifications/unread-count",
+            "/api/v1/messages/unread-total",
+            "/api/v1/stats/leads/by-status",
+            "/api/v1/admin/activity",
+        ] {
+            assert!(is_routine_background_read(&Method::GET, route, 200));
+        }
+    }
+
+    #[test]
+    fn mutations_and_failed_background_reads_remain_audited() {
+        assert!(!is_routine_background_read(
+            &Method::POST,
+            "/api/v1/users/online",
+            200
+        ));
+        assert!(!is_routine_background_read(
+            &Method::GET,
+            "/api/v1/users/online",
+            500
+        ));
+        assert!(!is_routine_background_read(
+            &Method::GET,
+            "/api/v1/patients",
+            200
+        ));
     }
 
     #[test]
