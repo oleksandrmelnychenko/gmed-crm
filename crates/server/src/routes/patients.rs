@@ -10998,15 +10998,14 @@ async fn save_patient_diagnoses(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if !merge_only {
-        if let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
+    if !merge_only
+        && let Err(e) = sqlx::query("DELETE FROM patient_diagnoses WHERE patient_id = $1")
             .bind(patient_uuid)
             .execute(&mut *tx)
             .await
-        {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+    {
+        tracing::error!(error = %e, patient_id = %patient_uuid, "delete patient diagnoses");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     // Items arrive ordered parent-before-child. We map each item's client id
     // (cid) onto the freshly generated server uuid so a child can resolve its
