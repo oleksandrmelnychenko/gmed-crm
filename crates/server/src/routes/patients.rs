@@ -527,8 +527,7 @@ pub(crate) fn normalize_patient_lab_result_payload(
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid result_text"));
     }
     let panel = normalize_optional_text(body.panel, "panel", 160)?;
-    let laboratory_name =
-        normalize_optional_text(body.laboratory_name, "laboratory_name", 160)?;
+    let laboratory_name = normalize_optional_text(body.laboratory_name, "laboratory_name", 160)?;
     let unit = normalize_optional_text(body.unit, "unit", 80)?;
     let reference_text = normalize_optional_text(body.reference_text, "reference_text", 240)?;
     let source_candidate_id =
