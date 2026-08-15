@@ -28,6 +28,7 @@ export type PatientLabResult = {
   measured_at: string;
   measured_at_precision?: "date" | "datetime";
   panel?: string | null;
+  laboratory_name?: string | null;
   analyte_name: string;
   result_text: string;
   numeric_result?: number | null;

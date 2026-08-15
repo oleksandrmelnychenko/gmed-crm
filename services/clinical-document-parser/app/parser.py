@@ -177,6 +177,7 @@ def parse_clinical_text(text: str) -> ParseDraft:
             layout,
             admission_date=admission_date,
             discharge_date=discharge_date,
+            laboratory_name=_laboratory_name(layout),
         )
     )
     warnings: list[str] = []
@@ -482,6 +483,42 @@ def _parse_localized_number(value: str) -> float | None:
 def _laboratory_date(text: str) -> str | None:
     match = LAB_DATE_RE.search(text)
     return _normalize_german_date(match.group("date")) if match else None
+
+
+def _laboratory_name(text: str) -> str | None:
+    """Extract an explicit laboratory organisation without using section titles."""
+
+    generic_heading = re.compile(
+        r"^(?:labor(?:befund|bericht|werte|ergebnisse?)?|laboratorium|"
+        r"labormedizin|klinische\s+chemie)(?:\s+(?:vom|am)\b.*)?\s*:?$",
+        re.IGNORECASE,
+    )
+    organisation_marker = re.compile(
+        r"(?:\b(?:labor(?:atorium)?|labormedizin|mvz|synlab|ladr|amedes)\b|"
+        r"institut\s+f[uü]r\s+(?:laboratoriumsmedizin|klinische\s+chemie))",
+        re.IGNORECASE,
+    )
+    legal_form = re.compile(r"\b(?:GmbH|AG|e\.\s*V\.|MVZ)\b", re.IGNORECASE)
+    candidates: list[tuple[int, int, str]] = []
+    first_page = text.split("\f", 1)[0]
+    for index, raw_line in enumerate(first_page.splitlines()[:80]):
+        line = re.sub(r"\s+", " ", raw_line).strip(" \t|•·")
+        if not 3 <= len(line) <= 160 or generic_heading.fullmatch(line):
+            continue
+        if not organisation_marker.search(line):
+            continue
+        if re.search(r"\b(?:Parameter|Ergebnis|Referenzbereich|Messwert)\b", line, re.IGNORECASE):
+            continue
+        score = 20 - min(index, 20)
+        if re.search(r"\b(?:SYNLAB|LADR|amedes)\b", line, re.IGNORECASE):
+            score += 40
+        if legal_form.search(line):
+            score += 20
+        if re.search(r"\b(?:Institut|Zentrum|Klinik|Praxis)\b", line, re.IGNORECASE):
+            score += 10
+        candidates.append((score, -index, line))
+    name = max(candidates, default=(0, 0, ""))[2]
+    return name or None
 
 
 def _document_stay_dates(text: str) -> tuple[str | None, str | None]:
@@ -1557,6 +1594,7 @@ def _laboratory_candidates(
     *,
     admission_date: str | None = None,
     discharge_date: str | None = None,
+    laboratory_name: str | None = None,
 ) -> list[ClinicalCandidate]:
     """Extract one candidate per analyte/date from layout-aware laboratory tables."""
 
@@ -1699,6 +1737,8 @@ def _laboratory_candidates(
                         source_text=line,
                     )
                 )
+    for candidate in candidates:
+        candidate.normalized["laboratory_name"] = laboratory_name
     return candidates
 
 

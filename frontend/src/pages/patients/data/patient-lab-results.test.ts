@@ -21,6 +21,7 @@ describe("updatePatientLabResult", () => {
     const payload: PatientLabResultCorrectionPayload = {
       measured_at: "2026-08-10",
       panel: "Blutbild",
+      laboratory_name: "SYNLAB Berlin",
       analyte_name: "Hämoglobin",
       result_text: "13.4",
       numeric_result: 13.4,

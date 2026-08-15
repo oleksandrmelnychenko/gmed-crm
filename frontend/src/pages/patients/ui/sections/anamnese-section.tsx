@@ -11,6 +11,7 @@ import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
+import { ClinicalRecordSource } from "./clinical-record-source";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -62,6 +63,9 @@ export function copyNarrativeVersion(version: ClinicalNarrative): ClinicalNarrat
     specialization_ids: [...(version.specialization_ids ?? [])],
     specializations: (version.specializations ?? []).map((item) => ({ ...item })),
     id: null,
+    source_document_id: null,
+    source_document_name: null,
+    source_import_id: null,
     anamnese_at: new Date().toISOString(),
     is_active: true,
     created_at: null,
@@ -343,7 +347,7 @@ export function AnamneseSection({
       <div className="space-y-2.5 p-3">
         {active ? (
           <div className="space-y-3">
-            <div className="grid gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2.5 md:grid-cols-2">
+            <div className="grid gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2.5 md:grid-cols-3">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
@@ -363,6 +367,14 @@ export function AnamneseSection({
                     {tx("Активная версия", "Aktive Version")}
                   </span>
                 </p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  {tx("Источник", "Quelle")}
+                </p>
+                <div className="mt-1">
+                  <ClinicalRecordSource item={active} tx={tx} />
+                </div>
               </div>
             </div>
             {activeNonEmpty.length > 0 ? (
@@ -495,6 +507,9 @@ export function AnamneseSection({
                               ? tx("Активная версия", "Aktive Version")
                               : tx("Архивная версия", "Archivversion")}
                           </span>
+                          <div className="mt-1.5">
+                            <ClinicalRecordSource item={version} tx={tx} />
+                          </div>
                         </div>
                         <div className="min-w-0">
                           <p className="text-[10px] font-medium uppercase text-muted-foreground">

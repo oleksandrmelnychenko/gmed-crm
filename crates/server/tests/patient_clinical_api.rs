@@ -3779,6 +3779,137 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
 }
 
 #[tokio::test]
+async fn clinical_edits_preserve_ocr_document_provenance() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-provenance-edit");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let bearer = auth_header_for(ceo_id, "ceo");
+
+    let document_id = Uuid::new_v4();
+    let document_name = format!("arztbrief-{tag}.pdf");
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $3, 'medical_report', 'report',
+                'active', 'internal', true, 'application/pdf', 128,
+                $1, 1, $4
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(&document_name)
+    .bind(ceo_id)
+    .execute(&pool)
+    .await
+    .expect("seed source document");
+
+    let diagnosis_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_diagnoses (patient_id, kind, label, source_document_id)
+           VALUES ($1, 'main', 'OCR diagnosis', $2)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .expect("seed imported diagnosis");
+    let examination_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_examinations (patient_id, kind, title, source_document_id)
+           VALUES ($1, 'lab', 'OCR examination', $2)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .expect("seed imported examination");
+    let verlauf_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_clinical_verlauf (patient_id, occurred_on, note, source_document_id, source_page)
+           VALUES ($1, '2026-08-14', 'OCR course entry', $2, 2)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .expect("seed imported Verlauf entry");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &bearer,
+        Some(json!({
+            "items": [{
+                "id": diagnosis_id.to_string(),
+                "kind": "main",
+                "label": "Edited diagnosis",
+                "status": "active"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/verlauf"),
+        &bearer,
+        Some(json!({
+            "items": [{
+                "id": verlauf_id.to_string(),
+                "occurred_on": "2026-08-14",
+                "note": "Edited course entry"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/examinations"),
+        &bearer,
+        Some(json!({
+            "items": [{
+                "id": examination_id.to_string(),
+                "kind": "lab",
+                "title": "Edited examination",
+                "status": "final"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+
+    for section in ["diagnoses", "examinations", "verlauf"] {
+        let item = &body[section][0];
+        assert_eq!(item["source_document_id"], document_id.to_string());
+        assert_eq!(item["source_document_name"], document_name);
+    }
+    assert_eq!(body["verlauf"][0]["source_page"], 2);
+}
+
+#[tokio::test]
 async fn patient_clinical_merge_preserves_rows_omitted_by_returning_patient_intake() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

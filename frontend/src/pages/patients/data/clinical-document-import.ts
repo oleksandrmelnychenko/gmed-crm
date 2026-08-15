@@ -156,6 +156,7 @@ export type ImportedMedicationPayload = {
 export type ImportedLabResultPayload = {
   measured_at: string;
   panel: string | null;
+  laboratory_name: string | null;
   analyte_name: string;
   result_text: string;
   numeric_result: number | null;

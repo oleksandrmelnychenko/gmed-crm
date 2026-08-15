@@ -62,6 +62,7 @@ describe("canonical clinical document candidate payloads", () => {
         result_text: "7.2",
         measured_on: "2026-08-10",
         unit: "G/L",
+        laboratory_name: " SYNLAB Berlin ",
         source_country: "DE",
       }),
     ];
@@ -76,6 +77,7 @@ describe("canonical clinical document candidate payloads", () => {
     expect(result.candidatePayloads["lab-1"]).toEqual({
       measured_at: "2026-08-10",
       panel: null,
+      laboratory_name: "SYNLAB Berlin",
       analyte_name: "Leukozyten",
       result_text: "7.2",
       numeric_result: null,

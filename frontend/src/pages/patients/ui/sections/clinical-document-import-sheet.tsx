@@ -2807,6 +2807,21 @@ export function ClinicalDocumentImportSheet({
                                           />
                                         </label>
                                       ))}
+                                      <label className="space-y-1 sm:col-span-2 xl:col-span-2">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Лаборатория", "Labor")}</span>
+                                        <Input
+                                          value={typeof candidate.normalized.laboratory_name === "string" ? candidate.normalized.laboratory_name : ""}
+                                          disabled={snapshotReadOnly || !candidate.selected}
+                                          className="h-10 bg-white"
+                                          maxLength={160}
+                                          placeholder={tx("Например: SYNLAB Berlin", "Zum Beispiel: SYNLAB Berlin")}
+                                          onFocus={() => setActiveCandidateId(candidate.id)}
+                                          onChange={(event) => {
+                                            const nextNormalized = { ...candidate.normalized, laboratory_name: event.target.value };
+                                            patchCandidate(candidate.id, { normalized: nextNormalized });
+                                          }}
+                                        />
+                                      </label>
                                       <label className="space-y-1 sm:col-span-1">
                                         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Дата", "Datum")}</span>
                                         <Input

@@ -93,6 +93,10 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
   note: string | null;
   /** Free-text warning signs requiring special attention. */
   red_flags?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
   source_mode: "intern" | "extern";
   /** Extern attribution; external_country is an ISO 3166-1 alpha-2 code. */
   external_clinic: string | null;
@@ -117,6 +121,7 @@ export type ClinicalMedication = ClinicalAttribution & {
   source_date?: string | null;
   source_page?: number | null;
   source_document_id?: string | null;
+  source_document_name?: string | null;
   source_import_id?: string | null;
   source_candidate_id?: string | null;
   category: MedicationCategory;
@@ -167,6 +172,10 @@ export type ClinicalExamination = ClinicalAttribution & {
   result: string | null;
   note: string | null;
   red_flags?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
   specialization_ids?: string[];
   specializations?: import("@/pages/providers/model/types").SpecializationItem[];
 };
@@ -192,6 +201,9 @@ export type ClinicalNarrative = {
   anamnese_sozial: string | null;
   beurteilung: string | null;
   red_flags?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
   specialization_ids?: string[];
   specializations?: ClinicalNarrativeSpecialization[];
   /** Clinical date and time of this anamnesis version (RFC 3339). */
@@ -214,6 +226,11 @@ export type ClinicalVerlaufEntry = ClinicalAttribution & {
   id?: string | null;
   /** Episode (case) this entry was established in, if any. */
   case_id?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  source_import_id?: string | null;
+  source_candidate_id?: string | null;
+  source_page?: number | null;
   occurred_on: string | null;
   note: string;
 };
@@ -271,6 +288,7 @@ export type PatientRecommendation = {
   /** Internal staff-only note. */
   note_intern: string | null;
   source_document_id?: string | null;
+  source_document_name?: string | null;
 };
 
 /** Writable fields accepted by create/update; all optional on update. */

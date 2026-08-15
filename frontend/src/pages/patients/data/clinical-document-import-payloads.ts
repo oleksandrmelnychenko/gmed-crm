@@ -52,6 +52,9 @@ export function labResultImportPayload(
   return {
     measured_at: measuredAt,
     panel: typeof normalized.panel === "string" ? normalized.panel : null,
+    laboratory_name: typeof normalized.laboratory_name === "string"
+      ? normalized.laboratory_name.trim() || null
+      : null,
     analyte_name: analyteName,
     result_text: resultText,
     numeric_result: typeof normalized.numeric_result === "number" ? normalized.numeric_result : null,

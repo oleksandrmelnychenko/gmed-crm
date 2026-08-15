@@ -46,6 +46,9 @@ describe("AnamneseSection", () => {
       specialization_ids: [],
       specializations: [],
       id: null,
+      source_document_id: null,
+      source_document_name: null,
+      source_import_id: null,
       anamnese_at: expect.any(String),
       is_active: true,
       created_at: null,
@@ -84,6 +87,27 @@ describe("AnamneseSection", () => {
     expect(html).toContain("Удалить анамнез");
     expect(html).toContain("Актуальный анамнез");
     expect(html).toContain("Дата и время анамнеза");
+    expect(html).toContain("Создано вручную");
+  });
+
+  it("shows the source document for an imported anamnesis", () => {
+    const html = renderToStaticMarkup(
+      <AnamneseSection
+        active={narrative({
+          source_document_id: "document-1",
+          source_document_name: "Arztbrief.pdf",
+          source_import_id: "import-1",
+        })}
+        canManage
+        lang="ru"
+        loadHistory={async () => []}
+        onDelete={async () => undefined}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("Из документа");
+    expect(html).toContain("Arztbrief.pdf");
   });
 
   it("renders red flags and per-specialization narrative details", () => {
