@@ -6,9 +6,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { Lang } from "@/lib/i18n";
@@ -20,6 +17,13 @@ import {
   type ConciergeKeyEvent,
   type ConciergeService,
 } from "./model";
+import {
+  ConciergeDialogBody,
+  ConciergeDialogHeader,
+  ConciergeDialogSection,
+  ConciergeField,
+  conciergeDialogContentClassName,
+} from "./dialog-layout";
 
 const copy = {
   de: {
@@ -136,131 +140,60 @@ export function ConciergeKeyHandoverDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-xl overflow-y-auto rounded-2xl p-4 sm:max-h-[85vh] sm:w-full sm:p-5">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-              <KeyRound className="size-4" />
-            </span>
-            <DialogTitle>{labels.title}</DialogTitle>
-          </div>
-          <DialogDescription>{labels.description}</DialogDescription>
-        </DialogHeader>
+      <DialogContent className={conciergeDialogContentClassName}>
+        <ConciergeDialogHeader
+          icon={KeyRound}
+          tone="amber"
+          title={labels.title}
+          description={labels.description}
+          meta={service.key_status ? <Badge variant="outline" className={cn("rounded-full text-[10px]", actionTone(service.key_status))}>{conciergeKeyActionLabel(service.key_status, lang)}</Badge> : undefined}
+        />
 
-        <section className="rounded-xl border border-border/70 bg-muted/30 p-3" aria-label={labels.current}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{labels.current}</p>
-            {service.key_status ? (
-              <Badge variant="outline" className={actionTone(service.key_status)}>
-                {conciergeKeyActionLabel(service.key_status, lang)}
-              </Badge>
-            ) : (
-              <Badge variant="outline">{labels.notStarted}</Badge>
-            )}
-          </div>
-          {service.key_responsible_user_name ? (
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-              <div className="flex items-center gap-2">
-                <UserRound className="size-3.5 text-muted-foreground" />
-                <span className="text-muted-foreground">{labels.responsible}:</span>
-                <span className="font-medium">{service.key_responsible_user_name}</span>
-              </div>
-              {service.key_status_at ? (
-                <div className="flex items-center gap-2">
-                  <Clock3 className="size-3.5 text-muted-foreground" />
-                  <span>{formatDateTime(service.key_status_at, lang)}</span>
+        <ConciergeDialogBody>
+          {error ? <div role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div> : null}
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
+            <div className="space-y-4">
+              <ConciergeDialogSection title={labels.current} icon={KeyRound}>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/35 p-3">
+                  {service.key_status ? <Badge variant="outline" className={cn("rounded-full", actionTone(service.key_status))}>{conciergeKeyActionLabel(service.key_status, lang)}</Badge> : <Badge variant="outline" className="rounded-full">{labels.notStarted}</Badge>}
+                  {service.key_status_at ? <time className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="size-3.5" />{formatDateTime(service.key_status_at, lang)}</time> : null}
                 </div>
-              ) : null}
+                {service.key_responsible_user_name ? <div className="mt-3 flex items-center gap-2 text-sm"><span className="flex size-8 items-center justify-center rounded-full bg-muted"><UserRound className="size-3.5 text-muted-foreground" /></span><div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">{labels.responsible}</p><p className="font-medium">{service.key_responsible_user_name}</p></div></div> : null}
+              </ConciergeDialogSection>
+
+              <ConciergeDialogSection title={labels.nextAction} icon={ShieldCheck}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ConciergeField label={labels.time}><Input className="bg-field" type="datetime-local" value={occurredAt} max={localDateTimeValue(new Date(Date.now() + 5 * 60_000))} onChange={(event) => setOccurredAt(event.target.value)} /></ConciergeField>
+                  <ConciergeField label={labels.note}><textarea value={note} maxLength={1000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" /></ConciergeField>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {nextActions.map((action) => (
+                    <Button key={action} type="button" variant={action === "returned" ? "outline" : "default"} disabled={Boolean(submittingAction) || !occurredAt} onClick={() => void record(action)} className="h-10 justify-start rounded-lg">
+                      {submittingAction === action ? <LoaderCircle className="animate-spin" /> : <ShieldCheck />}{submittingAction === action ? labels.saving : conciergeKeyActionLabel(action, lang)}
+                    </Button>
+                  ))}
+                </div>
+              </ConciergeDialogSection>
             </div>
-          ) : null}
-        </section>
 
-        {error ? (
-          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-            {error}
-          </div>
-        ) : null}
-
-        <section className="space-y-3" aria-label={labels.nextAction}>
-          <h3 className="text-sm font-semibold">{labels.nextAction}</h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1 text-xs font-medium text-muted-foreground">
-              {labels.time}
-              <Input
-                type="datetime-local"
-                value={occurredAt}
-                max={localDateTimeValue(new Date(Date.now() + 5 * 60_000))}
-                onChange={(event) => setOccurredAt(event.target.value)}
-              />
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground sm:row-span-2">
-              {labels.note}
-              <textarea
-                value={note}
-                maxLength={1000}
-                rows={3}
-                placeholder={labels.notePlaceholder}
-                onChange={(event) => setNote(event.target.value)}
-                className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
-              />
-            </label>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {nextActions.map((action) => (
-              <Button
-                key={action}
-                type="button"
-                variant={action === "returned" ? "outline" : "default"}
-                disabled={Boolean(submittingAction) || !occurredAt}
-                onClick={() => void record(action)}
-                className="min-h-11 justify-start"
-              >
-                {submittingAction === action ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <ShieldCheck />
+            <ConciergeDialogSection title={labels.history} icon={History}>
+              <div className="max-h-[52vh] overflow-y-auto pr-1">
+                {loading ? <div className="flex items-center justify-center py-12 text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /></div> : events.length === 0 ? <p className="rounded-lg border border-dashed border-border px-3 py-12 text-center text-xs text-muted-foreground">{labels.noHistory}</p> : (
+                  <ol className="space-y-2">
+                    {[...events].reverse().map((event) => (
+                      <li key={event.id} className="rounded-lg border border-border/70 bg-muted/15 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", actionTone(event.action))}>{conciergeKeyActionLabel(event.action, lang)}</Badge><time className="text-[11px] text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at, lang)}</time></div>
+                        <p className="mt-2 text-xs font-medium">{event.responsible_user_name}</p>
+                        {event.note ? <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{event.note}</p> : null}
+                        <p className={cn("mt-2 text-[10px] text-muted-foreground", event.note ? "" : "mt-1")}>{labels.recordedBy.replace("{name}", event.recorded_by_name)}</p>
+                      </li>
+                    ))}
+                  </ol>
                 )}
-                {submittingAction === action ? labels.saving : conciergeKeyActionLabel(action, lang)}
-              </Button>
-            ))}
+              </div>
+            </ConciergeDialogSection>
           </div>
-        </section>
-
-        <section className="space-y-3 border-t border-border/70 pt-4" aria-label={labels.history}>
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <History className="size-4 text-muted-foreground" />
-            {labels.history}
-          </h3>
-          {loading ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <LoaderCircle className="size-4 animate-spin" />
-            </div>
-          ) : events.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">
-              {labels.noHistory}
-            </p>
-          ) : (
-            <ol className="space-y-2">
-              {[...events].reverse().map((event) => (
-                <li key={event.id} className="rounded-xl border border-border/70 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Badge variant="outline" className={actionTone(event.action)}>
-                      {conciergeKeyActionLabel(event.action, lang)}
-                    </Badge>
-                    <time className="text-[11px] text-muted-foreground" dateTime={event.occurred_at}>
-                      {formatDateTime(event.occurred_at, lang)}
-                    </time>
-                  </div>
-                  <p className="mt-2 text-xs font-medium">{event.responsible_user_name}</p>
-                  {event.note ? <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{event.note}</p> : null}
-                  <p className={cn("mt-2 text-[10px] text-muted-foreground", event.note ? "" : "mt-1")}>
-                    {labels.recordedBy.replace("{name}", event.recorded_by_name)}
-                  </p>
-                </li>
-              ))}
-            </ol>
-          )}
-        </section>
+        </ConciergeDialogBody>
       </DialogContent>
     </Dialog>
   );

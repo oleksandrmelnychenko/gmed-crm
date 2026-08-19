@@ -13,6 +13,7 @@ import {
   conciergeServiceDisplayTitle,
   conciergeTaskDisplayTitle,
   filterConciergeServices,
+  filterConciergeTasks,
   filterConciergeProviders,
   eligibleConciergeServicesForProvider,
   googleMapsDirectionsUrl,
@@ -23,9 +24,11 @@ import {
   sortConciergeProviders,
   sortConciergeServices,
   sortConciergeTasks,
+  conciergeTaskWorkload,
   type ConciergeProvider,
   type ConciergeService,
   type ConciergeTask,
+  type ConciergeAssignee,
 } from "./model";
 
 function service(overrides: Partial<ConciergeService> = {}): ConciergeService {
@@ -38,6 +41,8 @@ function service(overrides: Partial<ConciergeService> = {}): ConciergeService {
     appointment_title: null,
     provider_id: "provider-1",
     provider_name: "Berlin Mobility",
+    assigned_concierge_id: "concierge-1",
+    assigned_concierge_name: "Hans Becker",
     taxonomy_node_code: "transfer",
     taxonomy_node_name_de: "Transfer",
     taxonomy_node_name_ru: "Трансфер",
@@ -81,6 +86,11 @@ function task(overrides: Partial<ConciergeTask> = {}): ConciergeTask {
     location: null,
     priority: "high",
     status: "open",
+    reminder_at: null,
+    reminder_sent_at: null,
+    checklist_total: 0,
+    checklist_completed: 0,
+    comment_count: 0,
     completed_at: null,
     created_at: "2026-08-18T08:00:00.000Z",
     updated_at: "2026-08-18T08:00:00.000Z",
@@ -117,6 +127,38 @@ function provider(overrides: Partial<ConciergeProvider> = {}): ConciergeProvider
 }
 
 describe("concierge workspace model", () => {
+  it("filters task-manager rows by assignee, timing and plain-language search", () => {
+    const now = new Date("2026-08-19T12:00:00.000Z");
+    const rows = [
+      task({ id: "overdue", assigned_to: "concierge-1", due_at: "2026-08-19T10:00:00.000Z" }),
+      task({ id: "other", assigned_to: "concierge-2", assigned_to_name: "Maria", title: "Restaurant bestätigen", due_at: "2026-08-20T10:00:00.000Z" }),
+    ];
+    expect(filterConciergeTasks(rows, {
+      query: "fahrer",
+      assignee: "concierge-1",
+      status: "all",
+      priority: "all",
+      kind: "all",
+      timing: "overdue",
+    }, now).map((item) => item.id)).toEqual(["overdue"]);
+  });
+
+  it("calculates manager workload for each Concierge", () => {
+    const assignees: ConciergeAssignee[] = [
+      { id: "concierge-1", name: "Hans", email: "hans@example.test", role: "concierge", is_active: true },
+      { id: "concierge-2", name: "Maria", email: "maria@example.test", role: "concierge", is_active: true },
+    ];
+    const workload = conciergeTaskWorkload([
+      task({ id: "a", assigned_to: "concierge-1", due_at: "2026-08-19T10:00:00.000Z" }),
+      task({ id: "b", assigned_to: "concierge-1", due_at: "2026-08-20T10:00:00.000Z" }),
+      task({ id: "c", assigned_to: "concierge-2", status: "completed" }),
+    ], assignees, new Date("2026-08-19T12:00:00.000Z"));
+    expect(workload.map(({ assignee, active, overdue }) => ({ id: assignee.id, active, overdue }))).toEqual([
+      { id: "concierge-1", active: 2, overdue: 1 },
+      { id: "concierge-2", active: 0, overdue: 0 },
+    ]);
+  });
+
   it("groups operational statuses into the board columns", () => {
     expect(conciergeServiceColumn(service({ status: "planned" }))).toBe("requests");
     expect(conciergeServiceColumn(service({ status: "confirmed" }))).toBe("confirmed");

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   CalendarDays,
@@ -7,6 +8,7 @@ import {
   Clock3,
   Columns3,
   List,
+  ListChecks,
   LoaderCircle,
   MapPinned,
   KeyRound,
@@ -19,6 +21,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
@@ -40,6 +43,7 @@ import {
   nextConciergeTaskStatus,
   sortConciergeServices,
   type ApplyPartnerQuoteResponse,
+  type ConciergeAssignee,
   type ConciergeBoardColumnId,
   type ConciergeKeyAction,
   type ConciergeKeyEvent,
@@ -49,6 +53,8 @@ import {
   type ConciergeService,
   type ConciergeTask,
 } from "./model";
+import { ConciergeTaskManager } from "./task-manager";
+import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
   ConciergeKeyHandoverDialog,
   conciergeKeyActionLabel,
@@ -84,11 +90,14 @@ const REALTIME_EVENTS = [
   "concierge_service.booking_confirmed",
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
+  "concierge_operational_item.reminder_sent",
 ] as const;
 
 const text = {
   de: {
     title: "Concierge-Arbeitsbereich",
+    subtitle: "Services, Aufgaben und Partneraktivitäten zentral steuern",
+    searchLabel: "Suche",
     search: "Service, Patient, Anbieter oder Referenz suchen",
     refresh: "Aktualisieren",
     newTask: "Aufgabe / Termin",
@@ -96,6 +105,7 @@ const text = {
     list: "Liste",
     calendar: "Kalender",
     map: "Karte",
+    taskManager: "Aufgaben",
     active: "Aktive Services",
     today: "Heute geplant",
     overdue: "Überfällig",
@@ -132,6 +142,8 @@ const text = {
   },
   ru: {
     title: "Рабочее пространство консьержа",
+    subtitle: "Единое управление услугами, задачами и взаимодействием с партнёрами",
+    searchLabel: "Поиск",
     search: "Поиск по услуге, пациенту, поставщику или номеру",
     refresh: "Обновить",
     newTask: "Задача / событие",
@@ -139,6 +151,7 @@ const text = {
     list: "Список",
     calendar: "Календарь",
     map: "Карта",
+    taskManager: "Задачи",
     active: "Активные услуги",
     today: "Запланировано сегодня",
     overdue: "Просрочено",
@@ -176,7 +189,7 @@ const text = {
 } as const;
 
 type ConciergeText = (typeof text)[Lang];
-type ViewMode = "board" | "list" | "calendar" | "map";
+type ViewMode = "board" | "list" | "calendar" | "map" | "tasks";
 
 function serviceStatusLabel(status: string, labels: ConciergeText) {
   if (status === "confirmed") return labels.status_confirmed;
@@ -220,6 +233,15 @@ function formatMoney(value: string | null, currency: string, lang: Lang, fallbac
   }
 }
 
+function serviceAccent(status: ConciergeService["status"], overdue: boolean) {
+  if (overdue) return "border-l-rose-400";
+  if (status === "completed") return "border-l-emerald-400";
+  if (status === "in_progress") return "border-l-sky-400";
+  if (status === "booked") return "border-l-indigo-400";
+  if (status === "cancelled") return "border-l-slate-300";
+  return "border-l-amber-400";
+}
+
 function ServiceCard({
   service,
   lang,
@@ -253,7 +275,8 @@ function ServiceCard({
   return (
     <article
       className={cn(
-        "rounded-xl border bg-card p-3 shadow-sm transition-shadow hover:shadow-md",
+        "rounded-lg border border-l-[3px] bg-card p-3 shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-border hover:shadow-md",
+        serviceAccent(service.status, overdue),
         overdue ? "border-rose-200" : "border-border/70",
         compact && "sm:grid sm:grid-cols-[minmax(220px,1.4fr)_minmax(170px,1fr)_minmax(180px,1fr)_auto] sm:items-center sm:gap-4",
       )}
@@ -261,21 +284,21 @@ function ServiceCard({
     >
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <Badge variant="outline" className={statusTone(service.status)}>
+          <Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(service.status))}>
             {serviceStatusLabel(service.status, labels)}
           </Badge>
           {service.request_source === "patient_portal" ? (
-            <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-700">
+            <Badge variant="outline" className="rounded-full border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700">
               {labels.portal}
             </Badge>
           ) : null}
           {overdue ? (
-            <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+            <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">
               {labels.overdue}
             </Badge>
           ) : null}
           {service.key_status ? (
-            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+            <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700">
               <KeyRound className="size-3" />
               {conciergeKeyActionLabel(service.key_status, lang)}
             </Badge>
@@ -287,7 +310,7 @@ function ServiceCard({
         {taxonomy ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{taxonomy}</p> : null}
       </div>
 
-      <div className={cn("mt-3 space-y-1.5", compact && "sm:mt-0")}>
+      <div className={cn("mt-3 space-y-2 rounded-md bg-muted/30 p-2.5", compact && "sm:mt-0")}>
         <ServiceFact icon={UserRound} label={labels.patient}>
           <span className="truncate">{service.patient_name}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{service.patient_pid}</span>
@@ -297,7 +320,7 @@ function ServiceCard({
         </ServiceFact>
       </div>
 
-      <div className={cn("mt-3 space-y-1.5", compact && "sm:mt-0")}>
+      <div className={cn("mt-3 space-y-2 rounded-md bg-muted/30 p-2.5", compact && "sm:mt-0")}>
         <ServiceFact icon={Clock3} label={labels.provider}>
           <span className="truncate">{provider || labels.notSet}</span>
           {service.vendor_contact ? (
@@ -318,18 +341,18 @@ function ServiceCard({
           ) : null}
         </ServiceFact>
         {service.booking_reference ? (
-          <p className="truncate pl-5 text-[11px] text-muted-foreground">
+          <p className="truncate border-t border-border/60 pt-1.5 text-[11px] text-muted-foreground">
             {labels.reference}: <span className="font-mono text-foreground">{service.booking_reference}</span>
           </p>
         ) : null}
       </div>
 
-      <div className={cn("mt-3 grid grid-cols-2 gap-2", compact && "sm:mt-0 sm:flex sm:justify-self-end")}>
+      <div className={cn("mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3", compact && "sm:mt-0 sm:flex sm:justify-self-end sm:border-0 sm:pt-0")}>
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="w-full sm:w-auto"
+          className="h-8 w-full rounded-md text-xs sm:w-auto"
           onClick={() => onOpenKey(service)}
         >
           <KeyRound />
@@ -340,7 +363,7 @@ function ServiceCard({
             type="button"
             size="sm"
             variant="outline"
-            className="w-full sm:w-auto"
+            className="h-8 w-full rounded-md text-xs sm:w-auto"
             onClick={() => onOpenPartner(service)}
           >
             <MessageSquareText />
@@ -352,7 +375,7 @@ function ServiceCard({
             type="button"
             size="sm"
             variant="outline"
-            className="col-span-2 w-full sm:col-span-1 sm:w-auto"
+            className="col-span-2 h-8 w-full rounded-md text-xs sm:col-span-1 sm:w-auto"
             disabled={updating}
             aria-label={labels.advance.replace("{status}", serviceStatusLabel(nextStatus, labels))}
             onClick={() => onAdvance(service)}
@@ -376,10 +399,12 @@ function ServiceFact({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 text-xs">
-      <Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="sr-only">{label}: </span>
-      <div className="flex min-w-0 flex-1 items-center justify-between gap-2">{children}</div>
+    <div className="grid min-w-0 grid-cols-[1.1rem_minmax(0,1fr)] gap-1.5 text-xs">
+      <Icon aria-hidden="true" className="mt-3.5 size-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">{label}</p>
+        <div className="flex min-w-0 items-center justify-between gap-2 text-foreground">{children}</div>
+      </div>
     </div>
   );
 }
@@ -388,23 +413,22 @@ function MetricCard({
   label,
   value,
   tone,
+  icon: Icon,
 }: {
   label: string;
   value: number;
   tone?: "danger" | "success";
+  icon: typeof CalendarDays;
 }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card px-4 py-3 shadow-sm">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p
-        className={cn(
-          "mt-1 font-mono text-2xl font-semibold tabular-nums text-foreground",
-          tone === "danger" && value > 0 && "text-rose-600",
-          tone === "success" && value > 0 && "text-emerald-600",
-        )}
-      >
-        {value}
-      </p>
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 shadow-sm">
+      <div className="min-w-0">
+        <p className="truncate text-[11px] font-medium text-muted-foreground">{label}</p>
+        <p className={cn("mt-0.5 font-mono text-xl font-semibold tabular-nums text-foreground", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>{value}</p>
+      </div>
+      <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground", tone === "danger" && value > 0 && "bg-rose-500/10 text-rose-600", tone === "success" && value > 0 && "bg-emerald-500/10 text-emerald-600")}>
+        <Icon className="size-3.5" />
+      </span>
     </div>
   );
 }
@@ -412,15 +436,17 @@ function MetricCard({
 export function ConciergeWorkspacePage() {
   const { lang } = useLang();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const labels = text[lang];
   const [services, setServices] = useState<ConciergeService[]>([]);
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
+  const [assignees, setAssignees] = useState<ConciergeAssignee[]>([]);
   const [providers, setProviders] = useState<ConciergeProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("board");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => searchParams.get("view") === "tasks" ? "tasks" : "board");
   const [version, setVersion] = useState(0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
@@ -428,6 +454,7 @@ export function ConciergeWorkspacePage() {
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const [keyServiceId, setKeyServiceId] = useState<string | null>(null);
   const [keyEvents, setKeyEvents] = useState<ConciergeKeyEvent[]>([]);
   const [loadingKeyEvents, setLoadingKeyEvents] = useState(false);
@@ -448,6 +475,7 @@ export function ConciergeWorkspacePage() {
     clearApiCache("/concierge-services");
     clearApiCache("/concierge-operational-items");
     clearApiCache("/providers");
+    clearApiCache("/users");
     setVersion((current) => current + 1);
   }, []);
 
@@ -461,8 +489,8 @@ export function ConciergeWorkspacePage() {
       else setLoading(true);
       setError("");
       try {
-        const [serviceRows, taskRows, providerRows] = await Promise.all([
-          apiFetch<ConciergeService[]>("/concierge-services?mine_only=true", {
+        const [serviceRows, taskRows, providerRows, assigneeRows] = await Promise.all([
+          apiFetch<ConciergeService[]>(user?.role === "ceo" ? "/concierge-services" : "/concierge-services?mine_only=true", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
@@ -474,11 +502,18 @@ export function ConciergeWorkspacePage() {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
           }).catch(() => []),
+          user?.role === "ceo"
+            ? apiFetch<ConciergeAssignee[]>("/users?role=concierge&active_only=true", {
+                cacheTtlMs: 30_000,
+                forceFresh: version > 0,
+              })
+            : Promise.resolve(user ? [{ id: user.id, name: user.name, email: user.email, role: user.role, is_active: true }] : []),
         ]);
         if (!cancelled) {
           setServices(serviceRows);
           setTasks(taskRows);
           setProviders(providerRows);
+          setAssignees(assigneeRows);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -496,7 +531,7 @@ export function ConciergeWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [labels.loadFailed, version]);
+  }, [labels.loadFailed, user, version]);
 
   const visibleServices = useMemo(
     () => sortConciergeServices(filterConciergeServices(services, query)),
@@ -716,8 +751,8 @@ export function ConciergeWorkspacePage() {
     }
   }
 
-  async function advanceTask(task: ConciergeTask) {
-    const status = nextConciergeTaskStatus(task.status);
+  async function changeTaskStatus(task: ConciergeTask, requestedStatus?: string) {
+    const status = requestedStatus ?? nextConciergeTaskStatus(task.status);
     if (!status || updatingTaskId) return;
 
     setUpdatingTaskId(task.id);
@@ -736,6 +771,8 @@ export function ConciergeWorkspacePage() {
           location: task.location,
           priority: task.priority,
           status,
+          assigned_to: task.assigned_to,
+          reminder_at: task.reminder_at,
         }),
       });
       clearApiCache("/concierge-operational-items");
@@ -749,6 +786,10 @@ export function ConciergeWorkspacePage() {
     }
   }
 
+  function advanceTask(task: ConciergeTask) {
+    void changeTaskStatus(task);
+  }
+
   function openCreateTask() {
     setTaskError("");
     setEditingTask(null);
@@ -759,6 +800,24 @@ export function ConciergeWorkspacePage() {
     setTaskError("");
     setEditingTask(task);
     setTaskDialogOpen(true);
+  }
+
+  function selectViewMode(mode: ViewMode) {
+    setViewMode(mode);
+    const next = new URLSearchParams(searchParams);
+    if (mode === "tasks") next.set("view", "tasks");
+    else next.delete("view");
+    if (mode !== "tasks") next.delete("task");
+    setSearchParams(next, { replace: true });
+  }
+
+  function openTaskDetail(task: ConciergeTask) {
+    setViewMode("tasks");
+    setDetailTaskId(task.id);
+    const next = new URLSearchParams(searchParams);
+    next.set("view", "tasks");
+    next.set("task", task.id);
+    setSearchParams(next, { replace: true });
   }
 
   async function saveTask(input: SaveConciergeOperationalItemInput) {
@@ -807,14 +866,15 @@ export function ConciergeWorkspacePage() {
     <div className="space-y-4" data-testid="concierge-workspace">
       <PageHeader
         title={labels.title}
+        description={labels.subtitle}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {user?.role === "concierge" ? (
-              <Button type="button" size="sm" onClick={openCreateTask}>
+            {user?.role === "concierge" && viewMode !== "tasks" ? (
+              <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
                 <Plus />{labels.newTask}
               </Button>
             ) : null}
-            <Button type="button" size="sm" variant="outline" disabled={refreshing} onClick={requestRefresh}>
+            <Button type="button" className="h-9 rounded-lg px-3.5" variant="outline" disabled={refreshing} onClick={requestRefresh}>
               <RefreshCw className={cn(refreshing && "animate-spin")} />
               {labels.refresh}
             </Button>
@@ -822,76 +882,66 @@ export function ConciergeWorkspacePage() {
         }
       />
 
-      <section aria-label={labels.title} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <MetricCard label={labels.active} value={stats.active} />
-        <MetricCard label={labels.today} value={stats.today} />
-        <MetricCard label={labels.overdue} value={stats.overdue} tone="danger" />
-        <MetricCard label={labels.ready} value={stats.readyForBilling} tone="success" />
-      </section>
+      {viewMode !== "tasks" ? (
+        <section aria-label={labels.title} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <MetricCard label={labels.active} value={stats.active} icon={Columns3} />
+          <MetricCard label={labels.today} value={stats.today} icon={CalendarDays} />
+          <MetricCard label={labels.overdue} value={stats.overdue} tone="danger" icon={Clock3} />
+          <MetricCard label={labels.ready} value={stats.readyForBilling} tone="success" icon={CheckCircle2} />
+        </section>
+      ) : null}
 
       {error ? (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2 rounded-xl border border-border/70 bg-card p-2 shadow-sm sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="mx-auto flex w-fit max-w-full flex-wrap rounded-lg border border-border bg-card p-1">
+        {([
+          ["board", Columns3, labels.board],
+          ["list", List, labels.list],
+          ["calendar", CalendarDays, labels.calendar],
+          ["map", MapPinned, labels.map],
+          ["tasks", ListChecks, labels.taskManager],
+        ] as const).map(([mode, Icon, label]) => (
+          <Button key={mode} type="button" size="sm" variant={viewMode === mode ? "default" : "ghost"} className="h-8 rounded-md px-3 text-xs" aria-pressed={viewMode === mode} onClick={() => selectViewMode(mode)}>
+            <Icon className="size-3.5" />
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      {viewMode !== "tasks" ? <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
+        <ToolbarField label={labels.searchLabel} className="w-full">
+          <div className="relative min-w-0">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={labels.search}
             aria-label={labels.search}
-            className="pl-9"
+            className="h-8 rounded-md bg-field pl-8 text-xs"
           />
-        </div>
-        <div className="grid grid-cols-4 gap-1 overflow-x-auto rounded-lg bg-muted p-1" aria-label={labels.title}>
-          <Button
-            type="button"
-            size="sm"
-            variant={viewMode === "board" ? "secondary" : "ghost"}
-            aria-pressed={viewMode === "board"}
-            onClick={() => setViewMode("board")}
-          >
-            <Columns3 />
-            {labels.board}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={viewMode === "list" ? "secondary" : "ghost"}
-            aria-pressed={viewMode === "list"}
-            onClick={() => setViewMode("list")}
-          >
-            <List />
-            {labels.list}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={viewMode === "calendar" ? "secondary" : "ghost"}
-            aria-pressed={viewMode === "calendar"}
-            onClick={() => setViewMode("calendar")}
-          >
-            <CalendarDays />
-            {labels.calendar}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={viewMode === "map" ? "secondary" : "ghost"}
-            aria-pressed={viewMode === "map"}
-            onClick={() => setViewMode("map")}
-          >
-            <MapPinned />
-            {labels.map}
-          </Button>
-        </div>
-      </div>
+          </div>
+        </ToolbarField>
+      </div> : null}
 
-      {viewMode === "calendar" ? (
+      {viewMode === "tasks" ? (
+        <ConciergeTaskManager
+          tasks={tasks}
+          assignees={assignees}
+          lang={lang}
+          now={now}
+          canManageTeam={user?.role === "ceo"}
+          updatingTaskId={updatingTaskId}
+          onCreate={openCreateTask}
+          onEdit={openEditTask}
+          onOpen={openTaskDetail}
+          onStatusChange={(task, status) => void changeTaskStatus(task, status)}
+        />
+      ) : viewMode === "calendar" ? (
         <ConciergeAgendaView
           services={visibleServices}
           tasks={tasks}
@@ -905,7 +955,7 @@ export function ConciergeWorkspacePage() {
         <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0">
             {visibleServices.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
                 {labels.empty}
               </div>
             ) : viewMode === "board" ? (
@@ -913,12 +963,12 @@ export function ConciergeWorkspacePage() {
                 {CONCIERGE_BOARD_COLUMNS.map((column) => {
                   const rows = servicesByColumn.get(column.id) ?? [];
                   return (
-                    <div key={column.id} className="min-w-0 rounded-xl border border-border/70 bg-muted/30 p-2">
+                    <div key={column.id} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2">
                       <div className="flex items-center justify-between gap-2 px-1 pb-2">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           {labels[column.id]}
                         </h2>
-                        <Badge variant="secondary">{rows.length}</Badge>
+                        <Badge variant="secondary" className="rounded-full text-[10px]">{rows.length}</Badge>
                       </div>
                       <div className="space-y-2">
                         {rows.length === 0 ? (
@@ -1026,6 +1076,9 @@ export function ConciergeWorkspacePage() {
       <ConciergeTaskEventDialog
         item={editingTask}
         services={services}
+        assignees={assignees}
+        currentUserId={user?.id ?? null}
+        canAssign={user?.role === "ceo"}
         lang={lang}
         open={taskDialogOpen}
         submitting={submittingTask}
@@ -1035,6 +1088,19 @@ export function ConciergeWorkspacePage() {
           if (!open) setEditingTask(null);
         }}
         onSave={saveTask}
+      />
+      <ConciergeTaskDetailDialog
+        taskId={detailTaskId}
+        lang={lang}
+        open={Boolean(detailTaskId)}
+        onOpenChange={(open) => {
+          if (open) return;
+          setDetailTaskId(null);
+          const next = new URLSearchParams(searchParams);
+          next.delete("task");
+          setSearchParams(next, { replace: true });
+        }}
+        onChanged={requestRefresh}
       />
     </div>
   );

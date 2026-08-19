@@ -570,8 +570,8 @@ function accountMovementDirectionLabel(
   direction: PatientAccountMovement["direction"],
   lang: string,
 ) {
-  if (direction === "debit") return lang === "de" ? "Soll" : "Дебет";
-  return lang === "de" ? "Haben" : "Кредит";
+  if (direction === "debit") return lang === "de" ? "Belastung" : "Начисление";
+  return lang === "de" ? "Zahlung oder Gutschrift" : "Оплата или уменьшение долга";
 }
 
 function accountBalanceLabel(
@@ -583,10 +583,10 @@ function accountBalanceLabel(
   if (value == null) return lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка";
   const amount = moneyNumeric(value);
   if (amount > 0) {
-    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Soll" : "Дт"}`;
+    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "offener Betrag" : "долг"}`;
   }
   if (amount < 0) {
-    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Haben" : "Кт"}`;
+    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Guthaben" : "переплата"}`;
   }
   return formatMoney("0", currency);
 }
@@ -1439,7 +1439,7 @@ function usePatientInvoicesTabContent({
       },
       {
         id: "direction",
-        label: lang === "de" ? "Soll / Haben" : "Дебет / кредит",
+        label: lang === "de" ? "Belastung / Zahlung" : "Начисление / оплата",
         accessor: (movement) => accountMovementDirectionLabel(movement.direction, lang),
         sortable: true,
         filterType: "enum",
@@ -1491,7 +1491,7 @@ function usePatientInvoicesTabContent({
       },
       {
         id: "debit",
-        label: lang === "de" ? "Soll" : "Дебет",
+        label: lang === "de" ? "Belastung" : "Начисление",
         accessor: (movement) => moneyNumeric(movement.debit),
         sortable: true,
         filterType: "number",
@@ -1506,7 +1506,7 @@ function usePatientInvoicesTabContent({
       },
       {
         id: "credit",
-        label: lang === "de" ? "Haben" : "Кредит",
+        label: lang === "de" ? "Zahlung / Gutschrift" : "Оплата / уменьшение",
         accessor: (movement) => moneyNumeric(movement.credit),
         sortable: true,
         filterType: "number",
@@ -2052,11 +2052,11 @@ function usePatientInvoicesTabContent({
                 ),
               ],
               [
-                lang === "de" ? "Soll im Zeitraum" : "Дебет за период",
+                lang === "de" ? "Belastungen im Zeitraum" : "Начислено за период",
                 formatMoney(accountStatement.summary.debit_total, accountStatement.currency),
               ],
               [
-                lang === "de" ? "Haben im Zeitraum" : "Кредит за период",
+                lang === "de" ? "Zahlungen und Gutschriften im Zeitraum" : "Оплачено или уменьшено за период",
                 formatMoney(accountStatement.summary.credit_total, accountStatement.currency),
               ],
               [
@@ -2280,7 +2280,7 @@ function usePatientInvoicesTabContent({
                 </span>
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                 <NativeComboboxSelect
-                  aria-label={lang === "de" ? "Soll/Haben filtern" : "Фильтр дебет/кредит"}
+                  aria-label={lang === "de" ? "Belastungen und Zahlungen filtern" : "Фильтр начислений и оплат"}
                   value={movementDirectionFilter}
                   onChange={(event) =>
                     setMovementDirectionFilter(
@@ -2289,9 +2289,9 @@ function usePatientInvoicesTabContent({
                   }
                   className={cn(selectClass, "h-8 min-w-36")}
                 >
-                  <option value="all">{lang === "de" ? "Soll und Haben" : "Дебет и кредит"}</option>
-                  <option value="debit">{lang === "de" ? "Nur Soll" : "Только дебет"}</option>
-                  <option value="credit">{lang === "de" ? "Nur Haben" : "Только кредит"}</option>
+                  <option value="all">{lang === "de" ? "Belastungen und Zahlungen" : "Начисления и оплаты"}</option>
+                  <option value="debit">{lang === "de" ? "Nur Belastungen" : "Только начисления"}</option>
+                  <option value="credit">{lang === "de" ? "Nur Zahlungen und Gutschriften" : "Только оплаты и уменьшения"}</option>
                 </NativeComboboxSelect>
                 <NativeComboboxSelect
                   aria-label={lang === "de" ? "Buchungsart filtern" : "Фильтр типа операции"}
@@ -2413,8 +2413,8 @@ function usePatientInvoicesTabContent({
                 className={selectClass}
                 disabled={balanceAdjustmentBusy}
               >
-                <option value="debit">{lang === "de" ? "Soll" : "Дебет"}</option>
-                <option value="credit">{lang === "de" ? "Haben" : "Кредит"}</option>
+                <option value="debit">{lang === "de" ? "Forderung erhöhen" : "Увеличить долг"}</option>
+                <option value="credit">{lang === "de" ? "Forderung mindern oder Guthaben bilden" : "Уменьшить долг или создать переплату"}</option>
               </NativeComboboxSelect>
             </Field>
             <Field label={lang === "de" ? "Kategorie" : "Категория"} htmlFor="balance-adjustment-category">

@@ -451,9 +451,9 @@ function usePatientInvoicesPageContent() {
                 accountStatement.summary.closing_balance == null
                   ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
                   : Number(accountStatement.summary.closing_balance) > 0
-                    ? `${formatPortalCurrency(accountStatement.summary.closing_balance, accountStatement.currency)} ${lang === "de" ? "Soll" : "Дт"}`
+                    ? `${formatPortalCurrency(accountStatement.summary.closing_balance, accountStatement.currency)} ${lang === "de" ? "offener Betrag" : "долг"}`
                     : Number(accountStatement.summary.closing_balance) < 0
-                      ? `${formatPortalCurrency(Math.abs(Number(accountStatement.summary.closing_balance)), accountStatement.currency)} ${lang === "de" ? "Haben" : "Кт"}`
+                      ? `${formatPortalCurrency(Math.abs(Number(accountStatement.summary.closing_balance)), accountStatement.currency)} ${lang === "de" ? "Guthaben" : "переплата"}`
                       : formatPortalCurrency(0, accountStatement.currency)
               }
             />

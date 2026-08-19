@@ -72,6 +72,11 @@ export function notificationHrefForRole(item: Notification, role: string) {
   if (item.entity_type === "concierge_service") {
     return role === "concierge" ? "/concierge" : "/services";
   }
+  if (item.entity_type === "concierge_task") {
+    return role === "concierge" || role === "ceo"
+      ? `/concierge?view=tasks&task=${item.entity_id}`
+      : null;
+  }
   if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
   if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
   if (item.entity_type === "privacy_request") return "/admin/compliance";

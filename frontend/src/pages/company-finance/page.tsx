@@ -1,18 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Building2,
   RefreshCw,
-  Scale,
   Search,
-  UsersRound,
-  WalletCards,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { ToolbarField } from "@/components/data-table/toolbar-field";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Input } from "@/components/ui/input";
 import { StaffLink } from "@/components/staff-link";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -35,6 +31,9 @@ import type {
   CompanyFinancialAccountsPayload,
   CompanyFinancialFilters,
   CompanyFinancialPosition,
+  CompanyCashMovement,
+  CompanyPatientPosition,
+  CompanyProviderLiability,
 } from "./types";
 
 type PatientSideFilter = "all" | CompanyBalanceSide | "reconciliation";
@@ -51,7 +50,9 @@ const initialFilters: CompanyFinancialFilters = {
 const textByLanguage = {
   ru: {
     title: "Баланс компании",
+    subtitle: "Финансовая позиция, обязательства и движение средств компании",
     refresh: "Обновить",
+    searchLabel: "Поиск",
     from: "Денежные операции с",
     to: "по",
     currency: "Валюта",
@@ -81,8 +82,8 @@ const textByLanguage = {
     unassignedAccount: "Не распределено",
     assignmentFailed: "Не удалось изменить счет денежной операции.",
     all: "Все",
-    debit: "Дт",
-    credit: "Кт",
+    debit: "Долг",
+    credit: "Переплата",
     reconciliation: "Сверка",
     patient: "Пациент",
     invoicesDue: "По счетам",
@@ -112,7 +113,9 @@ const textByLanguage = {
   },
   de: {
     title: "Unternehmenssaldo",
+    subtitle: "Finanzposition, Verbindlichkeiten und Geldbewegungen des Unternehmens",
     refresh: "Aktualisieren",
+    searchLabel: "Suche",
     from: "Geldbewegungen von",
     to: "bis",
     currency: "Währung",
@@ -142,8 +145,8 @@ const textByLanguage = {
     unassignedAccount: "Nicht zugeordnet",
     assignmentFailed: "Das Konto der Geldbewegung konnte nicht geändert werden.",
     all: "Alle",
-    debit: "Soll",
-    credit: "Haben",
+    debit: "Forderung",
+    credit: "Guthaben",
     reconciliation: "Abstimmung",
     patient: "Patient",
     invoicesDue: "Rechnungen offen",
@@ -196,55 +199,35 @@ function formatDate(value: string | null, locale: string) {
 function SummaryCard({
   label,
   value,
-  icon: Icon,
   tone = "default",
-  meta,
 }: {
   label: string;
   value: string;
-  icon: typeof Scale;
   tone?: "default" | "positive" | "negative" | "warning";
-  meta?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p
-            className={cn(
-              "mt-2 truncate text-xl font-semibold tracking-tight tabular-nums",
-              tone === "positive" && "text-emerald-700 dark:text-emerald-400",
-              tone === "negative" && "text-rose-700 dark:text-rose-400",
-              tone === "warning" && "text-amber-700 dark:text-amber-400",
-            )}
-          >
-            {value}
-          </p>
-          {meta ? <p className="mt-1 text-[11px] text-muted-foreground">{meta}</p> : null}
-        </div>
-        <span
-          className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground",
-            tone === "positive" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-            tone === "negative" && "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-            tone === "warning" && "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-          )}
-        >
-          <Icon className="size-4" />
-        </span>
-      </div>
+    <div
+      className={cn(
+        "min-w-0 rounded-lg border border-border/70 border-l-[3px] bg-card px-3 py-2.5 shadow-xs",
+        tone === "default" && "border-l-slate-300",
+        tone === "positive" && "border-l-emerald-400",
+        tone === "negative" && "border-l-rose-400",
+        tone === "warning" && "border-l-amber-400",
+      )}
+    >
+      <p className="truncate text-[11px] font-medium text-muted-foreground" title={label}>{label}</p>
+      <p
+        className={cn(
+          "mt-1 truncate text-base font-semibold tracking-tight tabular-nums",
+          tone === "positive" && "text-emerald-700 dark:text-emerald-400",
+          tone === "negative" && "text-rose-700 dark:text-rose-400",
+          tone === "warning" && "text-amber-700 dark:text-amber-400",
+        )}
+        title={value}
+      >
+        {value}
+      </p>
     </div>
-  );
-}
-
-function EmptyRow({ colSpan, label }: { colSpan: number; label: string }) {
-  return (
-    <tr>
-      <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-muted-foreground">
-        {label}
-      </td>
-    </tr>
   );
 }
 
@@ -310,6 +293,109 @@ export function CompanyFinancePage() {
   const actualCashBalance = (accounts?.items ?? [])
     .reduce((sum, account) => sum + parseAmount(account.current_balance), 0);
 
+  const patientColumns = useMemo<ColumnDef<CompanyPatientPosition>[]>(() => [
+    {
+      id: "patient",
+      label: text.patient,
+      accessor: (row) => `${row.patient_name} ${row.patient_pid}`,
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      required: true,
+      pinned: "left",
+      width: 260,
+      render: (row) => (
+        <div className="min-w-0">
+          <StaffLink className="truncate font-medium text-foreground hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>
+            {row.patient_name || row.patient_pid}
+          </StaffLink>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <span>{row.patient_pid}</span>
+            {!row.is_active ? <Badge variant="outline" className="rounded-full text-[10px]">{text.inactive}</Badge> : null}
+            {row.reconciliation_required ? <Badge className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" variant="outline">{text.reconciliation}</Badge> : null}
+          </div>
+        </div>
+      ),
+    },
+    { id: "invoice_due", label: text.invoicesDue, accessor: (row) => parseAmount(row.invoice_due), filterType: "number", sortable: true, width: 145, render: (row) => money(row.invoice_due) },
+    { id: "external_receivable", label: text.externalReceivable, accessor: (row) => parseAmount(row.external_receivable), filterType: "number", sortable: true, width: 150, render: (row) => money(row.external_receivable) },
+    { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => money(row.manual_balance) },
+    { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => <span className="text-rose-700 dark:text-rose-400">− {money(row.available_prepayment)}</span> },
+    {
+      id: "balance",
+      label: text.balance,
+      accessor: (row) => parseAmount(row.calculated_balance),
+      filterType: "number",
+      sortable: true,
+      width: 150,
+      render: (row) => (
+        <div className={cn("font-semibold", row.balance_side === "debit" && "text-emerald-700 dark:text-emerald-400", row.balance_side === "credit" && "text-rose-700 dark:text-rose-400")}>
+          {money(row.calculated_balance)}
+          <div className="text-[10px] font-normal text-muted-foreground">{row.balance_side === "debit" ? text.debit : row.balance_side === "credit" ? text.credit : "—"}</div>
+        </div>
+      ),
+    },
+  ], [money, text]);
+
+  const providerColumns = useMemo<ColumnDef<CompanyProviderLiability>[]>(() => [
+    {
+      id: "document",
+      label: text.document,
+      accessor: (row) => row.external_invoice_number,
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      required: true,
+      pinned: "left",
+      width: 190,
+      render: (row) => (
+        <div>
+          <div className="truncate font-medium">{row.external_invoice_number}</div>
+          <Badge variant="outline" className={cn("mt-0.5 rounded-full text-[10px]", row.liability_kind === "expected" ? "border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" : "border-rose-200 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400")}>
+            {row.liability_kind === "expected" ? text.expected : text.payable}
+          </Badge>
+        </div>
+      ),
+    },
+    { id: "provider", label: text.provider, accessor: (row) => row.provider_name ?? "", filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.provider_id ? <StaffLink className="hover:text-primary hover:underline" to={`/providers/${row.provider_id}`}>{row.provider_name || "—"}</StaffLink> : row.provider_name || "—" },
+    { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid}</StaffLink> },
+    { id: "order", label: text.order, accessor: (row) => row.order_number, filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> },
+    { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date, locale) },
+    { id: "amount", label: text.amount, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className="font-semibold">{money(row.amount_gross)}</span> },
+  ], [locale, money, text]);
+
+  const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
+    { id: "date", label: text.date, accessor: (row) => row.entry_date, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.entry_date, locale) },
+    { id: "operation", label: text.operation, accessor: (row) => `${row.description} ${row.category}`, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div><div className="truncate font-medium" title={row.description}>{row.description}</div><div className="truncate text-[10px] text-muted-foreground">{row.category}</div></div> },
+    { id: "document", label: text.document, accessor: (row) => `${row.invoice_number ?? ""} ${row.external_invoice_number ?? ""} ${row.order_number ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <div><div>{row.invoice_number || row.external_invoice_number || "—"}</div>{row.order_id ? <StaffLink className="text-[10px] text-muted-foreground hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> : null}</div> },
+    { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name ?? ""} ${row.patient_pid ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—" },
+    {
+      id: "account",
+      label: text.financialAccount,
+      accessor: (row) => row.financial_account_name ?? "",
+      filterType: "enum",
+      filterOptions: (accounts?.items ?? []).map((account) => ({ value: account.name, label: account.name })),
+      sortable: true,
+      width: 210,
+      render: (row) => (
+        <select
+          className={cn(shellSelectClassName, "h-8 min-w-44 rounded-md bg-field text-xs")}
+          value={row.financial_account_id ?? ""}
+          disabled={assignmentBusyId === row.id}
+          aria-label={text.financialAccount}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => void handleAssignMovement(row.id, event.target.value)}
+        >
+          <option value="" disabled>{text.unassignedAccount}</option>
+          {(accounts?.items ?? []).map((account) => <option key={account.id} value={account.id} disabled={!account.is_active}>{account.name}{account.is_active ? "" : ` · ${text.inactive}`}</option>)}
+        </select>
+      ),
+    },
+    { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => money(row.amount_net) },
+    { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => money(row.amount_vat) },
+    { id: "gross", label: text.gross, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className={cn("font-semibold", row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}</span> },
+  ], [accounts?.items, assignmentBusyId, locale, money, text]);
+
   async function handleAssignMovement(entryId: string, financialAccountId: string) {
     setAssignmentBusyId(entryId);
     setAssignmentError(null);
@@ -326,13 +412,15 @@ export function CompanyFinancePage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <PageHeader
         title={text.title}
+        description={text.subtitle}
         actions={(
           <Button
             type="button"
             variant="outline"
+            className="h-9 rounded-lg px-3.5"
             disabled={loading}
             onClick={() => setReloadToken((current) => current + 1)}
           >
@@ -342,27 +430,26 @@ export function CompanyFinancePage() {
         )}
       />
 
-      <section className="grid gap-3 rounded-xl border border-border/70 bg-card p-3 shadow-sm sm:grid-cols-2 lg:grid-cols-[1fr_1fr_0.7fr_0.9fr_1.5fr]">
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          <span>{text.from}</span>
+      <section className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
+        <ToolbarField label={text.from} className="w-[150px]">
           <Input
             type="date"
+            className="h-8 rounded-md bg-field text-xs"
             value={filters.from}
             onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
           />
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          <span>{text.to}</span>
+        </ToolbarField>
+        <ToolbarField label={text.to} className="w-[150px]">
           <Input
             type="date"
+            className="h-8 rounded-md bg-field text-xs"
             value={filters.to}
             onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
           />
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          <span>{text.currency}</span>
+        </ToolbarField>
+        <ToolbarField label={text.currency} className="w-[96px]">
           <select
-            className={shellSelectClassName}
+            className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
             value={filters.currency || currency}
             onChange={(event) => setFilters((current) => ({ ...current, currency: event.target.value }))}
           >
@@ -370,11 +457,10 @@ export function CompanyFinancePage() {
               (value) => <option key={value} value={value}>{value}</option>,
             )}
           </select>
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
-          <span>{text.movement}</span>
+        </ToolbarField>
+        <ToolbarField label={text.movement} className="w-[150px]">
           <select
-            className={shellSelectClassName}
+            className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
             value={filters.movement}
             onChange={(event) => setFilters((current) => ({
               ...current,
@@ -385,206 +471,101 @@ export function CompanyFinancePage() {
             <option value="inflow">{text.inflow}</option>
             <option value="outflow">{text.outflow}</option>
           </select>
-        </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground sm:col-span-2 lg:col-span-1">
-          <span>{text.search}</span>
+        </ToolbarField>
+        <ToolbarField label={text.searchLabel} className="w-[280px]">
           <span className="relative block">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
-              className="pl-8"
+              className="h-8 rounded-md bg-field pl-8 text-xs"
+              placeholder={text.search}
               value={filters.search}
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
             />
           </span>
-        </label>
+        </ToolbarField>
       </section>
 
       {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
 
       {summary ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} icon={UsersRound} tone="positive" />
-            <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} icon={ArrowDownLeft} tone="negative" />
-            <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} icon={Building2} tone="negative" />
-            <SummaryCard label={text.expectedCosts} value={money(summary.expected_provider_costs)} icon={Building2} tone="warning" />
+          <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone="positive" />
+            <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone="negative" />
+            <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone="negative" />
+            <SummaryCard label={text.expectedCosts} value={money(summary.expected_provider_costs)} tone="warning" />
             <SummaryCard
               label={text.calculatedPosition}
               value={money(summary.calculated_net_position)}
-              icon={Scale}
               tone={calculatedNet >= 0 ? "positive" : "negative"}
-              meta={text.calculated}
             />
             <SummaryCard
               label={text.confirmedPosition}
               value={summary.confirmed_net_position === null ? text.reconciliationRequired : money(summary.confirmed_net_position)}
-              icon={summary.confirmed_net_position === null ? AlertTriangle : Scale}
               tone={summary.confirmed_net_position === null ? "warning" : "default"}
-              meta={summary.confirmed_net_position === null ? undefined : text.confirmed}
             />
-            <SummaryCard label={text.cashInflow} value={money(summary.cash_inflow)} icon={ArrowDownLeft} tone="positive" />
-            <SummaryCard label={text.cashOutflow} value={money(summary.cash_outflow)} icon={ArrowUpRight} tone="negative" />
+            <SummaryCard label={text.cashInflow} value={money(summary.cash_inflow)} tone="positive" />
+            <SummaryCard label={text.cashOutflow} value={money(summary.cash_outflow)} tone="negative" />
             <SummaryCard
               label={text.actualCashBalance}
               value={money(String(actualCashBalance))}
-              icon={WalletCards}
               tone={actualCashBalance >= 0 ? "positive" : "negative"}
             />
-          </section>
-
-          <div className="grid gap-3 sm:grid-cols-2">
             <SummaryCard
               label={text.netCashFlow}
               value={money(summary.net_cash_flow)}
-              icon={netCashFlow >= 0 ? ArrowDownLeft : ArrowUpRight}
               tone={netCashFlow >= 0 ? "positive" : "negative"}
-              meta={`${formatDate(position?.period.from ?? null, locale)} — ${formatDate(position?.period.to ?? null, locale)}`}
             />
-            {summary.reconciliation_required ? (
-              <ShellBanner tone="warning" withIcon>
-                {text.reconciliationMessage(
-                  summary.reconciliation_patient_count,
-                  money(summary.unreconciled_external_receivables),
-                )}
-              </ShellBanner>
-            ) : (
-              <div className="rounded-xl border border-border/70 bg-card p-4 text-sm text-muted-foreground shadow-sm">
-                {text.confirmed}: {money(summary.confirmed_net_position)}
-              </div>
-            )}
-          </div>
+          </section>
+
+          {summary.reconciliation_required ? (
+            <ShellBanner tone="warning" withIcon>
+              {text.reconciliationMessage(
+                summary.reconciliation_patient_count,
+                money(summary.unreconciled_external_receivables),
+              )}
+            </ShellBanner>
+          ) : null}
         </>
       ) : loading ? (
-        <div className="rounded-xl border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">
           {text.loading}
         </div>
       ) : null}
 
       {position && accounts ? (
-        <Tabs defaultValue="patients">
-          <TabsList className="max-w-full overflow-x-auto">
-            <TabsTrigger value="patients">{text.patients} · {position.patient_positions.length}</TabsTrigger>
-            <TabsTrigger value="providers">{text.providers} · {position.provider_liabilities.length}</TabsTrigger>
-            <TabsTrigger value="accounts">{text.financialAccounts} · {accounts.items.length}</TabsTrigger>
-            <TabsTrigger value="cash">{text.cash} · {position.cash_movement_count}</TabsTrigger>
+        <Tabs defaultValue="patients" className="gap-3">
+          <TabsList className="mx-auto h-auto max-w-full flex-wrap border border-border bg-card p-1">
+            <TabsTrigger className="h-8 rounded-md px-3" value="patients">{text.patients} · {position.patient_positions.length}</TabsTrigger>
+            <TabsTrigger className="h-8 rounded-md px-3" value="providers">{text.providers} · {position.provider_liabilities.length}</TabsTrigger>
+            <TabsTrigger className="h-8 rounded-md px-3" value="accounts">{text.financialAccounts} · {accounts.items.length}</TabsTrigger>
+            <TabsTrigger className="h-8 rounded-md px-3" value="cash">{text.cash} · {position.cash_movement_count}</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="patients" className="space-y-3">
-            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card p-2 shadow-sm">
-              {([
-                ["all", text.all],
-                ["debit", text.debit],
-                ["credit", text.credit],
-                ["reconciliation", text.reconciliation],
-              ] as const).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  size="sm"
-                  variant={patientSide === value ? "secondary" : "ghost"}
-                  onClick={() => setPatientSide(value)}
-                >
-                  {label}
-                </Button>
-              ))}
-              <span className="ml-auto px-2 text-xs text-muted-foreground">
-                {text.shown(patientRows.length, position.patient_positions.length)}
-              </span>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[960px] text-sm">
-                  <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">{text.patient}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.invoicesDue}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.externalReceivable}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.adjustments}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.advances}</th>
-                      <th className="px-4 py-3 text-right font-medium">{text.balance}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/70">
-                    {patientRows.length ? patientRows.map((row) => (
-                      <tr key={row.patient_id} className="hover:bg-muted/25">
-                        <td className="px-4 py-3">
-                          <StaffLink className="font-medium text-foreground hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>
-                            {row.patient_name || row.patient_pid}
-                          </StaffLink>
-                          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <span>{row.patient_pid}</span>
-                            {!row.is_active ? <Badge variant="outline">{text.inactive}</Badge> : null}
-                            {row.reconciliation_required ? <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-400" variant="outline">{text.reconciliation}</Badge> : null}
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 text-right tabular-nums">{money(row.invoice_due)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{money(row.external_receivable)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{money(row.manual_balance)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums text-rose-700 dark:text-rose-400">− {money(row.available_prepayment)}</td>
-                        <td className={cn(
-                          "px-4 py-3 text-right font-semibold tabular-nums",
-                          row.balance_side === "debit" && "text-emerald-700 dark:text-emerald-400",
-                          row.balance_side === "credit" && "text-rose-700 dark:text-rose-400",
-                        )}>
-                          {money(row.calculated_balance)}
-                          <div className="text-[11px] font-normal text-muted-foreground">
-                            {row.balance_side === "debit" ? text.debit : row.balance_side === "credit" ? text.credit : "—"}
-                          </div>
-                        </td>
-                      </tr>
-                    )) : <EmptyRow colSpan={6} label={text.noRows} />}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <TabsContent value="patients">
+            <DataTableSurface
+              rows={patientRows}
+              columns={patientColumns}
+              rowId={(row) => row.patient_id}
+              storageKey="company-finance-patients"
+              defaultDensity="compact"
+              defaultSort={[{ field: "patient", dir: "asc" }]}
+              emptyState={text.noRows}
+              pagination={{ pageSize: 50, resetKey: patientSide }}
+              toolbarStart={(
+                <div className="flex shrink-0 items-end gap-1">
+                  {([ ["all", text.all], ["debit", text.debit], ["credit", text.credit], ["reconciliation", text.reconciliation] ] as const).map(([value, label]) => (
+                    <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={patientSide === value ? "default" : "ghost"} onClick={() => setPatientSide(value)}>{label}</Button>
+                  ))}
+                  <span className="self-center px-1 text-[10px] tabular-nums text-muted-foreground">{text.shown(patientRows.length, position.patient_positions.length)}</span>
+                </div>
+              )}
+            />
           </TabsContent>
 
           <TabsContent value="providers">
-            <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[940px] text-sm">
-                  <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">{text.document}</th>
-                      <th className="px-3 py-3 font-medium">{text.provider}</th>
-                      <th className="px-3 py-3 font-medium">{text.patient}</th>
-                      <th className="px-3 py-3 font-medium">{text.order}</th>
-                      <th className="px-3 py-3 font-medium">{text.dueDate}</th>
-                      <th className="px-4 py-3 text-right font-medium">{text.amount}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/70">
-                    {position.provider_liabilities.length ? position.provider_liabilities.map((row) => (
-                      <tr key={row.id} className="hover:bg-muted/25">
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{row.external_invoice_number}</div>
-                          <Badge
-                            variant="outline"
-                            className={row.liability_kind === "expected" ? "mt-1 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "mt-1 bg-rose-500/10 text-rose-700 dark:text-rose-400"}
-                          >
-                            {row.liability_kind === "expected" ? text.expected : text.payable}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-3">
-                          {row.provider_id ? (
-                            <StaffLink className="hover:text-primary hover:underline" to={`/providers/${row.provider_id}`}>{row.provider_name || "—"}</StaffLink>
-                          ) : row.provider_name || "—"}
-                        </td>
-                        <td className="px-3 py-3">
-                          <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid}</StaffLink>
-                        </td>
-                        <td className="px-3 py-3">
-                          <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink>
-                        </td>
-                        <td className="px-3 py-3 tabular-nums">{formatDate(row.due_date, locale)}</td>
-                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{money(row.amount_gross)}</td>
-                      </tr>
-                    )) : <EmptyRow colSpan={6} label={text.noRows} />}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <DataTableSurface rows={position.provider_liabilities} columns={providerColumns} rowId={(row) => row.id} storageKey="company-finance-providers" defaultDensity="compact" defaultSort={[{ field: "due_date", dir: "asc" }]} emptyState={text.noRows} pagination={{ pageSize: 50 }} />
           </TabsContent>
 
           <TabsContent value="accounts">
@@ -599,66 +580,7 @@ export function CompanyFinancePage() {
 
           <TabsContent value="cash" className="space-y-2">
             {assignmentError ? <ShellBanner tone="error">{assignmentError}</ShellBanner> : null}
-            <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1220px] text-sm">
-                  <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">{text.date}</th>
-                      <th className="px-3 py-3 font-medium">{text.operation}</th>
-                      <th className="px-3 py-3 font-medium">{text.document}</th>
-                      <th className="px-3 py-3 font-medium">{text.patient}</th>
-                      <th className="px-3 py-3 font-medium">{text.financialAccount}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.net}</th>
-                      <th className="px-3 py-3 text-right font-medium">{text.vat}</th>
-                      <th className="px-4 py-3 text-right font-medium">{text.gross}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/70">
-                    {position.cash_movements.length ? position.cash_movements.map((row) => (
-                      <tr key={row.id} className="hover:bg-muted/25">
-                        <td className="px-4 py-3 tabular-nums">{formatDate(row.entry_date, locale)}</td>
-                        <td className="max-w-[320px] px-3 py-3">
-                          <div className="truncate font-medium" title={row.description}>{row.description}</div>
-                          <div className="text-xs text-muted-foreground">{row.category}</div>
-                        </td>
-                        <td className="px-3 py-3">
-                          <div>{row.invoice_number || row.external_invoice_number || "—"}</div>
-                          {row.order_id ? <StaffLink className="text-xs text-muted-foreground hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> : null}
-                        </td>
-                        <td className="px-3 py-3">
-                          {row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—"}
-                        </td>
-                        <td className="px-3 py-3">
-                          <select
-                            className={cn(shellSelectClassName, "min-w-44")}
-                            value={row.financial_account_id ?? ""}
-                            disabled={assignmentBusyId === row.id}
-                            aria-label={text.financialAccount}
-                            onChange={(event) => void handleAssignMovement(row.id, event.target.value)}
-                          >
-                            <option value="" disabled>{text.unassignedAccount}</option>
-                            {accounts.items.map((account) => (
-                              <option key={account.id} value={account.id} disabled={!account.is_active}>
-                                {account.name}{account.is_active ? "" : ` · ${text.inactive}`}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-3 py-3 text-right tabular-nums">{money(row.amount_net)}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{money(row.amount_vat)}</td>
-                        <td className={cn(
-                          "px-4 py-3 text-right font-semibold tabular-nums",
-                          row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400",
-                        )}>
-                          {row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}
-                        </td>
-                      </tr>
-                    )) : <EmptyRow colSpan={8} label={text.noRows} />}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <DataTableSurface rows={position.cash_movements} columns={cashColumns} rowId={(row) => row.id} storageKey="company-finance-cash" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} defaultFrozenColumns={["date"]} emptyState={text.noRows} pagination={{ pageSize: 50 }} />
             {position.cash_movements_truncated ? (
               <p className="text-xs text-muted-foreground">{text.shown(position.cash_movements.length, position.cash_movement_count)}</p>
             ) : null}

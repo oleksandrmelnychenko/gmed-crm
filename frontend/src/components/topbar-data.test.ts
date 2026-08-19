@@ -32,5 +32,7 @@ describe("notificationHrefForRole", () => {
   it("keeps entity-specific staff destinations", () => {
     expect(notificationHrefForRole(notification("order"), "ceo")).toBe("/orders?order=entity-1");
     expect(notificationHrefForRole(notification("concierge_service"), "concierge")).toBe("/concierge");
+    expect(notificationHrefForRole(notification("concierge_task"), "concierge")).toBe("/concierge?view=tasks&task=entity-1");
+    expect(notificationHrefForRole(notification("concierge_task"), "billing")).toBeNull();
   });
 });

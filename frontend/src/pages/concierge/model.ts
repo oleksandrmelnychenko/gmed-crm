@@ -27,6 +27,8 @@ export type ConciergeService = {
   appointment_title: string | null;
   provider_id: string | null;
   provider_name: string | null;
+  assigned_concierge_id: string | null;
+  assigned_concierge_name: string | null;
   taxonomy_node_code: string | null;
   taxonomy_node_name_de: string | null;
   taxonomy_node_name_ru: string | null;
@@ -139,9 +141,69 @@ export type ConciergeTask = {
   location: string | null;
   priority: string;
   status: string;
+  reminder_at: string | null;
+  reminder_sent_at: string | null;
+  checklist_total: number;
+  checklist_completed: number;
+  comment_count: number;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ConciergeAssignee = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+};
+
+export type ConciergeTaskChecklistItem = {
+  id: string;
+  label: string;
+  position: number;
+  is_completed: boolean;
+  completed_by: string | null;
+  completed_by_name: string | null;
+  completed_at: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ConciergeTaskComment = {
+  id: string;
+  body: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+};
+
+export type ConciergeTaskHistoryEvent = {
+  id: string;
+  event_type: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+};
+
+export type ConciergeTaskDetail = {
+  item: ConciergeTask;
+  checklist: ConciergeTaskChecklistItem[];
+  comments: ConciergeTaskComment[];
+  history: ConciergeTaskHistoryEvent[];
+};
+
+export type ConciergeTaskFilters = {
+  query: string;
+  assignee: string;
+  status: string;
+  priority: string;
+  kind: string;
+  timing: "all" | "today" | "overdue" | "upcoming";
 };
 
 export type ConciergeProviderTaxonomyNode = {
@@ -379,6 +441,68 @@ export function sortConciergeTasks(tasks: ConciergeTask[]): ConciergeTask[] {
     const rightDate = validDate(right.kind === "event" ? right.starts_at : right.due_at)?.getTime() ?? Number.POSITIVE_INFINITY;
     if (leftDate !== rightDate) return leftDate - rightDate;
     return right.created_at.localeCompare(left.created_at);
+  });
+}
+
+export function conciergeTaskScheduledAt(task: ConciergeTask): Date | null {
+  return validDate(task.kind === "event" ? task.starts_at : task.due_at);
+}
+
+export function filterConciergeTasks(
+  tasks: ConciergeTask[],
+  filters: ConciergeTaskFilters,
+  now: Date,
+): ConciergeTask[] {
+  const query = filters.query.trim().toLocaleLowerCase();
+  return tasks.filter((task) => {
+    if (filters.assignee !== "all" && task.assigned_to !== filters.assignee) return false;
+    if (filters.status !== "all" && task.status !== filters.status) return false;
+    if (filters.priority !== "all" && task.priority !== filters.priority) return false;
+    if (filters.kind !== "all" && task.kind !== filters.kind) return false;
+    if (query && ![
+      task.title,
+      task.note,
+      task.location,
+      task.assigned_to_name,
+      task.assigned_by_name,
+    ].some((value) => value?.toLocaleLowerCase().includes(query))) return false;
+    const scheduled = conciergeTaskScheduledAt(task);
+    if (filters.timing === "overdue" && !isConciergeTaskOverdue(task, now)) return false;
+    if (filters.timing === "today") {
+      if (!scheduled
+        || scheduled.getFullYear() !== now.getFullYear()
+        || scheduled.getMonth() !== now.getMonth()
+        || scheduled.getDate() !== now.getDate()) return false;
+    }
+    if (filters.timing === "upcoming") {
+      if (!scheduled || scheduled < now || TERMINAL_STATUSES.has(task.status)) return false;
+    }
+    return true;
+  });
+}
+
+export function conciergeTaskWorkload(
+  tasks: ConciergeTask[],
+  assignees: ConciergeAssignee[],
+  now: Date,
+) {
+  return assignees.map((assignee) => {
+    const assigned = tasks.filter((task) => task.assigned_to === assignee.id);
+    return {
+      assignee,
+      active: assigned.filter(isConciergeTaskActive).length,
+      overdue: assigned.filter((task) => isConciergeTaskOverdue(task, now)).length,
+      today: assigned.filter((task) => {
+        const scheduled = conciergeTaskScheduledAt(task);
+        return Boolean(
+          scheduled
+          && scheduled.getFullYear() === now.getFullYear()
+          && scheduled.getMonth() === now.getMonth()
+          && scheduled.getDate() === now.getDate()
+          && isConciergeTaskActive(task)
+        );
+      }).length,
+    };
   });
 }
 

@@ -591,9 +591,9 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     : null;
   const balanceSideLabel =
     balance?.side === "debit"
-      ? lang === "de" ? "Soll" : "Дт"
+      ? lang === "de" ? "Offener Betrag" : "Долг"
       : balance?.side === "credit"
-        ? lang === "de" ? "Haben" : "Кт"
+        ? lang === "de" ? "Guthaben" : "Переплата"
         : "";
   const balanceValue = balance?.needsReconciliation
     ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"

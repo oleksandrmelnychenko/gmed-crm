@@ -188,6 +188,13 @@ function priorityTone(priority: string) {
   return "border-sky-200 bg-sky-50 text-sky-700";
 }
 
+function taskAccent(priority: string, overdue: boolean) {
+  if (overdue || priority === "urgent") return "border-l-rose-400";
+  if (priority === "high") return "border-l-orange-400";
+  if (priority === "low") return "border-l-slate-300";
+  return "border-l-sky-400";
+}
+
 export function ConciergeTaskQueue({
   tasks,
   lang,
@@ -212,14 +219,14 @@ export function ConciergeTaskQueue({
   const openCount = tasks.filter(isConciergeTaskActive).length;
 
   return (
-    <aside className="rounded-xl border border-border/70 bg-card shadow-sm" aria-label={labels.tasks}>
+    <aside className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.tasks}>
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <ListTodo className="size-4 text-primary" />
           <h2 className="text-sm font-semibold">{labels.tasks}</h2>
         </div>
         <div className="flex items-center gap-1.5">
-          <Badge variant="secondary">{openCount} {labels.openTasks}</Badge>
+          <Badge variant="secondary" className="rounded-full text-[10px]">{openCount} {labels.openTasks}</Badge>
           <Button
             type="button"
             size="icon-sm"
@@ -244,23 +251,24 @@ export function ConciergeTaskQueue({
               <article
                 key={task.id}
                 className={cn(
-                  "rounded-lg border bg-background p-3",
+                  "rounded-lg border border-l-[3px] bg-background p-3 shadow-xs transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-sm",
+                  taskAccent(task.priority, overdue),
                   overdue ? "border-rose-200" : "border-border/70",
                   ["completed", "cancelled"].includes(task.status) && "opacity-65",
                 )}
                 data-testid={`concierge-task-${task.id}`}
               >
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className={priorityTone(task.priority)}>
+                  <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>
                     {priorityLabel(task.priority, lang)}
                   </Badge>
-                  <Badge variant="secondary">
+                  <Badge variant="secondary" className="rounded-full text-[10px]">
                     {task.kind === "event" ? <CalendarClock className="size-3" /> : <ListTodo className="size-3" />}
                     {labels[task.kind]}
                   </Badge>
-                  <Badge variant="outline">{taskStatusLabel(task.status, lang)}</Badge>
+                  <Badge variant="outline" className="rounded-full text-[10px]">{taskStatusLabel(task.status, lang)}</Badge>
                   {overdue ? (
-                    <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                    <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">
                       {labels.overdue}
                     </Badge>
                   ) : null}
@@ -269,13 +277,13 @@ export function ConciergeTaskQueue({
                   {conciergeTaskDisplayTitle(task, lang)}
                 </h3>
                 {task.note ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.note}</p> : null}
-                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
                   <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{labels.due}: {dateTime(scheduledAt, lang)}</p>
                   {task.location ? <p className="flex items-center gap-1.5"><MapPin className="size-3.5" />{task.location}</p> : null}
-                  <p className="truncate">{labels.assignedBy}: {task.assigned_by_name}</p>
+                  <p className="truncate border-t border-border/60 pt-1.5">{labels.assignedBy}: <span className="font-medium text-foreground">{task.assigned_by_name}</span></p>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <Button type="button" size="sm" variant="ghost" aria-label={labels.editTask} onClick={() => onEdit(task)}>
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
+                  <Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs" aria-label={labels.editTask} onClick={() => onEdit(task)}>
                     <Pencil />{labels.editTask}
                   </Button>
                   {nextStatus ? (
@@ -283,6 +291,7 @@ export function ConciergeTaskQueue({
                       type="button"
                       size="sm"
                       variant="outline"
+                      className="h-8 rounded-md text-xs"
                       disabled={updatingTaskId === task.id}
                       aria-label={labels.advanceTask.replace("{status}", taskStatusLabel(nextStatus, lang))}
                       onClick={() => onAdvance(task)}
@@ -337,7 +346,7 @@ export function ConciergeAgendaView({
   return (
     <section className="space-y-3" aria-label={labels.agenda}>
       {grouped.map((group) => (
-        <div key={group.date} className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+        <div key={group.date} className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
           <div className="border-b border-border/70 bg-muted/40 px-4 py-2.5">
             <h2 className="text-sm font-semibold capitalize">{dayHeading(group.items[0].date, lang)}</h2>
           </div>
@@ -353,10 +362,10 @@ export function ConciergeAgendaView({
                   </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant={item.kind === "service" ? "default" : "secondary"}>
+                      <Badge variant={item.kind === "service" ? "default" : "secondary"} className="rounded-full text-[10px]">
                         {labels[item.kind]}
                       </Badge>
-                      {item.priority ? <Badge variant="outline" className={priorityTone(item.priority)}>{priorityLabel(item.priority, lang)}</Badge> : null}
+                      {item.priority ? <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(item.priority))}>{priorityLabel(item.priority, lang)}</Badge> : null}
                     </div>
                     <h3 className="mt-1.5 truncate text-sm font-semibold">{item.title}</h3>
                     {item.patientName ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.patientName}</p> : null}
@@ -408,7 +417,7 @@ export function ConciergeMapView({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-border/70 bg-card shadow-sm" aria-label={labels.destinations}>
+      <section className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.destinations}>
         <div className="flex items-center gap-2 border-b border-border/70 px-4 py-3">
           <MapPin className="size-4 text-primary" />
           <h2 className="text-sm font-semibold">{labels.destinations}</h2>
@@ -434,16 +443,16 @@ export function ConciergeMapView({
         )}
       </section>
 
-      <section className="rounded-xl border border-border/70 bg-card shadow-sm" aria-label={labels.partners}>
+      <section className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.partners}>
         <div className="border-b border-border/70 px-4 py-3">
           <h2 className="text-sm font-semibold">{labels.partners}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.partnerSubtitle}</p>
         </div>
         <div className="space-y-2 border-b border-border/60 p-3">
-          <Input value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} placeholder={labels.providerSearch} aria-label={labels.providerSearch} />
+          <Input className="h-8 rounded-md bg-field text-xs" value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} placeholder={labels.providerSearch} aria-label={labels.providerSearch} />
           <div className="flex gap-1 overflow-x-auto pb-1">
             {categories.map((item) => (
-              <Button key={item} type="button" size="sm" variant={category === item ? "secondary" : "ghost"} aria-pressed={category === item} onClick={() => setCategory(item)}>
+              <Button key={item} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={category === item ? "default" : "ghost"} aria-pressed={category === item} onClick={() => setCategory(item)}>
                 {labels[item]}
               </Button>
             ))}
@@ -464,7 +473,7 @@ export function ConciergeMapView({
                       <h3 className="truncate text-sm font-semibold">{provider.name}</h3>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">{conciergeProviderTaxonomyLabel(provider, lang)}</p>
                     </div>
-                    {rating !== null ? <Badge variant="outline"><Star className="fill-amber-400 text-amber-500" />{rating.toFixed(1)}</Badge> : null}
+                    {rating !== null ? <Badge variant="outline" className="rounded-full text-[10px]"><Star className="fill-amber-400 text-amber-500" />{rating.toFixed(1)}</Badge> : null}
                   </div>
                   <p className="mt-2 flex min-h-10 items-start gap-1.5 text-xs leading-5 text-muted-foreground"><MapPin className="mt-0.5 size-3.5 shrink-0" />{address || labels.routeUnavailable}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{provider.open_concierge_service_count} {labels.openServices}</p>
@@ -473,12 +482,12 @@ export function ConciergeMapView({
                       <ExternalLink className="size-3" />{labels.details}
                     </StaffLink>
                     {provider.phone ? (
-                      <Button nativeButton={false} render={<a href={`tel:${provider.phone}`} />} variant="outline" size="sm"><Phone />{labels.phone}</Button>
+                      <Button nativeButton={false} render={<a href={`tel:${provider.phone}`} />} variant="outline" size="sm" className="h-8 rounded-md text-xs"><Phone />{labels.phone}</Button>
                     ) : (
                       <MapAction href={googleMapsSearchUrl(address)} label={labels.openMap} icon={MapPin} />
                     )}
                     {canBook ? (
-                      <Button type="button" variant="default" size="sm" className="col-span-2" onClick={() => onBookProvider(provider)}>
+                      <Button type="button" variant="default" size="sm" className="col-span-2 h-8 rounded-md text-xs" onClick={() => onBookProvider(provider)}>
                         <CalendarCheck2 />{labels.book}
                       </Button>
                     ) : null}
@@ -504,7 +513,7 @@ function MapAction({ href, label, icon: Icon }: { href: string | null; label: st
 
 function EmptySurface({ icon: Icon, text }: { icon: typeof CalendarDays; text: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+    <div className="rounded-lg border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
       <Icon className="mx-auto mb-3 size-6" />{text}
     </div>
   );

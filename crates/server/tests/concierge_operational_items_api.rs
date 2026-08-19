@@ -1,5 +1,7 @@
 mod support;
 
+use std::time::Duration;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
@@ -8,6 +10,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
+use gmed_server::settings::{SettingsCache, TokenSettings};
+use gmed_server::state::AppState;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
@@ -304,4 +308,376 @@ async fn patient_manager_cannot_access_concierge_operational_items() {
     )
     .await;
     assert_eq!(create_status, StatusCode::FORBIDDEN, "{create}");
+}
+
+#[tokio::test]
+async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_history_and_reminders() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("manager-owner-{tag}")).await;
+    let other_id = seed_user(&ctx.pool, "concierge", &format!("manager-other-{tag}")).await;
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let other_bearer = auth_header_for(other_id, "concierge");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "kind": "task",
+            "title": "Confirm restaurant booking",
+            "note": "Operational details only",
+            "assigned_to": concierge_id,
+            "due_at": "2026-08-20T09:00:00Z",
+            "reminder_at": "2020-08-20T08:30:00Z",
+            "priority": "urgent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    assert_eq!(task["assigned_to"], concierge_id.to_string());
+    assert_eq!(task["checklist_total"], 0);
+    assert_eq!(task["comment_count"], 0);
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+
+    let detail_path = format!("{path}/{task_id}");
+    let (status, forbidden) = json_request(&ctx.app, "GET", &detail_path, &other_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let comment_request_id = Uuid::new_v4();
+    let comment_body = json!({
+        "request_id": comment_request_id,
+        "body": "Table and arrival time confirmed"
+    });
+    let (status, first_comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments"),
+        &concierge_bearer,
+        Some(comment_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first_comment}");
+    let (status, replayed_comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments"),
+        &concierge_bearer,
+        Some(comment_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed_comment}");
+    assert_eq!(first_comment["id"], replayed_comment["id"]);
+    let (status, drift) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments"),
+        &concierge_bearer,
+        Some(json!({ "request_id": comment_request_id, "body": "Different data" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{drift}");
+
+    let checklist_request_id = Uuid::new_v4();
+    let checklist_path = format!("{detail_path}/checklist");
+    let (status, checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &checklist_path,
+        &concierge_bearer,
+        Some(json!({ "request_id": checklist_request_id, "label": "Send written confirmation" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let checklist_id = Uuid::parse_str(checklist["id"].as_str().expect("checklist id")).unwrap();
+    let toggle_request_id = Uuid::new_v4();
+    let toggle_path = format!("{checklist_path}/{checklist_id}/toggle");
+    let toggle_body = json!({ "request_id": toggle_request_id, "completed": true });
+    let (status, toggled) = json_request(
+        &ctx.app,
+        "POST",
+        &toggle_path,
+        &concierge_bearer,
+        Some(toggle_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{toggled}");
+    assert_eq!(toggled["is_completed"], true);
+    let (status, replayed_toggle) = json_request(
+        &ctx.app,
+        "POST",
+        &toggle_path,
+        &concierge_bearer,
+        Some(toggle_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed_toggle}");
+    assert_eq!(toggled["updated_at"], replayed_toggle["updated_at"]);
+
+    let (status, detail) = json_request(&ctx.app, "GET", &detail_path, &concierge_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["comments"].as_array().expect("comments").len(), 1);
+    assert_eq!(detail["checklist"].as_array().expect("checklist").len(), 1);
+    assert_eq!(detail["item"]["checklist_completed"], 1);
+    assert!(detail["history"].as_array().expect("history").iter().any(|event| event["event_type"] == "comment_added"));
+    assert!(detail["history"].as_array().expect("history").iter().any(|event| event["event_type"] == "checklist_item_toggled"));
+
+    let scheduler_state = AppState::new(
+        ctx.pool.clone(),
+        TEST_SECRET,
+        SettingsCache::new(TokenSettings::default()),
+    );
+    assert_eq!(
+        gmed_server::routes::concierge_operational_items::run_concierge_task_reminder_scheduler_once(&scheduler_state).await,
+        1,
+    );
+    assert_eq!(
+        gmed_server::routes::concierge_operational_items::run_concierge_task_reminder_scheduler_once(&scheduler_state).await,
+        0,
+    );
+    let notification_count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'concierge_task_reminder'
+             AND entity_type = 'concierge_task'
+             AND entity_id = $2"#,
+    )
+    .bind(concierge_id)
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(notification_count, 1);
+}
+
+#[tokio::test]
+async fn reassignment_serializes_detail_and_child_mutations_before_revoking_old_assignee() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let old_concierge_id = seed_user(&ctx.pool, "concierge", &format!("race-old-{tag}")).await;
+    let new_concierge_id = seed_user(&ctx.pool, "concierge", &format!("race-new-{tag}")).await;
+    let old_bearer = auth_header_for(old_concierge_id, "concierge");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let base_path = "/api/v1/concierge-operational-items";
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        base_path,
+        &ceo_bearer,
+        Some(json!({
+            "kind": "task",
+            "title": "Serialize reassignment",
+            "assigned_to": old_concierge_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+    let detail_path = format!("{base_path}/{task_id}");
+    let checklist_path = format!("{detail_path}/checklist");
+    let (status, checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &checklist_path,
+        &old_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "label": "Must stay unchanged after reassignment"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let checklist_id = Uuid::parse_str(checklist["id"].as_str().expect("checklist id")).unwrap();
+
+    let mut reassign_tx = ctx.pool.begin().await.unwrap();
+    sqlx::query("UPDATE tasks SET assigned_to = $2, updated_at = now() WHERE id = $1")
+        .bind(task_id)
+        .bind(new_concierge_id)
+        .execute(&mut *reassign_tx)
+        .await
+        .unwrap();
+
+    let detail_app = ctx.app.clone();
+    let detail_bearer = old_bearer.clone();
+    let detail_request_path = detail_path.clone();
+    let mut pending_detail = tokio::spawn(async move {
+        json_request(
+            &detail_app,
+            "GET",
+            &detail_request_path,
+            &detail_bearer,
+            None,
+        )
+        .await
+    });
+    let comment_app = ctx.app.clone();
+    let comment_bearer = old_bearer.clone();
+    let comment_path = format!("{detail_path}/comments");
+    let denied_comment_request_id = Uuid::new_v4();
+    let mut pending_comment = tokio::spawn(async move {
+        json_request(
+            &comment_app,
+            "POST",
+            &comment_path,
+            &comment_bearer,
+            Some(json!({
+                "request_id": denied_comment_request_id,
+                "body": "Must not survive reassignment"
+            })),
+        )
+        .await
+    });
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut pending_detail)
+            .await
+            .is_err(),
+        "detail read must wait for the reassignment row lock"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut pending_comment)
+            .await
+            .is_err(),
+        "comment mutation must wait for the reassignment row lock"
+    );
+
+    reassign_tx.commit().await.unwrap();
+    let (detail_status, detail_body) = pending_detail.await.unwrap();
+    assert_eq!(detail_status, StatusCode::FORBIDDEN, "{detail_body}");
+    let (comment_status, comment_body) = pending_comment.await.unwrap();
+    assert_eq!(comment_status, StatusCode::FORBIDDEN, "{comment_body}");
+
+    let (status, denied_checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &checklist_path,
+        &old_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "label": "Former assignee cannot append"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_checklist}");
+    let (status, denied_toggle) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{checklist_id}/toggle"),
+        &old_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "completed": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_toggle}");
+
+    let comment_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM concierge_operational_task_comments WHERE task_id = $1",
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(comment_count, 0);
+    let checklist_state: (i64, bool) = sqlx::query_as(
+        r#"SELECT count(*) OVER (), is_completed
+           FROM concierge_operational_task_checklist_items
+           WHERE task_id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(checklist_state, (1, false));
+}
+
+#[tokio::test]
+async fn concurrent_checklist_toggle_with_same_request_id_replays_as_two_successes() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("toggle-race-{tag}")).await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let base_path = "/api/v1/concierge-operational-items";
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        base_path,
+        &bearer,
+        Some(json!({
+            "kind": "task",
+            "title": "Concurrent toggle",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+    let checklist_path = format!("{base_path}/{task_id}/checklist");
+    let (status, checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &checklist_path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "label": "Toggle once"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let checklist_id = Uuid::parse_str(checklist["id"].as_str().expect("checklist id")).unwrap();
+    let toggle_path = format!("{checklist_path}/{checklist_id}/toggle");
+    let toggle_request_id = Uuid::new_v4();
+    let toggle_body = json!({
+        "request_id": toggle_request_id,
+        "completed": true
+    });
+
+    let (first, second) = tokio::join!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &toggle_path,
+            &bearer,
+            Some(toggle_body.clone()),
+        ),
+        json_request(
+            &ctx.app,
+            "POST",
+            &toggle_path,
+            &bearer,
+            Some(toggle_body),
+        ),
+    );
+    assert_eq!(first.0, StatusCode::OK, "{}", first.1);
+    assert_eq!(second.0, StatusCode::OK, "{}", second.1);
+    assert_eq!(first.1["id"], second.1["id"]);
+    assert_eq!(first.1["updated_at"], second.1["updated_at"]);
+    assert_eq!(first.1["is_completed"], true);
+    assert_eq!(second.1["is_completed"], true);
+
+    let event_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(task_id)
+    .bind(toggle_request_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count, 1);
 }

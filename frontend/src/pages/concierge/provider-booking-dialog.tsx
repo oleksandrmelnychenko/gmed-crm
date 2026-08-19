@@ -3,15 +3,18 @@ import { AlertCircle, CalendarCheck2, LoaderCircle, Mail, MapPinned, Phone } fro
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { Lang } from "@/lib/i18n";
+
+import {
+  conciergeDialogContentClassName,
+  ConciergeDialogBody,
+  ConciergeDialogFooter,
+  ConciergeDialogHeader,
+  ConciergeDialogSection,
+  ConciergeField,
+} from "./dialog-layout";
 
 import {
   conciergePartnerEmailUrl,
@@ -72,6 +75,7 @@ const copy = {
     route: "Route",
     save: "Buchung speichern",
     saving: "Wird gespeichert",
+    cancel: "Abbrechen",
     noServices: "Keine geplante Serviceanfrage kann mit diesem Partner verbunden werden.",
     confirmedHint: "Für eine bestätigte Buchung ist eine Buchungsnummer, Kontaktperson oder Notiz erforderlich.",
   },
@@ -102,13 +106,14 @@ const copy = {
     route: "Маршрут",
     save: "Сохранить бронь",
     saving: "Сохранение",
+    cancel: "Отмена",
     noServices: "Нет запланированного запроса, который можно связать с этим партнёром.",
     confirmedHint: "Для подтверждённой брони укажите номер, контактное лицо или примечание.",
   },
 } as const;
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 function localDateTimeValue(value: string | Date | null, fallbackToNextHour = false) {
   if (!value && !fallbackToNextHour) return "";
@@ -219,69 +224,81 @@ export function ConciergeProviderBookingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto rounded-2xl p-4 sm:max-h-[88vh] sm:w-full sm:p-5">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><CalendarCheck2 className="size-5 text-primary" />{labels.title}</DialogTitle>
-          <DialogDescription>{labels.description}</DialogDescription>
-        </DialogHeader>
-        {provider ? (
-          <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{provider.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{conciergeProviderAddress(provider)}</p>
-              </div>
-              <Badge variant="secondary">{provider.open_concierge_service_count}</Badge>
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-1.5">
-              <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} variant="outline" size="sm" disabled={!callUrl}><Phone />{labels.call}</Button>
-              <Button nativeButton={false} render={<a href={emailUrl ?? "#"} />} variant="outline" size="sm" disabled={!emailUrl}><Mail />{labels.write}</Button>
-              <Button nativeButton={false} render={<a href={directionsUrl ?? "#"} target="_blank" rel="noreferrer" />} variant="outline" size="sm" disabled={!directionsUrl}><MapPinned />{labels.route}</Button>
-            </div>
-          </div>
-        ) : null}
+      <DialogContent className={conciergeDialogContentClassName}>
+        <ConciergeDialogHeader
+          icon={CalendarCheck2}
+          tone="orange"
+          title={labels.title}
+          description={labels.description}
+          meta={provider ? <Badge variant="secondary" className="rounded-full">{provider.open_concierge_service_count}</Badge> : null}
+        />
 
         {eligibleServices.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">{labels.noServices}</p>
+          <ConciergeDialogBody>
+            <p className="rounded-lg border border-dashed border-border px-4 py-14 text-center text-sm text-muted-foreground">{labels.noServices}</p>
+          </ConciergeDialogBody>
         ) : (
-          <form className="space-y-4" onSubmit={(event) => void submit(event)}>
-            <label className="grid gap-1.5 text-sm font-medium">
-              {labels.service}
+          <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
+            <ConciergeDialogBody>
+              <div className="grid items-start gap-4 lg:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+                <div className="space-y-4">
+                  {provider ? (
+                    <ConciergeDialogSection title={provider.name}>
+                      <div className="flex items-start justify-between gap-3 rounded-md bg-muted/35 p-3">
+                        <p className="min-w-0 text-xs leading-relaxed text-muted-foreground">{conciergeProviderAddress(provider)}</p>
+                        <Badge variant="secondary" className="shrink-0 rounded-full">{provider.open_concierge_service_count}</Badge>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} variant="outline" size="sm" disabled={!callUrl}><Phone />{labels.call}</Button>
+                        <Button nativeButton={false} render={<a href={emailUrl ?? "#"} />} variant="outline" size="sm" disabled={!emailUrl}><Mail />{labels.write}</Button>
+                        <Button nativeButton={false} render={<a href={directionsUrl ?? "#"} target="_blank" rel="noreferrer" />} variant="outline" size="sm" disabled={!directionsUrl}><MapPinned />{labels.route}</Button>
+                      </div>
+                    </ConciergeDialogSection>
+                  ) : null}
+
+                  <ConciergeDialogSection title={labels.service} icon={CalendarCheck2}>
+                    <ConciergeField label={labels.service}>
               <select className={selectClass} value={serviceId} onChange={(event) => selectService(event.target.value)} required>
                 <option value="" disabled>{labels.chooseService}</option>
                 {eligibleServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)} · {service.patient_name}</option>)}
               </select>
-            </label>
-            <div className="grid grid-cols-2 gap-2" role="group" aria-label={labels.title}>
-              {(["requested", "confirmed"] as const).map((state) => (
-                <Button key={state} type="button" variant={bookingState === state ? "secondary" : "outline"} aria-pressed={bookingState === state} onClick={() => setBookingState(state)}>
-                  {labels[state]}
-                </Button>
-              ))}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-sm font-medium">{labels.startsAt}<Input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required /></label>
-              <label className="grid gap-1.5 text-sm font-medium">{labels.endsAt}<Input type="datetime-local" value={endsAt} min={startsAt} onChange={(event) => setEndsAt(event.target.value)} /></label>
-            </div>
-            <label className="grid gap-1.5 text-sm font-medium">{labels.address}<Input value={serviceAddress} onChange={(event) => setServiceAddress(event.target.value)} placeholder={labels.addressPlaceholder} maxLength={500} required /></label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5 text-sm font-medium">{labels.contact}<Input value={vendorContact} onChange={(event) => setVendorContact(event.target.value)} maxLength={255} /></label>
-              <label className="grid gap-1.5 text-sm font-medium">{labels.contactPerson}<Input value={contactPerson} onChange={(event) => setContactPerson(event.target.value)} maxLength={160} /></label>
-              <label className="grid gap-1.5 text-sm font-medium">{labels.reference}<Input value={bookingReference} onChange={(event) => setBookingReference(event.target.value)} maxLength={160} /></label>
-              <label className="grid gap-1.5 text-sm font-medium">
-                {labels.channel}
+                    </ConciergeField>
+                    <div className="grid grid-cols-2 gap-2" role="group" aria-label={labels.title}>
+                      {(["requested", "confirmed"] as const).map((state) => (
+                        <Button key={state} type="button" variant={bookingState === state ? "default" : "outline"} aria-pressed={bookingState === state} onClick={() => setBookingState(state)}>
+                          {labels[state]}
+                        </Button>
+                      ))}
+                    </div>
+                  </ConciergeDialogSection>
+                </div>
+
+                <ConciergeDialogSection title={labels.title} icon={CalendarCheck2}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <ConciergeField label={labels.startsAt}><Input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required /></ConciergeField>
+                    <ConciergeField label={labels.endsAt}><Input type="datetime-local" value={endsAt} min={startsAt} onChange={(event) => setEndsAt(event.target.value)} /></ConciergeField>
+                    <ConciergeField label={labels.address} className="sm:col-span-2"><Input value={serviceAddress} onChange={(event) => setServiceAddress(event.target.value)} placeholder={labels.addressPlaceholder} maxLength={500} required /></ConciergeField>
+                    <ConciergeField label={labels.contact}><Input value={vendorContact} onChange={(event) => setVendorContact(event.target.value)} maxLength={255} /></ConciergeField>
+                    <ConciergeField label={labels.contactPerson}><Input value={contactPerson} onChange={(event) => setContactPerson(event.target.value)} maxLength={160} /></ConciergeField>
+                    <ConciergeField label={labels.reference}><Input value={bookingReference} onChange={(event) => setBookingReference(event.target.value)} maxLength={160} /></ConciergeField>
+                    <ConciergeField label={labels.channel}>
                 <select className={selectClass} value={channel} onChange={(event) => setChannel(event.target.value as ConciergePartnerChannel)}>
                   {(["phone", "email", "messaging", "in_person", "other"] as const).map((item) => <option key={item} value={item}>{labels[item]}</option>)}
                 </select>
-              </label>
-            </div>
-            <label className="grid gap-1.5 text-sm font-medium">
-              {labels.note}
-              <textarea className="min-h-24 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={note} onChange={(event) => setNote(event.target.value)} placeholder={labels.notePlaceholder} maxLength={2000} />
-            </label>
-            {confirmedDetailsMissing ? <p className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><AlertCircle className="mt-0.5 size-4 shrink-0" />{labels.confirmedHint}</p> : null}
-            {error ? <p role="alert" className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertCircle className="mt-0.5 size-4 shrink-0" />{error}</p> : null}
-            <Button type="submit" className="w-full" disabled={!canSubmit}>{submitting ? <LoaderCircle className="animate-spin" /> : <CalendarCheck2 />}{submitting ? labels.saving : labels.save}</Button>
+                    </ConciergeField>
+                    <ConciergeField label={labels.note} className="sm:col-span-2">
+                      <textarea className="min-h-28 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={note} onChange={(event) => setNote(event.target.value)} placeholder={labels.notePlaceholder} maxLength={2000} />
+                    </ConciergeField>
+                  </div>
+                  {confirmedDetailsMissing ? <p className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><AlertCircle className="mt-0.5 size-4 shrink-0" />{labels.confirmedHint}</p> : null}
+                  {error ? <p role="alert" className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertCircle className="mt-0.5 size-4 shrink-0" />{error}</p> : null}
+                </ConciergeDialogSection>
+              </div>
+            </ConciergeDialogBody>
+            <ConciergeDialogFooter>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
+              <Button type="submit" disabled={!canSubmit}>{submitting ? <LoaderCircle className="animate-spin" /> : <CalendarCheck2 />}{submitting ? labels.saving : labels.save}</Button>
+            </ConciergeDialogFooter>
           </form>
         )}
       </DialogContent>

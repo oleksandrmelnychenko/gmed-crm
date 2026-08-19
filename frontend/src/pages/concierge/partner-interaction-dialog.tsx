@@ -15,15 +15,17 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { Lang } from "@/lib/i18n";
+
+import {
+  conciergeDialogContentClassName,
+  ConciergeDialogBody,
+  ConciergeDialogHeader,
+  ConciergeDialogSection,
+  ConciergeField,
+} from "./dialog-layout";
 
 import {
   conciergePartnerEmailUrl,
@@ -185,7 +187,7 @@ function money(value: string | null, currency: string | null, lang: Lang) {
 }
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 export function ConciergePartnerInteractionDialog({
   service,
@@ -269,100 +271,96 @@ export function ConciergePartnerInteractionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-2xl overflow-y-auto rounded-2xl p-4 sm:max-h-[88vh] sm:w-full sm:p-5">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700">
-              <MessageSquareText className="size-4" />
-            </span>
-            <div className="min-w-0">
-              <DialogTitle>{labels.title}</DialogTitle>
-              <p className="mt-1 truncate text-xs font-medium text-foreground">{provider.name}</p>
+      <DialogContent className={conciergeDialogContentClassName}>
+        <ConciergeDialogHeader
+          icon={MessageSquareText}
+          tone="indigo"
+          title={labels.title}
+          description={labels.description}
+          meta={<Badge variant="secondary" className="max-w-72 truncate rounded-full">{provider.name}</Badge>}
+        />
+
+        <ConciergeDialogBody>
+          {error ? (
+            <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              {error}
             </div>
-          </div>
-          <DialogDescription>{labels.description}</DialogDescription>
-        </DialogHeader>
+          ) : null}
 
-        <div className="grid grid-cols-3 gap-2">
-          <Button render={callUrl ? <a href={callUrl} /> : undefined} type="button" variant="outline" disabled={!callUrl}>
-            <Phone />{labels.call}
-          </Button>
-          <Button render={emailUrl ? <a href={emailUrl} /> : undefined} type="button" variant="outline" disabled={!emailUrl}>
-            <Mail />{labels.email}
-          </Button>
-          <Button render={routeUrl ? <a href={routeUrl} target="_blank" rel="noreferrer" /> : undefined} type="button" variant="outline" disabled={!routeUrl}>
-            <MapPinned />{labels.route}
-          </Button>
-        </div>
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
+            <div className="space-y-4">
+              <ConciergeDialogSection title={provider.name}>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} type="button" variant="outline" disabled={!callUrl}>
+                    <Phone />{labels.call}
+                  </Button>
+                  <Button nativeButton={false} render={<a href={emailUrl ?? "#"} />} type="button" variant="outline" disabled={!emailUrl}>
+                    <Mail />{labels.email}
+                  </Button>
+                  <Button nativeButton={false} render={<a href={routeUrl ?? "#"} target="_blank" rel="noreferrer" />} type="button" variant="outline" disabled={!routeUrl}>
+                    <MapPinned />{labels.route}
+                  </Button>
+                </div>
+              </ConciergeDialogSection>
 
-        {error ? (
-          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-            {error}
-          </div>
-        ) : null}
-
-        <section className="space-y-3" aria-label={labels.record}>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="space-y-1 text-xs font-medium text-muted-foreground">
-              {labels.occurredAt}
+              <ConciergeDialogSection title={labels.record} icon={MessageSquareText}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ConciergeField label={labels.occurredAt}>
               <Input type="datetime-local" value={occurredAt} max={localDateTimeValue(new Date(Date.now() + 5 * 60_000))} onChange={(event) => setOccurredAt(event.target.value)} />
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground">
-              {labels.channel}
+                  </ConciergeField>
+                  <ConciergeField label={labels.channel}>
               <select className={selectClass} value={channel} onChange={(event) => setChannel(event.target.value as ConciergePartnerChannel)}>
                 {CHANNELS.map((value) => <option key={value} value={value}>{interactionLabel(value, lang)}</option>)}
               </select>
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground">
-              {labels.direction}
+                  </ConciergeField>
+                  <ConciergeField label={labels.direction}>
               <select className={selectClass} value={direction} onChange={(event) => setDirection(event.target.value as ConciergePartnerDirection)}>
                 <option value="outbound">{labels.outbound}</option>
                 <option value="inbound">{labels.inbound}</option>
               </select>
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground sm:col-span-2 lg:col-span-1">
-              {labels.outcome}
+                  </ConciergeField>
+                  <ConciergeField label={labels.outcome}>
               <select className={selectClass} value={outcome} onChange={(event) => setOutcome(event.target.value as ConciergePartnerOutcome)}>
                 {OUTCOMES.map((value) => <option key={value} value={value}>{interactionLabel(value, lang)}</option>)}
               </select>
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground sm:col-span-2">
-              {labels.contactPerson}
+                  </ConciergeField>
+                  <ConciergeField label={labels.contactPerson} className="sm:col-span-2">
               <Input value={contactPerson} maxLength={160} placeholder={labels.contactPlaceholder} onChange={(event) => setContactPerson(event.target.value)} />
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground">
-              {labels.quote}
+                  </ConciergeField>
+                  <ConciergeField label={labels.quote} className="sm:col-span-2">
               <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-2">
                 <Input type="number" min="0" step="0.01" value={quotedCost} onChange={(event) => setQuotedCost(event.target.value)} />
                 <Input value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value.toUpperCase())} />
               </div>
-            </label>
-            <label className="space-y-1 text-xs font-medium text-muted-foreground sm:col-span-2">
-              {labels.note}
-              <textarea value={note} maxLength={2000} rows={3} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" />
-            </label>
-          </div>
-          <Button type="button" className="min-h-11 w-full" disabled={submitting || !occurredAt || (quotedCost.trim() !== "" && !Number.isFinite(Number(quotedCost)))} onClick={() => void record()}>
-            {submitting ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}
-            {submitting ? labels.saving : labels.record}
-          </Button>
-        </section>
+                  </ConciergeField>
+                  <ConciergeField label={labels.note} className="sm:col-span-2">
+                    <textarea value={note} maxLength={2000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" />
+                  </ConciergeField>
+                </div>
+                <div className="flex justify-end border-t border-border/60 pt-3">
+                  <Button type="button" className="min-h-10 w-full sm:w-auto" disabled={submitting || !occurredAt || (quotedCost.trim() !== "" && !Number.isFinite(Number(quotedCost)))} onClick={() => void record()}>
+                    {submitting ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}
+                    {submitting ? labels.saving : labels.record}
+                  </Button>
+                </div>
+              </ConciergeDialogSection>
+            </div>
 
-        <section className="space-y-3 border-t border-border/70 pt-4" aria-label={labels.history}>
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><History className="size-4 text-muted-foreground" />{labels.history}</h3>
-          {loading ? (
-            <div className="flex justify-center py-8 text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /></div>
-          ) : events.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">{labels.empty}</p>
-          ) : (
-            <ol className="space-y-2">
+            <ConciergeDialogSection title={labels.history} icon={History} className="lg:sticky lg:top-0">
+              <div className="max-h-[56vh] overflow-y-auto pr-1">
+                {loading ? (
+                  <div className="flex justify-center py-12 text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /></div>
+                ) : events.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-12 text-center text-xs text-muted-foreground">{labels.empty}</p>
+                ) : (
+                  <ol className="space-y-2">
               {[...events].reverse().map((event) => (
-                <li key={event.id} className="rounded-xl border border-border/70 p-3">
+                <li key={event.id} className="rounded-lg border border-border/70 bg-background p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="outline" className={outcomeTone(event.outcome)}>{interactionLabel(event.outcome, lang)}</Badge>
-                      <Badge variant="secondary">{interactionLabel(event.channel, lang)}</Badge>
-                      <Badge variant="outline">{event.direction === "outbound" ? labels.outbound : labels.inbound}</Badge>
+                      <Badge variant="outline" className={`rounded-full ${outcomeTone(event.outcome)}`}>{interactionLabel(event.outcome, lang)}</Badge>
+                      <Badge variant="secondary" className="rounded-full">{interactionLabel(event.channel, lang)}</Badge>
+                      <Badge variant="outline" className="rounded-full">{event.direction === "outbound" ? labels.outbound : labels.inbound}</Badge>
                       {event.applied_as_cost_estimate_at ? (
                         <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
                           <CheckCircle2 className="size-3" />
@@ -411,9 +409,12 @@ export function ConciergePartnerInteractionDialog({
                   <p className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground"><ExternalLink className="size-3" />{labels.recordedBy.replace("{name}", event.recorded_by_name)}</p>
                 </li>
               ))}
-            </ol>
-          )}
-        </section>
+                  </ol>
+                )}
+              </div>
+            </ConciergeDialogSection>
+          </div>
+        </ConciergeDialogBody>
       </DialogContent>
     </Dialog>
   );

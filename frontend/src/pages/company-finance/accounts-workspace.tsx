@@ -240,6 +240,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     note: "",
   });
   const activeAccounts = payload.items.filter((account) => account.is_active);
+  const transferRows = useMemo(() => payload.transfers ?? [], [payload.transfers]);
 
   function openTransferDialog() {
     const source = activeAccounts.find((account) => account.is_default) ?? activeAccounts[0];
@@ -433,13 +434,13 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       render: (row) => (
         <span className="inline-flex w-full items-center justify-end font-semibold">
           {money(row.amount)}
-          {row.transaction_type === "transfer" && !payload.transfers.some((item) => item.reverses_transfer_id === row.id) ? (
+          {row.transaction_type === "transfer" && !transferRows.some((item) => item.reverses_transfer_id === row.id) ? (
             <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={(event) => { event.stopPropagation(); setReverseTransferError(null); setReverseTransfer(row); }}><Undo2 /></Button>
           ) : null}
         </span>
       ),
     },
-  ], [locale, money, payload.transfers, text]);
+  ], [locale, money, text, transferRows]);
 
   const adjustmentColumns = useMemo<ColumnDef<CompanyFinancialAccountAdjustment>[]>(() => [
     { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on, locale) },
@@ -522,11 +523,11 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
               <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs sm:grid-cols-4">
                 <div><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
-                <div><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.transfer_balance)}</dd></div>
+                <div><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.transfer_balance ?? "0")}</dd></div>
                 <div><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
               </dl>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {formatDate(account.opening_balance_on, locale)} · {account.movement_count + account.transfer_count} {text.movementCount}
+                {formatDate(account.opening_balance_on, locale)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button type="button" size="xs" variant="outline" disabled={!account.is_active} onClick={() => {
@@ -547,7 +548,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         })}
       </div>
 
-      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.internalTransfers}</span>} rows={payload.transfers} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.internalTransfers}</span>} rows={transferRows} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
 
       <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
 
