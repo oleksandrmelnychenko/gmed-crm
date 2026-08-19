@@ -8,6 +8,7 @@ import {
   Scale,
   Search,
   UsersRound,
+  WalletCards,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +24,15 @@ import {
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-import { fetchCompanyFinancialPosition } from "./data";
+import { CompanyAccountsWorkspace } from "./accounts-workspace";
+import {
+  assignAccountingEntryFinancialAccount,
+  fetchCompanyFinancialAccounts,
+  fetchCompanyFinancialPosition,
+} from "./data";
 import type {
   CompanyBalanceSide,
+  CompanyFinancialAccountsPayload,
   CompanyFinancialFilters,
   CompanyFinancialPosition,
 } from "./types";
@@ -62,12 +69,17 @@ const textByLanguage = {
     cashInflow: "Поступило за период",
     cashOutflow: "Выплачено за период",
     netCashFlow: "Денежный поток",
+    actualCashBalance: "Фактический остаток",
     reconciliationRequired: "Требуется сверка",
     reconciliationMessage: (count: number, amount: string) =>
       `Нужно сверить ${count} пациентских балансов. Нераспределенные расходы: ${amount}.`,
     patients: "Пациенты",
     providers: "Поставщики",
     cash: "Движение денег",
+    financialAccounts: "Счета GMED",
+    financialAccount: "Счет GMED",
+    unassignedAccount: "Не распределено",
+    assignmentFailed: "Не удалось изменить счет денежной операции.",
     all: "Все",
     debit: "Дт",
     credit: "Кт",
@@ -118,12 +130,17 @@ const textByLanguage = {
     cashInflow: "Einzahlungen im Zeitraum",
     cashOutflow: "Auszahlungen im Zeitraum",
     netCashFlow: "Cashflow",
+    actualCashBalance: "Tatsächlicher Kontostand",
     reconciliationRequired: "Abstimmung erforderlich",
     reconciliationMessage: (count: number, amount: string) =>
       `${count} Patientensalden müssen abgestimmt werden. Nicht zugeordnete Kosten: ${amount}.`,
     patients: "Patienten",
     providers: "Leistungserbringer",
     cash: "Geldbewegungen",
+    financialAccounts: "GMED-Konten",
+    financialAccount: "GMED-Konto",
+    unassignedAccount: "Nicht zugeordnet",
+    assignmentFailed: "Das Konto der Geldbewegung konnte nicht geändert werden.",
     all: "Alle",
     debit: "Soll",
     credit: "Haben",
@@ -238,8 +255,11 @@ export function CompanyFinancePage() {
   const [filters, setFilters] = useState<CompanyFinancialFilters>(initialFilters);
   const [patientSide, setPatientSide] = useState<PatientSideFilter>("all");
   const [position, setPosition] = useState<CompanyFinancialPosition | null>(null);
+  const [accounts, setAccounts] = useState<CompanyFinancialAccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [assignmentBusyId, setAssignmentBusyId] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -247,10 +267,14 @@ export function CompanyFinancePage() {
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError(null);
-      void fetchCompanyFinancialPosition(filters, reloadToken > 0)
-        .then((result) => {
+      void Promise.all([
+        fetchCompanyFinancialPosition(filters, reloadToken > 0),
+        fetchCompanyFinancialAccounts(filters.currency, reloadToken > 0),
+      ])
+        .then(([result, accountResult]) => {
           if (!active) return;
           setPosition(result);
+          setAccounts(accountResult);
           if (!filters.currency && result.currency) {
             setFilters((current) => ({ ...current, currency: result.currency }));
           }
@@ -283,6 +307,23 @@ export function CompanyFinancePage() {
   const summary = position?.summary;
   const netCashFlow = parseAmount(summary?.net_cash_flow);
   const calculatedNet = parseAmount(summary?.calculated_net_position);
+  const actualCashBalance = (accounts?.items ?? [])
+    .reduce((sum, account) => sum + parseAmount(account.current_balance), 0);
+
+  async function handleAssignMovement(entryId: string, financialAccountId: string) {
+    setAssignmentBusyId(entryId);
+    setAssignmentError(null);
+    try {
+      await assignAccountingEntryFinancialAccount(entryId, financialAccountId);
+      setReloadToken((current) => current + 1);
+    } catch (requestError) {
+      setAssignmentError(
+        requestError instanceof Error ? requestError.message : text.assignmentFailed,
+      );
+    } finally {
+      setAssignmentBusyId("");
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -384,6 +425,12 @@ export function CompanyFinancePage() {
             />
             <SummaryCard label={text.cashInflow} value={money(summary.cash_inflow)} icon={ArrowDownLeft} tone="positive" />
             <SummaryCard label={text.cashOutflow} value={money(summary.cash_outflow)} icon={ArrowUpRight} tone="negative" />
+            <SummaryCard
+              label={text.actualCashBalance}
+              value={money(String(actualCashBalance))}
+              icon={WalletCards}
+              tone={actualCashBalance >= 0 ? "positive" : "negative"}
+            />
           </section>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -414,11 +461,12 @@ export function CompanyFinancePage() {
         </div>
       ) : null}
 
-      {position ? (
+      {position && accounts ? (
         <Tabs defaultValue="patients">
           <TabsList className="max-w-full overflow-x-auto">
             <TabsTrigger value="patients">{text.patients} · {position.patient_positions.length}</TabsTrigger>
             <TabsTrigger value="providers">{text.providers} · {position.provider_liabilities.length}</TabsTrigger>
+            <TabsTrigger value="accounts">{text.financialAccounts} · {accounts.items.length}</TabsTrigger>
             <TabsTrigger value="cash">{text.cash} · {position.cash_movement_count}</TabsTrigger>
           </TabsList>
 
@@ -539,16 +587,28 @@ export function CompanyFinancePage() {
             </div>
           </TabsContent>
 
+          <TabsContent value="accounts">
+            <CompanyAccountsWorkspace
+              payload={accounts}
+              currency={currency}
+              locale={locale}
+              money={money}
+              onChanged={() => setReloadToken((current) => current + 1)}
+            />
+          </TabsContent>
+
           <TabsContent value="cash" className="space-y-2">
+            {assignmentError ? <ShellBanner tone="error">{assignmentError}</ShellBanner> : null}
             <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1040px] text-sm">
+                <table className="w-full min-w-[1220px] text-sm">
                   <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                     <tr>
                       <th className="px-4 py-3 font-medium">{text.date}</th>
                       <th className="px-3 py-3 font-medium">{text.operation}</th>
                       <th className="px-3 py-3 font-medium">{text.document}</th>
                       <th className="px-3 py-3 font-medium">{text.patient}</th>
+                      <th className="px-3 py-3 font-medium">{text.financialAccount}</th>
                       <th className="px-3 py-3 text-right font-medium">{text.net}</th>
                       <th className="px-3 py-3 text-right font-medium">{text.vat}</th>
                       <th className="px-4 py-3 text-right font-medium">{text.gross}</th>
@@ -569,6 +629,22 @@ export function CompanyFinancePage() {
                         <td className="px-3 py-3">
                           {row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—"}
                         </td>
+                        <td className="px-3 py-3">
+                          <select
+                            className={cn(shellSelectClassName, "min-w-44")}
+                            value={row.financial_account_id ?? ""}
+                            disabled={assignmentBusyId === row.id}
+                            aria-label={text.financialAccount}
+                            onChange={(event) => void handleAssignMovement(row.id, event.target.value)}
+                          >
+                            <option value="" disabled>{text.unassignedAccount}</option>
+                            {accounts.items.map((account) => (
+                              <option key={account.id} value={account.id} disabled={!account.is_active}>
+                                {account.name}{account.is_active ? "" : ` · ${text.inactive}`}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
                         <td className="px-3 py-3 text-right tabular-nums">{money(row.amount_net)}</td>
                         <td className="px-3 py-3 text-right tabular-nums">{money(row.amount_vat)}</td>
                         <td className={cn(
@@ -578,7 +654,7 @@ export function CompanyFinancePage() {
                           {row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}
                         </td>
                       </tr>
-                    )) : <EmptyRow colSpan={7} label={text.noRows} />}
+                    )) : <EmptyRow colSpan={8} label={text.noRows} />}
                   </tbody>
                 </table>
               </div>

@@ -65,6 +65,54 @@ export type CompanyCashMovement = {
   patient_id: string | null;
   patient_pid: string | null;
   patient_name: string | null;
+  financial_account_id: string | null;
+  financial_account_name: string | null;
+};
+
+export type CompanyFinancialAccount = {
+  id: string;
+  name: string;
+  account_type: "bank" | "cash" | "card" | "other";
+  currency: string;
+  iban: string | null;
+  opening_balance: string;
+  opening_balance_on: string;
+  movement_balance: string;
+  adjustment_balance: string;
+  current_balance: string;
+  movement_count: number;
+  latest_movement_on: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CompanyFinancialAccountAdjustment = {
+  id: string;
+  financial_account_id: string;
+  account_name: string;
+  transaction_type: "adjustment" | "reversal";
+  reverses_adjustment_id: string | null;
+  direction: "inflow" | "outflow";
+  amount: string;
+  currency: string;
+  effective_on: string;
+  reason: string;
+  note: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+};
+
+export type CompanyFinancialAccountsPayload = {
+  currency: string;
+  available_currencies: string[];
+  items: CompanyFinancialAccount[];
+  adjustments: CompanyFinancialAccountAdjustment[];
+  unassigned_movement_count: number;
+  unassigned_signed_amount: string;
+  generated_at: string;
 };
 
 export type CompanyFinancialPosition = {

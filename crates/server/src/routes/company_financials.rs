@@ -492,16 +492,20 @@ async fn get_company_financial_position(
                           ELSE -entry.amount_gross
                       END AS signed_amount,
                       invoice.invoice_number,
-                      external.external_invoice_number,
-                      orders.id AS order_id, orders.order_number,
-                      patient.id AS patient_id, patient.patient_id AS patient_pid,
-                      patient.first_name, patient.last_name
+                       external.external_invoice_number,
+                       orders.id AS order_id, orders.order_number,
+                       patient.id AS patient_id, patient.patient_id AS patient_pid,
+                       patient.first_name, patient.last_name,
+                       financial_account.id AS financial_account_id,
+                       financial_account.name AS financial_account_name
                FROM accounting_entries entry
                LEFT JOIN invoices invoice ON invoice.id = entry.source_invoice_id
                LEFT JOIN external_invoices external
                  ON external.id = entry.source_external_invoice_id
                LEFT JOIN orders ON orders.id = entry.order_id
                LEFT JOIN patients patient ON patient.id = entry.patient_id
+               LEFT JOIN company_financial_accounts financial_account
+                 ON financial_account.id = entry.financial_account_id
                WHERE entry.entry_date >= $1
                  AND entry.entry_date <= $2
                  AND UPPER(entry.currency) = $3
@@ -579,6 +583,8 @@ async fn get_company_financial_position(
                 "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
                 "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
                 "patient_name": if patient_name.is_empty() { None::<String> } else { Some(patient_name) },
+                "financial_account_id": row.try_get::<Option<Uuid>, _>("financial_account_id").unwrap_or_default(),
+                "financial_account_name": row.try_get::<Option<String>, _>("financial_account_name").unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
