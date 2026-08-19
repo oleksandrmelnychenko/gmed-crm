@@ -218,7 +218,7 @@ async fn external_invoices_round_trip_through_order_detail_and_status_update() {
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
         &billing_bearer,
-        Some(json!({ "status": "paid" })),
+        Some(json!({ "status": "paid", "paid_by": "patient" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -238,7 +238,7 @@ async fn external_invoices_round_trip_through_order_detail_and_status_update() {
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
         &billing_bearer,
-        Some(json!({ "status": "paid" })),
+        Some(json!({ "status": "paid", "paid_by": "patient" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

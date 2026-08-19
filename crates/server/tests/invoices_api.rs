@@ -1823,13 +1823,24 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let provider_payment_account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let (status, _) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &format!("/api/v1/company-provider-liabilities/{external_invoice_id}/settlements"),
         &billing_bearer,
         Some(json!({
-            "status": "paid"
+            "request_id": Uuid::new_v4(),
+            "financial_account_id": provider_payment_account_id,
+            "amount_gross": "60.00",
+            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "payment_method": "bank_transfer",
+            "reference": "Clinic bill settlement"
         })),
     )
     .await;

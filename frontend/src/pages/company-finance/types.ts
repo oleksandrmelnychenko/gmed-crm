@@ -1,6 +1,11 @@
 export type CompanyBalanceSide = "debit" | "credit" | "settled";
 export type CompanyCashMovementKind = "inflow" | "outflow";
-export type CompanyLiabilityKind = "payable" | "expected";
+export type CompanyLiabilityKind = "payable" | "expected" | "settled";
+export type CompanyProviderSettlementStatus =
+  | "unpaid"
+  | "partial"
+  | "paid"
+  | "paid_by_patient";
 
 export type CompanyFinancialSummary = {
   patient_receivables_calculated: string;
@@ -37,8 +42,14 @@ export type CompanyProviderLiability = {
   invoice_date: string | null;
   due_date: string | null;
   status: string;
+  paid_by: "patient" | "agency" | "unpaid";
   liability_kind: CompanyLiabilityKind;
   amount_gross: string;
+  company_paid_gross: string;
+  remaining_gross: string;
+  settlement_status: CompanyProviderSettlementStatus;
+  latest_payment_on: string | null;
+  payment_count: number;
   order_id: string;
   order_number: string;
   patient_id: string;
@@ -46,6 +57,39 @@ export type CompanyProviderLiability = {
   patient_name: string;
   provider_id: string | null;
   provider_name: string | null;
+};
+
+export type CompanyProviderPaymentTransaction = {
+  id: string;
+  external_invoice_id: string;
+  financial_account_id: string;
+  financial_account_name: string;
+  transaction_type: "payment" | "reversal";
+  reverses_transaction_id: string | null;
+  amount_gross: string;
+  currency: string;
+  paid_on: string;
+  payment_method: "bank_transfer" | "cash" | "card" | "other";
+  reference: string | null;
+  note: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+};
+
+export type CompanyProviderSettlement = {
+  external_invoice_id: string;
+  external_invoice_number: string;
+  amount_gross: string;
+  currency: string;
+  status: string;
+  paid_by: "patient" | "agency" | "unpaid";
+  company_paid_gross: string;
+  remaining_provider_liability_gross: string;
+  settlement_status: CompanyProviderSettlementStatus;
+  latest_payment_on: string | null;
+  payment_count: number;
+  transactions: CompanyProviderPaymentTransaction[];
 };
 
 export type CompanyCashMovement = {

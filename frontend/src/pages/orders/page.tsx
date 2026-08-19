@@ -6381,7 +6381,11 @@ function useOrdersPageContent() {
                                             {externalInvoiceStatusLabel(invoice.status)}
                                           </Badge>
                                           <Badge variant="outline" className="rounded-full">
-                                            {invoice.paid_by === "agency"
+                                            {invoice.provider_settlement_status === "partial"
+                                              ? lang === "de"
+                                                ? "Teilweise von GMED bezahlt"
+                                                : "Частично оплачено GMED"
+                                              : invoice.paid_by === "agency"
                                               ? lang === "de"
                                                 ? "Bezahlt: GMED"
                                                 : "Плательщик: GMED"
@@ -6482,21 +6486,15 @@ function useOrdersPageContent() {
                                                     variant="outline"
                                                     size="sm"
                                                     className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
-                                                    onClick={() =>
-                                                      void handleUpdateExternalInvoiceStatus(
-                                                        invoice.id,
-                                                        nextStatus,
-                                                        "agency",
-                                                      )
-                                                    }
+                                                    onClick={() => window.location.assign(`/company-finance?provider_invoice=${invoice.id}`)}
                                                     disabled={invoiceUpdating}
                                                   >
                                                     {invoiceUpdating ? (
                                                       <LoaderCircle className="mr-2 size-4 animate-spin" />
                                                     ) : null}
                                                     {lang === "de"
-                                                      ? "Von GMED bezahlt"
-                                                      : "Оплачено GMED"}
+                                                      ? "Zahlung über Unternehmenssaldo erfassen"
+                                                      : "Записать выплату в балансе компании"}
                                                   </Button>
                                                 </div>
                                               ) : (
@@ -6959,12 +6957,12 @@ function useOrdersPageContent() {
                         setExternalInvoiceForm((current) => ({
                           ...current,
                           status: event.target.value as ExternalInvoiceStatus,
-                          paidBy:
-                            event.target.value === "paid"
-                              ? current.paidBy === "unpaid"
-                                ? "agency"
-                                : current.paidBy
-                              : "unpaid",
+                            paidBy:
+                              event.target.value === "paid"
+                                ? current.paidBy === "unpaid"
+                                  ? "patient"
+                                  : current.paidBy
+                                : "unpaid",
                         }))
                       }
                       className={selectClassName}
@@ -6994,7 +6992,6 @@ function useOrdersPageContent() {
                       <option value="patient">
                         {lang === "de" ? "Patient" : "Пациент"}
                       </option>
-                      <option value="agency">GMED</option>
                     </NativeComboboxSelect>
                   </Field>
                   <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm text-foreground md:col-span-2">

@@ -805,6 +805,29 @@ async fn total_accounted_external_invoice_gross(
     .await
 }
 
+async fn provider_payment_journal_target_gross(
+    state: &AppState,
+    external_invoice_id: Uuid,
+) -> Result<Option<Decimal>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT COUNT(*)::bigint AS transaction_count,
+                  COALESCE(SUM(
+                      CASE WHEN transaction_type = 'payment'
+                           THEN amount_gross ELSE -amount_gross END
+                  ), 0) AS net_paid
+           FROM external_invoice_provider_payment_transactions
+           WHERE external_invoice_id = $1"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&state.db)
+    .await?;
+    let transaction_count = row.try_get::<i64, _>("transaction_count").unwrap_or(0);
+    Ok((transaction_count > 0).then(|| {
+        row.try_get::<Decimal, _>("net_paid")
+            .unwrap_or(Decimal::ZERO)
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn insert_invoice_payment_accounting_entries(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1002,10 +1025,10 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
 
     let already_accounted =
         total_accounted_external_invoice_gross(state, external_invoice_id).await?;
-    let target_gross = if context.status == "paid" && context.paid_by == "agency" {
-        context.amount_gross
-    } else {
-        Decimal::ZERO
+    let target_gross = match provider_payment_journal_target_gross(state, external_invoice_id).await? {
+        Some(value) => value,
+        None if context.status == "paid" && context.paid_by == "agency" => context.amount_gross,
+        None => Decimal::ZERO,
     };
     let delta_gross = round_accounting_money(target_gross - already_accounted);
     if delta_gross == Decimal::ZERO {

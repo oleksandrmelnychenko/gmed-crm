@@ -21,6 +21,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
+import { ProviderSettlementDialog } from "./provider-settlement-dialog";
 import {
   assignAccountingEntryFinancialAccount,
   fetchCompanyFinancialAccounts,
@@ -37,6 +38,7 @@ import type {
 } from "./types";
 
 type PatientSideFilter = "all" | CompanyBalanceSide | "reconciliation";
+type ProviderSettlementFilter = "open" | "partial" | "settled" | "expected" | "all";
 
 const today = new Date();
 const initialFilters: CompanyFinancialFilters = {
@@ -99,6 +101,13 @@ const textByLanguage = {
     amount: "Сумма",
     payable: "К оплате",
     expected: "Ожидается",
+    partiallyPaid: "Частично оплачено",
+    settledProvider: "Оплачено",
+    openProviderPayments: "Открытые",
+    providerSettlements: "Расчеты",
+    originalAmount: "Сумма счета",
+    companyPaid: "Выплачено компанией",
+    remainingAmount: "Осталось выплатить",
     date: "Дата",
     operation: "Операция",
     net: "Нетто",
@@ -162,6 +171,13 @@ const textByLanguage = {
     amount: "Betrag",
     payable: "Zu zahlen",
     expected: "Erwartet",
+    partiallyPaid: "Teilweise bezahlt",
+    settledProvider: "Bezahlt",
+    openProviderPayments: "Offen",
+    providerSettlements: "Abrechnung",
+    originalAmount: "Rechnungsbetrag",
+    companyPaid: "Vom Unternehmen bezahlt",
+    remainingAmount: "Noch zu zahlen",
     date: "Datum",
     operation: "Vorgang",
     net: "Netto",
@@ -236,7 +252,13 @@ export function CompanyFinancePage() {
   const text = textByLanguage[lang];
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const [filters, setFilters] = useState<CompanyFinancialFilters>(initialFilters);
+  const [activeTab, setActiveTab] = useState(
+    () => new URL(window.location.href).searchParams.has("provider_invoice") ? "providers" : "patients",
+  );
   const [patientSide, setPatientSide] = useState<PatientSideFilter>("all");
+  const [providerFilter, setProviderFilter] = useState<ProviderSettlementFilter>("open");
+  const [selectedProviderLiability, setSelectedProviderLiability] =
+    useState<CompanyProviderLiability | null>(null);
   const [position, setPosition] = useState<CompanyFinancialPosition | null>(null);
   const [accounts, setAccounts] = useState<CompanyFinancialAccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -276,6 +298,20 @@ export function CompanyFinancePage() {
     };
   }, [filters, reloadToken]);
 
+  useEffect(() => {
+    if (!position || selectedProviderLiability) return;
+    const url = new URL(window.location.href);
+    const requestedId = url.searchParams.get("provider_invoice");
+    if (!requestedId) return;
+    const requested = position.provider_liabilities.find((item) => item.id === requestedId);
+    url.searchParams.delete("provider_invoice");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    if (requested) {
+      setActiveTab("providers");
+      setSelectedProviderLiability(requested);
+    }
+  }, [position, selectedProviderLiability]);
+
   const currency = position?.currency || filters.currency || "EUR";
   const money = (value: string | null | undefined) => formatMoney(value, currency, locale);
   const patientRows = useMemo(() => {
@@ -286,6 +322,20 @@ export function CompanyFinancePage() {
     }
     return rows.filter((row) => row.balance_side === patientSide);
   }, [patientSide, position?.patient_positions]);
+  const providerRows = useMemo(() => {
+    const rows = position?.provider_liabilities ?? [];
+    if (providerFilter === "all") return rows;
+    if (providerFilter === "expected") {
+      return rows.filter((row) => row.liability_kind === "expected");
+    }
+    if (providerFilter === "settled") {
+      return rows.filter((row) => row.liability_kind === "settled");
+    }
+    if (providerFilter === "partial") {
+      return rows.filter((row) => row.settlement_status === "partial");
+    }
+    return rows.filter((row) => row.liability_kind === "payable");
+  }, [position?.provider_liabilities, providerFilter]);
 
   const summary = position?.summary;
   const netCashFlow = parseAmount(summary?.net_cash_flow);
@@ -351,8 +401,19 @@ export function CompanyFinancePage() {
       render: (row) => (
         <div>
           <div className="truncate font-medium">{row.external_invoice_number}</div>
-          <Badge variant="outline" className={cn("mt-0.5 rounded-full text-[10px]", row.liability_kind === "expected" ? "border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" : "border-rose-200 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400")}>
-            {row.liability_kind === "expected" ? text.expected : text.payable}
+          <Badge variant="outline" className={cn(
+            "mt-0.5 rounded-full text-[10px]",
+            row.liability_kind === "settled" && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400",
+            row.liability_kind === "expected" && "border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+            row.liability_kind === "payable" && "border-rose-200 bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",
+          )}>
+            {row.liability_kind === "settled"
+              ? text.settledProvider
+              : row.liability_kind === "expected"
+                ? text.expected
+                : row.settlement_status === "partial"
+                  ? text.partiallyPaid
+                  : text.payable}
           </Badge>
         </div>
       ),
@@ -361,7 +422,10 @@ export function CompanyFinancePage() {
     { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid}</StaffLink> },
     { id: "order", label: text.order, accessor: (row) => row.order_number, filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> },
     { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date, locale) },
-    { id: "amount", label: text.amount, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className="font-semibold">{money(row.amount_gross)}</span> },
+    { id: "amount", label: text.originalAmount, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => money(row.amount_gross) },
+    { id: "company_paid", label: text.companyPaid, accessor: (row) => parseAmount(row.company_paid_gross), filterType: "number", sortable: true, width: 170, render: (row) => <span className="text-emerald-700 dark:text-emerald-400">{money(row.company_paid_gross)}</span> },
+    { id: "remaining", label: text.remainingAmount, accessor: (row) => parseAmount(row.remaining_gross), filterType: "number", sortable: true, width: 170, render: (row) => <span className={cn("font-semibold", parseAmount(row.remaining_gross) > 0 ? "text-rose-700 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400")}>{money(row.remaining_gross)}</span> },
+    { id: "settlement", label: text.providerSettlements, accessor: (row) => row.settlement_status, filterType: "enum", width: 130, render: (row) => <Button type="button" size="xs" variant="outline" onClick={(event) => { event.stopPropagation(); setSelectedProviderLiability(row); }}>{text.providerSettlements}</Button> },
   ], [locale, money, text]);
 
   const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
@@ -535,7 +599,7 @@ export function CompanyFinancePage() {
       ) : null}
 
       {position && accounts ? (
-        <Tabs defaultValue="patients" className="gap-3">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
           <TabsList className="mx-auto h-auto max-w-full flex-wrap border border-border bg-card p-1">
             <TabsTrigger className="h-8 rounded-md px-3" value="patients">{text.patients} · {position.patient_positions.length}</TabsTrigger>
             <TabsTrigger className="h-8 rounded-md px-3" value="providers">{text.providers} · {position.provider_liabilities.length}</TabsTrigger>
@@ -565,7 +629,31 @@ export function CompanyFinancePage() {
           </TabsContent>
 
           <TabsContent value="providers">
-            <DataTableSurface rows={position.provider_liabilities} columns={providerColumns} rowId={(row) => row.id} storageKey="company-finance-providers" defaultDensity="compact" defaultSort={[{ field: "due_date", dir: "asc" }]} emptyState={text.noRows} pagination={{ pageSize: 50 }} />
+            <DataTableSurface
+              rows={providerRows}
+              columns={providerColumns}
+              rowId={(row) => row.id}
+              storageKey="company-finance-providers"
+              defaultDensity="compact"
+              defaultSort={[{ field: "due_date", dir: "asc" }]}
+              emptyState={text.noRows}
+              pagination={{ pageSize: 50, resetKey: providerFilter }}
+              onRowClick={setSelectedProviderLiability}
+              toolbarStart={(
+                <div className="flex shrink-0 items-end gap-1">
+                  {([
+                    ["open", text.openProviderPayments],
+                    ["partial", text.partiallyPaid],
+                    ["settled", text.settledProvider],
+                    ["expected", text.expected],
+                    ["all", text.all],
+                  ] as const).map(([value, label]) => (
+                    <Button key={value} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={providerFilter === value ? "default" : "ghost"} onClick={() => setProviderFilter(value)}>{label}</Button>
+                  ))}
+                  <span className="self-center px-1 text-[10px] tabular-nums text-muted-foreground">{text.shown(providerRows.length, position.provider_liabilities.length)}</span>
+                </div>
+              )}
+            />
           </TabsContent>
 
           <TabsContent value="accounts">
@@ -587,6 +675,14 @@ export function CompanyFinancePage() {
           </TabsContent>
         </Tabs>
       ) : null}
+
+      <ProviderSettlementDialog
+        liability={selectedProviderLiability}
+        accounts={accounts?.items ?? []}
+        locale={locale}
+        onClose={() => setSelectedProviderLiability(null)}
+        onChanged={() => setReloadToken((current) => current + 1)}
+      />
     </div>
   );
 }

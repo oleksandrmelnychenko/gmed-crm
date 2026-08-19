@@ -372,7 +372,11 @@ async fn get_company_financial_position(
     let provider_rows = match sqlx::query(
         r#"SELECT external.id, external.external_invoice_number,
                   external.invoice_date, external.due_date, external.status,
-                  external.provider_liability_gross, external.order_id,
+                  external.paid_by, external.amount_gross,
+                  settlement.company_paid_gross,
+                  settlement.remaining_provider_liability_gross,
+                  settlement.settlement_status, settlement.latest_payment_on,
+                  settlement.payment_count, external.order_id,
                   orders.order_number, external.patient_id,
                   patient.patient_id AS patient_pid,
                   patient.first_name, patient.last_name,
@@ -380,9 +384,11 @@ async fn get_company_financial_position(
            FROM external_invoices external
            JOIN orders ON orders.id = external.order_id
            JOIN patients patient ON patient.id = external.patient_id
+           JOIN external_invoice_provider_settlement_balances settlement
+             ON settlement.external_invoice_id = external.id
            LEFT JOIN providers provider ON provider.id = external.provider_id
            WHERE external.status <> 'cancelled'
-             AND external.provider_liability_gross > 0
+             AND external.amount_gross > 0
              AND UPPER(external.currency) = $1
            ORDER BY external.due_date NULLS LAST, external.created_at DESC"#,
     )
@@ -405,9 +411,11 @@ async fn get_company_financial_position(
     for row in provider_rows {
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let amount = row
-            .try_get::<Decimal, _>("provider_liability_gross")
+            .try_get::<Decimal, _>("remaining_provider_liability_gross")
             .unwrap_or(Decimal::ZERO);
-        let liability_kind = if status == "expected" {
+        let liability_kind = if amount <= Decimal::ZERO {
+            "settled"
+        } else if status == "expected" {
             expected_provider_costs += amount;
             "expected"
         } else {
@@ -430,8 +438,14 @@ async fn get_company_financial_position(
             "invoice_date": row.try_get::<Option<NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
             "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
             "status": status,
+            "paid_by": row.try_get::<String, _>("paid_by").unwrap_or_default(),
             "liability_kind": liability_kind,
-            "amount_gross": decimal_to_string(amount),
+            "amount_gross": decimal_to_string(row.try_get::<Decimal, _>("amount_gross").unwrap_or(Decimal::ZERO)),
+            "company_paid_gross": decimal_to_string(row.try_get::<Decimal, _>("company_paid_gross").unwrap_or(Decimal::ZERO)),
+            "remaining_gross": decimal_to_string(amount),
+            "settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),
+            "latest_payment_on": row.try_get::<Option<NaiveDate>, _>("latest_payment_on").unwrap_or_default().map(|value| value.to_string()),
+            "payment_count": row.try_get::<i64, _>("payment_count").unwrap_or(0),
             "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
             "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
             "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),

@@ -3058,7 +3058,10 @@ async fn get_order(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.paid_by, ei.service_delivered,
-                  ei.patient_receivable_gross, ei.provider_liability_gross,
+                  receivable.patient_receivable_gross,
+                  provider_settlement.company_paid_gross,
+                  provider_settlement.remaining_provider_liability_gross AS provider_liability_gross,
+                  provider_settlement.settlement_status,
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
@@ -3070,6 +3073,8 @@ async fn get_order(
            FROM external_invoices ei
            JOIN external_invoice_receivable_balances receivable
              ON receivable.external_invoice_id = ei.id
+           JOIN external_invoice_provider_settlement_balances provider_settlement
+             ON provider_settlement.external_invoice_id = ei.id
            LEFT JOIN providers pr ON pr.id = ei.provider_id
            LEFT JOIN LATERAL (
                SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
@@ -3120,6 +3125,8 @@ async fn get_order(
             "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "company_paid_gross": row.try_get::<rust_decimal::Decimal, _>("company_paid_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "provider_settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),
             "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -4696,7 +4703,7 @@ async fn load_external_invoice_allocation_workspace(
 ) -> Result<Option<serde_json::Value>, sqlx::Error> {
     let Some(external) = sqlx::query(
         r#"SELECT external.id, external.patient_id, external.external_invoice_number,
-                  external.currency, external.status, external.patient_receivable_gross,
+                  external.currency, external.status, balances.patient_receivable_gross,
                   balances.allocated_receivable_gross,
                   balances.remaining_receivable_gross
            FROM external_invoices external
@@ -5254,7 +5261,10 @@ async fn list_external_invoices(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.paid_by, ei.service_delivered,
-                  ei.patient_receivable_gross, ei.provider_liability_gross,
+                  receivable.patient_receivable_gross,
+                  provider_settlement.remaining_provider_liability_gross,
+                  provider_settlement.company_paid_gross,
+                  provider_settlement.settlement_status,
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
@@ -5266,6 +5276,8 @@ async fn list_external_invoices(
            FROM external_invoices ei
            JOIN external_invoice_receivable_balances receivable
              ON receivable.external_invoice_id = ei.id
+           JOIN external_invoice_provider_settlement_balances provider_settlement
+             ON provider_settlement.external_invoice_id = ei.id
            LEFT JOIN providers pr ON pr.id = ei.provider_id
            LEFT JOIN LATERAL (
                SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
@@ -5306,7 +5318,9 @@ async fn list_external_invoices(
                     "patient_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
-                    "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "company_paid_gross": row.try_get::<rust_decimal::Decimal, _>("company_paid_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "provider_settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),
                     "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -5371,6 +5385,12 @@ async fn create_external_invoice(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Paid external invoices require patient or agency as payer",
+        );
+    }
+    if status == "paid" && paid_by == "agency" {
+        return err(
+            StatusCode::CONFLICT,
+            "Create the provider invoice first, then record the company payment",
         );
     }
     let service_delivered = body.service_delivered.unwrap_or(status == "paid");
@@ -5584,6 +5604,15 @@ async fn update_external_invoice(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Paid external invoices require patient or agency as payer",
+        );
+    }
+    if effective_status == "paid"
+        && effective_paid_by == "agency"
+        && !(current_status == "paid" && current_paid_by == "agency")
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Record the provider payment in company settlements",
         );
     }
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {

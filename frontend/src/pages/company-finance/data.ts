@@ -4,6 +4,8 @@ import type {
   CompanyFinancialFilters,
   CompanyFinancialAccountsPayload,
   CompanyFinancialPosition,
+  CompanyProviderPaymentTransaction,
+  CompanyProviderSettlement,
 } from "./types";
 
 export function buildCompanyFinancialPositionPath(filters: CompanyFinancialFilters) {
@@ -93,6 +95,40 @@ export function reverseCompanyFinancialAccountTransfer(
 ) {
   return postJson<{ id: string; idempotent_replay: boolean }>(
     `/company-financial-account-transfers/${transferId}/reversal`,
+    payload,
+  );
+}
+
+export function fetchCompanyProviderSettlement(
+  externalInvoiceId: string,
+  forceFresh = false,
+) {
+  return apiFetch<CompanyProviderSettlement>(
+    `/company-provider-liabilities/${externalInvoiceId}/settlements`,
+    { forceFresh },
+  );
+}
+
+export function createCompanyProviderPayment(
+  externalInvoiceId: string,
+  payload: JsonPayload,
+) {
+  return postJson<{
+    transaction: CompanyProviderPaymentTransaction;
+    idempotent_replay: boolean;
+  }>(`/company-provider-liabilities/${externalInvoiceId}/settlements`, payload);
+}
+
+export function reverseCompanyProviderPayment(
+  externalInvoiceId: string,
+  paymentId: string,
+  payload: JsonPayload,
+) {
+  return postJson<{
+    transaction: CompanyProviderPaymentTransaction;
+    idempotent_replay: boolean;
+  }>(
+    `/company-provider-liabilities/${externalInvoiceId}/settlements/${paymentId}/reversal`,
     payload,
   );
 }

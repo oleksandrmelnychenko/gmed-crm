@@ -136,6 +136,8 @@ export type ExternalInvoice = {
   allocated_receivable_gross: unknown;
   remaining_receivable_gross: unknown;
   provider_liability_gross: unknown;
+  company_paid_gross?: unknown;
+  provider_settlement_status?: "unpaid" | "partial" | "paid" | "paid_by_patient";
   received_at?: string | null;
   paid_at?: string | null;
   notes?: string | null;
