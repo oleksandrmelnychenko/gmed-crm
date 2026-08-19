@@ -156,6 +156,9 @@ fn account_row_payload(row: &sqlx::postgres::PgRow) -> Value {
     let adjustment_balance = row
         .try_get::<Decimal, _>("adjustment_balance")
         .unwrap_or(Decimal::ZERO);
+    let transfer_balance = row
+        .try_get::<Decimal, _>("transfer_balance")
+        .unwrap_or(Decimal::ZERO);
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "name": row.try_get::<String, _>("name").unwrap_or_default(),
@@ -166,8 +169,10 @@ fn account_row_payload(row: &sqlx::postgres::PgRow) -> Value {
         "opening_balance_on": row.try_get::<NaiveDate, _>("opening_balance_on").map(|date| date.to_string()).unwrap_or_default(),
         "movement_balance": decimal_to_string(movement_balance),
         "adjustment_balance": decimal_to_string(adjustment_balance),
-        "current_balance": decimal_to_string(opening_balance + movement_balance + adjustment_balance),
+        "transfer_balance": decimal_to_string(transfer_balance),
+        "current_balance": decimal_to_string(opening_balance + movement_balance + adjustment_balance + transfer_balance),
         "movement_count": row.try_get::<i64, _>("movement_count").unwrap_or(0),
+        "transfer_count": row.try_get::<i64, _>("transfer_count").unwrap_or(0),
         "latest_movement_on": row.try_get::<Option<NaiveDate>, _>("latest_movement_on").unwrap_or_default().map(|date| date.to_string()),
         "is_default": row.try_get::<bool, _>("is_default").unwrap_or(false),
         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
@@ -188,6 +193,26 @@ fn adjustment_row_payload(row: &sqlx::postgres::PgRow) -> Value {
         "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
         "effective_on": row.try_get::<NaiveDate, _>("effective_on").map(|date| date.to_string()).unwrap_or_default(),
         "reason": row.try_get::<String, _>("reason").unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "created_by": row.try_get::<Uuid, _>("created_by").unwrap_or_default(),
+        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+fn transfer_row_payload(row: &sqlx::postgres::PgRow) -> Value {
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "transaction_type": row.try_get::<String, _>("transaction_type").unwrap_or_default(),
+        "reverses_transfer_id": row.try_get::<Option<Uuid>, _>("reverses_transfer_id").unwrap_or_default(),
+        "source_account_id": row.try_get::<Uuid, _>("source_account_id").unwrap_or_default(),
+        "source_account_name": row.try_get::<String, _>("source_account_name").unwrap_or_default(),
+        "target_account_id": row.try_get::<Uuid, _>("target_account_id").unwrap_or_default(),
+        "target_account_name": row.try_get::<String, _>("target_account_name").unwrap_or_default(),
+        "amount": decimal_to_string(row.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO)),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
+        "effective_on": row.try_get::<NaiveDate, _>("effective_on").map(|date| date.to_string()).unwrap_or_default(),
+        "reference": row.try_get::<Option<String>, _>("reference").unwrap_or_default(),
         "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
         "created_by": row.try_get::<Uuid, _>("created_by").unwrap_or_default(),
         "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
@@ -251,12 +276,35 @@ async fn list_company_financial_accounts(
                         AND adjustment.effective_on >= account.opening_balance_on
                         AND adjustment.effective_on <= CURRENT_DATE
                   ), 0) AS adjustment_balance,
+                  COALESCE((
+                      SELECT SUM(CASE WHEN transfer.source_account_id = account.id
+                                      THEN -transfer.amount ELSE transfer.amount END)
+                      FROM company_financial_account_transfers transfer
+                      WHERE (transfer.source_account_id = account.id
+                             OR transfer.target_account_id = account.id)
+                        AND transfer.effective_on >= account.opening_balance_on
+                        AND transfer.effective_on <= CURRENT_DATE
+                  ), 0) AS transfer_balance,
                   (SELECT COUNT(*) FROM accounting_entries entry
                    WHERE entry.financial_account_id = account.id
                      AND entry.entry_date >= account.opening_balance_on
                      AND entry.entry_date <= CURRENT_DATE)::bigint AS movement_count,
-                  (SELECT MAX(entry.entry_date) FROM accounting_entries entry
-                   WHERE entry.financial_account_id = account.id) AS latest_movement_on
+                  (SELECT COUNT(*) FROM company_financial_account_transfers transfer
+                   WHERE (transfer.source_account_id = account.id
+                          OR transfer.target_account_id = account.id)
+                     AND transfer.effective_on >= account.opening_balance_on
+                     AND transfer.effective_on <= CURRENT_DATE)::bigint AS transfer_count,
+                  GREATEST(
+                      (SELECT MAX(entry.entry_date) FROM accounting_entries entry
+                       WHERE entry.financial_account_id = account.id),
+                      (SELECT MAX(adjustment.effective_on)
+                       FROM company_financial_account_adjustments adjustment
+                       WHERE adjustment.financial_account_id = account.id),
+                      (SELECT MAX(transfer.effective_on)
+                       FROM company_financial_account_transfers transfer
+                       WHERE transfer.source_account_id = account.id
+                          OR transfer.target_account_id = account.id)
+                  ) AS latest_movement_on
            FROM company_financial_accounts account
            WHERE account.currency = $1
              AND ($2 OR account.is_active)
@@ -299,6 +347,33 @@ async fn list_company_financial_accounts(
         }
     };
 
+    let transfer_rows = match sqlx::query(
+        r#"SELECT transfer.id, transfer.transaction_type,
+                  transfer.reverses_transfer_id,
+                  transfer.source_account_id, source.name AS source_account_name,
+                  transfer.target_account_id, target.name AS target_account_name,
+                  transfer.amount, transfer.currency, transfer.effective_on,
+                  transfer.reference, transfer.note, transfer.created_by,
+                  users.name AS created_by_name, transfer.created_at
+           FROM company_financial_account_transfers transfer
+           JOIN company_financial_accounts source ON source.id = transfer.source_account_id
+           JOIN company_financial_accounts target ON target.id = transfer.target_account_id
+           JOIN users ON users.id = transfer.created_by
+           WHERE transfer.currency = $1
+           ORDER BY transfer.effective_on DESC, transfer.created_at DESC
+           LIMIT 250"#,
+    )
+    .bind(&currency)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, currency = %currency, "load company account transfers");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+        }
+    };
+
     let unassigned = match sqlx::query(
         r#"SELECT COUNT(*)::bigint AS movement_count,
                   COALESCE(SUM(CASE WHEN direction = 'income'
@@ -323,6 +398,7 @@ async fn list_company_financial_accounts(
         "available_currencies": available_currencies,
         "items": account_rows.iter().map(account_row_payload).collect::<Vec<_>>(),
         "adjustments": adjustment_rows.iter().map(adjustment_row_payload).collect::<Vec<_>>(),
+        "transfers": transfer_rows.iter().map(transfer_row_payload).collect::<Vec<_>>(),
         "unassigned_movement_count": unassigned.try_get::<i64, _>("movement_count").unwrap_or(0),
         "unassigned_signed_amount": decimal_to_string(unassigned.try_get::<Decimal, _>("signed_amount").unwrap_or(Decimal::ZERO)),
         "generated_at": Utc::now().to_rfc3339(),

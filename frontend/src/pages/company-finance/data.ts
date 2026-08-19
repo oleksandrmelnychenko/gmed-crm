@@ -79,3 +79,20 @@ export function assignAccountingEntryFinancialAccount(
     { financial_account_id: financialAccountId },
   );
 }
+
+export function createCompanyFinancialAccountTransfer(payload: JsonPayload) {
+  return postJson<{ id: string; idempotent_replay: boolean }>(
+    "/company-financial-account-transfers",
+    payload,
+  );
+}
+
+export function reverseCompanyFinancialAccountTransfer(
+  transferId: string,
+  payload: JsonPayload,
+) {
+  return postJson<{ id: string; idempotent_replay: boolean }>(
+    `/company-financial-account-transfers/${transferId}/reversal`,
+    payload,
+  );
+}

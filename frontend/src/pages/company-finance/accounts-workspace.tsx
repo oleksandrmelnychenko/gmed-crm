@@ -1,8 +1,20 @@
-import { useState, type FormEvent } from "react";
-import { Banknote, Building2, CreditCard, Plus, RefreshCw, Undo2, WalletCards } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
+import {
+  ArrowRight,
+  ArrowRightLeft,
+  Banknote,
+  Building2,
+  CreditCard,
+  Plus,
+  RefreshCw,
+  Undo2,
+  WalletCards,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import {
   Dialog,
   DialogContent,
@@ -18,12 +30,15 @@ import { cn } from "@/lib/utils";
 import {
   createCompanyFinancialAccount,
   createCompanyFinancialAccountAdjustment,
+  createCompanyFinancialAccountTransfer,
   reverseCompanyFinancialAccountAdjustment,
+  reverseCompanyFinancialAccountTransfer,
   updateCompanyFinancialAccount,
 } from "./data";
 import type {
   CompanyFinancialAccount,
   CompanyFinancialAccountAdjustment,
+  CompanyFinancialAccountTransfer,
   CompanyFinancialAccountsPayload,
 } from "./types";
 
@@ -56,6 +71,18 @@ const copy = {
     opening: "Начальный",
     movements: "Операции",
     corrections: "Сверка",
+    internalTransfers: "Внутренние переводы",
+    internalTransfer: "Перевести между счетами",
+    transferTitle: "Внутренний перевод",
+    transferDescription: "Перемещение денег между счетами GMED в одной валюте.",
+    sourceAccount: "Со счета",
+    targetAccount: "На счет",
+    reference: "Назначение / референс",
+    transferBalance: "Переводы",
+    noTransfers: "Внутренних переводов пока нет",
+    transferUnavailable: "Нужно минимум два активных счета в одной валюте",
+    transferReversalTitle: "Сторно внутреннего перевода",
+    transferReversalDescription: "Сумма вернется на исходный счет.",
     movementCount: "движений",
     default: "По умолчанию",
     inactive: "Неактивен",
@@ -100,6 +127,18 @@ const copy = {
     opening: "Anfang",
     movements: "Bewegungen",
     corrections: "Abstimmung",
+    internalTransfers: "Interne Umbuchungen",
+    internalTransfer: "Zwischen Konten umbuchen",
+    transferTitle: "Interne Umbuchung",
+    transferDescription: "Geld zwischen GMED-Konten derselben Währung verschieben.",
+    sourceAccount: "Vom Konto",
+    targetAccount: "Auf Konto",
+    reference: "Verwendungszweck / Referenz",
+    transferBalance: "Umbuchungen",
+    noTransfers: "Noch keine internen Umbuchungen",
+    transferUnavailable: "Mindestens zwei aktive Konten derselben Währung sind erforderlich",
+    transferReversalTitle: "Interne Umbuchung stornieren",
+    transferReversalDescription: "Der Betrag wird auf das ursprüngliche Konto zurückgebucht.",
     movementCount: "Bewegungen",
     default: "Standard",
     inactive: "Inaktiv",
@@ -178,6 +217,45 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
   });
   const [defaultBusyId, setDefaultBusyId] = useState("");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferForm, setTransferForm] = useState({
+    requestId: crypto.randomUUID(),
+    sourceAccountId: "",
+    targetAccountId: "",
+    amount: "",
+    effectiveOn: todayIso(),
+    reference: "",
+    note: "",
+  });
+  const [reverseTransfer, setReverseTransfer] =
+    useState<CompanyFinancialAccountTransfer | null>(null);
+  const [reverseTransferBusy, setReverseTransferBusy] = useState(false);
+  const [reverseTransferError, setReverseTransferError] = useState<string | null>(null);
+  const [reverseTransferForm, setReverseTransferForm] = useState({
+    requestId: crypto.randomUUID(),
+    effectiveOn: todayIso(),
+    reference: "",
+    note: "",
+  });
+  const activeAccounts = payload.items.filter((account) => account.is_active);
+
+  function openTransferDialog() {
+    const source = activeAccounts.find((account) => account.is_default) ?? activeAccounts[0];
+    const target = activeAccounts.find((account) => account.id !== source?.id);
+    setTransferError(null);
+    setTransferForm({
+      requestId: crypto.randomUUID(),
+      sourceAccountId: source?.id ?? "",
+      targetAccountId: target?.id ?? "",
+      amount: "",
+      effectiveOn: todayIso(),
+      reference: "",
+      note: "",
+    });
+    setTransferOpen(true);
+  }
 
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
@@ -279,6 +357,114 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     }
   }
 
+  async function handleTransfer(event: FormEvent) {
+    event.preventDefault();
+    setTransferBusy(true);
+    setTransferError(null);
+    try {
+      await createCompanyFinancialAccountTransfer({
+        request_id: transferForm.requestId,
+        source_account_id: transferForm.sourceAccountId,
+        target_account_id: transferForm.targetAccountId,
+        amount: transferForm.amount,
+        effective_on: transferForm.effectiveOn,
+        reference: transferForm.reference.trim() || null,
+        note: transferForm.note.trim() || null,
+      });
+      setTransferOpen(false);
+      onChanged();
+    } catch (error) {
+      setTransferError(error instanceof Error ? error.message : "Failed to record transfer");
+    } finally {
+      setTransferBusy(false);
+    }
+  }
+
+  async function handleReverseTransfer(event: FormEvent) {
+    event.preventDefault();
+    if (!reverseTransfer) return;
+    setReverseTransferBusy(true);
+    setReverseTransferError(null);
+    try {
+      await reverseCompanyFinancialAccountTransfer(reverseTransfer.id, {
+        request_id: reverseTransferForm.requestId,
+        effective_on: reverseTransferForm.effectiveOn,
+        reference: reverseTransferForm.reference.trim(),
+        note: reverseTransferForm.note.trim() || null,
+      });
+      setReverseTransfer(null);
+      setReverseTransferForm({
+        requestId: crypto.randomUUID(),
+        effectiveOn: todayIso(),
+        reference: "",
+        note: "",
+      });
+      onChanged();
+    } catch (error) {
+      setReverseTransferError(error instanceof Error ? error.message : "Failed to reverse transfer");
+    } finally {
+      setReverseTransferBusy(false);
+    }
+  }
+
+  const transferColumns = useMemo<ColumnDef<CompanyFinancialAccountTransfer>[]>(() => [
+    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on, locale) },
+    { id: "source", label: text.sourceAccount, accessor: (row) => row.source_account_name, filterType: "enum", sortable: true, searchable: true, width: 210 },
+    { id: "target", label: text.targetAccount, accessor: (row) => row.target_account_name, filterType: "enum", sortable: true, searchable: true, width: 210, render: (row) => <span className="inline-flex items-center gap-2"><ArrowRight className="size-3.5 text-muted-foreground" />{row.target_account_name}</span> },
+    {
+      id: "reference",
+      label: text.reference,
+      accessor: (row) => `${row.reference ?? ""} ${row.note ?? ""}`,
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      required: true,
+      width: 280,
+      render: (row) => <div className="truncate" title={row.reference ?? row.note ?? undefined}>{row.transaction_type === "reversal" ? <Badge className="mr-2 rounded-full text-[10px]" variant="outline">{text.reverse}</Badge> : null}{row.reference || row.note || "—"}</div>,
+    },
+    { id: "author", label: text.author, accessor: (row) => row.created_by_name, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <span className="text-muted-foreground">{row.created_by_name}</span> },
+    {
+      id: "amount",
+      label: text.amount,
+      accessor: (row) => Number(row.amount),
+      filterType: "number",
+      sortable: true,
+      width: 160,
+      render: (row) => (
+        <span className="inline-flex w-full items-center justify-end font-semibold">
+          {money(row.amount)}
+          {row.transaction_type === "transfer" && !payload.transfers.some((item) => item.reverses_transfer_id === row.id) ? (
+            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={(event) => { event.stopPropagation(); setReverseTransferError(null); setReverseTransfer(row); }}><Undo2 /></Button>
+          ) : null}
+        </span>
+      ),
+    },
+  ], [locale, money, payload.transfers, text]);
+
+  const adjustmentColumns = useMemo<ColumnDef<CompanyFinancialAccountAdjustment>[]>(() => [
+    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on, locale) },
+    { id: "account", label: text.account, accessor: (row) => row.account_name, filterType: "enum", sortable: true, searchable: true, width: 210 },
+    { id: "operation", label: text.operation, accessor: (row) => row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow, filterType: "enum", sortable: true, width: 180, render: (row) => <Badge variant="outline" className="rounded-full text-[10px]">{row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow}</Badge> },
+    { id: "reason", label: text.reason, accessor: (row) => row.reason, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div className="truncate" title={row.reason}>{row.reason}</div> },
+    { id: "author", label: text.author, accessor: (row) => row.created_by_name, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <span className="text-muted-foreground">{row.created_by_name}</span> },
+    {
+      id: "amount",
+      label: text.amount,
+      accessor: (row) => Number(row.amount),
+      filterType: "number",
+      sortable: true,
+      width: 160,
+      render: (row) => (
+        <span className={cn("inline-flex w-full items-center justify-end font-semibold", row.direction === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>
+          {row.direction === "inflow" ? "+" : "−"} {money(row.amount)}
+          {row.transaction_type === "adjustment" && !payload.adjustments.some((item) => item.reverses_adjustment_id === row.id) ? (
+            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={(event) => { event.stopPropagation(); setReverseError(null); setReverseAdjustment(row); }}><Undo2 /></Button>
+          ) : null}
+        </span>
+      ),
+    },
+  ], [locale, money, payload.adjustments, text]);
+
   return (
     <div className="space-y-3">
       {workspaceError ? <ShellBanner tone="error">{workspaceError}</ShellBanner> : null}
@@ -290,21 +476,34 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
             </ShellBanner>
           ) : null}
         </div>
-        <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" />
-          {text.create}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={activeAccounts.length < 2}
+            title={activeAccounts.length < 2 ? text.transferUnavailable : undefined}
+            onClick={openTransferDialog}
+          >
+            <ArrowRightLeft className="size-4" />
+            {text.internalTransfer}
+          </Button>
+          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+            {text.create}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {payload.items.map((account) => {
           const Icon = accountIcon(account.account_type);
           return (
-            <article key={account.id} className={cn("rounded-xl border border-border/70 bg-card p-4 shadow-sm", !account.is_active && "opacity-60")}>
+            <article key={account.id} className={cn("rounded-lg border border-border/70 bg-card p-3 shadow-sm", !account.is_active && "opacity-60")}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                    <Icon className="size-4" />
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <Icon className="size-3.5" />
                   </span>
                   <div className="min-w-0">
                     <h3 className="truncate font-semibold">{account.name}</h3>
@@ -318,15 +517,16 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 </div>
                 <span className="text-xs font-medium text-muted-foreground">{account.currency}</span>
               </div>
-              <p className="mt-4 text-xs text-muted-foreground">{text.currentBalance}</p>
-              <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">{money(account.current_balance)}</p>
-              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border/70 pt-3 text-xs">
+              <p className="mt-3 text-xs text-muted-foreground">{text.currentBalance}</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{money(account.current_balance)}</p>
+              <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs sm:grid-cols-4">
                 <div><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
+                <div><dt className="text-muted-foreground">{text.transferBalance}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.transfer_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
               </dl>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {formatDate(account.opening_balance_on, locale)} · {account.movement_count} {text.movementCount}
+                {formatDate(account.opening_balance_on, locale)} · {account.movement_count + account.transfer_count} {text.movementCount}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button type="button" size="xs" variant="outline" disabled={!account.is_active} onClick={() => {
@@ -347,47 +547,83 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         })}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
-        <div className="border-b border-border/70 px-4 py-3 text-sm font-semibold">{text.history}</div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">{text.date}</th>
-                <th className="px-3 py-3 font-medium">{text.account}</th>
-                <th className="px-3 py-3 font-medium">{text.operation}</th>
-                <th className="px-3 py-3 font-medium">{text.reason}</th>
-                <th className="px-3 py-3 font-medium">{text.author}</th>
-                <th className="px-4 py-3 text-right font-medium">{text.amount}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/70">
-              {payload.adjustments.length ? payload.adjustments.map((adjustment) => (
-                <tr key={adjustment.id}>
-                  <td className="px-4 py-3 tabular-nums">{formatDate(adjustment.effective_on, locale)}</td>
-                  <td className="px-3 py-3">{adjustment.account_name}</td>
-                  <td className="px-3 py-3">
-                    <Badge variant="outline">{adjustment.transaction_type === "reversal" ? text.reverse : adjustment.direction === "inflow" ? text.inflow : text.outflow}</Badge>
-                  </td>
-                  <td className="max-w-[320px] px-3 py-3"><div className="truncate" title={adjustment.reason}>{adjustment.reason}</div></td>
-                  <td className="px-3 py-3 text-muted-foreground">{adjustment.created_by_name}</td>
-                  <td className={cn("px-4 py-3 text-right font-semibold tabular-nums", adjustment.direction === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>
-                    {adjustment.direction === "inflow" ? "+" : "−"} {money(adjustment.amount)}
-                    {adjustment.transaction_type === "adjustment" && !payload.adjustments.some((row) => row.reverses_adjustment_id === adjustment.id) ? (
-                      <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={() => {
-                        setReverseError(null);
-                        setReverseAdjustment(adjustment);
-                      }}><Undo2 /></Button>
-                    ) : null}
-                  </td>
-                </tr>
-              )) : (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">{text.noAdjustments}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.internalTransfers}</span>} rows={payload.transfers} columns={transferColumns} rowId={(row) => row.id} storageKey="company-finance-transfers" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noTransfers} pagination={{ pageSize: 25 }} />
+
+      <DataTableSurface toolbarStart={<span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />{text.history}</span>} rows={payload.adjustments} columns={adjustmentColumns} rowId={(row) => row.id} storageKey="company-finance-adjustments" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} emptyState={text.noAdjustments} pagination={{ pageSize: 25 }} />
+
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{text.transferTitle}</DialogTitle>
+            <DialogDescription>{text.transferDescription}</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleTransfer}>
+            {transferError ? <ShellBanner tone="error">{transferError}</ShellBanner> : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block space-y-1.5 text-sm">
+                <span>{text.sourceAccount}</span>
+                <select
+                  className={shellSelectClassName}
+                  required
+                  value={transferForm.sourceAccountId}
+                  onChange={(event) => {
+                    const sourceAccountId = event.target.value;
+                    setTransferForm((current) => ({
+                      ...current,
+                      sourceAccountId,
+                      targetAccountId: current.targetAccountId === sourceAccountId
+                        ? activeAccounts.find((account) => account.id !== sourceAccountId)?.id ?? ""
+                        : current.targetAccountId,
+                    }));
+                  }}
+                >
+                  {activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                </select>
+              </label>
+              <label className="block space-y-1.5 text-sm">
+                <span>{text.targetAccount}</span>
+                <select className={shellSelectClassName} required value={transferForm.targetAccountId} onChange={(event) => setTransferForm((current) => ({ ...current, targetAccountId: event.target.value }))}>
+                  {activeAccounts.filter((account) => account.id !== transferForm.sourceAccountId).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                </select>
+              </label>
+              <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" value={transferForm.effectiveOn} onChange={(event) => setTransferForm((current) => ({ ...current, effectiveOn: event.target.value }))} /></label>
+            </div>
+            <label className="block space-y-1.5 text-sm"><span>{text.reference}</span><Input maxLength={120} value={transferForm.reference} onChange={(event) => setTransferForm((current) => ({ ...current, reference: event.target.value }))} /></label>
+            <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={2000} value={transferForm.note} onChange={(event) => setTransferForm((current) => ({ ...current, note: event.target.value }))} /></label>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setTransferOpen(false)}>{text.cancel}</Button>
+              <Button type="submit" disabled={transferBusy || Number(transferForm.amount) <= 0 || !transferForm.sourceAccountId || !transferForm.targetAccountId || transferForm.sourceAccountId === transferForm.targetAccountId}>{text.save}</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(reverseTransfer)} onOpenChange={(open) => { if (!open) setReverseTransfer(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{text.transferReversalTitle}</DialogTitle>
+            <DialogDescription>{text.transferReversalDescription}</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleReverseTransfer}>
+            {reverseTransferError ? <ShellBanner tone="error">{reverseTransferError}</ShellBanner> : null}
+            {reverseTransfer ? (
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3 text-sm">
+                <div className="flex items-center gap-2 font-medium">
+                  {reverseTransfer.source_account_name}
+                  <ArrowRight className="size-4 text-muted-foreground" />
+                  {reverseTransfer.target_account_name}
+                </div>
+                <div className="mt-1 text-lg font-semibold tabular-nums">{money(reverseTransfer.amount)}</div>
+              </div>
+            ) : null}
+            <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" value={reverseTransferForm.effectiveOn} onChange={(event) => setReverseTransferForm((current) => ({ ...current, effectiveOn: event.target.value }))} /></label>
+            <label className="block space-y-1.5 text-sm"><span>{text.reversalReason}</span><Input required maxLength={120} value={reverseTransferForm.reference} onChange={(event) => setReverseTransferForm((current) => ({ ...current, reference: event.target.value }))} /></label>
+            <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={2000} value={reverseTransferForm.note} onChange={(event) => setReverseTransferForm((current) => ({ ...current, note: event.target.value }))} /></label>
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setReverseTransfer(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" disabled={reverseTransferBusy || !reverseTransferForm.reference.trim()}>{text.reverse}</Button></div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg">

@@ -9,6 +9,7 @@ pub mod cases;
 pub mod clinical_document_imports;
 pub mod company_financials;
 pub mod company_financial_accounts;
+pub mod company_financial_account_transfers;
 pub mod concierge_operational_items;
 pub mod concierge_services;
 pub mod contracts;
@@ -64,6 +65,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(clinical_document_imports::router())
         .merge(company_financials::router())
         .merge(company_financial_accounts::router())
+        .merge(company_financial_account_transfers::router())
         .merge(concierge_services::router())
         .merge(concierge_operational_items::router())
         .merge(contracts::router())

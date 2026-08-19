@@ -79,8 +79,10 @@ export type CompanyFinancialAccount = {
   opening_balance_on: string;
   movement_balance: string;
   adjustment_balance: string;
+  transfer_balance: string;
   current_balance: string;
   movement_count: number;
+  transfer_count: number;
   latest_movement_on: string | null;
   is_default: boolean;
   is_active: boolean;
@@ -105,11 +107,30 @@ export type CompanyFinancialAccountAdjustment = {
   created_at: string;
 };
 
+export type CompanyFinancialAccountTransfer = {
+  id: string;
+  transaction_type: "transfer" | "reversal";
+  reverses_transfer_id: string | null;
+  source_account_id: string;
+  source_account_name: string;
+  target_account_id: string;
+  target_account_name: string;
+  amount: string;
+  currency: string;
+  effective_on: string;
+  reference: string | null;
+  note: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+};
+
 export type CompanyFinancialAccountsPayload = {
   currency: string;
   available_currencies: string[];
   items: CompanyFinancialAccount[];
   adjustments: CompanyFinancialAccountAdjustment[];
+  transfers: CompanyFinancialAccountTransfer[];
   unassigned_movement_count: number;
   unassigned_signed_amount: string;
   generated_at: string;
