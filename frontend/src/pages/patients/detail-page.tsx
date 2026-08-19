@@ -1150,6 +1150,8 @@ function usePatientDetailPageContent() {
   const timelineLimit = 50;
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
+  const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
+  const canOpenLeadWizard = user?.role === "ceo" || user?.role === "patient_manager";
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
@@ -2050,6 +2052,7 @@ function usePatientDetailPageContent() {
         assignBusy={assignBusy}
         assignments={assignments}
         assignableStaff={assignableStaff}
+        canCreateOrders={canCreateOrders}
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}
         canManage={canManage}
@@ -2059,6 +2062,7 @@ function usePatientDetailPageContent() {
         canManageRelations={canManageRelations}
         canManageWorkflowChecklist={canManageWorkflowChecklist}
         canOpenComplianceWorkspace={canOpenComplianceWorkspace}
+        canOpenLeadWizard={canOpenLeadWizard}
         canOpenDocumentsWorkspace={canOpenDocumentsWorkspace}
         canPrintPatientLabel={canPrintPatientLabel}
         canViewClinical={canViewClinical}

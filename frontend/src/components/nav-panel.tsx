@@ -22,6 +22,7 @@ import {
   Megaphone,
   MessageCircleHeart,
   MessagesSquare,
+  PackageCheck,
   ReceiptText,
   Settings2,
   Shield,
@@ -61,6 +62,7 @@ const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
 
 const NAV_ICONS: Record<string, React.ElementType> = {
   dashboard: LayoutDashboard,
+  concierge: ConciergeBell,
   chat: MessagesSquare,
   feedback: MessageCircleHeart,
   reports: ChartSpline,
@@ -76,6 +78,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   specializations: Stethoscope,
   recommendations: ClipboardList,
   services: ConciergeBell,
+  subscriptions: PackageCheck,
   privacy: Shield,
   cases: FileHeart,
   appointments: CalendarClock,

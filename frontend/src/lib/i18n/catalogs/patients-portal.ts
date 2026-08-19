@@ -633,6 +633,14 @@ export interface PatientsPortalTranslations {
   portal_invoices_not_set: string;
   portal_invoices_total_gross: string;
   portal_invoices_open_balance: string;
+  portal_invoices_payment_history: string;
+  portal_invoices_payment_history_description: string;
+  portal_invoices_no_payments: string;
+  portal_invoices_payment_received: string;
+  portal_invoices_payment_reversal: string;
+  portal_invoices_payment_reversed: string;
+  portal_invoices_payment_method: string;
+  portal_invoices_payment_reference: string;
   portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were: string;
   portal_invoices_upload_payment_proof: string;
   portal_invoices_uploaded_proofs: string;
@@ -874,6 +882,49 @@ export interface PatientsPortalTranslations {
   patient_case_preview_value_no: string;
   patient_case_preview_value_yes_2: string;
   patient_case_preview_value_no_2: string;
+
+  portal_subscriptions_title: string;
+  portal_subscriptions_subtitle: string;
+  portal_subscriptions_eyebrow: string;
+  portal_subscriptions_refresh: string;
+  portal_subscriptions_open_invoices: string;
+  portal_subscriptions_load_failed: string;
+  portal_subscriptions_active: string;
+  portal_subscriptions_upcoming: string;
+  portal_subscriptions_completed: string;
+  portal_subscriptions_total: string;
+  portal_subscriptions_included_services: string;
+  portal_subscriptions_payment_attention: string;
+  portal_subscriptions_empty_title: string;
+  portal_subscriptions_empty_description: string;
+  portal_subscriptions_period: string;
+  portal_subscriptions_from: string;
+  portal_subscriptions_until: string;
+  portal_subscriptions_ongoing: string;
+  portal_subscriptions_order: string;
+  portal_subscriptions_financial_status: string;
+  portal_subscriptions_financial_not_invoiced: string;
+  portal_subscriptions_financial_open: string;
+  portal_subscriptions_financial_partially_paid: string;
+  portal_subscriptions_financial_paid: string;
+  portal_subscriptions_financial_overdue: string;
+  portal_subscriptions_amount_hidden: string;
+  portal_subscriptions_balance_shared_order: string;
+  portal_subscriptions_balance_due: string;
+  portal_subscriptions_invoice_count: string;
+  portal_subscriptions_usage: string;
+  portal_subscriptions_included: string;
+  portal_subscriptions_used: string;
+  portal_subscriptions_remaining: string;
+  portal_subscriptions_overage: string;
+  portal_subscriptions_pending_approval: string;
+  portal_subscriptions_no_services: string;
+  portal_subscriptions_units: string;
+  portal_subscriptions_hours: string;
+  portal_subscriptions_days: string;
+  portal_subscriptions_trips: string;
+  portal_subscriptions_nights: string;
+  portal_subscriptions_appointments: string;
 }
 
 export const patientsPortalRu: PatientsPortalTranslations = {
@@ -1520,6 +1571,14 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoices_not_set: "Не указано",
   portal_invoices_total_gross: "Итого брутто",
   portal_invoices_open_balance: "Остаток к оплате",
+  portal_invoices_payment_history: "История поступлений",
+  portal_invoices_payment_history_description: "Зарегистрированные платежи и сторнирования по этому счёту.",
+  portal_invoices_no_payments: "По этому счёту ещё нет зарегистрированных платежей.",
+  portal_invoices_payment_received: "Платёж получен",
+  portal_invoices_payment_reversal: "Сторнирование платежа",
+  portal_invoices_payment_reversed: "Сторнирован",
+  portal_invoices_payment_method: "Способ оплаты",
+  portal_invoices_payment_reference: "Референс",
   portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were: "Загрузите квитанцию о переводе или подтверждение оплаты после отправки средств.",
   portal_invoices_upload_payment_proof: "Загрузить подтверждение оплаты",
   portal_invoices_uploaded_proofs: "Загруженные подтверждения",
@@ -1753,6 +1812,48 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_case_preview_value_no: "Нет",
   patient_case_preview_value_yes_2: "Да",
   patient_case_preview_value_no_2: "Нет",
+  portal_subscriptions_title: "Мои подписки",
+  portal_subscriptions_subtitle: "Периоды действия, включённые услуги, доступные лимиты и состояние оплаты ваших сервисных пакетов.",
+  portal_subscriptions_eyebrow: "Портал пациента",
+  portal_subscriptions_refresh: "Обновить",
+  portal_subscriptions_open_invoices: "Открыть счета",
+  portal_subscriptions_load_failed: "Не удалось загрузить подписки.",
+  portal_subscriptions_active: "Активные",
+  portal_subscriptions_upcoming: "Предстоящие",
+  portal_subscriptions_completed: "Завершённые",
+  portal_subscriptions_total: "Всего подписок",
+  portal_subscriptions_included_services: "Включённые услуги",
+  portal_subscriptions_payment_attention: "Требуют внимания к оплате",
+  portal_subscriptions_empty_title: "В этом разделе пока нет подписок",
+  portal_subscriptions_empty_description: "Опубликованные сервисные пакеты появятся здесь после назначения менеджером.",
+  portal_subscriptions_period: "Период действия",
+  portal_subscriptions_from: "с",
+  portal_subscriptions_until: "по",
+  portal_subscriptions_ongoing: "без указанной даты окончания",
+  portal_subscriptions_order: "Связанный заказ",
+  portal_subscriptions_financial_status: "Оплата связанного заказа",
+  portal_subscriptions_financial_not_invoiced: "Счёт ещё не выставлен",
+  portal_subscriptions_financial_open: "Ожидает оплаты",
+  portal_subscriptions_financial_partially_paid: "Оплачено частично",
+  portal_subscriptions_financial_paid: "Оплачено",
+  portal_subscriptions_financial_overdue: "Оплата просрочена",
+  portal_subscriptions_amount_hidden: "Сумма доступна в опубликованном счёте",
+  portal_subscriptions_balance_shared_order: "Сумма общая для нескольких подписок — смотрите опубликованные счета",
+  portal_subscriptions_balance_due: "Остаток к оплате",
+  portal_subscriptions_invoice_count: "Опубликованных счетов: {count}",
+  portal_subscriptions_usage: "Использование услуг",
+  portal_subscriptions_included: "Включено",
+  portal_subscriptions_used: "Использовано",
+  portal_subscriptions_remaining: "Осталось",
+  portal_subscriptions_overage: "Сверх лимита",
+  portal_subscriptions_pending_approval: "Ожидает согласования",
+  portal_subscriptions_no_services: "Для этого пакета ещё не опубликован перечень услуг.",
+  portal_subscriptions_units: "ед.",
+  portal_subscriptions_hours: "ч",
+  portal_subscriptions_days: "дн.",
+  portal_subscriptions_trips: "поездок",
+  portal_subscriptions_nights: "ночей",
+  portal_subscriptions_appointments: "приёмов",
 };
 
 export const patientsPortalDe: PatientsPortalTranslations = {
@@ -2399,6 +2500,14 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoices_not_set: "Nicht festgelegt",
   portal_invoices_total_gross: "Brutto gesamt",
   portal_invoices_open_balance: "Offener Saldo",
+  portal_invoices_payment_history: "Zahlungseingänge",
+  portal_invoices_payment_history_description: "Erfasste Zahlungen und Stornierungen zu dieser Rechnung.",
+  portal_invoices_no_payments: "Für diese Rechnung wurden noch keine Zahlungen erfasst.",
+  portal_invoices_payment_received: "Zahlung eingegangen",
+  portal_invoices_payment_reversal: "Zahlungsstornierung",
+  portal_invoices_payment_reversed: "Storniert",
+  portal_invoices_payment_method: "Zahlungsart",
+  portal_invoices_payment_reference: "Referenz",
   portal_invoices_upload_transfer_receipt_or_payment_confirmation_once_funds_were: "Laden Sie Überweisungsbeleg oder Zahlungsbestätigung hoch, sobald die Zahlung erfolgt ist.",
   portal_invoices_upload_payment_proof: "Zahlungsnachweis hochladen",
   portal_invoices_uploaded_proofs: "Hochgeladene Nachweise",
@@ -2632,4 +2741,46 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_case_preview_value_no: "Nein",
   patient_case_preview_value_yes_2: "Ja",
   patient_case_preview_value_no_2: "Nein",
+  portal_subscriptions_title: "Meine Abonnements",
+  portal_subscriptions_subtitle: "Laufzeiten, enthaltene Leistungen, verfügbare Kontingente und Zahlungsstatus Ihrer Servicepakete.",
+  portal_subscriptions_eyebrow: "Patientenportal",
+  portal_subscriptions_refresh: "Aktualisieren",
+  portal_subscriptions_open_invoices: "Rechnungen öffnen",
+  portal_subscriptions_load_failed: "Abonnements konnten nicht geladen werden.",
+  portal_subscriptions_active: "Aktiv",
+  portal_subscriptions_upcoming: "Bevorstehend",
+  portal_subscriptions_completed: "Abgeschlossen",
+  portal_subscriptions_total: "Abonnements gesamt",
+  portal_subscriptions_included_services: "Enthaltene Leistungen",
+  portal_subscriptions_payment_attention: "Zahlung zu klären",
+  portal_subscriptions_empty_title: "In diesem Bereich gibt es noch keine Abonnements",
+  portal_subscriptions_empty_description: "Freigegebene Servicepakete erscheinen hier nach der Zuweisung durch Ihr Betreuungsteam.",
+  portal_subscriptions_period: "Laufzeit",
+  portal_subscriptions_from: "ab",
+  portal_subscriptions_until: "bis",
+  portal_subscriptions_ongoing: "ohne festgelegtes Enddatum",
+  portal_subscriptions_order: "Verknüpfter Auftrag",
+  portal_subscriptions_financial_status: "Zahlungsstatus des verknüpften Auftrags",
+  portal_subscriptions_financial_not_invoiced: "Noch nicht abgerechnet",
+  portal_subscriptions_financial_open: "Zahlung ausstehend",
+  portal_subscriptions_financial_partially_paid: "Teilweise bezahlt",
+  portal_subscriptions_financial_paid: "Bezahlt",
+  portal_subscriptions_financial_overdue: "Zahlung überfällig",
+  portal_subscriptions_amount_hidden: "Betrag ist in der freigegebenen Rechnung verfügbar",
+  portal_subscriptions_balance_shared_order: "Der Betrag gilt gemeinsam für mehrere Abonnements – bitte Rechnungen öffnen",
+  portal_subscriptions_balance_due: "Offener Betrag",
+  portal_subscriptions_invoice_count: "Freigegebene Rechnungen: {count}",
+  portal_subscriptions_usage: "Leistungsnutzung",
+  portal_subscriptions_included: "Enthalten",
+  portal_subscriptions_used: "Genutzt",
+  portal_subscriptions_remaining: "Verfügbar",
+  portal_subscriptions_overage: "Über Kontingent",
+  portal_subscriptions_pending_approval: "Freigabe ausstehend",
+  portal_subscriptions_no_services: "Für dieses Paket wurde noch keine Leistungsliste freigegeben.",
+  portal_subscriptions_units: "Einheiten",
+  portal_subscriptions_hours: "Std.",
+  portal_subscriptions_days: "Tage",
+  portal_subscriptions_trips: "Fahrten",
+  portal_subscriptions_nights: "Nächte",
+  portal_subscriptions_appointments: "Termine",
 };

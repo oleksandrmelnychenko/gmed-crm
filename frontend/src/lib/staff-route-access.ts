@@ -121,6 +121,11 @@ const ROLES_SERVICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
+const ROLES_CONCIERGE_WORKSPACE = [
+  "ceo",
+  "concierge",
+] as const satisfies readonly StaffRole[];
+
 type RouteRule = {
   id: string;
   match: "exact" | "prefix";
@@ -158,6 +163,13 @@ function pathMatches(pathname: string, rule: RouteRule): boolean {
  * More specific rules must appear earlier than broader prefixes.
  */
 const STAFF_ROUTE_RULES: RouteRule[] = [
+  {
+    id: "concierge",
+    match: "exact",
+    path: "/concierge",
+    roles: ROLES_CONCIERGE_WORKSPACE,
+    nav: { section: "main", labelKey: "nav_concierge_workspace" },
+  },
   {
     id: "admin/access",
     match: "prefix",
@@ -385,6 +397,7 @@ const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "recommendations", to: "/recommendations", labelKey: "nav_my_recommendations" },
   { id: "documents", to: "/documents", labelKey: "nav_my_documents" },
   { id: "services", to: "/services", labelKey: "nav_my_services" },
+  { id: "subscriptions", to: "/subscriptions", labelKey: "nav_my_subscriptions" },
   { id: "invoices", to: "/invoices", labelKey: "nav_my_invoices" },
   { id: "feedback", to: "/feedback", labelKey: "nav_my_feedback" },
   { id: "privacy", to: "/privacy", labelKey: "nav_my_privacy" },

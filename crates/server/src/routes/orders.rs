@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::access;
@@ -58,6 +59,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/orders/{order_id}/external-invoices/{external_invoice_id}/update",
             post(update_external_invoice),
+        )
+        .route(
+            "/orders/{order_id}/external-invoices/{external_invoice_id}/allocations",
+            get(get_external_invoice_allocations).post(create_external_invoice_allocation),
+        )
+        .route(
+            "/orders/{order_id}/external-invoices/{external_invoice_id}/allocations/{allocation_id}/reverse",
+            post(reverse_external_invoice_allocation),
         )
         .route(
             "/orders/{order_id}/leistungen/{leistung_id}/approve",
@@ -211,6 +220,8 @@ struct CreateExternalInvoiceRequest {
     amount_gross: f64,
     currency: Option<String>,
     status: Option<String>,
+    paid_by: Option<String>,
+    service_delivered: Option<bool>,
     notes: Option<String>,
 }
 
@@ -224,7 +235,20 @@ struct UpdateExternalInvoiceRequest {
     amount_gross: Option<f64>,
     currency: Option<String>,
     status: Option<String>,
+    paid_by: Option<String>,
+    service_delivered: Option<bool>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateExternalInvoiceAllocationRequest {
+    patient_invoice_id: Uuid,
+    amount_gross: String,
+}
+
+#[derive(Deserialize)]
+struct ReverseExternalInvoiceAllocationRequest {
+    note: String,
 }
 
 #[derive(Deserialize)]
@@ -264,6 +288,14 @@ fn is_valid_external_invoice_status(value: &str) -> bool {
         value,
         "expected" | "received" | "approved" | "paid" | "overdue" | "cancelled"
     )
+}
+
+fn is_valid_external_invoice_paid_by(value: &str) -> bool {
+    matches!(value, "patient" | "agency" | "unpaid")
+}
+
+fn external_invoice_payment_state_is_consistent(status: &str, paid_by: &str) -> bool {
+    (status == "paid") == (paid_by != "unpaid")
 }
 
 fn is_valid_external_invoice_transition(current: &str, next: &str) -> bool {
@@ -522,24 +554,42 @@ async fn list_debt_management_queue(
                     WHERE i.order_id = o.id
                       AND i.status = 'overdue'
                       AND i.total_gross > COALESCE(i.paid_amount, 0)
+                                            + COALESCE(i.prepayment_applied_amount, 0)
                   ), 0) AS overdue_invoice_count,
                   COALESCE((
-                    SELECT SUM(GREATEST(i.total_gross - COALESCE(i.paid_amount, 0), 0))
+                    SELECT SUM(GREATEST(
+                        i.total_gross
+                        - COALESCE(i.paid_amount, 0)
+                        - COALESCE(i.prepayment_applied_amount, 0),
+                        0
+                    ))
                     FROM invoices i
                     WHERE i.order_id = o.id
                       AND i.status = 'overdue'
                       AND i.total_gross > COALESCE(i.paid_amount, 0)
+                                            + COALESCE(i.prepayment_applied_amount, 0)
                   ), 0) AS overdue_balance,
                   COALESCE((
                     SELECT SUM(
                         CASE
                             WHEN i.status NOT IN ('paid', 'cancelled')
-                            THEN GREATEST(i.total_gross - COALESCE(i.paid_amount, 0), 0)
+                            THEN GREATEST(
+                                i.total_gross
+                                - COALESCE(i.paid_amount, 0)
+                                - COALESCE(i.prepayment_applied_amount, 0),
+                                0
+                            )
                             ELSE 0
                         END
                     )
                     FROM invoices i
                     WHERE i.order_id = o.id
+                  ), 0) + COALESCE((
+                    SELECT SUM(balance.remaining_receivable_gross)
+                    FROM external_invoices external
+                    JOIN external_invoice_receivable_balances balance
+                      ON balance.external_invoice_id = external.id
+                    WHERE external.order_id = o.id
                   ), 0) AS outstanding_balance
            FROM orders o
            JOIN patients p ON p.id = o.patient_id
@@ -557,6 +607,7 @@ async fn list_debt_management_queue(
                         WHERE i.order_id = o.id
                           AND i.status = 'overdue'
                           AND i.total_gross > COALESCE(i.paid_amount, 0)
+                                                + COALESCE(i.prepayment_applied_amount, 0)
                     )
                  )
              AND (
@@ -1068,17 +1119,29 @@ async fn load_order_process_readiness(
         r#"SELECT COUNT(*) FILTER (
                     WHERE status = 'overdue'
                       AND total_gross > COALESCE(paid_amount, 0)
+                                         + COALESCE(prepayment_applied_amount, 0)
                 ) AS overdue_invoice_count,
                   COALESCE(
                     SUM(
                         CASE
                             WHEN status NOT IN ('paid', 'cancelled')
-                            THEN GREATEST(total_gross - COALESCE(paid_amount, 0), 0)
+                            THEN GREATEST(
+                                total_gross
+                                - COALESCE(paid_amount, 0)
+                                - COALESCE(prepayment_applied_amount, 0),
+                                0
+                            )
                             ELSE 0
                         END
                     ),
                     0
-                ) AS outstanding_balance,
+                ) + COALESCE((
+                    SELECT SUM(balance.remaining_receivable_gross)
+                    FROM external_invoices external
+                    JOIN external_invoice_receivable_balances balance
+                      ON balance.external_invoice_id = external.id
+                    WHERE external.patient_id = $1
+                ), 0) AS outstanding_balance,
                   COUNT(*) FILTER (
                     WHERE order_id = $2
                       AND invoice_type = 'advance'
@@ -2825,7 +2888,16 @@ async fn get_order(
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
                   provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru,
-                  catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
+                  COALESCE(ol.agency_service_key_snapshot, catalog.service_key) AS agency_service_key,
+                  COALESCE(ol.agency_service_name_snapshot, catalog.service_name) AS agency_service_name,
+                  COALESCE(ol.agency_service_description_snapshot, catalog.description) AS agency_service_description,
+                  COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label,
+                  ol.agency_service_key_snapshot, ol.agency_service_name_snapshot,
+                  ol.agency_service_description_snapshot, ol.agency_service_unit_label_snapshot,
+                  ol.unit_price_snapshot, ol.currency_snapshot, ol.vat_rate_snapshot,
+                  billing.invoiced_quantity, billing.invoice_count,
+                  billing.all_invoices_paid, billing.any_payment,
+                  billing.invoice_references,
                   doc.auto_name AS external_document_auto_name,
                   doc.original_filename AS external_document_filename
            FROM order_leistungen ol
@@ -2840,6 +2912,52 @@ async fn get_order(
                LIMIT 1
            ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           LEFT JOIN LATERAL (
+               SELECT
+                   COALESCE(SUM(item.invoiced_quantity), 0) AS invoiced_quantity,
+                   COUNT(*) AS invoice_count,
+                   COALESCE(BOOL_AND(item.balance_due <= 0), false) AS all_invoices_paid,
+                   COALESCE(BOOL_OR(item.settled_amount > 0), false) AS any_payment,
+                   COALESCE(
+                       JSONB_AGG(
+                           JSONB_BUILD_OBJECT(
+                               'invoice_id', item.invoice_id,
+                               'invoice_number', item.invoice_number,
+                               'invoice_status', item.invoice_status,
+                               'line_quantity', item.invoiced_quantity,
+                               'line_gross', item.line_gross,
+                               'invoice_balance_due', item.balance_due
+                           )
+                           ORDER BY item.issued_at, item.invoice_id
+                       ),
+                       '[]'::jsonb
+                   ) AS invoice_references
+               FROM (
+                   SELECT
+                       invoice.id AS invoice_id,
+                       invoice.invoice_number,
+                       invoice.status AS invoice_status,
+                       invoice.issued_at,
+                       SUM(allocation.quantity) AS invoiced_quantity,
+                       SUM(allocation.amount_gross_snapshot) AS line_gross,
+                       GREATEST(
+                           invoice.total_gross
+                               - invoice.paid_amount
+                               - COALESCE(invoice.prepayment_applied_amount, 0),
+                           0
+                       ) AS balance_due,
+                       LEAST(
+                           invoice.total_gross,
+                           invoice.paid_amount
+                               + COALESCE(invoice.prepayment_applied_amount, 0)
+                       ) AS settled_amount
+                   FROM invoice_order_line_allocations allocation
+                   JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                   WHERE allocation.order_leistung_id = ol.id
+                     AND invoice.status <> 'cancelled'
+                   GROUP BY invoice.id
+               ) item
+           ) billing ON true
            LEFT JOIN documents doc ON doc.id = ol.external_document_id
            WHERE ol.order_id = $1
            ORDER BY ol.created_at"#,
@@ -2858,12 +2976,36 @@ async fn get_order(
         }
     };
 
+    let can_view_line_billing = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    );
     let mut leist_json = Vec::new();
     for l in leistungen {
+        let quantity = l
+            .try_get::<rust_decimal::Decimal, _>("quantity")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
+        let invoiced_quantity = l
+            .try_get::<rust_decimal::Decimal, _>("invoiced_quantity")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
+        let invoice_count = l.try_get::<i64, _>("invoice_count").unwrap_or_default();
+        let all_invoices_paid = l.try_get::<bool, _>("all_invoices_paid").unwrap_or(false);
+        let any_payment = l.try_get::<bool, _>("any_payment").unwrap_or(false);
+        let billing_status = if invoice_count == 0 {
+            "not_invoiced"
+        } else if invoiced_quantity < quantity {
+            "partially_invoiced"
+        } else if all_invoices_paid {
+            "paid"
+        } else if any_payment {
+            "partially_paid"
+        } else {
+            "awaiting_payment"
+        };
         leist_json.push(serde_json::json!({
             "id": l.try_get::<Uuid, _>("id").unwrap_or_default(),
             "description": l.try_get::<String, _>("description").unwrap_or_default(),
-            "quantity": l.try_get::<rust_decimal::Decimal, _>("quantity").unwrap_or(rust_decimal::Decimal::ZERO),
+            "quantity": quantity,
             "unit_price": l.try_get::<rust_decimal::Decimal, _>("unit_price").unwrap_or(rust_decimal::Decimal::ZERO),
             "currency": l.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "vat_rate": l.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
@@ -2885,6 +3027,22 @@ async fn get_order(
             "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
             "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
             "agency_service_name": l.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+            "agency_service_description": l.try_get::<Option<String>, _>("agency_service_description").unwrap_or_default(),
+            "agency_service_unit_label": l.try_get::<Option<String>, _>("agency_service_unit_label").unwrap_or_default(),
+            "agency_service_key_snapshot": l.try_get::<Option<String>, _>("agency_service_key_snapshot").unwrap_or_default(),
+            "agency_service_name_snapshot": l.try_get::<Option<String>, _>("agency_service_name_snapshot").unwrap_or_default(),
+            "agency_service_description_snapshot": l.try_get::<Option<String>, _>("agency_service_description_snapshot").unwrap_or_default(),
+            "agency_service_unit_label_snapshot": l.try_get::<Option<String>, _>("agency_service_unit_label_snapshot").unwrap_or_default(),
+            "unit_price_snapshot": l.try_get::<Option<rust_decimal::Decimal>, _>("unit_price_snapshot").unwrap_or_default(),
+            "currency_snapshot": l.try_get::<Option<String>, _>("currency_snapshot").unwrap_or_default(),
+            "vat_rate_snapshot": l.try_get::<Option<rust_decimal::Decimal>, _>("vat_rate_snapshot").unwrap_or_default(),
+            "billing_status": can_view_line_billing.then_some(billing_status),
+            "invoiced_quantity": can_view_line_billing.then_some(invoiced_quantity),
+            "invoice_references": if can_view_line_billing {
+                l.try_get::<serde_json::Value, _>("invoice_references").unwrap_or_else(|_| serde_json::json!([]))
+            } else {
+                serde_json::json!([])
+            },
             "external_document_id": l.try_get::<Option<Uuid>, _>("external_document_id").unwrap_or_default(),
             "external_document_auto_name": l.try_get::<Option<String>, _>("external_document_auto_name").unwrap_or_default(),
             "external_document_filename": l.try_get::<Option<String>, _>("external_document_filename").unwrap_or_default(),
@@ -2894,13 +3052,19 @@ async fn get_order(
     let external_invoice_rows = match sqlx::query(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
-                  ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
+                  ei.status, ei.paid_by, ei.service_delivered,
+                  ei.patient_receivable_gross, ei.provider_liability_gross,
+                  receivable.allocated_receivable_gross,
+                  receivable.remaining_receivable_gross,
+                  ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
                   pr.name AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
                   provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru
            FROM external_invoices ei
+           JOIN external_invoice_receivable_balances receivable
+             ON receivable.external_invoice_id = ei.id
            LEFT JOIN providers pr ON pr.id = ei.provider_id
            LEFT JOIN LATERAL (
                SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
@@ -2945,6 +3109,12 @@ async fn get_order(
             "amount_gross": row.try_get::<rust_decimal::Decimal, _>("amount_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
             "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "paid_by": row.try_get::<String, _>("paid_by").unwrap_or_else(|_| "unpaid".to_string()),
+            "service_delivered": row.try_get::<bool, _>("service_delivered").unwrap_or(false),
+            "patient_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -4514,6 +4684,494 @@ async fn list_my_followup_milestones(
     Json(items).into_response()
 }
 
+async fn load_external_invoice_allocation_workspace(
+    state: &AppState,
+    order_id: Uuid,
+    external_invoice_id: Uuid,
+) -> Result<Option<serde_json::Value>, sqlx::Error> {
+    let Some(external) = sqlx::query(
+        r#"SELECT external.id, external.patient_id, external.external_invoice_number,
+                  external.currency, external.status, external.patient_receivable_gross,
+                  balances.allocated_receivable_gross,
+                  balances.remaining_receivable_gross
+           FROM external_invoices external
+           JOIN external_invoice_receivable_balances balances
+             ON balances.external_invoice_id = external.id
+           WHERE external.id = $1 AND external.order_id = $2"#,
+    )
+    .bind(external_invoice_id)
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let patient_id = external
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_default();
+    let currency = external
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    let allocation_rows = sqlx::query(
+        r#"SELECT allocation.id, allocation.patient_invoice_id,
+                  allocation.amount_gross, allocation.created_at,
+                  allocation.reversed_at, allocation.reversal_note,
+                  invoice.invoice_number, invoice.invoice_type, invoice.status AS invoice_status,
+                  creator.name AS created_by_name,
+                  reverser.name AS reversed_by_name,
+                  (allocation.reversed_at IS NULL
+                   AND source_external.status <> 'cancelled'
+                   AND invoice.status NOT IN ('draft', 'cancelled')) AS is_effective
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+           JOIN external_invoices source_external
+             ON source_external.id = allocation.external_invoice_id
+           LEFT JOIN users creator ON creator.id = allocation.created_by
+           LEFT JOIN users reverser ON reverser.id = allocation.reversed_by
+           WHERE allocation.external_invoice_id = $1
+           ORDER BY allocation.created_at DESC, allocation.id DESC"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_all(&state.db)
+    .await?;
+    let allocations = allocation_rows
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "patient_invoice_id": row.try_get::<Uuid, _>("patient_invoice_id").unwrap_or_default(),
+                "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+                "invoice_status": row.try_get::<String, _>("invoice_status").unwrap_or_default(),
+                "amount_gross": row.try_get::<rust_decimal::Decimal, _>("amount_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
+                "is_effective": row.try_get::<bool, _>("is_effective").unwrap_or(false),
+                "created_by_name": row.try_get::<Option<String>, _>("created_by_name").unwrap_or_default(),
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()).to_rfc3339(),
+                "reversed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reversed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "reversed_by_name": row.try_get::<Option<String>, _>("reversed_by_name").unwrap_or_default(),
+                "reversal_note": row.try_get::<Option<String>, _>("reversal_note").unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let candidate_rows = sqlx::query(
+        r#"SELECT invoice.id, invoice.invoice_number, invoice.invoice_type,
+                  invoice.status, invoice.total_gross, invoice.paid_amount,
+                  invoice.prepayment_applied_amount,
+                  COALESCE(SUM(allocation.amount_gross) FILTER (
+                      WHERE allocation.reversed_at IS NULL
+                        AND linked_external.status <> 'cancelled'
+                  ), 0) AS allocated_source_receivable
+           FROM invoices invoice
+           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN external_invoice_patient_invoice_allocations allocation
+                  ON allocation.patient_invoice_id = invoice.id
+           LEFT JOIN external_invoices linked_external
+                  ON linked_external.id = allocation.external_invoice_id
+           WHERE invoice.order_id = $1
+             AND invoice.patient_id = $2
+             AND orders.currency = $3
+             AND invoice.invoice_type <> 'advance'
+             AND invoice.status NOT IN ('draft', 'cancelled')
+           GROUP BY invoice.id
+           HAVING invoice.total_gross - COALESCE(SUM(allocation.amount_gross) FILTER (
+                      WHERE allocation.reversed_at IS NULL
+                        AND linked_external.status <> 'cancelled'
+                  ), 0) > 0
+           ORDER BY invoice.issued_at DESC, invoice.created_at DESC"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(&currency)
+    .fetch_all(&state.db)
+    .await?;
+    let candidates = candidate_rows
+        .into_iter()
+        .map(|row| {
+            let total = row
+                .try_get::<rust_decimal::Decimal, _>("total_gross")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let paid = row
+                .try_get::<rust_decimal::Decimal, _>("paid_amount")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let prepayment = row
+                .try_get::<rust_decimal::Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            let allocated = row
+                .try_get::<rust_decimal::Decimal, _>("allocated_source_receivable")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
+            serde_json::json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+                "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "total_gross": total.to_string(),
+                "balance_due": (total - paid - prepayment).max(rust_decimal::Decimal::ZERO).to_string(),
+                "allocated_source_receivable": allocated.to_string(),
+                "allocatable_capacity": (total - allocated).max(rust_decimal::Decimal::ZERO).to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Some(serde_json::json!({
+        "external_invoice_id": external_invoice_id,
+        "external_invoice_number": external.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+        "status": external.try_get::<String, _>("status").unwrap_or_default(),
+        "currency": currency,
+        "patient_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
+        "allocated_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
+        "remaining_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
+        "allocations": allocations,
+        "candidate_invoices": candidates,
+    })))
+}
+
+async fn get_external_invoice_allocations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, external_invoice_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    match load_external_invoice_allocation_workspace(&state, order_id, external_invoice_id).await {
+        Ok(Some(workspace)) => Json(workspace).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "External invoice not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "load external invoice allocations");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice allocations",
+            )
+        }
+    }
+}
+
+async fn create_external_invoice_allocation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, external_invoice_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreateExternalInvoiceAllocationRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let amount = match rust_decimal::Decimal::from_str(body.amount_gross.trim()) {
+        Ok(value) if value > rust_decimal::Decimal::ZERO => value.round_dp(2),
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Positive allocation amount is required",
+            );
+        }
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, "begin external invoice allocation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+    };
+    let external = match sqlx::query(
+        r#"SELECT patient_id, currency, status, patient_receivable_gross
+           FROM external_invoices
+           WHERE id = $1 AND order_id = $2
+           FOR UPDATE"#,
+    )
+    .bind(external_invoice_id)
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
+        Err(error) => {
+            tracing::error!(error = %error, "lock external invoice allocation source");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+    };
+    let external_status = external.try_get::<String, _>("status").unwrap_or_default();
+    let patient_receivable = external
+        .try_get::<rust_decimal::Decimal, _>("patient_receivable_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    if external_status == "cancelled" || patient_receivable <= rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::CONFLICT,
+            "External invoice has no allocatable patient receivable",
+        );
+    }
+    let patient_id = external
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_default();
+    let currency = external
+        .try_get::<String, _>("currency")
+        .unwrap_or_default();
+
+    let patient_invoice = match sqlx::query(
+        r#"SELECT invoice.patient_id, invoice.order_id, invoice.invoice_type,
+                  invoice.status, invoice.total_gross, orders.currency
+           FROM invoices invoice
+           JOIN orders ON orders.id = invoice.order_id
+           WHERE invoice.id = $1
+           FOR UPDATE OF invoice"#,
+    )
+    .bind(body.patient_invoice_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient invoice not found"),
+        Err(error) => {
+            tracing::error!(error = %error, "lock patient invoice allocation target");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+    };
+    let invoice_status = patient_invoice
+        .try_get::<String, _>("status")
+        .unwrap_or_default();
+    let invoice_type = patient_invoice
+        .try_get::<String, _>("invoice_type")
+        .unwrap_or_default();
+    if patient_invoice
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_default()
+        != patient_id
+        || patient_invoice
+            .try_get::<Uuid, _>("order_id")
+            .unwrap_or_default()
+            != order_id
+        || patient_invoice
+            .try_get::<String, _>("currency")
+            .unwrap_or_default()
+            != currency
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoices must share order, patient and currency",
+        );
+    }
+    if matches!(invoice_status.as_str(), "draft" | "cancelled") || invoice_type == "advance" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient invoice is not eligible for allocation",
+        );
+    }
+
+    let external_allocated = match sqlx::query_scalar::<_, rust_decimal::Decimal>(
+        r#"SELECT COALESCE(SUM(allocation.amount_gross), 0)
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN invoices linked_invoice ON linked_invoice.id = allocation.patient_invoice_id
+           WHERE allocation.external_invoice_id = $1
+             AND allocation.reversed_at IS NULL
+             AND linked_invoice.status NOT IN ('draft', 'cancelled')"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, "sum external invoice allocations");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+    };
+    if external_allocated + amount > patient_receivable {
+        return err(
+            StatusCode::CONFLICT,
+            "Allocation exceeds remaining external receivable",
+        );
+    }
+    let invoice_allocated = match sqlx::query_scalar::<_, rust_decimal::Decimal>(
+        r#"SELECT COALESCE(SUM(allocation.amount_gross), 0)
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN external_invoices linked_external ON linked_external.id = allocation.external_invoice_id
+           WHERE allocation.patient_invoice_id = $1
+             AND allocation.reversed_at IS NULL
+             AND linked_external.status <> 'cancelled'"#,
+    )
+    .bind(body.patient_invoice_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, "sum patient invoice source allocations");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to allocate receivable");
+        }
+    };
+    let invoice_total = patient_invoice
+        .try_get::<rust_decimal::Decimal, _>("total_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    if invoice_allocated + amount > invoice_total {
+        return err(
+            StatusCode::CONFLICT,
+            "Allocation exceeds patient invoice gross total",
+        );
+    }
+
+    let allocation_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO external_invoice_patient_invoice_allocations (
+               external_invoice_id, patient_invoice_id, amount_gross, created_by
+           ) VALUES ($1, $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(external_invoice_id)
+    .bind(body.patient_invoice_id)
+    .bind(amount)
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(id) => id,
+        Err(error) => {
+            tracing::warn!(error = %error, "insert external invoice allocation rejected");
+            return err(
+                StatusCode::CONFLICT,
+                "Allocation conflicts with current balances",
+            );
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, "commit external invoice allocation");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to allocate receivable",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "allocate_external_invoice_receivable",
+        Some(auth.user_id),
+        "external_invoice",
+        Some(external_invoice_id),
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "patient_invoice_id": body.patient_invoice_id,
+            "amount_gross": amount.to_string(),
+            "currency": currency,
+        }),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.external_invoice_allocation_created",
+        order_id,
+        serde_json::json!({
+            "external_invoice_id": external_invoice_id,
+            "allocation_id": allocation_id,
+            "patient_invoice_id": body.patient_invoice_id,
+        }),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": allocation_id })),
+    )
+        .into_response()
+}
+
+async fn reverse_external_invoice_allocation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, external_invoice_id, allocation_id)): Path<(Uuid, Uuid, Uuid)>,
+    Json(body): Json<ReverseExternalInvoiceAllocationRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let note = body.note.trim();
+    if note.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal note is required",
+        );
+    }
+
+    let result = sqlx::query(
+        r#"UPDATE external_invoice_patient_invoice_allocations allocation
+           SET reversed_at = now(), reversed_by = $1, reversal_note = $2
+           FROM external_invoices external
+           WHERE allocation.id = $3
+             AND allocation.external_invoice_id = $4
+             AND external.id = allocation.external_invoice_id
+             AND external.order_id = $5
+             AND allocation.reversed_at IS NULL"#,
+    )
+    .bind(auth.user_id)
+    .bind(note)
+    .bind(allocation_id)
+    .bind(external_invoice_id)
+    .bind(order_id)
+    .execute(&state.db)
+    .await;
+    match result {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => return err(StatusCode::CONFLICT, "Active allocation not found"),
+        Err(error) => {
+            tracing::error!(error = %error, "reverse external invoice allocation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse allocation",
+            );
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "reverse_external_invoice_receivable_allocation",
+        Some(auth.user_id),
+        "external_invoice",
+        Some(external_invoice_id),
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "note": note,
+        }),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.external_invoice_allocation_reversed",
+        order_id,
+        serde_json::json!({
+            "external_invoice_id": external_invoice_id,
+            "allocation_id": allocation_id,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 async fn list_external_invoices(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4531,13 +5189,19 @@ async fn list_external_invoices(
     match sqlx::query(
         r#"SELECT ei.id, ei.provider_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
-                  ei.status, ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
+                  ei.status, ei.paid_by, ei.service_delivered,
+                  ei.patient_receivable_gross, ei.provider_liability_gross,
+                  receivable.allocated_receivable_gross,
+                  receivable.remaining_receivable_gross,
+                  ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
                   pr.name AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
                   provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru
            FROM external_invoices ei
+           JOIN external_invoice_receivable_balances receivable
+             ON receivable.external_invoice_id = ei.id
            LEFT JOIN providers pr ON pr.id = ei.provider_id
            LEFT JOIN LATERAL (
                SELECT ptn.id, ptn.code, ptn.name_de, ptn.name_ru
@@ -4573,6 +5237,12 @@ async fn list_external_invoices(
                     "amount_gross": row.try_get::<rust_decimal::Decimal, _>("amount_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "paid_by": row.try_get::<String, _>("paid_by").unwrap_or_else(|_| "unpaid".to_string()),
+                    "service_delivered": row.try_get::<bool, _>("service_delivered").unwrap_or(false),
+                    "patient_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "received_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("received_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "paid_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -4621,6 +5291,25 @@ async fn create_external_invoice(
             "Invalid external invoice status",
         );
     }
+    let paid_by = body
+        .paid_by
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(if status == "paid" { "agency" } else { "unpaid" });
+    if !is_valid_external_invoice_paid_by(paid_by) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid external invoice payer",
+        );
+    }
+    if !external_invoice_payment_state_is_consistent(status, paid_by) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Paid external invoices require patient or agency as payer",
+        );
+    }
+    let service_delivered = body.service_delivered.unwrap_or(status == "paid");
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
         return resp;
     }
@@ -4650,7 +5339,6 @@ async fn create_external_invoice(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
-
     let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
@@ -4660,14 +5348,15 @@ async fn create_external_invoice(
     match sqlx::query(
         r#"INSERT INTO external_invoices (
                 order_id, patient_id, provider_id, external_invoice_number, invoice_date,
-                due_date, amount_net, amount_vat, amount_gross, currency, status, notes,
+                due_date, amount_net, amount_vat, amount_gross, currency, status,
+                paid_by, service_delivered, notes,
                 received_at, paid_at, created_by
            ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $12,
+                $6, $7, $8, $9, $10, $11, $12, $13, $14,
                 CASE WHEN $11 IN ('received', 'approved', 'paid', 'overdue') THEN now() ELSE NULL END,
                 CASE WHEN $11 = 'paid' THEN now() ELSE NULL END,
-                $13
+                $15
            )
            RETURNING id"#,
     )
@@ -4682,6 +5371,8 @@ async fn create_external_invoice(
     .bind(amount_gross)
     .bind(currency)
     .bind(status)
+    .bind(paid_by)
+    .bind(service_delivered)
     .bind(notes)
     .bind(auth.user_id)
     .fetch_one(&state.db)
@@ -4712,6 +5403,8 @@ async fn create_external_invoice(
                     "external_invoice_id": id,
                     "external_invoice_number": external_invoice_number,
                     "status": status,
+                    "paid_by": paid_by,
+                    "service_delivered": service_delivered,
                     "amount_gross": amount_gross.to_string(),
                 }),
             ));
@@ -4724,6 +5417,8 @@ async fn create_external_invoice(
                     "external_invoice_id": id,
                     "external_invoice_number": external_invoice_number,
                     "status": status,
+                    "paid_by": paid_by,
+                    "service_delivered": service_delivered,
                     "amount_gross": amount_gross.to_string(),
                 }),
             )
@@ -4769,8 +5464,8 @@ async fn update_external_invoice(
         );
     }
 
-    let current_status = match sqlx::query_scalar::<_, String>(
-        "SELECT status FROM external_invoices WHERE id = $1 AND order_id = $2",
+    let current = match sqlx::query(
+        "SELECT status, paid_by FROM external_invoices WHERE id = $1 AND order_id = $2",
     )
     .bind(external_invoice_id)
     .bind(order_id)
@@ -4787,6 +5482,10 @@ async fn update_external_invoice(
             );
         }
     };
+    let current_status = current.try_get::<String, _>("status").unwrap_or_default();
+    let current_paid_by = current
+        .try_get::<String, _>("paid_by")
+        .unwrap_or_else(|_| "unpaid".to_string());
     if let Some(next_status) = status
         && !is_valid_external_invoice_transition(&current_status, next_status)
     {
@@ -4795,6 +5494,32 @@ async fn update_external_invoice(
             &format!(
                 "External invoice status cannot change from {current_status} to {next_status}"
             ),
+        );
+    }
+    let mut paid_by = body
+        .paid_by
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if status == Some("paid") && paid_by.is_none() && current_paid_by == "unpaid" {
+        // Backward-compatible default for older clients: historically every
+        // paid external invoice was recorded as an agency provider expense.
+        paid_by = Some("agency");
+    }
+    if let Some(value) = paid_by
+        && !is_valid_external_invoice_paid_by(value)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid external invoice payer",
+        );
+    }
+    let effective_status = status.unwrap_or(&current_status);
+    let effective_paid_by = paid_by.unwrap_or(&current_paid_by);
+    if !external_invoice_payment_state_is_consistent(effective_status, effective_paid_by) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Paid external invoices require patient or agency as payer",
         );
     }
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
@@ -4835,9 +5560,11 @@ async fn update_external_invoice(
                amount_gross = COALESCE($8, amount_gross),
                currency = COALESCE($9, currency),
                status = COALESCE($10, status),
+               paid_by = COALESCE($11, paid_by),
+               service_delivered = COALESCE($12, service_delivered),
                notes = CASE
-                   WHEN $11 IS NULL THEN notes
-                   ELSE NULLIF($11, '')
+                   WHEN $13 IS NULL THEN notes
+                   ELSE NULLIF($13, '')
                END,
                received_at = CASE
                    WHEN COALESCE($10, status) IN ('received', 'approved', 'paid', 'overdue')
@@ -4863,6 +5590,8 @@ async fn update_external_invoice(
     .bind(amount_gross)
     .bind(currency)
     .bind(status)
+    .bind(paid_by)
+    .bind(body.service_delivered)
     .bind(notes)
     .fetch_optional(&state.db)
     .await
@@ -4907,6 +5636,15 @@ async fn update_external_invoice(
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "External invoice not found"),
         Err(error) => {
+            let database_message = error.to_string();
+            if database_message.contains("locked by active allocations")
+                || database_message.contains("cannot be lower than active allocations")
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Reverse or reassign active patient-invoice allocations first",
+                );
+            }
             tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "update external invoice");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -4941,7 +5679,13 @@ async fn list_leistungen(
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
                   provider_taxonomy.name_ru AS provider_taxonomy_node_name_ru,
-                  catalog.service_key AS agency_service_key, catalog.service_name AS agency_service_name,
+                  COALESCE(ol.agency_service_key_snapshot, catalog.service_key) AS agency_service_key,
+                  COALESCE(ol.agency_service_name_snapshot, catalog.service_name) AS agency_service_name,
+                  COALESCE(ol.agency_service_description_snapshot, catalog.description) AS agency_service_description,
+                  COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label,
+                  ol.agency_service_key_snapshot, ol.agency_service_name_snapshot,
+                  ol.agency_service_description_snapshot, ol.agency_service_unit_label_snapshot,
+                  ol.unit_price_snapshot, ol.currency_snapshot, ol.vat_rate_snapshot,
                   doc.auto_name AS external_document_auto_name,
                   doc.original_filename AS external_document_filename
            FROM order_leistungen ol
@@ -4992,6 +5736,15 @@ async fn list_leistungen(
                     "agency_service_id": r.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
                     "agency_service_key": r.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
                     "agency_service_name": r.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+                    "agency_service_description": r.try_get::<Option<String>, _>("agency_service_description").unwrap_or_default(),
+                    "agency_service_unit_label": r.try_get::<Option<String>, _>("agency_service_unit_label").unwrap_or_default(),
+                    "agency_service_key_snapshot": r.try_get::<Option<String>, _>("agency_service_key_snapshot").unwrap_or_default(),
+                    "agency_service_name_snapshot": r.try_get::<Option<String>, _>("agency_service_name_snapshot").unwrap_or_default(),
+                    "agency_service_description_snapshot": r.try_get::<Option<String>, _>("agency_service_description_snapshot").unwrap_or_default(),
+                    "agency_service_unit_label_snapshot": r.try_get::<Option<String>, _>("agency_service_unit_label_snapshot").unwrap_or_default(),
+                    "unit_price_snapshot": r.try_get::<Option<rust_decimal::Decimal>, _>("unit_price_snapshot").unwrap_or_default(),
+                    "currency_snapshot": r.try_get::<Option<String>, _>("currency_snapshot").unwrap_or_default(),
+                    "vat_rate_snapshot": r.try_get::<Option<rust_decimal::Decimal>, _>("vat_rate_snapshot").unwrap_or_default(),
                     "external_document_id": r.try_get::<Option<Uuid>, _>("external_document_id").unwrap_or_default(),
                     "external_document_auto_name": r.try_get::<Option<String>, _>("external_document_auto_name").unwrap_or_default(),
                     "external_document_filename": r.try_get::<Option<String>, _>("external_document_filename").unwrap_or_default(),
@@ -5033,16 +5786,16 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    if let Some(agency_service_id) = body.agency_service_id {
-        match sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM agency_service_catalog WHERE id = $1 AND is_active)",
+    let catalog_currency = if let Some(agency_service_id) = body.agency_service_id {
+        match sqlx::query_scalar::<_, String>(
+            "SELECT currency FROM agency_service_catalog WHERE id = $1 AND is_active",
         )
         .bind(agency_service_id)
-        .fetch_one(&state.db)
+        .fetch_optional(&state.db)
         .await
         {
-            Ok(true) => {}
-            Ok(false) => {
+            Ok(Some(currency)) => Some(currency),
+            Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Agency service is missing or inactive",
@@ -5053,7 +5806,9 @@ async fn add_leistung(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
-    }
+    } else {
+        None
+    };
 
     let description = body.description.trim().to_string();
     if description.is_empty() {
@@ -5120,17 +5875,18 @@ async fn add_leistung(
 
     match sqlx::query(
         "INSERT INTO order_leistungen (
-             order_id, patient_id, agency_service_id, description, quantity, unit_price, vat_rate,
+             order_id, patient_id, agency_service_id, description, quantity, unit_price, currency, vat_rate,
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
              agency_service_id = EXCLUDED.agency_service_id,
              description = EXCLUDED.description,
              quantity = EXCLUDED.quantity,
              unit_price = EXCLUDED.unit_price,
+             currency = EXCLUDED.currency,
              vat_rate = EXCLUDED.vat_rate,
              is_cost_passthrough = EXCLUDED.is_cost_passthrough,
              provider_id = EXCLUDED.provider_id,
@@ -5145,6 +5901,7 @@ async fn add_leistung(
     .bind(&description)
     .bind(qty)
     .bind(price)
+    .bind(catalog_currency.as_deref().unwrap_or("EUR"))
     .bind(vat)
     .bind(passthrough)
     .bind(body.provider_id)

@@ -1305,7 +1305,7 @@ async fn load_ceo_summary(state: &AppState) -> Result<Value, sqlx::Error> {
                     THEN total_gross ELSE 0 END), 0) AS invoiced_this_quarter,
                 COALESCE(SUM(CASE
                     WHEN status NOT IN ('paid', 'cancelled')
-                    THEN GREATEST(total_gross - paid_amount, 0)
+                    THEN GREATEST(total_gross - paid_amount - prepayment_applied_amount, 0)
                     ELSE 0 END), 0) AS outstanding_receivables
            FROM invoices"#,
     )
@@ -2003,7 +2003,7 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     SUM(
                         CASE
                             WHEN i.status IN ('sent', 'partially_paid', 'overdue')
-                                THEN i.total_gross - i.paid_amount
+                                THEN i.total_gross - i.paid_amount - i.prepayment_applied_amount
                             ELSE 0
                         END
                     ),
@@ -3990,7 +3990,7 @@ async fn load_forecast_collections(
                           AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
                     )::bigint AS due_next_14d_count,
                     COALESCE(
-                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0), 0)) FILTER (
+                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0) - COALESCE(prepayment_applied_amount, 0), 0)) FILTER (
                             WHERE status NOT IN ('paid', 'cancelled')
                               AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
                         ),
@@ -3998,16 +3998,16 @@ async fn load_forecast_collections(
                     ) AS due_next_14d_total,
                     COUNT(*) FILTER (
                         WHERE status = 'overdue'
-                          AND total_gross > COALESCE(paid_amount, 0)
+                          AND total_gross > COALESCE(paid_amount, 0) + COALESCE(prepayment_applied_amount, 0)
                     )::bigint AS overdue_invoice_count,
                     COALESCE(
-                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0), 0)) FILTER (
+                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0) - COALESCE(prepayment_applied_amount, 0), 0)) FILTER (
                             WHERE status = 'overdue'
                         ),
                         0
                     ) AS overdue_open_total,
                     COALESCE(
-                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0), 0)) FILTER (
+                        SUM(GREATEST(total_gross - COALESCE(paid_amount, 0) - COALESCE(prepayment_applied_amount, 0), 0)) FILTER (
                             WHERE status NOT IN ('paid', 'cancelled')
                         ),
                         0
@@ -5261,7 +5261,7 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                         0
                     ) AS invoiced_total,
                     COALESCE(
-                        SUM(GREATEST(i.total_gross - i.paid_amount, 0))
+                        SUM(GREATEST(i.total_gross - i.paid_amount - i.prepayment_applied_amount, 0))
                             FILTER (WHERE i.status NOT IN ('paid', 'cancelled')),
                         0
                     ) AS outstanding_balance

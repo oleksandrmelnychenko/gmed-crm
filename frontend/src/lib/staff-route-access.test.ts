@@ -32,6 +32,7 @@ describe("first-release staff RBAC", () => {
       "/finance-catalog",
       "/documents/document-1",
       "/specializations",
+      "/concierge",
       "/services",
       "/appointments",
       "/employees",
@@ -54,6 +55,7 @@ describe("first-release staff RBAC", () => {
       "/patients/patient-1",
       "/providers/provider-1",
       "/documents",
+      "/concierge",
       "/services",
       "/appointments",
       "/employees",
@@ -109,12 +111,14 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/leads");
     expect(concierge).toContain("/appointments");
     expect(concierge).toContain("/employees");
+    expect(concierge).toContain("/concierge");
     expect(concierge).not.toContain("/feedback");
     expect(concierge).not.toContain("/reports");
 
     const billing = listStaffNavItems("billing").map((item) => item.to);
     expect(billing).toContain("/invoices");
     expect(billing).toContain("/finance-catalog");
+    expect(billing).not.toContain("/concierge");
     expect(billing).not.toContain("/appointments");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual(["/"]);
@@ -133,6 +137,7 @@ describe("patient portal routes", () => {
     expect(canAccessPatientPortalRoute("/")).toBe(true);
     expect(canAccessPatientPortalRoute("/chat")).toBe(true);
     expect(canAccessPatientPortalRoute("/documents?tab=portal")).toBe(true);
+    expect(canAccessPatientPortalRoute("/subscriptions")).toBe(true);
     expect(canAccessPatientPortalRoute("/reports")).toBe(false);
     expect(canAccessPatientPortalRoute("/patients")).toBe(false);
   });
@@ -145,6 +150,7 @@ describe("patient portal routes", () => {
       "/recommendations",
       "/documents",
       "/services",
+      "/subscriptions",
       "/invoices",
       "/feedback",
       "/privacy",

@@ -5,6 +5,22 @@ export function fetchPatientRelations(patientId: string) {
   return apiFetch<RelationItem[]>(`/patients/${patientId}/relations`);
 }
 
+export type RepeatPatientIntakeResponse = {
+  id: string;
+  patient_id: string;
+  case_id: string;
+  case_code: string;
+  request_id: string;
+  idempotent_replay: boolean;
+};
+
+export function createRepeatPatientIntake(patientId: string, requestId: string) {
+  return apiFetch<RepeatPatientIntakeResponse>(`/patients/${patientId}/repeat-intake`, {
+    method: "POST",
+    body: JSON.stringify({ request_id: requestId }),
+  });
+}
+
 export async function upsertPatientRelation(
   patientId: string,
   payload: Record<string, unknown>,

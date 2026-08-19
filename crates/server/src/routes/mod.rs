@@ -7,6 +7,7 @@ pub mod appointments;
 pub mod auth;
 pub mod cases;
 pub mod clinical_document_imports;
+pub mod concierge_operational_items;
 pub mod concierge_services;
 pub mod contracts;
 pub mod custom_fields;
@@ -60,6 +61,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(cases::router())
         .merge(clinical_document_imports::router())
         .merge(concierge_services::router())
+        .merge(concierge_operational_items::router())
         .merge(contracts::router())
         .merge(leads::router())
         .merge(orders::router())

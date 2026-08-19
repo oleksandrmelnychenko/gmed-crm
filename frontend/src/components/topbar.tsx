@@ -125,7 +125,7 @@ function RealtimeConnectionIndicator({
   );
 }
 
-function notificationHref(item: Notification) {
+function notificationHref(item: Notification, staffRole: string) {
   if (!item.entity_id || !item.entity_type) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
@@ -134,7 +134,9 @@ function notificationHref(item: Notification) {
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;
   if (item.entity_type === "appointment") return `/appointments?appointment=${item.entity_id}`;
   if (item.entity_type === "appointment_request") return "/appointments";
-  if (item.entity_type === "concierge_service") return "/services";
+  if (item.entity_type === "concierge_service") {
+    return staffRole === "concierge" ? "/concierge" : "/services";
+  }
   if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
   if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
   if (item.entity_type === "privacy_request") return "/admin/compliance";
@@ -452,7 +454,7 @@ function NotificationPanel({
     if (!item.is_read) {
       markOne(item.id);
     }
-    const href = notificationHref(item);
+    const href = notificationHref(item, staffRole);
     if (href) {
       navigate(staffHrefIfAllowed(staffRole, href));
       onClose();

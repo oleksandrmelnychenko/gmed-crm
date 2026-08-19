@@ -17,6 +17,7 @@ export const de = {
     "Diese Route existiert nicht oder ist fuer die aktuelle Sitzung nicht verfuegbar.",
 
   nav_dashboard: "Dashboard",
+  nav_concierge_workspace: "Concierge-Arbeitsbereich",
   nav_main: "Haupt",
   nav_documents: "Dokumente",
   nav_specializations: "Spezialisierungen",
@@ -31,6 +32,7 @@ export const de = {
   nav_my_appointments: "Meine Termine",
   nav_my_recommendations: "Meine Empfehlungen",
   nav_my_services: "Concierge-Services",
+  nav_my_subscriptions: "Meine Abonnements",
   nav_my_invoices: "Meine Rechnungen",
   nav_my_privacy: "Datenschutz",
   nav_my_feedback: "Mein Feedback",

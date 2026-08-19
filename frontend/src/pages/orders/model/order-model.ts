@@ -131,6 +131,7 @@ export function blankCreateOrderForm(): CreateOrderFormState {
 
 export function blankLeistungForm(): LeistungFormState {
   return {
+    agencyServiceId: "",
     description: "",
     quantity: "1",
     unitPrice: "",
@@ -154,6 +155,8 @@ export function blankExternalInvoiceForm(): ExternalInvoiceFormState {
     amountGross: "",
     currency: "EUR",
     status: "expected",
+    paidBy: "unpaid",
+    serviceDelivered: false,
     notes: "",
   };
 }

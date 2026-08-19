@@ -17,6 +17,7 @@ export const ru = {
     "Этот маршрут не существует или недоступен для текущей сессии.",
 
   nav_dashboard: "Панель управления",
+  nav_concierge_workspace: "Рабочее место консьержа",
   nav_main: "Главное",
   nav_documents: "Документы",
   nav_specializations: "Специализации",
@@ -31,6 +32,7 @@ export const ru = {
   nav_my_appointments: "Мои визиты",
   nav_my_recommendations: "Мои рекомендации",
   nav_my_services: "Консьерж-сервисы",
+  nav_my_subscriptions: "Мои подписки",
   nav_my_invoices: "Мои счета",
   nav_my_privacy: "Конфиденциальность",
   nav_my_feedback: "Мои отзывы",

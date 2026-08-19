@@ -243,7 +243,7 @@ async fn load_invoice_actions(
              AND portal_visible = true
              AND hide_amounts_from_patient = false
              AND status IN ('sent', 'partially_paid', 'overdue')
-             AND (total_gross - paid_amount) > 0
+             AND (total_gross - paid_amount - prepayment_applied_amount) > 0
            ORDER BY due_date ASC NULLS LAST, issued_at DESC
            LIMIT 10"#,
     )

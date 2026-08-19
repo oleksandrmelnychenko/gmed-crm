@@ -217,6 +217,7 @@ const LEAD_LEGAL_SEX_LABEL_KEYS = {
 
 const LEAD_SOURCE_LABEL_KEYS = {
   manual: "lead_source_manual",
+  existing_patient: "lead_source_existing_patient",
   agent: "lead_source_agent",
   website: "lead_source_website",
   apply: "lead_source_website_wizard",

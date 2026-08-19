@@ -45,6 +45,9 @@ import { cn } from "@/lib/utils";
 
 import type {
   InvoiceItem,
+  PatientAccountMovement,
+  PatientAccountStatement,
+  PatientAccountStatementItem,
   PatientFinancialLedger,
   PatientFinancialLedgerEntry,
   PatientFinancialSummary,
@@ -108,6 +111,7 @@ type PatientInvoicesFinanceState = {
   financeFilters: FinanceFilters;
   refreshedFinancialSummary: PatientFinancialSummary | null;
   refreshedFinancialLedger: PatientFinancialLedger | null;
+  refreshedAccountStatement: PatientAccountStatement | null;
   refreshedServicePackages: PatientServicePackageItem[] | null;
   packageCatalog: PackageCatalogItem[];
   patientOrders: OrderItem[];
@@ -168,6 +172,7 @@ function createPatientInvoicesFinanceState(): PatientInvoicesFinanceState {
     financeFilters: BLANK_FINANCE_FILTERS,
     refreshedFinancialSummary: null,
     refreshedFinancialLedger: null,
+    refreshedAccountStatement: null,
     refreshedServicePackages: null,
     packageCatalog: [],
     patientOrders: [],
@@ -474,6 +479,83 @@ function invoiceAccentClass(status: string) {
   return "bg-sky-500";
 }
 
+function accountStatementKindLabel(kind: PatientAccountStatementItem["kind"], lang: string) {
+  const labels: Record<PatientAccountStatementItem["kind"], [string, string]> = {
+    invoice: ["Rechnung", "Счёт"],
+    prepayment: ["Vorauszahlung", "Предоплата"],
+    external_expense: ["Externe Kosten", "Внешние расходы"],
+    service: ["Leistung", "Услуга"],
+  };
+  return lang === "de" ? labels[kind][0] : labels[kind][1];
+}
+
+function accountStatementStateLabel(state: string, lang: string) {
+  const labels: Record<string, [string, string]> = {
+    reconciled_to_patient_invoice: [
+      "Patientenrechnung zugeordnet",
+      "Распределено по счёту пациента",
+    ],
+    paid: ["Bezahlt", "Оплачено"],
+    partially_paid: ["Teilbezahlt – Rest offen", "Оплачено частично — требуется доплата"],
+    unpaid: ["Nicht bezahlt", "Не оплачено"],
+    not_issued: ["Noch nicht ausgestellt", "Ещё не выставлено"],
+    amount_hidden: ["Betrag ausgeblendet", "Сумма скрыта"],
+    patient_paid: ["Vom Patienten bezahlt", "Оплачено пациентом"],
+    gmed_paid_patient_due: ["Von GMED bezahlt – Patient schuldet", "Оплачено GMED — долг пациента"],
+    provider_unpaid_patient_due: ["Anbieter offen – Patient schuldet nach Leistung", "Поставщику не оплачено — долг пациента за оказанную услугу"],
+    provider_unpaid: ["Anbieter noch nicht bezahlt", "Поставщику ещё не оплачено"],
+    not_invoiced: ["Noch nicht fakturiert", "Ещё не выставлено в счёт"],
+    partially_invoiced: ["Teilweise fakturiert", "Частично выставлено в счёт"],
+    invoiced: ["Fakturiert", "Выставлено в счёт"],
+  };
+  const label = labels[state];
+  return label ? (lang === "de" ? label[0] : label[1]) : state;
+}
+
+function accountStatementPayerLabel(paidBy: PatientAccountStatementItem["paid_by"], lang: string) {
+  if (paidBy === "patient") return lang === "de" ? "Patient" : "Пациент";
+  if (paidBy === "agency") return "GMED";
+  if (paidBy === "unpaid") return lang === "de" ? "Noch niemand" : "Ещё никто";
+  return "—";
+}
+
+function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: string) {
+  const labels: Record<PatientAccountMovement["kind"], [string, string]> = {
+    invoice: ["Patientenrechnung", "Счёт пациента"],
+    payment: ["Zahlung", "Оплата"],
+    payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
+    external_receivable: ["Externe Forderung", "Внешний долг"],
+    external_allocation: ["Forderung zugeordnet", "Долг распределён"],
+    external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
+  };
+  return lang === "de" ? labels[kind][0] : labels[kind][1];
+}
+
+function accountMovementDirectionLabel(
+  direction: PatientAccountMovement["direction"],
+  lang: string,
+) {
+  if (direction === "debit") return lang === "de" ? "Soll" : "Дебет";
+  return lang === "de" ? "Haben" : "Кредит";
+}
+
+function accountBalanceLabel(
+  value: string | null | undefined,
+  currency: string,
+  formatMoney: MoneyFormatter,
+  lang: string,
+) {
+  if (value == null) return lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка";
+  const amount = moneyNumeric(value);
+  if (amount > 0) {
+    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Soll" : "Дт"}`;
+  }
+  if (amount < 0) {
+    return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Haben" : "Кт"}`;
+  }
+  return `${formatMoney("0", currency)} ${lang === "de" ? "ausgeglichen" : "закрыто"}`;
+}
+
 async function downloadPatientLedgerExport(patientId: string, query: URLSearchParams) {
   await downloadApiFile(
     `/patients/${patientId}/financial-ledger/export?${query.toString()}`,
@@ -501,6 +583,12 @@ function usePatientInvoicesTabContent({
   invoiceTypeLabel,
 }: PatientInvoicesTabProps) {
   const { t, lang } = useLang();
+  const [movementDirectionFilter, setMovementDirectionFilter] = useState<
+    "all" | PatientAccountMovement["direction"]
+  >("all");
+  const [movementKindFilter, setMovementKindFilter] = useState<
+    "all" | PatientAccountMovement["kind"]
+  >("all");
   const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
   const [financeState, dispatchFinanceState] = useReducer(
     patientInvoicesFinanceReducer,
@@ -511,6 +599,7 @@ function usePatientInvoicesTabContent({
     financeFilters,
     refreshedFinancialSummary,
     refreshedFinancialLedger,
+    refreshedAccountStatement,
     refreshedServicePackages,
     packageCatalog,
     patientOrders,
@@ -650,12 +739,15 @@ function usePatientInvoicesTabContent({
       });
       try {
         const suffix = financeQuery.toString();
-        const [summary, ledger, packages, catalog, orders] = await Promise.all([
+        const [summary, ledger, statement, packages, catalog, orders] = await Promise.all([
           apiFetch<PatientFinancialSummary>(
             `/patients/${patientId}/financial-summary${suffix ? `?${suffix}` : ""}`,
           ),
           apiFetch<PatientFinancialLedger>(
             `/patients/${patientId}/financial-ledger${suffix ? `?${suffix}` : ""}`,
+          ),
+          apiFetch<PatientAccountStatement>(
+            `/patients/${patientId}/account-statement${suffix ? `?${suffix}` : ""}`,
           ),
           apiFetch<PatientServicePackageItem[]>(`/patients/${patientId}/service-packages`),
           apiFetch<PackageCatalogItem[]>("/service-packages").catch(() => []),
@@ -665,6 +757,7 @@ function usePatientInvoicesTabContent({
         dispatchFinanceState({
           refreshedFinancialSummary: summary,
           refreshedFinancialLedger: ledger,
+          refreshedAccountStatement: statement,
           refreshedServicePackages: packages,
           packageCatalog: catalog,
           patientOrders: orders,
@@ -816,6 +909,20 @@ function usePatientInvoicesTabContent({
   }, [effectiveServicePackages]);
   const effectiveFinancialSummary = refreshedFinancialSummary ?? financialSummary;
   const effectiveFinancialLedger = refreshedFinancialLedger ?? financialLedger;
+  const accountStatement = refreshedAccountStatement;
+  const accountMovements = useMemo(
+    () =>
+      (accountStatement?.movements ?? []).filter((movement) => {
+        if (
+          movementDirectionFilter !== "all" &&
+          movement.direction !== movementDirectionFilter
+        ) {
+          return false;
+        }
+        return movementKindFilter === "all" || movement.kind === movementKindFilter;
+      }),
+    [accountStatement?.movements, movementDirectionFilter, movementKindFilter],
+  );
   const ledgerEntries = effectiveFinancialLedger?.entries ?? [];
   const ledgerLabels = useMemo(
     () => ({
@@ -1016,7 +1123,7 @@ function usePatientInvoicesTabContent({
         },
       },
     ],
-     
+
     [commonNotSet, formatDate, formatDateTime, formatMoney, invoiceTypeLabel, moneyValueNumber, statusColors, statusLabel, t],
   );
   const ledgerColumns = useMemo<ColumnDef<PatientFinancialLedgerEntry>[]>(
@@ -1141,6 +1248,298 @@ function usePatientInvoicesTabContent({
       },
     ],
     [commonNotSet, formatDate, formatMoney, ledgerEntries, ledgerLabels, t],
+  );
+  const accountMovementColumns = useMemo<ColumnDef<PatientAccountMovement>[]>(
+    () => [
+      {
+        id: "entry_date",
+        label: lang === "de" ? "Datum" : "Дата",
+        accessor: (movement) => movement.entry_date,
+        sortable: true,
+        filterType: "date",
+        required: true,
+        width: 120,
+        render: (movement) => (
+          <span className="font-mono text-xs tabular-nums">
+            {formatDate(movement.entry_date)}
+          </span>
+        ),
+      },
+      {
+        id: "direction",
+        label: lang === "de" ? "Soll / Haben" : "Дебет / кредит",
+        accessor: (movement) => accountMovementDirectionLabel(movement.direction, lang),
+        sortable: true,
+        filterType: "enum",
+        width: 135,
+        render: (movement) => (
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full text-[10px]",
+              movement.direction === "debit"
+                ? "border-amber-200 bg-amber-50 text-amber-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+            )}
+          >
+            {accountMovementDirectionLabel(movement.direction, lang)}
+          </Badge>
+        ),
+      },
+      {
+        id: "kind",
+        label: lang === "de" ? "Buchung" : "Операция",
+        accessor: (movement) => accountMovementKindLabel(movement.kind, lang),
+        sortable: true,
+        filterType: "enum",
+        width: 185,
+        render: (movement) => (
+          <span className="text-xs font-medium text-foreground">
+            {accountMovementKindLabel(movement.kind, lang)}
+          </span>
+        ),
+      },
+      {
+        id: "description",
+        label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
+        accessor: (movement) =>
+          `${movement.description} ${movement.document_number ?? ""} ${movement.order_number ?? ""}`,
+        searchable: true,
+        width: 280,
+        render: (movement) => (
+          <div className="min-w-0">
+            <div className="truncate text-xs text-foreground" title={movement.description}>
+              {movement.description}
+            </div>
+            <div className="truncate font-mono text-[10px] text-muted-foreground">
+              {[movement.order_number, movement.document_number].filter(Boolean).join(" · ") || "—"}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "debit",
+        label: lang === "de" ? "Soll" : "Дебет",
+        accessor: (movement) => moneyNumeric(movement.debit),
+        sortable: true,
+        filterType: "number",
+        width: 135,
+        render: (movement) => (
+          <span className="block text-right font-mono text-xs font-semibold tabular-nums text-amber-700">
+            {moneyNumeric(movement.debit) > 0
+              ? formatMoney(movement.debit, movement.currency)
+              : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "credit",
+        label: lang === "de" ? "Haben" : "Кредит",
+        accessor: (movement) => moneyNumeric(movement.credit),
+        sortable: true,
+        filterType: "number",
+        width: 135,
+        render: (movement) => (
+          <span className="block text-right font-mono text-xs font-semibold tabular-nums text-emerald-700">
+            {moneyNumeric(movement.credit) > 0
+              ? formatMoney(movement.credit, movement.currency)
+              : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "balance_after",
+        label: lang === "de" ? "Saldo danach" : "Сальдо после",
+        accessor: (movement) => moneyNumeric(movement.balance_after),
+        sortable: true,
+        filterType: "number",
+        width: 170,
+        render: (movement) => {
+          const balance = moneyNumeric(movement.balance_after);
+          return (
+            <span
+              className={cn(
+                "block text-right font-mono text-xs font-semibold tabular-nums",
+                balance > 0
+                  ? "text-amber-700"
+                  : balance < 0
+                    ? "text-sky-700"
+                    : "text-emerald-700",
+              )}
+            >
+              {accountBalanceLabel(
+                movement.balance_after,
+                movement.currency,
+                formatMoney,
+                lang,
+              )}
+            </span>
+          );
+        },
+      },
+    ],
+    [formatDate, formatMoney, lang],
+  );
+  const accountStatementColumns = useMemo<ColumnDef<PatientAccountStatementItem>[]>(
+    () => [
+      {
+        id: "entry_date",
+        label: lang === "de" ? "Datum" : "Дата",
+        accessor: (item) => item.entry_date,
+        sortable: true,
+        filterType: "date",
+        required: true,
+        width: 120,
+        render: (item) => (
+          <span className="font-mono text-xs tabular-nums">{formatDate(item.entry_date)}</span>
+        ),
+      },
+      {
+        id: "kind",
+        label: lang === "de" ? "Position" : "Позиция",
+        accessor: (item) => accountStatementKindLabel(item.kind, lang),
+        sortable: true,
+        filterType: "enum",
+        width: 145,
+        render: (item) => (
+          <Badge variant="outline" className="rounded-full text-[10px]">
+            {accountStatementKindLabel(item.kind, lang)}
+          </Badge>
+        ),
+      },
+      {
+        id: "description",
+        label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
+        accessor: (item) => `${item.description} ${item.document_number ?? ""}`,
+        searchable: true,
+        width: 260,
+        render: (item) => (
+          <div className="min-w-0">
+            <div className="truncate text-xs text-foreground" title={item.description}>
+              {item.description}
+            </div>
+            <div className="truncate font-mono text-[10px] text-muted-foreground">
+              {[item.order_number, item.document_number].filter(Boolean).join(" · ") || "—"}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "payment_state",
+        label: lang === "de" ? "Zahlungsstand" : "Состояние оплаты",
+        accessor: (item) => accountStatementStateLabel(item.payment_state, lang),
+        sortable: true,
+        filterType: "enum",
+        width: 230,
+        render: (item) => {
+          const due = moneyNumeric(item.amount_due);
+          const settled = [
+            "paid",
+            "patient_paid",
+            "invoiced",
+            "reconciled_to_patient_invoice",
+          ].includes(item.payment_state);
+          return (
+            <span
+              className={cn(
+                "text-xs font-medium",
+                due > 0
+                  ? "text-amber-700"
+                  : settled
+                    ? "text-emerald-700"
+                    : "text-foreground",
+              )}
+            >
+              {accountStatementStateLabel(item.payment_state, lang)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "paid_by",
+        label: lang === "de" ? "Bezahlt durch" : "Кто оплатил",
+        accessor: (item) => accountStatementPayerLabel(item.paid_by, lang),
+        sortable: true,
+        width: 130,
+        render: (item) => (
+          <span className="text-xs text-foreground">
+            {accountStatementPayerLabel(item.paid_by, lang)}
+          </span>
+        ),
+      },
+      {
+        id: "amount_gross",
+        label: lang === "de" ? "Gesamt" : "Всего",
+        accessor: (item) => moneyNumeric(item.amount_gross),
+        sortable: true,
+        filterType: "number",
+        width: 125,
+        render: (item) => (
+          <span className="block text-right font-mono text-xs tabular-nums">
+            {item.amounts_visible && item.amount_gross != null
+              ? formatMoney(item.amount_gross, item.currency ?? accountStatement?.currency)
+              : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "settled",
+        label: lang === "de" ? "Bezahlt / verrechnet" : "Оплачено / зачтено",
+        accessor: (item) => moneyNumeric(item.cash_paid) + moneyNumeric(item.prepayment_applied),
+        sortable: true,
+        filterType: "number",
+        width: 160,
+        render: (item) => {
+          const settled = moneyNumeric(item.cash_paid) + moneyNumeric(item.prepayment_applied);
+          return (
+            <span className="block text-right font-mono text-xs tabular-nums text-emerald-700">
+              {item.kind === "invoice" || item.kind === "prepayment"
+                ? formatMoney(String(settled), accountStatement?.currency)
+                : "—"}
+            </span>
+          );
+        },
+      },
+      {
+        id: "allocated_receivable",
+        label: lang === "de" ? "Patientenrechnung zugeordnet" : "Распределено по счёту",
+        accessor: (item) => moneyNumeric(item.allocated_receivable),
+        sortable: true,
+        filterType: "number",
+        width: 175,
+        render: (item) => (
+          <span className="block text-right font-mono text-xs tabular-nums text-sky-700">
+            {item.kind === "external_expense" && item.allocated_receivable != null
+              ? formatMoney(item.allocated_receivable, item.currency ?? accountStatement?.currency)
+              : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "amount_due",
+        label: lang === "de" ? "Noch zu zahlen" : "Требуется доплатить",
+        accessor: (item) => moneyNumeric(item.amount_due),
+        sortable: true,
+        filterType: "number",
+        width: 155,
+        render: (item) => {
+          const due = moneyNumeric(item.amount_due);
+          return (
+            <span
+              className={cn(
+                "block text-right font-mono text-xs font-semibold tabular-nums",
+                due > 0 ? "text-amber-700" : "text-foreground",
+              )}
+            >
+              {item.amount_due != null
+                ? formatMoney(item.amount_due, item.currency ?? accountStatement?.currency)
+                : "—"}
+            </span>
+          );
+        },
+      },
+    ],
+    [accountStatement?.currency, formatDate, formatMoney, lang],
   );
   const servicePackageColumns = useMemo<ColumnDef<PatientServicePackageItem>[]>(
     () => [
@@ -1466,6 +1865,170 @@ function usePatientInvoicesTabContent({
             </Button>
           </div>
         </AdminToolbar>
+
+      {accountStatement ? (
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            {[
+              [
+                lang === "de" ? "Anfangssaldo" : "Входящее сальдо",
+                accountBalanceLabel(
+                  accountStatement.summary.opening_balance,
+                  accountStatement.currency,
+                  formatMoney,
+                  lang,
+                ),
+              ],
+              [
+                lang === "de" ? "Soll im Zeitraum" : "Дебет за период",
+                formatMoney(accountStatement.summary.debit_total, accountStatement.currency),
+              ],
+              [
+                lang === "de" ? "Haben im Zeitraum" : "Кредит за период",
+                formatMoney(accountStatement.summary.credit_total, accountStatement.currency),
+              ],
+              [
+                lang === "de" ? "Berechneter Saldo" : "Расчётное сальдо",
+                accountBalanceLabel(
+                  accountStatement.summary.calculated_balance,
+                  accountStatement.currency,
+                  formatMoney,
+                  lang,
+                ),
+              ],
+              [
+                lang === "de" ? "Noch abzustimmen" : "Требует распределения",
+                formatMoney(
+                  accountStatement.summary.unreconciled_external_debit,
+                  accountStatement.currency,
+                ),
+              ],
+              [
+                lang === "de" ? "Bestätigter Saldo" : "Подтверждённое сальдо",
+                accountBalanceLabel(
+                  accountStatement.summary.closing_balance,
+                  accountStatement.currency,
+                  formatMoney,
+                  lang,
+                ),
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-border/70 bg-card px-4 py-3">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {label}
+                </div>
+                <div className="mt-2 font-mono text-base font-semibold tabular-nums text-foreground">
+                  {value}
+                </div>
+              </div>
+            ))}
+          </section>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              [lang === "de" ? "Offene Rechnungen" : "Открытые счета", accountStatement.summary.invoice_due],
+              [lang === "de" ? "Zahlungen erhalten" : "Получено оплат", accountStatement.summary.cash_paid],
+              [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
+              [lang === "de" ? "Externe Restforderung" : "Остаток внешнего долга", accountStatement.summary.external_receivable],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-border/60 bg-muted/15 px-4 py-2.5">
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {label}
+                </div>
+                <div className="mt-1.5 font-mono text-sm font-semibold tabular-nums text-foreground">
+                  {value == null ? "—" : formatMoney(value, accountStatement.currency)}
+                </div>
+              </div>
+            ))}
+          </section>
+          <Banner tone="warning" withIcon>
+            {accountStatement.summary.reconciliation_required
+              ? lang === "de"
+                ? "Der berechnete Saldo enthält noch nicht vollständig zugeordnete externe Forderungen. Ordnen Sie diese einer Patientenrechnung zu oder bestätigen Sie sie als separate Forderung; erst danach wird der Saldo als bestätigt angezeigt."
+                : "Расчётное сальдо содержит внешние требования, которые ещё не полностью распределены. Свяжите их со счётом пациента либо подтвердите как отдельный долг — после этого сальдо станет подтверждённым."
+              : lang === "de"
+                ? "Soll erhöht die Forderung an den Patienten, Haben reduziert sie. Ein Sollsaldo bedeutet: Patient zahlt an GMED. Ein Habensaldo ist ein Guthaben des Patienten."
+                : "Дебет увеличивает долг пациента, кредит уменьшает его. Сальдо Дт означает, что пациент должен GMED; сальдо Кт означает, что у пациента есть переплата."}
+          </Banner>
+          <DataTableSurface
+            rows={accountMovements}
+            columns={accountMovementColumns}
+            rowId={(movement) => movement.id}
+            dictionary={t as unknown as Record<string, string>}
+            emptyState={
+              <EmptyCell>
+                {lang === "de" ? "Keine Kontobewegungen für diesen Filter" : "Нет движений по выбранному фильтру"}
+              </EmptyCell>
+            }
+            toolbarStart={
+              <>
+                <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                  {lang === "de" ? "Kontobewegungen" : "Движения взаиморасчётов"}
+                </span>
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+                <NativeComboboxSelect
+                  aria-label={lang === "de" ? "Soll/Haben filtern" : "Фильтр дебет/кредит"}
+                  value={movementDirectionFilter}
+                  onChange={(event) =>
+                    setMovementDirectionFilter(
+                      event.target.value as "all" | PatientAccountMovement["direction"],
+                    )
+                  }
+                  className={cn(selectClass, "h-8 min-w-36")}
+                >
+                  <option value="all">{lang === "de" ? "Soll und Haben" : "Дебет и кредит"}</option>
+                  <option value="debit">{lang === "de" ? "Nur Soll" : "Только дебет"}</option>
+                  <option value="credit">{lang === "de" ? "Nur Haben" : "Только кредит"}</option>
+                </NativeComboboxSelect>
+                <NativeComboboxSelect
+                  aria-label={lang === "de" ? "Buchungsart filtern" : "Фильтр типа операции"}
+                  value={movementKindFilter}
+                  onChange={(event) =>
+                    setMovementKindFilter(
+                      event.target.value as "all" | PatientAccountMovement["kind"],
+                    )
+                  }
+                  className={cn(selectClass, "h-8 min-w-44")}
+                >
+                  <option value="all">{lang === "de" ? "Alle Buchungen" : "Все операции"}</option>
+                  <option value="invoice">{accountMovementKindLabel("invoice", lang)}</option>
+                  <option value="payment">{accountMovementKindLabel("payment", lang)}</option>
+                  <option value="payment_reversal">{accountMovementKindLabel("payment_reversal", lang)}</option>
+                  <option value="external_receivable">{accountMovementKindLabel("external_receivable", lang)}</option>
+                  <option value="external_allocation">{accountMovementKindLabel("external_allocation", lang)}</option>
+                  <option value="external_allocation_reversal">{accountMovementKindLabel("external_allocation_reversal", lang)}</option>
+                </NativeComboboxSelect>
+              </>
+            }
+            pagination={{
+              resetKey: `${movementDirectionFilter}:${movementKindFilter}:${accountMovements.map((movement) => movement.id).join(":")}`,
+            }}
+          />
+          <DataTableSurface
+            rows={accountStatement.items}
+            columns={accountStatementColumns}
+            rowId={(item) => `${item.kind}:${item.id}`}
+            dictionary={t as unknown as Record<string, string>}
+            emptyState={
+              <EmptyCell>
+                {lang === "de" ? "Keine Kontobewegungen vorhanden" : "Нет данных по взаиморасчётам"}
+              </EmptyCell>
+            }
+            toolbarStart={
+              <>
+                <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+                  <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+                  {lang === "de" ? "Belege und Leistungen" : "Документы и услуги"}
+                </span>
+                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+              </>
+            }
+            pagination={{
+              resetKey: accountStatement.items.map((item) => `${item.kind}:${item.id}`).join(":"),
+            }}
+          />
+        </>
+      ) : null}
 
 
       <PatientSheetScaffold

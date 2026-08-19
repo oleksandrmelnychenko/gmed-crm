@@ -4,7 +4,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use printpdf::{
@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Number as JsonNumber, Value, json};
 use sqlx::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -48,6 +48,10 @@ pub fn router() -> Router<AppState> {
         .route("/me/invoices", get(list_my_invoices))
         .route("/me/invoices/{invoice_id}", get(get_my_invoice))
         .route(
+            "/me/invoices/{invoice_id}/payments",
+            get(list_my_invoice_payments),
+        )
+        .route(
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
         )
@@ -61,10 +65,26 @@ pub fn router() -> Router<AppState> {
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
         .route("/invoices/{invoice_id}/status", post(update_invoice_status))
         .route(
+            "/invoices/{invoice_id}/payments",
+            get(list_invoice_payments).post(create_invoice_payment),
+        )
+        .route(
+            "/invoices/{invoice_id}/payments/{payment_id}/reversal",
+            post(reverse_invoice_payment),
+        )
+        .route(
             "/invoices/{invoice_id}/visibility",
             post(update_invoice_visibility),
         )
         .route("/invoices/{invoice_id}/payer", post(update_invoice_payer))
+        .route(
+            "/invoices/{invoice_id}/prepayment-allocations",
+            post(apply_invoice_prepayment),
+        )
+        .route(
+            "/invoices/{invoice_id}/prepayment-allocations/{allocation_id}",
+            delete(release_invoice_prepayment),
+        )
         .route(
             "/invoices/{invoice_id}/dunning",
             get(list_dunning_events).post(create_dunning_event),
@@ -103,6 +123,19 @@ struct CreateInvoiceRequest {
     invoice_type: Option<String>,
     due_date: Option<String>,
     notes: Option<String>,
+    line_items: Option<Vec<CreateInvoiceLineSelection>>,
+}
+
+#[derive(Deserialize)]
+struct CreateInvoiceLineSelection {
+    line_index: usize,
+    quantity: MoneyInput,
+}
+
+#[derive(Deserialize)]
+struct ApplyInvoicePrepaymentRequest {
+    advance_invoice_id: Uuid,
+    amount_gross: MoneyInput,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +160,21 @@ struct UpdateInvoiceStatusRequest {
     due_date: Option<String>,
     paid_amount: Option<MoneyInput>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateInvoicePaymentRequest {
+    amount_gross: MoneyInput,
+    payment_method: String,
+    payment_reference: Option<String>,
+    received_on: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReverseInvoicePaymentRequest {
+    reversed_on: Option<String>,
+    note: String,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +224,20 @@ struct InvoiceCreationSnapshot {
     total_vat: Decimal,
     total_gross: Decimal,
     line_items: Value,
+    allocations: Vec<InvoiceLineAllocationSnapshot>,
+}
+
+struct InvoiceLineAllocationSnapshot {
+    quote_line_index: i32,
+    order_leistung_id: Option<Uuid>,
+    quantity: Decimal,
+    description: String,
+    unit_price_net: Decimal,
+    vat_rate: Decimal,
+    amount_net: Decimal,
+    amount_vat: Decimal,
+    amount_gross: Decimal,
+    completes_quote_line: bool,
 }
 
 struct InvoiceDunningContext {
@@ -185,19 +247,7 @@ struct InvoiceDunningContext {
     due_date: Option<NaiveDate>,
     total_gross: Decimal,
     paid_amount: Decimal,
-}
-
-struct InvoiceAccountingContext {
-    invoice_id: Uuid,
-    order_id: Uuid,
-    patient_id: Uuid,
-    invoice_number: String,
-    paid_amount: Decimal,
-    paid_at: Option<DateTime<Utc>>,
-    total_vat: Decimal,
-    total_gross: Decimal,
-    currency: String,
-    line_items: Value,
+    prepayment_applied_amount: Decimal,
 }
 
 struct ExternalInvoiceAccountingContext {
@@ -206,10 +256,23 @@ struct ExternalInvoiceAccountingContext {
     patient_id: Uuid,
     external_invoice_number: String,
     status: String,
+    paid_by: String,
     paid_at: Option<DateTime<Utc>>,
     amount_vat: Decimal,
     amount_gross: Decimal,
     currency: String,
+}
+
+struct InvoicePaymentContext {
+    invoice_id: Uuid,
+    order_id: Uuid,
+    patient_id: Uuid,
+    invoice_number: String,
+    invoice_status: String,
+    total_vat: Decimal,
+    total_gross: Decimal,
+    prepayment_applied_amount: Decimal,
+    line_items: Value,
 }
 
 struct AccountingEntryInsert<'a> {
@@ -237,6 +300,7 @@ struct AutoDunningCandidate {
     due_date: NaiveDate,
     total_gross: Decimal,
     paid_amount: Decimal,
+    prepayment_applied_amount: Decimal,
     first_sent_at: Option<DateTime<Utc>>,
     second_sent_at: Option<DateTime<Utc>>,
     collections_sent_at: Option<DateTime<Utc>>,
@@ -388,6 +452,13 @@ fn is_valid_invoice_status(value: &str) -> bool {
 
 fn is_valid_dunning_level(value: &str) -> bool {
     matches!(value, "first" | "second" | "collections")
+}
+
+fn is_valid_invoice_payment_method(value: &str) -> bool {
+    matches!(
+        value,
+        "bank_transfer" | "card" | "cash" | "direct_debit" | "cheque" | "other"
+    )
 }
 
 fn invoice_is_patient_visible(status: &str) -> bool {
@@ -610,53 +681,12 @@ async fn insert_accounting_entry(
     Ok(())
 }
 
-async fn load_invoice_accounting_context(
-    state: &AppState,
-    invoice_id: Uuid,
-) -> Result<Option<InvoiceAccountingContext>, sqlx::Error> {
-    sqlx::query(
-        r#"SELECT id, order_id, patient_id, invoice_number, paid_amount, paid_at,
-                  total_vat, total_gross, line_items
-           FROM invoices
-           WHERE id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    .map(|row| {
-        row.map(|row| InvoiceAccountingContext {
-            invoice_id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-            invoice_number: row
-                .try_get::<String, _>("invoice_number")
-                .unwrap_or_default(),
-            paid_amount: row
-                .try_get::<Decimal, _>("paid_amount")
-                .unwrap_or(Decimal::ZERO),
-            paid_at: row
-                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
-                .unwrap_or_default(),
-            total_vat: row
-                .try_get::<Decimal, _>("total_vat")
-                .unwrap_or(Decimal::ZERO),
-            total_gross: row
-                .try_get::<Decimal, _>("total_gross")
-                .unwrap_or(Decimal::ZERO),
-            currency: "EUR".to_string(),
-            line_items: row
-                .try_get::<Value, _>("line_items")
-                .unwrap_or_else(|_| serde_json::json!([])),
-        })
-    })
-}
-
 async fn load_external_invoice_accounting_context(
     state: &AppState,
     external_invoice_id: Uuid,
 ) -> Result<Option<ExternalInvoiceAccountingContext>, sqlx::Error> {
     sqlx::query(
-        r#"SELECT id, order_id, patient_id, external_invoice_number, status, paid_at,
+        r#"SELECT id, order_id, patient_id, external_invoice_number, status, paid_by, paid_at,
                   amount_vat, amount_gross, currency
            FROM external_invoices
            WHERE id = $1"#,
@@ -673,6 +703,9 @@ async fn load_external_invoice_accounting_context(
                 .try_get::<String, _>("external_invoice_number")
                 .unwrap_or_default(),
             status: row.try_get::<String, _>("status").unwrap_or_default(),
+            paid_by: row
+                .try_get::<String, _>("paid_by")
+                .unwrap_or_else(|_| "unpaid".to_string()),
             paid_at: row
                 .try_get::<Option<DateTime<Utc>>, _>("paid_at")
                 .unwrap_or_default(),
@@ -687,21 +720,6 @@ async fn load_external_invoice_accounting_context(
                 .unwrap_or_else(|_| "EUR".to_string()),
         })
     })
-}
-
-async fn total_accounted_invoice_gross(
-    state: &AppState,
-    invoice_id: Uuid,
-) -> Result<Decimal, sqlx::Error> {
-    sqlx::query_scalar(
-        r#"SELECT COALESCE(SUM(amount_gross), 0)
-           FROM accounting_entries
-           WHERE source_invoice_id = $1
-             AND entry_kind = 'invoice_payment'"#,
-    )
-    .bind(invoice_id)
-    .fetch_one(&state.db)
-    .await
 }
 
 async fn total_accounted_external_invoice_gross(
@@ -719,86 +737,93 @@ async fn total_accounted_external_invoice_gross(
     .await
 }
 
-async fn sync_invoice_accounting_entries_from_current_state(
-    state: &AppState,
-    invoice_id: Uuid,
-    actor_id: Option<Uuid>,
+#[allow(clippy::too_many_arguments)]
+async fn insert_invoice_payment_accounting_entries(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    payment_transaction_id: Uuid,
+    transaction_type: &str,
+    amount_gross: Decimal,
+    payment_method: &str,
+    payment_reference: Option<&str>,
+    entry_date: NaiveDate,
+    actor_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    let Some(context) = load_invoice_accounting_context(state, invoice_id).await? else {
-        return Ok(());
+    let signed_gross = if transaction_type == "reversal" {
+        -amount_gross
+    } else {
+        amount_gross
     };
-
-    let already_accounted = total_accounted_invoice_gross(state, invoice_id).await?;
-    let delta_gross = round_accounting_money(context.paid_amount - already_accounted);
-    if delta_gross == Decimal::ZERO {
-        return Ok(());
-    }
-
     let (_, passthrough_vat_total, passthrough_gross_total) =
         invoice_passthrough_totals(&context.line_items);
     let service_vat_total = context.total_vat - passthrough_vat_total;
-
     let passthrough_gross =
-        proportional_share(delta_gross, passthrough_gross_total, context.total_gross);
+        proportional_share(signed_gross, passthrough_gross_total, context.total_gross);
     let passthrough_vat =
-        proportional_share(delta_gross, passthrough_vat_total, context.total_gross);
-    let passthrough_net = passthrough_gross - passthrough_vat;
+        proportional_share(signed_gross, passthrough_vat_total, context.total_gross);
+    let service_gross = signed_gross - passthrough_gross;
+    let service_vat = proportional_share(signed_gross, service_vat_total, context.total_gross);
+    let description_prefix = if transaction_type == "reversal" {
+        "Invoice payment reversal"
+    } else {
+        "Invoice payment"
+    };
 
-    let service_gross = delta_gross - passthrough_gross;
-    let service_vat = proportional_share(delta_gross, service_vat_total, context.total_gross);
-    let service_net = service_gross - service_vat;
-
-    let entry_date = context.paid_at.unwrap_or_else(Utc::now).date_naive();
-
-    insert_accounting_entry(
-        state,
-        AccountingEntryInsert {
-            entry_kind: "invoice_payment",
-            direction: "income",
-            category: "service_revenue",
-            source_invoice_id: Some(context.invoice_id),
-            source_external_invoice_id: None,
-            order_id: context.order_id,
-            patient_id: context.patient_id,
-            entry_date,
-            description: format!("Invoice payment {}", context.invoice_number),
-            amount_net: service_net,
-            amount_vat: service_vat,
-            amount_gross: service_gross,
-            currency: &context.currency,
-            metadata: serde_json::json!({
+    for (category, gross, vat, description) in [
+        (
+            "service_revenue",
+            service_gross,
+            service_vat,
+            format!("{description_prefix} {}", context.invoice_number),
+        ),
+        (
+            "cost_passthrough_revenue",
+            passthrough_gross,
+            passthrough_vat,
+            format!(
+                "Cost passthrough {description_prefix} {}",
+                context.invoice_number
+            ),
+        ),
+    ] {
+        let net = gross - vat;
+        if gross == Decimal::ZERO && vat == Decimal::ZERO && net == Decimal::ZERO {
+            continue;
+        }
+        sqlx::query(
+            r#"INSERT INTO accounting_entries (
+                    entry_kind, direction, category, source_invoice_id,
+                    source_invoice_payment_transaction_id, order_id, patient_id,
+                    entry_date, description, amount_net, amount_vat, amount_gross,
+                    currency, metadata, created_by
+               ) VALUES (
+                    'invoice_payment', 'income', $1, $2,
+                    $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    'EUR', $11, $12
+               )"#,
+        )
+        .bind(category)
+        .bind(context.invoice_id)
+        .bind(payment_transaction_id)
+        .bind(context.order_id)
+        .bind(context.patient_id)
+        .bind(entry_date)
+        .bind(description)
+        .bind(round_accounting_money(net))
+        .bind(round_accounting_money(vat))
+        .bind(round_accounting_money(gross))
+        .bind(serde_json::json!({
             "invoice_number": context.invoice_number,
-            "payment_delta_gross": decimal_to_string(delta_gross),
-            }),
-            created_by: actor_id,
-        },
-    )
-    .await?;
-
-    insert_accounting_entry(
-        state,
-        AccountingEntryInsert {
-            entry_kind: "invoice_payment",
-            direction: "income",
-            category: "cost_passthrough_revenue",
-            source_invoice_id: Some(context.invoice_id),
-            source_external_invoice_id: None,
-            order_id: context.order_id,
-            patient_id: context.patient_id,
-            entry_date,
-            description: format!("Cost passthrough payment {}", context.invoice_number),
-            amount_net: passthrough_net,
-            amount_vat: passthrough_vat,
-            amount_gross: passthrough_gross,
-            currency: &context.currency,
-            metadata: serde_json::json!({
-            "invoice_number": context.invoice_number,
-            "payment_delta_gross": decimal_to_string(delta_gross),
-            }),
-            created_by: actor_id,
-        },
-    )
-    .await?;
+            "invoice_payment_transaction_id": payment_transaction_id,
+            "payment_transaction_type": transaction_type,
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+        }))
+        .bind(actor_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
 
     Ok(())
 }
@@ -816,7 +841,7 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
 
     let already_accounted =
         total_accounted_external_invoice_gross(state, external_invoice_id).await?;
-    let target_gross = if context.status == "paid" {
+    let target_gross = if context.status == "paid" && context.paid_by == "agency" {
         context.amount_gross
     } else {
         Decimal::ZERO
@@ -852,6 +877,7 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
             metadata: serde_json::json!({
             "external_invoice_number": context.external_invoice_number,
             "payment_delta_gross": decimal_to_string(delta_gross),
+            "paid_by": context.paid_by,
             }),
             created_by: actor_id,
         },
@@ -931,6 +957,7 @@ async fn load_auto_dunning_candidates(
 ) -> Result<Vec<AutoDunningCandidate>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT i.id, i.created_by, i.status, i.due_date, i.total_gross, i.paid_amount,
+                  i.prepayment_applied_amount,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'first') AS first_sent_at,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'second') AS second_sent_at,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'collections') AS collections_sent_at
@@ -938,7 +965,8 @@ async fn load_auto_dunning_candidates(
            LEFT JOIN invoice_dunning_events ide ON ide.invoice_id = i.id
            WHERE i.due_date IS NOT NULL
              AND i.status NOT IN ('draft', 'paid', 'cancelled')
-           GROUP BY i.id, i.created_by, i.status, i.due_date, i.total_gross, i.paid_amount"#,
+           GROUP BY i.id, i.created_by, i.status, i.due_date, i.total_gross,
+                    i.paid_amount, i.prepayment_applied_amount"#,
     )
     .fetch_all(&state.db)
     .await?;
@@ -957,6 +985,9 @@ async fn load_auto_dunning_candidates(
                 .unwrap_or(Decimal::ZERO),
             paid_amount: row
                 .try_get::<Decimal, _>("paid_amount")
+                .unwrap_or(Decimal::ZERO),
+            prepayment_applied_amount: row
+                .try_get::<Decimal, _>("prepayment_applied_amount")
                 .unwrap_or(Decimal::ZERO),
             first_sent_at: row
                 .try_get::<Option<DateTime<Utc>>, _>("first_sent_at")
@@ -1048,7 +1079,9 @@ pub async fn run_auto_dunning_scheduler_once(
     let mut summary = AutoDunningRunSummary::default();
 
     for candidate in load_auto_dunning_candidates(state).await? {
-        let balance_due = (candidate.total_gross - candidate.paid_amount).max(Decimal::ZERO);
+        let balance_due =
+            (candidate.total_gross - candidate.paid_amount - candidate.prepayment_applied_amount)
+                .max(Decimal::ZERO);
         if balance_due <= Decimal::ZERO || candidate.due_date >= today {
             continue;
         }
@@ -2176,7 +2209,8 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
     paid_at: DateTime<Utc>,
 ) -> Result<Vec<Uuid>, axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT order_id, patient_id, status, total_gross, paid_amount, line_items
+        r#"SELECT order_id, patient_id, status, total_gross, paid_amount,
+                  prepayment_applied_amount, line_items
            FROM invoices
            WHERE id = $1"#,
     )
@@ -2202,7 +2236,13 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
     let paid_amount = row
         .try_get::<Decimal, _>("paid_amount")
         .unwrap_or(Decimal::ZERO);
-    if status != "paid" || total_gross <= Decimal::ZERO || paid_amount < total_gross {
+    let prepayment_applied_amount = row
+        .try_get::<Decimal, _>("prepayment_applied_amount")
+        .unwrap_or(Decimal::ZERO);
+    if status != "paid"
+        || total_gross <= Decimal::ZERO
+        || paid_amount + prepayment_applied_amount < total_gross
+    {
         return Ok(Vec::new());
     }
 
@@ -2555,6 +2595,270 @@ async fn load_quote_invoice_context(
     }))
 }
 
+fn invoice_json_decimal(item: &Value, key: &str) -> Option<Decimal> {
+    match item.get(key) {
+        Some(Value::String(value)) => Decimal::from_str(value.trim()).ok(),
+        Some(Value::Number(value)) => Decimal::from_str(&value.to_string()).ok(),
+        _ => None,
+    }
+}
+
+async fn load_allocated_quote_quantities(
+    state: &AppState,
+    quote_id: Uuid,
+) -> Result<BTreeMap<usize, Decimal>, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT allocation.quote_line_index, COALESCE(SUM(allocation.quantity), 0) AS quantity
+           FROM invoice_order_line_allocations allocation
+           JOIN invoices invoice ON invoice.id = allocation.invoice_id
+           WHERE allocation.quote_id = $1
+             AND invoice.status <> 'cancelled'
+           GROUP BY allocation.quote_line_index"#,
+    )
+    .bind(quote_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, quote_id = %quote_id, "load allocated invoice quantities");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load remaining invoice quantities",
+        )
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let index = row.try_get::<i32, _>("quote_line_index").ok()?;
+            let quantity = row
+                .try_get::<Decimal, _>("quantity")
+                .unwrap_or(Decimal::ZERO);
+            usize::try_from(index).ok().map(|index| (index, quantity))
+        })
+        .collect())
+}
+
+async fn build_selected_invoice_snapshot(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+    invoice_type: &str,
+    requested_items: Option<&[CreateInvoiceLineSelection]>,
+) -> Result<InvoiceCreationSnapshot, axum::response::Response> {
+    let quote_items = ctx.line_items.as_array().ok_or_else(|| {
+        err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Quote has no invoiceable line items",
+        )
+    })?;
+    if quote_items.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Quote has no invoiceable line items",
+        ));
+    }
+
+    let allocated = if invoice_type == "advance" {
+        BTreeMap::new()
+    } else {
+        load_allocated_quote_quantities(state, ctx.quote_id).await?
+    };
+    let mut requested = BTreeMap::<usize, Decimal>::new();
+    if let Some(items) = requested_items {
+        if items.is_empty() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "At least one invoice line must be selected",
+            ));
+        }
+        for item in items {
+            if item.line_index >= quote_items.len() {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Selected invoice line does not exist",
+                ));
+            }
+            let Some(quantity) = item.quantity.parse_decimal() else {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid invoice line quantity",
+                ));
+            };
+            let quantity = quantity.round_dp(2);
+            if quantity <= Decimal::ZERO {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invoice line quantity must be greater than zero",
+                ));
+            }
+            if requested.insert(item.line_index, quantity).is_some() {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invoice line was selected more than once",
+                ));
+            }
+        }
+    }
+
+    let mut total_net = Decimal::ZERO;
+    let mut total_vat = Decimal::ZERO;
+    let mut total_gross = Decimal::ZERO;
+    let mut selected_items = Vec::new();
+    let mut allocations = Vec::new();
+    let mut incomplete_final_lines = BTreeSet::new();
+    let mut consumed_requested_lines = BTreeSet::new();
+
+    for (line_index, source_item) in quote_items.iter().enumerate() {
+        let quoted_quantity = invoice_json_decimal(source_item, "quantity")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        if quoted_quantity <= Decimal::ZERO {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote contains an invalid line quantity",
+            ));
+        }
+        let already_allocated = allocated
+            .get(&line_index)
+            .copied()
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        let remaining = if invoice_type == "advance" {
+            quoted_quantity
+        } else {
+            (quoted_quantity - already_allocated).max(Decimal::ZERO)
+        };
+        if remaining <= Decimal::ZERO {
+            continue;
+        }
+
+        let selected_quantity = match requested_items {
+            Some(_) => requested.get(&line_index).copied(),
+            None => Some(remaining),
+        };
+        let Some(selected_quantity) = selected_quantity else {
+            if invoice_type == "final" {
+                incomplete_final_lines.insert(line_index);
+            }
+            continue;
+        };
+        consumed_requested_lines.insert(line_index);
+        if selected_quantity > remaining {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Selected quantity exceeds the remaining quote line quantity",
+            ));
+        }
+        if invoice_type == "final" && selected_quantity < remaining {
+            incomplete_final_lines.insert(line_index);
+        }
+
+        let unit_price = invoice_json_decimal(source_item, "unit_price")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        let vat_rate = invoice_json_decimal(source_item, "vat_rate")
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(2);
+        if unit_price < Decimal::ZERO || vat_rate < Decimal::ZERO {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote contains invalid price or VAT data",
+            ));
+        }
+        let (line_net, line_vat, line_gross) =
+            compute_invoice_line_parts(selected_quantity, unit_price, vat_rate);
+        let mut selected_item = source_item.clone();
+        if let Some(map) = selected_item.as_object_mut() {
+            map.insert(
+                "quantity".to_string(),
+                Value::String(decimal_to_string(selected_quantity)),
+            );
+            map.insert(
+                "line_net".to_string(),
+                Value::String(decimal_to_string(line_net)),
+            );
+            map.insert(
+                "line_vat".to_string(),
+                Value::String(decimal_to_string(line_vat)),
+            );
+            map.insert(
+                "line_gross".to_string(),
+                Value::String(decimal_to_string(line_gross)),
+            );
+            map.insert(
+                "quote_line_index".to_string(),
+                serde_json::json!(line_index),
+            );
+            map.insert(
+                "quoted_quantity".to_string(),
+                Value::String(decimal_to_string(quoted_quantity)),
+            );
+        }
+
+        total_net = (total_net + line_net).round_dp(2);
+        total_vat = (total_vat + line_vat).round_dp(2);
+        total_gross = (total_gross + line_gross).round_dp(2);
+        selected_items.push(selected_item);
+
+        if invoice_type != "advance" {
+            allocations.push(InvoiceLineAllocationSnapshot {
+                quote_line_index: i32::try_from(line_index).unwrap_or(i32::MAX),
+                order_leistung_id: source_item
+                    .get("source_order_leistung_id")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok()),
+                quantity: selected_quantity,
+                description: source_item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Invoice line")
+                    .to_string(),
+                unit_price_net: unit_price,
+                vat_rate,
+                amount_net: line_net,
+                amount_vat: line_vat,
+                amount_gross: line_gross,
+                completes_quote_line: selected_quantity >= remaining,
+            });
+        }
+    }
+
+    if !incomplete_final_lines.is_empty() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A final invoice must include every remaining quote line quantity",
+        ));
+    }
+    if requested_items.is_some() && consumed_requested_lines.len() != requested.len() {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "A selected quote line has already been fully invoiced",
+        ));
+    }
+    if selected_items.is_empty() {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "This quote has no remaining quantities to invoice",
+        ));
+    }
+
+    let first_settlement = invoice_type != "advance" && allocated.is_empty();
+    let selected_all_lines = requested_items.is_none();
+    if first_settlement && selected_all_lines {
+        let mut snapshot =
+            build_invoice_snapshot_with_approved_package_overages(state, ctx).await?;
+        snapshot.allocations = allocations;
+        return Ok(snapshot);
+    }
+
+    Ok(InvoiceCreationSnapshot {
+        total_net,
+        total_vat,
+        total_gross,
+        line_items: Value::Array(selected_items),
+        allocations,
+    })
+}
+
 async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -2708,6 +3012,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         total_vat,
         total_gross,
         line_items: Value::Array(line_items),
+        allocations: Vec::new(),
     })
 }
 
@@ -2716,7 +3021,8 @@ async fn load_invoice_dunning_context(
     invoice_id: Uuid,
 ) -> Result<Option<InvoiceDunningContext>, axum::response::Response> {
     let row = sqlx::query(
-        "SELECT id, patient_id, status, due_date, total_gross, paid_amount
+        "SELECT id, patient_id, status, due_date, total_gross, paid_amount,
+                prepayment_applied_amount
          FROM invoices
          WHERE id = $1",
     )
@@ -2748,6 +3054,9 @@ async fn load_invoice_dunning_context(
         paid_amount: row
             .try_get::<Decimal, _>("paid_amount")
             .unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
     }))
 }
 
@@ -2755,6 +3064,7 @@ async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
     invoice_type: &str,
+    selected_source_ids: &[Uuid],
 ) -> Result<(), axum::response::Response> {
     if matches!(ctx.quote_status.as_str(), "rejected" | "expired") {
         return Err(err(
@@ -2798,7 +3108,7 @@ async fn validate_invoice_creation_for_quote(
                 SELECT 1
                 FROM invoices
                 WHERE quote_id = $1
-                  AND invoice_type IN ('interim', 'final')
+                  AND invoice_type = 'final'
                   AND status <> 'cancelled'
             )",
         )
@@ -2822,7 +3132,7 @@ async fn validate_invoice_creation_for_quote(
     }
 
     if invoice_type != "advance" {
-        let source_ids = extract_source_line_ids(&ctx.line_items);
+        let source_ids = selected_source_ids;
         if !source_ids.is_empty() {
             let invalid_count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*)
@@ -2832,7 +3142,7 @@ async fn validate_invoice_creation_for_quote(
                    AND status <> 'approved'",
             )
             .bind(ctx.order_id)
-            .bind(&source_ids)
+            .bind(source_ids)
             .fetch_one(&state.db)
             .await
             .map_err(|e| {
@@ -2855,71 +3165,13 @@ async fn validate_invoice_creation_for_quote(
     Ok(())
 }
 
-async fn mark_quote_services_invoiced(
-    state: &AppState,
-    ctx: &QuoteInvoiceContext,
-    invoice_type: &str,
-) -> Result<(), axum::response::Response> {
-    if invoice_type == "advance" {
-        return Ok(());
-    }
-
-    let source_ids = extract_source_line_ids(&ctx.line_items);
-    if source_ids.is_empty() {
-        return Ok(());
-    }
-
-    sqlx::query(
-        "UPDATE order_leistungen
-         SET status = 'invoiced'
-         WHERE order_id = $1
-           AND id = ANY($2)
-           AND status = 'approved'",
-    )
-    .bind(ctx.order_id)
-    .bind(&source_ids)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, order_id = %ctx.order_id, "mark order services invoiced");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to mark order services as invoiced",
-        )
-    })?;
-
-    Ok(())
-}
-
-async fn link_approved_package_consumptions_to_invoice(
-    state: &AppState,
-    ctx: &QuoteInvoiceContext,
-    invoice_id: Uuid,
-) -> Result<(), axum::response::Response> {
-    sqlx::query(
-        r#"UPDATE service_package_consumptions spc
-           SET invoice_id = $1
-           FROM patient_service_packages psp
-           WHERE spc.patient_service_package_id = psp.id
-             AND psp.patient_id = $2
-             AND spc.order_id = $3
-             AND spc.invoice_id IS NULL
-             AND spc.approval_status IN ('not_required', 'approved')"#,
-    )
-    .bind(invoice_id)
-    .bind(ctx.patient_id)
-    .bind(ctx.order_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "link package consumptions to invoice");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to link package consumption to invoice",
-        )
-    })?;
-
-    Ok(())
+fn invoice_snapshot_has_package_overage(snapshot: &InvoiceCreationSnapshot) -> bool {
+    snapshot
+        .line_items
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|item| item.get("source").and_then(Value::as_str) == Some("service_package_overage"))
 }
 
 async fn load_invoice_detail(
@@ -2930,7 +3182,8 @@ async fn load_invoice_detail(
     let row = sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.paid_at, i.line_items, i.notes, i.created_at, i.updated_at,
+                  i.paid_amount, i.prepayment_applied_amount, i.paid_at, i.line_items, i.notes,
+                  i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
@@ -2969,6 +3222,9 @@ async fn load_invoice_detail(
         .unwrap_or(Decimal::ZERO);
     let paid_amount = row
         .try_get::<Decimal, _>("paid_amount")
+        .unwrap_or(Decimal::ZERO);
+    let prepayment_applied_amount = row
+        .try_get::<Decimal, _>("prepayment_applied_amount")
         .unwrap_or(Decimal::ZERO);
     let raw_line_items = row
         .try_get::<Value, _>("line_items")
@@ -3020,6 +3276,84 @@ async fn load_invoice_detail(
         .collect::<Vec<_>>()
     };
 
+    let available_prepayments = if row.try_get::<String, _>("invoice_type").unwrap_or_default()
+        == "advance"
+    {
+        Vec::new()
+    } else {
+        sqlx::query(
+            r#"SELECT advance.id, advance.invoice_number, advance.total_gross,
+                      advance.paid_amount,
+                      COALESCE(SUM(allocation.amount_gross), 0) AS allocated_amount,
+                      GREATEST(advance.paid_amount - COALESCE(SUM(allocation.amount_gross), 0), 0) AS available_amount
+               FROM invoices advance
+               LEFT JOIN invoice_prepayment_allocations allocation
+                 ON allocation.advance_invoice_id = advance.id
+               WHERE advance.order_id = $1
+                 AND advance.patient_id = $2
+                 AND advance.invoice_type = 'advance'
+                 AND advance.status <> 'cancelled'
+                 AND advance.paid_amount > 0
+               GROUP BY advance.id
+               HAVING advance.paid_amount - COALESCE(SUM(allocation.amount_gross), 0) > 0
+               ORDER BY advance.issued_at, advance.id"#,
+        )
+        .bind(row.try_get::<Uuid, _>("order_id").unwrap_or_default())
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load available invoice prepayments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice prepayments",
+            )
+        })?
+        .into_iter()
+        .map(|advance| {
+            serde_json::json!({
+                "invoice_id": advance.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "invoice_number": advance.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                "total_gross": decimal_to_string(advance.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO)),
+                "paid_amount": decimal_to_string(advance.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
+                "allocated_amount": decimal_to_string(advance.try_get::<Decimal, _>("allocated_amount").unwrap_or(Decimal::ZERO)),
+                "available_amount": decimal_to_string(advance.try_get::<Decimal, _>("available_amount").unwrap_or(Decimal::ZERO)),
+            })
+        })
+        .collect::<Vec<_>>()
+    };
+
+    let prepayment_allocations = sqlx::query(
+        r#"SELECT allocation.id, allocation.advance_invoice_id,
+                  allocation.amount_gross, allocation.created_at,
+                  advance.invoice_number AS advance_invoice_number
+           FROM invoice_prepayment_allocations allocation
+           JOIN invoices advance ON advance.id = allocation.advance_invoice_id
+           WHERE allocation.target_invoice_id = $1
+           ORDER BY allocation.created_at, allocation.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice prepayment allocations");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load invoice prepayment allocations",
+        )
+    })?
+    .into_iter()
+    .map(|allocation| {
+        serde_json::json!({
+            "id": allocation.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "advance_invoice_id": allocation.try_get::<Uuid, _>("advance_invoice_id").unwrap_or_default(),
+            "advance_invoice_number": allocation.try_get::<String, _>("advance_invoice_number").unwrap_or_default(),
+            "amount_gross": decimal_to_string(allocation.try_get::<Decimal, _>("amount_gross").unwrap_or(Decimal::ZERO)),
+            "created_at": allocation.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        })
+    })
+    .collect::<Vec<_>>();
+
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
@@ -3043,7 +3377,10 @@ async fn load_invoice_detail(
         "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
         "total_gross": decimal_to_string(total_gross),
         "paid_amount": decimal_to_string(paid_amount),
-        "balance_due": decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
+        "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
+        "balance_due": decimal_to_string((total_gross - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
+        "available_prepayments": available_prepayments,
+        "prepayment_allocations": prepayment_allocations,
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
         "supporting_documents": supporting_documents,
@@ -3079,7 +3416,7 @@ async fn load_invoice_pdf_context(
     let row = sqlx::query(
         r#"SELECT i.id, i.patient_id, i.invoice_number, i.invoice_type, i.status,
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.line_items, i.notes,
+                  i.paid_amount, i.prepayment_applied_amount, i.line_items, i.notes,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
                   o.order_number, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
@@ -3122,6 +3459,9 @@ async fn load_invoice_pdf_context(
     let paid_amount = row
         .try_get::<Decimal, _>("paid_amount")
         .unwrap_or(Decimal::ZERO);
+    let prepayment_applied_amount = row
+        .try_get::<Decimal, _>("prepayment_applied_amount")
+        .unwrap_or(Decimal::ZERO);
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
@@ -3160,7 +3500,9 @@ async fn load_invoice_pdf_context(
         ),
         total_gross: decimal_to_string(total_gross),
         paid_amount: decimal_to_string(paid_amount),
-        balance_due: decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
+        balance_due: decimal_to_string(
+            (total_gross - paid_amount - prepayment_applied_amount).max(Decimal::ZERO),
+        ),
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -3490,7 +3832,8 @@ async fn list_my_invoices(
     match sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.paid_at, i.notes, i.created_at, i.updated_at,
+                  i.paid_amount, i.prepayment_applied_amount, i.paid_at, i.notes,
+                  i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
                   o.order_number, q.quote_number,
@@ -3547,6 +3890,9 @@ async fn list_my_invoices(
                     let paid_amount = row
                         .try_get::<Decimal, _>("paid_amount")
                         .unwrap_or(Decimal::ZERO);
+                    let prepayment_applied_amount = row
+                        .try_get::<Decimal, _>("prepayment_applied_amount")
+                        .unwrap_or(Decimal::ZERO);
 
                     let mut invoice = serde_json::json!({
                         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -3564,7 +3910,8 @@ async fn list_my_invoices(
                         "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
                         "total_gross": decimal_to_string(total_gross),
                         "paid_amount": decimal_to_string(paid_amount),
-                        "balance_due": decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
+                        "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
+                        "balance_due": decimal_to_string((total_gross - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
                         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -3996,7 +4343,7 @@ async fn list_invoices(
     match sqlx::query(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.paid_at, i.created_at, i.updated_at,
+                  i.paid_amount, i.prepayment_applied_amount, i.paid_at, i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
                   o.order_number, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
@@ -4045,6 +4392,9 @@ async fn list_invoices(
                 let paid_amount = row
                     .try_get::<Decimal, _>("paid_amount")
                     .unwrap_or(Decimal::ZERO);
+                let prepayment_applied_amount = row
+                    .try_get::<Decimal, _>("prepayment_applied_amount")
+                    .unwrap_or(Decimal::ZERO);
 
                 items.push(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -4068,7 +4418,8 @@ async fn list_invoices(
                     "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
                     "total_gross": decimal_to_string(total_gross),
                     "paid_amount": decimal_to_string(paid_amount),
-                    "balance_due": decimal_to_string((total_gross - paid_amount).max(Decimal::ZERO)),
+                    "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
+                    "balance_due": decimal_to_string((total_gross - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
                     "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
@@ -4215,15 +4566,28 @@ async fn create_invoice_from_quote(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    if let Err(resp) = validate_invoice_creation_for_quote(&state, &ctx, &invoice_type).await {
+    let invoice_snapshot = match build_selected_invoice_snapshot(
+        &state,
+        &ctx,
+        &invoice_type,
+        body.line_items.as_deref(),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let selected_source_ids = invoice_snapshot
+        .allocations
+        .iter()
+        .filter_map(|allocation| allocation.order_leistung_id)
+        .collect::<Vec<_>>();
+
+    if let Err(resp) =
+        validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, &selected_source_ids).await
+    {
         return resp;
     }
-
-    let invoice_snapshot =
-        match build_invoice_snapshot_with_approved_package_overages(&state, &ctx).await {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
 
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
         .fetch_one(&state.db)
@@ -4242,6 +4606,16 @@ async fn create_invoice_from_quote(
     let invoice_number = gen_invoice_number(seq);
     let notes = body.notes.clone().or(ctx.notes.clone());
     let payer = inherited_invoice_payer(&state.db, ctx.order_id, ctx.patient_id).await;
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, quote_id = %quote_id, "begin invoice creation transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice",
+            );
+        }
+    };
 
     match sqlx::query(
         r#"INSERT INTO invoices (
@@ -4272,19 +4646,122 @@ async fn create_invoice_from_quote(
     .bind(payer.payer_contact_phone.clone())
     .bind(payer.payer_contact_relationship.clone())
     .bind(payer.payer_notes.clone())
-    .fetch_one(&state.db)
+    .fetch_one(&mut *transaction)
     .await
     {
         Ok(row) => {
             let invoice_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
 
-            if let Err(resp) = mark_quote_services_invoiced(&state, &ctx, &invoice_type).await {
-                return resp;
+            for allocation in &invoice_snapshot.allocations {
+                if let Err(e) = sqlx::query(
+                    r#"INSERT INTO invoice_order_line_allocations (
+                            invoice_id, quote_id, quote_line_index, order_leistung_id,
+                            quantity, description_snapshot, unit_price_net_snapshot,
+                            vat_rate_snapshot, amount_net_snapshot, amount_vat_snapshot,
+                            amount_gross_snapshot
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                )
+                .bind(invoice_id)
+                .bind(ctx.quote_id)
+                .bind(allocation.quote_line_index)
+                .bind(allocation.order_leistung_id)
+                .bind(allocation.quantity)
+                .bind(allocation.description.clone())
+                .bind(allocation.unit_price_net)
+                .bind(allocation.vat_rate)
+                .bind(allocation.amount_net)
+                .bind(allocation.amount_vat)
+                .bind(allocation.amount_gross)
+                .execute(&mut *transaction)
+                .await
+                {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, quote_id = %ctx.quote_id, "persist invoice line allocation");
+                    return match e {
+                        sqlx::Error::Database(db_error)
+                            if matches!(db_error.code().as_deref(), Some("23505" | "P0001")) =>
+                        {
+                            err(
+                                StatusCode::CONFLICT,
+                                "Invoice quantity changed; reload the quote and try again",
+                            )
+                        }
+                        _ => err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to save invoice line allocation",
+                        ),
+                    };
+                }
             }
-            if let Err(resp) =
-                link_approved_package_consumptions_to_invoice(&state, &ctx, invoice_id).await
+
+            let completed_source_ids = invoice_snapshot
+                .allocations
+                .iter()
+                .filter(|allocation| allocation.completes_quote_line)
+                .filter_map(|allocation| allocation.order_leistung_id)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            if invoice_type != "advance" && !completed_source_ids.is_empty() {
+                let mark_result = sqlx::query(
+                    "UPDATE order_leistungen
+                     SET status = 'invoiced'
+                     WHERE order_id = $1
+                       AND id = ANY($2)
+                       AND status = 'approved'",
+                )
+                .bind(ctx.order_id)
+                .bind(&completed_source_ids)
+                .execute(&mut *transaction)
+                .await;
+                match mark_result {
+                    Ok(result)
+                        if result.rows_affected()
+                            == u64::try_from(completed_source_ids.len()).unwrap_or(u64::MAX) => {}
+                    Ok(_) => {
+                        return err(
+                            StatusCode::CONFLICT,
+                            "Order service approval changed; reload and try again",
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "mark invoiced services");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to mark order services as invoiced",
+                        );
+                    }
+                }
+            }
+            if invoice_snapshot_has_package_overage(&invoice_snapshot)
+                && let Err(e) = sqlx::query(
+                    r#"UPDATE service_package_consumptions consumption
+                       SET invoice_id = $1
+                       FROM patient_service_packages patient_package
+                       WHERE consumption.patient_service_package_id = patient_package.id
+                         AND patient_package.patient_id = $2
+                         AND consumption.order_id = $3
+                         AND consumption.invoice_id IS NULL
+                         AND consumption.approval_status IN ('not_required', 'approved')"#,
+                )
+                .bind(invoice_id)
+                .bind(ctx.patient_id)
+                .bind(ctx.order_id)
+                .execute(&mut *transaction)
+                .await
             {
-                return resp;
+                tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "link package consumption to invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to link package consumption to invoice",
+                );
+            }
+
+            if let Err(e) = transaction.commit().await {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice creation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
             }
 
             state.audit_sender.try_send(audit::domain_event(
@@ -4301,6 +4778,7 @@ async fn create_invoice_from_quote(
                     "contract_id": ctx.contract_id,
                     "quote_number": ctx.quote_number,
                     "order_number": ctx.order_number,
+                    "line_allocations": invoice_snapshot.allocations.len(),
                 }),
             ));
 
@@ -4337,6 +4815,1103 @@ async fn create_invoice_from_quote(
                 "Failed to create invoice",
             )
         }
+    }
+}
+
+async fn recompute_invoice_settlement_status(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"WITH locked AS (
+               SELECT id, status, due_date, total_gross,
+                      prepayment_applied_amount, paid_at
+               FROM invoices
+               WHERE id = $1
+               FOR UPDATE
+           ), cash AS (
+               SELECT COALESCE(SUM(
+                          CASE
+                              WHEN transaction_type = 'payment' THEN amount_gross
+                              ELSE -amount_gross
+                          END
+                      ), 0) AS paid_amount,
+                      MAX(
+                          CASE
+                              WHEN payment.transaction_type = 'payment'
+                               AND NOT EXISTS (
+                                   SELECT 1
+                                   FROM invoice_payment_transactions reversal
+                                   WHERE reversal.reverses_transaction_id = payment.id
+                                     AND reversal.transaction_type = 'reversal'
+                               )
+                              THEN CASE
+                                  WHEN payment.payment_method = 'legacy_import'
+                                      THEN payment.created_at
+                                  ELSE payment.received_on::timestamp AT TIME ZONE 'UTC'
+                              END
+                          END
+                      ) AS latest_cash_received_at
+               FROM invoice_payment_transactions payment
+               WHERE payment.invoice_id = $1
+           ), prepayment AS (
+               SELECT MAX(allocation.created_at) AS latest_prepayment_at
+               FROM invoice_prepayment_allocations allocation
+               WHERE allocation.target_invoice_id = $1
+           ), computed AS (
+               SELECT locked.id, cash.paid_amount,
+                      GREATEST(
+                          cash.latest_cash_received_at,
+                          prepayment.latest_prepayment_at
+                      ) AS settlement_at,
+                      CASE
+                          WHEN locked.status = 'cancelled' THEN locked.status
+                          WHEN locked.total_gross > 0
+                           AND cash.paid_amount + locked.prepayment_applied_amount
+                               >= locked.total_gross
+                              THEN 'paid'
+                          WHEN cash.paid_amount + locked.prepayment_applied_amount > 0
+                              THEN 'partially_paid'
+                          WHEN locked.status IN ('paid', 'partially_paid')
+                           AND locked.due_date < CURRENT_DATE THEN 'overdue'
+                          WHEN locked.status IN ('paid', 'partially_paid') THEN 'sent'
+                          ELSE locked.status
+                      END AS next_status
+               FROM locked
+               CROSS JOIN cash
+               CROSS JOIN prepayment
+           )
+           UPDATE invoices invoice
+           SET paid_amount = computed.paid_amount,
+               status = computed.next_status,
+               paid_at = CASE
+                   WHEN computed.next_status = 'paid'
+                       THEN COALESCE(computed.settlement_at, invoice.paid_at, now())
+                   ELSE NULL
+               END
+           FROM computed
+           WHERE invoice.id = computed.id"#,
+    )
+    .bind(invoice_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn apply_invoice_prepayment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<ApplyInvoicePrepaymentRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid prepayment amount",
+        );
+    };
+    let amount_gross = amount_gross.round_dp(2);
+    if amount_gross <= Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Prepayment amount must be greater than zero",
+        );
+    }
+
+    let target = match sqlx::query("SELECT patient_id FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load prepayment target invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply prepayment",
+            );
+        }
+    };
+    let patient_id = target.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin prepayment transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply prepayment",
+            );
+        }
+    };
+    let result = sqlx::query(
+        r#"INSERT INTO invoice_prepayment_allocations (
+                advance_invoice_id, target_invoice_id, amount_gross, created_by
+           ) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (advance_invoice_id, target_invoice_id)
+           DO UPDATE SET
+               amount_gross = invoice_prepayment_allocations.amount_gross + EXCLUDED.amount_gross,
+               created_by = EXCLUDED.created_by
+           RETURNING id"#,
+    )
+    .bind(body.advance_invoice_id)
+    .bind(invoice_id)
+    .bind(amount_gross)
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await;
+
+    let allocation_id = match result {
+        Ok(row) => row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        Err(sqlx::Error::Database(db_error))
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Prepayment exceeds the available advance or invoice balance",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "apply invoice prepayment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply prepayment",
+            );
+        }
+    };
+
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "refresh invoice status after prepayment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply prepayment",
+        );
+    }
+
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice prepayment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply prepayment",
+        );
+    }
+
+    match sqlx::query("SELECT status, paid_at FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(settlement))
+            if settlement
+                .try_get::<String, _>("status")
+                .unwrap_or_default()
+                == "paid" =>
+        {
+            if let Some(paid_at) = settlement
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default()
+                && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
+                    &state,
+                    invoice_id,
+                    auth.user_id,
+                    paid_at,
+                )
+                .await
+            {
+                tracing::error!(
+                    invoice_id = %invoice_id,
+                    allocation_id = %allocation_id,
+                    status = %resp.status(),
+                    "prepayment committed but reimbursed document follow-up failed"
+                );
+                state.audit_sender.try_send(audit::domain_event(
+                    "prepayment_follow_up_failed",
+                    Some(auth.user_id),
+                    "invoice",
+                    Some(invoice_id),
+                    serde_json::json!({
+                        "allocation_id": allocation_id,
+                        "follow_up": "reimbursed_financial_documents",
+                    }),
+                ));
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, allocation_id = %allocation_id, "load settlement for prepayment follow-up");
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "apply_invoice_prepayment",
+        Some(auth.user_id),
+        "invoice",
+        Some(invoice_id),
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "advance_invoice_id": body.advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    ));
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.prepayment_applied",
+        invoice_id,
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "advance_invoice_id": body.advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(invoice).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn release_invoice_prepayment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, allocation_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let allocation = match sqlx::query(
+        r#"SELECT allocation.advance_invoice_id, allocation.amount_gross,
+                  target.patient_id
+           FROM invoice_prepayment_allocations allocation
+           JOIN invoices target ON target.id = allocation.target_invoice_id
+           WHERE allocation.id = $1
+             AND allocation.target_invoice_id = $2"#,
+    )
+    .bind(allocation_id)
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Prepayment allocation not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, allocation_id = %allocation_id, "load prepayment allocation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to release prepayment",
+            );
+        }
+    };
+    let patient_id = allocation
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_default();
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    let advance_invoice_id = allocation
+        .try_get::<Uuid, _>("advance_invoice_id")
+        .unwrap_or_default();
+    let amount_gross = allocation
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin prepayment release transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to release prepayment",
+            );
+        }
+    };
+    let deleted = sqlx::query(
+        r#"DELETE FROM invoice_prepayment_allocations
+           WHERE id = $1
+             AND target_invoice_id = $2"#,
+    )
+    .bind(allocation_id)
+    .bind(invoice_id)
+    .execute(&mut *transaction)
+    .await;
+    match deleted {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Prepayment allocation not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, allocation_id = %allocation_id, "delete prepayment allocation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to release prepayment",
+            );
+        }
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after prepayment release");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release prepayment",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit prepayment release");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release prepayment",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "release_invoice_prepayment",
+        Some(auth.user_id),
+        "invoice",
+        Some(invoice_id),
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "advance_invoice_id": advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    ));
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.prepayment_released",
+        invoice_id,
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "advance_invoice_id": advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(invoice).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+fn invoice_payment_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) -> Value {
+    let transaction_type = row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default();
+    let amount_gross = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let effective_amount_gross = if transaction_type == "reversal" {
+        -amount_gross
+    } else {
+        amount_gross
+    };
+    let mut payload = serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
+        "transaction_type": transaction_type,
+        "reverses_transaction_id": row.try_get::<Option<Uuid>, _>("reverses_transaction_id").unwrap_or_default(),
+        "reversed_by_transaction_id": row.try_get::<Option<Uuid>, _>("reversed_by_transaction_id").unwrap_or_default(),
+        "is_reversed": row.try_get::<bool, _>("is_reversed").unwrap_or(false),
+        "amount_gross": decimal_to_string(amount_gross),
+        "effective_amount_gross": decimal_to_string(effective_amount_gross),
+        "payment_method": row.try_get::<String, _>("payment_method").unwrap_or_default(),
+        "payment_reference": row.try_get::<Option<String>, _>("payment_reference").unwrap_or_default(),
+        "received_on": row.try_get::<NaiveDate, _>("received_on").map(|value| value.to_string()).unwrap_or_default(),
+        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    });
+    if staff_view && let Some(map) = payload.as_object_mut() {
+        map.insert(
+            "note".to_string(),
+            serde_json::json!(row.try_get::<Option<String>, _>("note").unwrap_or_default()),
+        );
+        map.insert(
+            "created_by".to_string(),
+            serde_json::json!(row.try_get::<Uuid, _>("created_by").unwrap_or_default()),
+        );
+        map.insert(
+            "created_by_name".to_string(),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_name")
+                    .unwrap_or_default()
+            ),
+        );
+        map.insert(
+            "created_by_role".to_string(),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_role")
+                    .unwrap_or_default()
+            ),
+        );
+    }
+    payload
+}
+
+async fn load_invoice_payment_history(
+    state: &AppState,
+    invoice_id: Uuid,
+    staff_view: bool,
+) -> Result<Vec<Value>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT payment.id, payment.invoice_id, payment.transaction_type,
+                  payment.reverses_transaction_id, payment.amount_gross,
+                  payment.payment_method, payment.payment_reference,
+                  payment.received_on, payment.note, payment.created_by,
+                  payment.created_at, creator.name AS created_by_name,
+                  creator.role AS created_by_role,
+                  reversal.id AS reversed_by_transaction_id,
+                  (reversal.id IS NOT NULL) AS is_reversed
+           FROM invoice_payment_transactions payment
+           JOIN users creator ON creator.id = payment.created_by
+           LEFT JOIN invoice_payment_transactions reversal
+             ON reversal.reverses_transaction_id = payment.id
+            AND reversal.transaction_type = 'reversal'
+           WHERE payment.invoice_id = $1
+           ORDER BY payment.received_on DESC, payment.created_at DESC, payment.id DESC"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&state.db)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|row| invoice_payment_row_payload(&row, staff_view))
+            .collect()
+    })
+}
+
+async fn list_invoice_payments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payment access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice payments",
+            );
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    match load_invoice_payment_history(&state, invoice_id, true).await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice payments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice payments",
+            )
+        }
+    }
+}
+
+async fn list_my_invoice_payments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(patient_id) => patient_id,
+        Err(resp) => return resp,
+    };
+    let invoice = match sqlx::query(
+        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient
+           FROM invoices
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(invoice)) => invoice,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load portal invoice payment access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice payments",
+            );
+        }
+    };
+    if invoice
+        .try_get::<Uuid, _>("patient_id")
+        .map(|value| value != patient_id)
+        .unwrap_or(true)
+        || !invoice
+            .try_get::<bool, _>("portal_visible")
+            .unwrap_or(false)
+        || !invoice_is_patient_visible(&invoice.try_get::<String, _>("status").unwrap_or_default())
+    {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    }
+    if invoice
+        .try_get::<bool, _>("hide_amounts_from_patient")
+        .unwrap_or(true)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Invoice payment amounts are hidden from patient",
+        );
+    }
+
+    match load_invoice_payment_history(&state, invoice_id, false).await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "list portal invoice payments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load invoice payments",
+            )
+        }
+    }
+}
+
+async fn create_invoice_payment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<CreateInvoicePaymentRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
+    };
+    let amount_gross = amount_gross.round_dp(2);
+    if amount_gross <= Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payment amount must be greater than zero",
+        );
+    }
+    let payment_method = body.payment_method.trim();
+    if !is_valid_invoice_payment_method(payment_method) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
+    }
+    let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        _ => {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date");
+        }
+    };
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payment context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin invoice payment transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT id, order_id, patient_id, invoice_number, status,
+                  total_vat, total_gross, prepayment_applied_amount, line_items
+           FROM invoices
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoice for payment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        patient_id,
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+    if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
+        return err(
+            StatusCode::CONFLICT,
+            "Payments require an active released invoice",
+        );
+    }
+    let current_cash_paid: Decimal = match sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(
+                  CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END
+               ), 0)
+           FROM invoice_payment_transactions
+           WHERE invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice payments");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    if current_cash_paid + amount_gross + context.prepayment_applied_amount > context.total_gross {
+        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    }
+
+    let payment_reference = normalize_optional(body.payment_reference.as_deref());
+    let note = normalize_optional(body.note.as_deref());
+    let payment_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, amount_gross, payment_method,
+                payment_reference, received_on, note, created_by
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(amount_gross)
+    .bind(payment_method)
+    .bind(payment_reference.clone())
+    .bind(received_on)
+    .bind(note.clone())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(payment_id) => payment_id,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice payment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    if let Err(e) = insert_invoice_payment_accounting_entries(
+        &mut transaction,
+        &context,
+        payment_id,
+        "payment",
+        amount_gross,
+        payment_method,
+        payment_reference.as_deref(),
+        received_on,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert payment accounting entries");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice payment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
+
+    match sqlx::query("SELECT status, paid_at FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(settlement))
+            if settlement
+                .try_get::<String, _>("status")
+                .unwrap_or_default()
+                == "paid" =>
+        {
+            if let Some(paid_at) = settlement
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default()
+                && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
+                    &state,
+                    invoice_id,
+                    auth.user_id,
+                    paid_at,
+                )
+                .await
+            {
+                tracing::error!(
+                    invoice_id = %invoice_id,
+                    payment_id = %payment_id,
+                    status = %resp.status(),
+                    "payment committed but reimbursed document follow-up failed"
+                );
+                state.audit_sender.try_send(audit::domain_event(
+                    "payment_follow_up_failed",
+                    Some(auth.user_id),
+                    "invoice",
+                    Some(invoice_id),
+                    serde_json::json!({
+                        "payment_transaction_id": payment_id,
+                        "follow_up": "reimbursed_financial_documents",
+                    }),
+                ));
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "load settlement for payment follow-up");
+        }
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "payment_recorded",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+            "received_on": received_on.to_string(),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.payment_recorded",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "payment_transaction_id": payment_id,
+                "invoice": invoice,
+            })),
+        )
+            .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn reverse_invoice_payment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, payment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ReverseInvoicePaymentRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let note = match normalize_optional(Some(body.note.as_str())) {
+        Some(note) => note,
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Reversal reason is required",
+            );
+        }
+    };
+    let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(None) => Utc::now().date_naive(),
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
+    };
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice reversal access");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin payment reversal transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT payment.amount_gross, payment.payment_method,
+                  payment.payment_reference, payment.transaction_type,
+                  invoice.order_id, invoice.patient_id, invoice.invoice_number,
+                  invoice.status, invoice.total_vat, invoice.total_gross,
+                  invoice.prepayment_applied_amount, invoice.line_items,
+                  EXISTS (
+                      SELECT 1 FROM invoice_payment_transactions reversal
+                      WHERE reversal.reverses_transaction_id = payment.id
+                        AND reversal.transaction_type = 'reversal'
+                  ) AS already_reversed
+           FROM invoice_payment_transactions payment
+           JOIN invoices invoice ON invoice.id = payment.invoice_id
+           WHERE payment.id = $1
+             AND payment.invoice_id = $2
+           FOR UPDATE OF payment, invoice"#,
+    )
+    .bind(payment_id)
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Payment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "lock invoice payment reversal");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
+    };
+    if row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default()
+        != "payment"
+    {
+        return err(StatusCode::CONFLICT, "Only a payment can be reversed");
+    }
+    if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
+        return err(StatusCode::CONFLICT, "Payment was already reversed");
+    }
+    let amount_gross = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let payment_method = row
+        .try_get::<String, _>("payment_method")
+        .unwrap_or_else(|_| "other".to_string());
+    let payment_reference = row
+        .try_get::<Option<String>, _>("payment_reference")
+        .unwrap_or_default();
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        patient_id,
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+    let reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, reverses_transaction_id,
+                amount_gross, payment_method, payment_reference,
+                received_on, note, created_by
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(payment_id)
+    .bind(amount_gross)
+    .bind(payment_method.clone())
+    .bind(payment_reference.clone())
+    .bind(reversed_on)
+    .bind(note.clone())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(reversal_id) => reversal_id,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "P0001")) =>
+        {
+            return err(StatusCode::CONFLICT, "Payment was already reversed");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert payment reversal");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
+    };
+    if let Err(e) = insert_invoice_payment_accounting_entries(
+        &mut transaction,
+        &context,
+        reversal_id,
+        "reversal",
+        amount_gross,
+        &payment_method,
+        payment_reference.as_deref(),
+        reversed_on,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert reversal accounting entries");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse payment",
+        );
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after reversal");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse payment",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment reversal");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse payment",
+        );
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "payment_reversed",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "reversal_transaction_id": reversal_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "reason": note,
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.payment_reversed",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "reversal_transaction_id": reversal_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(serde_json::json!({
+            "reversal_transaction_id": reversal_id,
+            "invoice": invoice,
+        }))
+        .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
     }
 }
 
@@ -4558,7 +6133,8 @@ async fn create_dunning_event(
         return resp;
     }
 
-    let balance_due = (ctx.total_gross - ctx.paid_amount).max(Decimal::ZERO);
+    let balance_due =
+        (ctx.total_gross - ctx.paid_amount - ctx.prepayment_applied_amount).max(Decimal::ZERO);
     if balance_due <= Decimal::ZERO || matches!(ctx.status.as_str(), "paid" | "cancelled") {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -4954,9 +6530,20 @@ async fn update_invoice_status(
     if !is_valid_invoice_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }
-
     let current = match sqlx::query(
-        "SELECT patient_id, total_gross, paid_amount FROM invoices WHERE id = $1",
+        r#"SELECT invoice.patient_id, invoice.invoice_type, invoice.status,
+                  COALESCE((
+                      SELECT SUM(
+                          CASE
+                              WHEN payment.transaction_type = 'payment' THEN payment.amount_gross
+                              ELSE -payment.amount_gross
+                          END
+                      )
+                      FROM invoice_payment_transactions payment
+                      WHERE payment.invoice_id = invoice.id
+                  ), 0) AS journal_paid_amount
+           FROM invoices invoice
+           WHERE invoice.id = $1"#,
     )
     .bind(invoice_id)
     .fetch_optional(&state.db)
@@ -4983,70 +6570,317 @@ async fn update_invoice_status(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let total_gross = current
-        .try_get::<Decimal, _>("total_gross")
-        .unwrap_or(Decimal::ZERO);
     let existing_paid_amount = current
-        .try_get::<Decimal, _>("paid_amount")
+        .try_get::<Decimal, _>("journal_paid_amount")
         .unwrap_or(Decimal::ZERO);
-    let requested_paid_amount = match body.paid_amount {
+    let requested_paid_amount = match body.paid_amount.as_ref() {
         Some(value) => match value.parse_decimal() {
-            Some(decimal) if decimal >= Decimal::ZERO => decimal.round_dp(2),
-            _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount"),
+            Some(value) if value >= existing_paid_amount => Some(value.round_dp(2)),
+            Some(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Recorded payments can only be reduced through reversals",
+                );
+            }
+            None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount"),
         },
-        None => existing_paid_amount,
+        None => None,
     };
-
-    let mut effective_status = body.status.clone();
-    let mut effective_paid_amount = requested_paid_amount;
-    if effective_status == "paid" && effective_paid_amount == Decimal::ZERO {
-        effective_paid_amount = total_gross;
-    }
-    if effective_paid_amount >= total_gross && total_gross > Decimal::ZERO {
-        effective_status = "paid".to_string();
-    } else if effective_paid_amount > Decimal::ZERO
-        && matches!(effective_status.as_str(), "draft" | "sent" | "overdue")
+    let current_status = current.try_get::<String, _>("status").unwrap_or_default();
+    if body.paid_amount.is_none()
+        && matches!(body.status.as_str(), "paid" | "partially_paid")
+        && body.status != current_status
     {
-        effective_status = "partially_paid".to_string();
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payment status is derived from payment transactions and prepayments",
+        );
+    }
+    let requested_status = body.status.clone();
+    if requested_status == "cancelled"
+        && requested_paid_amount.unwrap_or(existing_paid_amount) > Decimal::ZERO
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Recorded payments must be reversed before cancellation",
+        );
     }
 
-    let paid_at = if effective_status == "paid" {
-        Some(Utc::now())
-    } else {
-        None
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin invoice status transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
     };
-    let paid_at_payload = paid_at.as_ref().map(|value| value.to_rfc3339());
+
+    let mut legacy_payment_transaction_id = None;
+    if let Some(requested_paid_amount) = requested_paid_amount
+        && requested_paid_amount > existing_paid_amount
+    {
+        let payment_row = match sqlx::query(
+            r#"SELECT order_id, patient_id, invoice_number, status,
+                      total_vat, total_gross, prepayment_applied_amount, line_items,
+                      COALESCE((
+                          SELECT SUM(
+                              CASE
+                                  WHEN payment.transaction_type = 'payment' THEN payment.amount_gross
+                                  ELSE -payment.amount_gross
+                              END
+                          )
+                          FROM invoice_payment_transactions payment
+                          WHERE payment.invoice_id = invoices.id
+                      ), 0) AS journal_paid_amount
+               FROM invoices
+               WHERE id = $1
+               FOR UPDATE"#,
+        )
+        .bind(invoice_id)
+        .fetch_one(&mut *transaction)
+        .await
+        {
+            Ok(row) => row,
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoice for legacy payment status update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        };
+        let locked_paid_amount = payment_row
+            .try_get::<Decimal, _>("journal_paid_amount")
+            .unwrap_or(Decimal::ZERO);
+        if locked_paid_amount != existing_paid_amount {
+            return err(
+                StatusCode::CONFLICT,
+                "Invoice payment state changed; reload and try again",
+            );
+        }
+        let payment_context = InvoicePaymentContext {
+            invoice_id,
+            order_id: payment_row
+                .try_get::<Uuid, _>("order_id")
+                .unwrap_or_default(),
+            patient_id,
+            invoice_number: payment_row
+                .try_get::<String, _>("invoice_number")
+                .unwrap_or_default(),
+            invoice_status: payment_row
+                .try_get::<String, _>("status")
+                .unwrap_or_default(),
+            total_vat: payment_row
+                .try_get::<Decimal, _>("total_vat")
+                .unwrap_or(Decimal::ZERO),
+            total_gross: payment_row
+                .try_get::<Decimal, _>("total_gross")
+                .unwrap_or(Decimal::ZERO),
+            prepayment_applied_amount: payment_row
+                .try_get::<Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(Decimal::ZERO),
+            line_items: payment_row
+                .try_get::<Value, _>("line_items")
+                .unwrap_or_else(|_| serde_json::json!([])),
+        };
+        if matches!(
+            payment_context.invoice_status.as_str(),
+            "draft" | "cancelled"
+        ) {
+            return err(
+                StatusCode::CONFLICT,
+                "Payments require an active released invoice",
+            );
+        }
+        let payment_delta = requested_paid_amount - existing_paid_amount;
+        let payment_id = match sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO invoice_payment_transactions (
+                    invoice_id, transaction_type, amount_gross, payment_method,
+                    payment_reference, received_on, note, created_by
+               ) VALUES (
+                    $1, 'payment', $2, 'legacy_import', 'legacy-status-api',
+                    CURRENT_DATE, 'Imported from deprecated invoice status payment field', $3
+               )
+               RETURNING id"#,
+        )
+        .bind(invoice_id)
+        .bind(payment_delta)
+        .bind(auth.user_id)
+        .fetch_one(&mut *transaction)
+        .await
+        {
+            Ok(payment_id) => payment_id,
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+                return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "record legacy status payment transaction");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        };
+        if let Err(e) = insert_invoice_payment_accounting_entries(
+            &mut transaction,
+            &payment_context,
+            payment_id,
+            "payment",
+            payment_delta,
+            "legacy_import",
+            Some("legacy-status-api"),
+            Utc::now().date_naive(),
+            auth.user_id,
+        )
+        .await
+        {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "record legacy status payment accounting");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
+        legacy_payment_transaction_id = Some(payment_id);
+    }
+
+    if requested_status == "cancelled"
+        && current
+            .try_get::<String, _>("invoice_type")
+            .unwrap_or_default()
+            == "advance"
+    {
+        let allocation_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM invoice_prepayment_allocations
+                WHERE advance_invoice_id = $1
+            )",
+        )
+        .bind(invoice_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .unwrap_or(true);
+        if allocation_exists {
+            return err(
+                StatusCode::CONFLICT,
+                "Applied advance payment must be released before cancellation",
+            );
+        }
+    }
+
+    if requested_status == "cancelled"
+        && let Err(e) =
+            sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE target_invoice_id = $1")
+                .bind(invoice_id)
+                .execute(&mut *transaction)
+                .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "release invoice prepayment allocations");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release invoice prepayment",
+        );
+    }
 
     match sqlx::query(
         r#"UPDATE invoices
            SET status = $2,
                due_date = COALESCE($3, due_date),
-               paid_amount = $4,
-               paid_at = $5,
-               notes = COALESCE($6, notes)
+               notes = COALESCE($4, notes)
            WHERE id = $1"#,
     )
     .bind(invoice_id)
-    .bind(effective_status.clone())
+    .bind(requested_status.clone())
     .bind(due_date)
-    .bind(effective_paid_amount)
-    .bind(paid_at)
     .bind(body.notes.clone())
-    .execute(&state.db)
+    .execute(&mut *transaction)
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            if let Err(error) = sync_invoice_accounting_entries_from_current_state(
-                &state,
-                invoice_id,
-                Some(auth.user_id),
-            )
-            .await
+            if requested_status == "cancelled"
+                && let Err(e) = sqlx::query(
+                    r#"UPDATE order_leistungen service
+                       SET status = 'approved'
+                       WHERE service.status = 'invoiced'
+                         AND service.id IN (
+                             SELECT order_leistung_id
+                             FROM invoice_order_line_allocations
+                             WHERE invoice_id = $1
+                               AND order_leistung_id IS NOT NULL
+                         )
+                         AND NOT EXISTS (
+                             SELECT 1
+                             FROM invoice_order_line_allocations allocation
+                             JOIN invoices active_invoice ON active_invoice.id = allocation.invoice_id
+                             JOIN quotes quote ON quote.id = allocation.quote_id
+                             WHERE allocation.order_leistung_id = service.id
+                               AND active_invoice.status <> 'cancelled'
+                             GROUP BY allocation.quote_id, allocation.quote_line_index,
+                                      quote.line_items
+                             HAVING SUM(allocation.quantity) >= COALESCE(
+                                 NULLIF(quote.line_items -> allocation.quote_line_index ->> 'quantity', '')::NUMERIC,
+                                 0
+                             )
+                         )"#,
+                )
+                .bind(invoice_id)
+                .execute(&mut *transaction)
+                .await
             {
-                tracing::error!(error = %error, invoice_id = %invoice_id, "sync invoice accounting entries");
+                tracing::error!(error = %e, invoice_id = %invoice_id, "release cancelled invoice services");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to update invoice accounting ledger",
+                    "Failed to release cancelled invoice services",
+                );
+            }
+
+            if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after status update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+
+            let settlement = match sqlx::query(
+                r#"SELECT status, paid_amount, prepayment_applied_amount, paid_at
+                   FROM invoices
+                   WHERE id = $1"#,
+            )
+            .bind(invoice_id)
+            .fetch_one(&mut *transaction)
+            .await
+            {
+                Ok(row) => row,
+                Err(e) => {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, "load recomputed invoice settlement");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            };
+            let effective_status = settlement
+                .try_get::<String, _>("status")
+                .unwrap_or(requested_status);
+            let effective_paid_amount = settlement
+                .try_get::<Decimal, _>("paid_amount")
+                .unwrap_or(Decimal::ZERO);
+            let effective_prepayment_amount = settlement
+                .try_get::<Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(Decimal::ZERO);
+            let paid_at = settlement
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default();
+            let paid_at_payload = paid_at.as_ref().map(|value| value.to_rfc3339());
+
+            if let Err(e) = transaction.commit().await {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice status update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
                 );
             }
             if let Some(paid_at) = paid_at
@@ -5069,6 +6903,8 @@ async fn update_invoice_status(
                 serde_json::json!({
                     "status": effective_status.clone(),
                     "paid_amount": decimal_to_string(effective_paid_amount),
+                    "prepayment_applied_amount": decimal_to_string(effective_prepayment_amount),
+                    "legacy_payment_transaction_id": legacy_payment_transaction_id,
                     "due_date": due_date.map(|value| value.to_string()),
                 }),
             ));

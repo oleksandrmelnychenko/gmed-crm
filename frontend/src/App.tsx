@@ -107,6 +107,12 @@ const PatientRecommendationsPage = lazy(() =>
   })),
 );
 
+const PatientSubscriptionsPage = lazy(() =>
+  import("@/pages/patients/portal-subscriptions-page").then((module) => ({
+    default: module.PatientSubscriptionsPage,
+  })),
+);
+
 const LeadsPage = lazy(() =>
   import("@/pages/leads").then((module) => ({
     default: module.LeadsPage,
@@ -158,6 +164,12 @@ const PrivacyPage = lazy(() =>
 const ServicesPage = lazy(() =>
   import("@/pages/services").then((module) => ({
     default: module.ServicesPage,
+  })),
+);
+
+const ConciergeWorkspacePage = lazy(() =>
+  import("@/pages/concierge").then((module) => ({
+    default: module.ConciergeWorkspacePage,
   })),
 );
 
@@ -344,6 +356,7 @@ function AppRoutes() {
             <Route path="patients" element={<PatientsPage />} />
             <Route path="patients/:id" element={<PatientDetailPage />} />
             <Route path="recommendations" element={<PatientRecommendationsPage />} />
+            <Route path="subscriptions" element={<PatientSubscriptionsPage />} />
             <Route path="providers" element={<ProvidersPage />} />
             <Route path="providers/:id" element={<ProviderDetailPage />} />
             <Route path="orders" element={<OrdersPage />} />
@@ -360,6 +373,7 @@ function AppRoutes() {
             />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
             <Route path="specializations" element={<SpecializationsPage />} />
+            <Route path="concierge" element={<ConciergeWorkspacePage />} />
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="privacy" element={<PrivacyPage />} />

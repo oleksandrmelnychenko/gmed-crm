@@ -3,6 +3,12 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
 export type LeistungStatus = "planned" | "delivered" | "approved" | "invoiced";
+export type LeistungBillingStatus =
+  | "not_invoiced"
+  | "partially_invoiced"
+  | "awaiting_payment"
+  | "partially_paid"
+  | "paid";
 export type BillingReleaseStatus = "pending" | "granted" | "denied";
 export type PackageCoverageStatus = "unknown" | "covered" | "not_covered";
 export type DebtManagementStatus =
@@ -35,6 +41,7 @@ export type ExternalInvoiceStatus =
   | "paid"
   | "overdue"
   | "cancelled";
+export type ExternalInvoicePaidBy = "patient" | "agency" | "unpaid";
 
 export type OrderSummary = {
   id: string;
@@ -83,12 +90,31 @@ export type Leistung = {
   agency_service_id?: string | null;
   agency_service_key?: string | null;
   agency_service_name?: string | null;
+  agency_service_description?: string | null;
+  agency_service_unit_label?: string | null;
+  agency_service_key_snapshot?: string | null;
+  agency_service_name_snapshot?: string | null;
+  agency_service_description_snapshot?: string | null;
+  agency_service_unit_label_snapshot?: string | null;
+  unit_price_snapshot?: unknown;
+  currency_snapshot?: string | null;
+  vat_rate_snapshot?: unknown;
+  billing_status?: LeistungBillingStatus | null;
+  invoiced_quantity?: unknown;
+  invoice_references?: Array<{
+    invoice_id: string;
+    invoice_number: string;
+    invoice_status: string;
+    line_quantity: unknown;
+    line_gross: unknown;
+    invoice_balance_due: unknown;
+  }>;
   external_document_id?: string | null;
   external_document_auto_name?: string | null;
   external_document_filename?: string | null;
 };
 
-type ExternalInvoice = {
+export type ExternalInvoice = {
   id: string;
   provider_id: string | null;
   provider_name: string | null;
@@ -104,11 +130,55 @@ type ExternalInvoice = {
   amount_gross: unknown;
   currency: string;
   status: ExternalInvoiceStatus;
+  paid_by: ExternalInvoicePaidBy;
+  service_delivered: boolean;
+  patient_receivable_gross: unknown;
+  allocated_receivable_gross: unknown;
+  remaining_receivable_gross: unknown;
+  provider_liability_gross: unknown;
   received_at?: string | null;
   paid_at?: string | null;
   notes?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ExternalInvoiceAllocation = {
+  id: string;
+  patient_invoice_id: string;
+  invoice_number: string;
+  invoice_type: string;
+  invoice_status: string;
+  amount_gross: string;
+  is_effective: boolean;
+  created_by_name: string | null;
+  created_at: string;
+  reversed_at: string | null;
+  reversed_by_name: string | null;
+  reversal_note: string | null;
+};
+
+export type ExternalInvoiceAllocationCandidate = {
+  id: string;
+  invoice_number: string;
+  invoice_type: string;
+  status: string;
+  total_gross: string;
+  balance_due: string;
+  allocated_source_receivable: string;
+  allocatable_capacity: string;
+};
+
+export type ExternalInvoiceAllocationWorkspace = {
+  external_invoice_id: string;
+  external_invoice_number: string;
+  status: ExternalInvoiceStatus;
+  currency: string;
+  patient_receivable_gross: string;
+  allocated_receivable_gross: string;
+  remaining_receivable_gross: string;
+  allocations: ExternalInvoiceAllocation[];
+  candidate_invoices: ExternalInvoiceAllocationCandidate[];
 };
 
 export type OrderDetail = {
@@ -567,6 +637,7 @@ export type CreateOrderFormState = {
 };
 
 export type LeistungFormState = {
+  agencyServiceId: string;
   description: string;
   quantity: string;
   unitPrice: string;
@@ -599,6 +670,8 @@ export type ExternalInvoiceFormState = {
   amountGross: string;
   currency: string;
   status: ExternalInvoiceStatus;
+  paidBy: ExternalInvoicePaidBy;
+  serviceDelivered: boolean;
   notes: string;
 };
 

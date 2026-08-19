@@ -3,7 +3,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
@@ -27,6 +27,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/agency-services/{service_id}/update",
             post(update_agency_service),
+        )
+        .route(
+            "/agency-services/{service_id}",
+            delete(delete_agency_service),
         )
         .route(
             "/framework-contracts",
@@ -260,6 +264,42 @@ fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
 }
 
+fn quote_decimal_value(value: Option<&Value>) -> Decimal {
+    value
+        .and_then(|value| match value {
+            Value::String(value) => value.parse::<Decimal>().ok(),
+            Value::Number(value) => value.to_string().parse::<Decimal>().ok(),
+            _ => None,
+        })
+        .unwrap_or(Decimal::ZERO)
+}
+
+fn add_remaining_quote_quantities(mut line_items: Value, allocated_quantities: &Value) -> Value {
+    let Some(items) = line_items.as_array_mut() else {
+        return line_items;
+    };
+    for (index, item) in items.iter_mut().enumerate() {
+        let quoted = quote_decimal_value(item.get("quantity"));
+        let allocated = quote_decimal_value(allocated_quantities.get(index.to_string().as_str()));
+        let remaining = (quoted - allocated).max(Decimal::ZERO).round_dp(2);
+        if let Some(map) = item.as_object_mut() {
+            map.insert(
+                "invoiced_quantity".to_string(),
+                Value::String(decimal_to_string(allocated)),
+            );
+            map.insert(
+                "remaining_quantity".to_string(),
+                Value::String(decimal_to_string(remaining)),
+            );
+            map.insert(
+                "fully_invoiced".to_string(),
+                json!(remaining <= Decimal::ZERO),
+            );
+        }
+    }
+    line_items
+}
+
 fn normalize_agency_service_key(value: &str) -> Result<String, &'static str> {
     let trimmed = value.trim().to_lowercase();
     if trimmed.is_empty() {
@@ -486,17 +526,24 @@ async fn list_agency_services(
     }
 
     match sqlx::query(
-        r#"SELECT id, service_key, service_name, description, unit_label, unit_price,
-                  currency, vat_rate, is_active, valid_from, valid_to, created_at, updated_at
-           FROM agency_service_catalog
+        r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description,
+                  catalog.unit_label, catalog.unit_price, catalog.currency, catalog.vat_rate,
+                  catalog.is_active, catalog.valid_from, catalog.valid_to,
+                  catalog.created_at, catalog.updated_at,
+                  (
+                      (SELECT COUNT(*) FROM order_leistungen line WHERE line.agency_service_id = catalog.id)
+                    + (SELECT COUNT(*) FROM service_package_items item WHERE item.agency_service_id = catalog.id)
+                    + (SELECT COUNT(*) FROM order_service_groups service_group WHERE service_group.agency_service_id = catalog.id)
+                  )::BIGINT AS usage_count
+           FROM agency_service_catalog catalog
            WHERE (
                     $1::TEXT IS NULL
-                    OR service_key ILIKE $1
-                    OR service_name ILIKE $1
-                    OR COALESCE(description, '') ILIKE $1
+                    OR catalog.service_key ILIKE $1
+                    OR catalog.service_name ILIKE $1
+                    OR COALESCE(catalog.description, '') ILIKE $1
                  )
-             AND ($2::BOOL IS NULL OR is_active = $2)
-           ORDER BY is_active DESC, valid_from DESC, service_name ASC"#,
+             AND ($2::BOOL IS NULL OR catalog.is_active = $2)
+           ORDER BY catalog.is_active DESC, catalog.valid_from DESC, catalog.service_name ASC"#,
     )
     .bind(
         query
@@ -527,6 +574,7 @@ async fn list_agency_services(
                         "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
                         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
                         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").ok().map(|value| value.to_rfc3339()),
+                        "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
                     })
                 })
                 .collect();
@@ -693,6 +741,144 @@ async fn update_agency_service(
             )
         }
     }
+}
+
+async fn delete_agency_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "begin agency service removal");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to remove agency service",
+            );
+        }
+    };
+
+    let exists = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM agency_service_catalog WHERE id = $1 FOR UPDATE",
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value.is_some(),
+        Err(error) => {
+            tracing::error!(%error, %service_id, "lock agency service for removal");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to remove agency service",
+            );
+        }
+    };
+    if !exists {
+        return err(StatusCode::NOT_FOUND, "Agency service not found");
+    }
+
+    let usage_count = match sqlx::query_scalar::<_, i64>(
+        r#"SELECT (
+                (SELECT COUNT(*) FROM order_leistungen WHERE agency_service_id = $1)
+              + (SELECT COUNT(*) FROM service_package_items WHERE agency_service_id = $1)
+              + (SELECT COUNT(*) FROM order_service_groups WHERE agency_service_id = $1)
+           )::BIGINT"#,
+    )
+    .bind(service_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "count agency service usage");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to remove agency service",
+            );
+        }
+    };
+
+    let action = if usage_count > 0 {
+        match sqlx::query(
+            r#"UPDATE agency_service_catalog
+               SET is_active = false,
+                   valid_to = CASE
+                       WHEN valid_to IS NULL OR valid_to > CURRENT_DATE THEN CURRENT_DATE
+                       ELSE valid_to
+                   END,
+                   updated_by = $2,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(service_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(_) => "archived",
+            Err(error) => {
+                tracing::error!(%error, %service_id, "archive used agency service");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to archive agency service",
+                );
+            }
+        }
+    } else {
+        match sqlx::query("DELETE FROM agency_service_catalog WHERE id = $1")
+            .bind(service_id)
+            .execute(&mut *tx)
+            .await
+        {
+            Ok(_) => "deleted",
+            Err(error) => {
+                tracing::error!(%error, %service_id, "delete unused agency service");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to delete agency service",
+                );
+            }
+        }
+    };
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %service_id, "commit agency service removal");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to remove agency service",
+        );
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        if action == "archived" {
+            "archive_agency_service"
+        } else {
+            "delete_agency_service"
+        },
+        "agency_service_catalog",
+        Some(service_id),
+        Some(json!({
+            "service_id": service_id,
+            "action": action,
+            "usage_count": usage_count,
+        })),
+    )
+    .await;
+
+    Json(json!({
+        "ok": true,
+        "action": action,
+        "usage_count": usage_count,
+    }))
+    .into_response()
 }
 
 async fn can_access_patient(
@@ -1392,7 +1578,8 @@ async fn load_quote_line_items_from_order(
     order_id: Uuid,
 ) -> Result<Vec<QuoteLineItem>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, description, quantity, unit_price, vat_rate, is_cost_passthrough,
+        r#"SELECT id, description, agency_service_description_snapshot,
+                  quantity, unit_price, vat_rate, is_cost_passthrough,
                   external_document_id, provider_id, doctor_id, notes
            FROM order_leistungen
            WHERE order_id = $1
@@ -1428,6 +1615,24 @@ async fn load_quote_line_items_from_order(
         let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
         let line_gross = (line_net + line_vat).round_dp(2);
 
+        let catalog_description = row
+            .try_get::<Option<String>, _>("agency_service_description_snapshot")
+            .unwrap_or_default()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let operator_notes = row
+            .try_get::<Option<String>, _>("notes")
+            .unwrap_or_default()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let notes = match (catalog_description, operator_notes) {
+            (Some(description), Some(notes)) if description != notes => {
+                Some(format!("{description}\n{notes}"))
+            }
+            (Some(description), _) => Some(description),
+            (_, notes) => notes,
+        };
+
         items.push(QuoteLineItem {
             description: row.try_get::<String, _>("description").unwrap_or_default(),
             quantity: decimal_to_string(quantity),
@@ -1447,9 +1652,7 @@ async fn load_quote_line_items_from_order(
             doctor_id: row
                 .try_get::<Option<Uuid>, _>("doctor_id")
                 .unwrap_or_default(),
-            notes: row
-                .try_get::<Option<String>, _>("notes")
-                .unwrap_or_default(),
+            notes,
         });
     }
 
@@ -1509,6 +1712,17 @@ async fn load_quote_detail(
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
+                  COALESCE((
+                      SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
+                      FROM (
+                          SELECT allocation.quote_line_index, SUM(allocation.quantity) AS quantity
+                          FROM invoice_order_line_allocations allocation
+                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                          WHERE allocation.quote_id = q.id
+                            AND invoice.status <> 'cancelled'
+                          GROUP BY allocation.quote_line_index
+                      ) allocated
+                  ), '{}'::jsonb) AS invoiced_quantities,
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
@@ -1574,7 +1788,10 @@ async fn load_quote_detail(
         "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
         "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
-        "line_items": row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
+        "line_items": add_remaining_quote_quantities(
+            row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
+            &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
+        ),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "version_count": row.try_get::<i64, _>("version_count").unwrap_or(0),
         "current_version_number": row.try_get::<i32, _>("current_version_number").unwrap_or(0),
@@ -1603,6 +1820,17 @@ async fn list_quotes(
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
+                  COALESCE((
+                      SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
+                      FROM (
+                          SELECT allocation.quote_line_index, SUM(allocation.quantity) AS quantity
+                          FROM invoice_order_line_allocations allocation
+                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                          WHERE allocation.quote_id = q.id
+                            AND invoice.status <> 'cancelled'
+                          GROUP BY allocation.quote_line_index
+                      ) allocated
+                  ), '{}'::jsonb) AS invoiced_quantities,
                   q.created_at, q.updated_at,
                   o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
@@ -1682,7 +1910,10 @@ async fn list_quotes(
                     "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
-                    "line_items": row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
+                    "line_items": add_remaining_quote_quantities(
+                        row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
+                        &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
+                    ),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),

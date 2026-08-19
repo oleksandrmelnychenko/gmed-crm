@@ -1447,6 +1447,194 @@ async fn agency_service_catalog_supports_create_read_only_visibility_and_update(
 }
 
 #[tokio::test]
+async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("agency-snapshot");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let original_name = format!("Concierge transfer {tag}");
+    let original_description = "Airport pickup with driver and waiting time";
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("concierge_transfer_{tag}"),
+            "service_name": original_name.clone(),
+            "description": original_description,
+            "unit_label": "transfer",
+            "unit_price": 90.0,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-08-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+    let service_id = service["id"].as_str().expect("service id");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Concierge transfer"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().expect("order id");
+
+    let (status, line) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "agency_service_id": service_id,
+            "description": original_name.clone(),
+            "quantity": 2.0,
+            "unit_price": 88.0,
+            "vat_rate": 19.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {line}");
+
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{service_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("concierge_transfer_{tag}"),
+            "service_name": format!("Changed transfer {tag}"),
+            "description": "Changed catalog wording",
+            "unit_label": "ride",
+            "unit_price": 120.0,
+            "currency": "EUR",
+            "vat_rate": 7.0,
+            "is_active": true,
+            "valid_from": "2026-08-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {updated}");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {detail}");
+    let saved_line = &detail["leistungen"][0];
+    assert_eq!(saved_line["agency_service_name"], original_name);
+    assert_eq!(
+        saved_line["agency_service_description"],
+        original_description
+    );
+    assert_eq!(saved_line["agency_service_unit_label"], "transfer");
+    assert_eq!(saved_line["unit_price"], "88");
+    assert_eq!(saved_line["unit_price_snapshot"], "88");
+    assert_eq!(saved_line["vat_rate_snapshot"], "19");
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    assert_eq!(quote["line_items"][0]["notes"], original_description);
+
+    let (status, removed) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/agency-services/{service_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {removed}");
+    assert_eq!(removed["action"], "archived");
+    assert!(removed["usage_count"].as_i64().unwrap_or_default() > 0);
+    let is_active: bool =
+        sqlx::query_scalar("SELECT is_active FROM agency_service_catalog WHERE id = $1")
+            .bind(Uuid::parse_str(service_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!is_active);
+}
+
+#[tokio::test]
+async fn unused_agency_service_can_be_deleted() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("unused-agency-service");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("unused_{tag}"),
+            "service_name": format!("Unused {tag}"),
+            "unit_label": "unit",
+            "unit_price": 10.0,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-08-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+    let service_id = service["id"].as_str().expect("service id");
+
+    let (status, removed) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/agency-services/{service_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {removed}");
+    assert_eq!(removed["action"], "deleted");
+    assert_eq!(removed["usage_count"], 0);
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM agency_service_catalog WHERE id = $1")
+            .bind(Uuid::parse_str(service_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
 async fn sales_and_concierge_cannot_access_agency_service_catalog() {
     let Some((app, pool, _admin_id, _)) = test_context().await else {
         return;
@@ -1473,6 +1661,16 @@ async fn sales_and_concierge_cannot_access_agency_service_catalog() {
                 "unit_price": 10.0,
                 "valid_from": "2026-04-01"
             })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, _) = json_request(
+            &app,
+            "DELETE",
+            &format!("/api/v1/agency-services/{}", Uuid::new_v4()),
+            bearer,
+            None,
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);

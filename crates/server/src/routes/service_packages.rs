@@ -17,11 +17,13 @@ use uuid::Uuid;
 
 use crate::access;
 use crate::auth::middleware::AuthUser;
+use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/me/subscriptions", get(list_my_subscriptions))
         .route(
             "/service-packages",
             get(list_service_packages).post(create_service_package),
@@ -82,6 +84,7 @@ struct AssignPatientPackageRequest {
     payer_contact_email: Option<String>,
     payer_contact_phone: Option<String>,
     payer_contact_relationship: Option<String>,
+    portal_visible: Option<bool>,
     notes: Option<String>,
 }
 
@@ -868,6 +871,7 @@ async fn list_patient_service_packages(
 
     match sqlx::query(
         r#"SELECT psp.id, psp.package_id, psp.order_id, sp.name AS package_name, psp.status,
+                  psp.portal_visible,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                   psp.payer_contact_name, psp.payer_contact_relationship,
                   o.order_number,
@@ -891,6 +895,7 @@ async fn list_patient_service_packages(
                  AND (spc.package_item_id = spi.id OR (spc.package_item_id IS NULL AND spi.id IS NULL))
            WHERE psp.patient_id = $1
            GROUP BY psp.id, psp.package_id, psp.order_id, sp.name, psp.status,
+                    psp.portal_visible,
                     psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                     psp.payer_contact_name, psp.payer_contact_relationship,
                     o.order_number, spi.id, COALESCE(c.service_key, spi.service_key), c.service_name,
@@ -920,6 +925,7 @@ async fn list_patient_service_packages(
                         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "package_name": row.try_get::<String, _>("package_name").unwrap_or_default(),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
                         "starts_on": row.try_get::<Option<NaiveDate>, _>("starts_on").unwrap_or_default().map(|value| value.to_string()),
                         "ends_on": row.try_get::<Option<NaiveDate>, _>("ends_on").unwrap_or_default().map(|value| value.to_string()),
                         "assigned_at": row.try_get::<chrono::DateTime<Utc>, _>("assigned_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -954,6 +960,260 @@ async fn list_patient_service_packages(
             )
         }
     }
+}
+
+async fn list_my_subscriptions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if auth.role != Role::Patient {
+        return err(StatusCode::FORBIDDEN, "Patient portal access required");
+    }
+
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(patient_id) => patient_id,
+        Err(resp) => return resp,
+    };
+
+    // Base package invoices are linked to an order, not directly to a concrete
+    // patient_service_package. We therefore expose an explicit linked-order
+    // financial scope. If an order has multiple released subscriptions, the
+    // shared balance is not repeated on every card; patients can inspect the
+    // authoritative amount once in the invoices workspace.
+    let rows = match sqlx::query(
+        r#"SELECT psp.id, psp.package_id, psp.order_id, psp.status,
+                  psp.starts_on, psp.ends_on, psp.assigned_at, psp.portal_visible,
+                  sp.name AS package_name, sp.description AS package_description,
+                  sp.currency, o.order_number,
+                  spi.id AS package_item_id,
+                  COALESCE(NULLIF(c.service_name, ''), NULLIF(spi.description, ''), 'Service') AS service_name,
+                  COALESCE(c.service_key, spi.service_key) AS service_key,
+                  spi.description AS service_description,
+                  spi.included_quantity, spi.unit_label, spi.requires_patient_approval,
+                  COALESCE(SUM(spc.quantity) FILTER (
+                      WHERE spc.approval_status <> 'declined'
+                  ), 0) AS used_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (
+                      WHERE spc.approval_status <> 'declined'
+                  ), 0) AS overage_quantity,
+                  COALESCE(SUM(spc.overage_quantity) FILTER (
+                      WHERE spc.approval_status = 'pending'
+                  ), 0) AS pending_overage_quantity,
+                  finance.visible_invoice_count,
+                  finance.overdue_invoice_count,
+                  finance.settled_amount,
+                  finance.balance_due,
+                  finance.amounts_visible,
+                  finance.linked_subscription_count
+           FROM patient_service_packages psp
+           JOIN service_packages sp ON sp.id = psp.package_id
+           LEFT JOIN orders o ON o.id = psp.order_id AND o.patient_id = psp.patient_id
+           LEFT JOIN service_package_items spi ON spi.package_id = sp.id
+           LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
+           LEFT JOIN service_package_consumptions spc
+                  ON spc.patient_service_package_id = psp.id
+                 AND spc.package_item_id = spi.id
+           LEFT JOIN LATERAL (
+               SELECT COUNT(*)::BIGINT AS visible_invoice_count,
+                      COUNT(*) FILTER (
+                          WHERE invoice.status = 'overdue'
+                            AND invoice.total_gross
+                                > invoice.paid_amount + invoice.prepayment_applied_amount
+                      )::BIGINT AS overdue_invoice_count,
+                      COALESCE(SUM(
+                          invoice.paid_amount + invoice.prepayment_applied_amount
+                      ), 0) AS settled_amount,
+                      COALESCE(SUM(GREATEST(
+                          invoice.total_gross
+                          - invoice.paid_amount
+                          - invoice.prepayment_applied_amount,
+                          0
+                      )), 0) AS balance_due,
+                      COALESCE(BOOL_AND(NOT invoice.hide_amounts_from_patient), true) AS amounts_visible,
+                      (
+                          SELECT COUNT(*)::BIGINT
+                          FROM patient_service_packages sibling
+                          WHERE psp.order_id IS NOT NULL
+                            AND sibling.patient_id = psp.patient_id
+                            AND sibling.order_id = psp.order_id
+                            AND sibling.portal_visible = true
+                            AND sibling.status IN ('active', 'paused', 'completed')
+                      ) AS linked_subscription_count
+               FROM invoices invoice
+               WHERE psp.order_id IS NOT NULL
+                 AND invoice.order_id = psp.order_id
+                 AND invoice.patient_id = psp.patient_id
+                 AND invoice.portal_visible = true
+                 AND invoice.status NOT IN ('draft', 'cancelled')
+           ) finance ON true
+           WHERE psp.patient_id = $1
+             AND psp.portal_visible = true
+             AND psp.status IN ('active', 'paused', 'completed')
+           GROUP BY psp.id, psp.package_id, psp.order_id, psp.status,
+                    psp.starts_on, psp.ends_on, psp.assigned_at, psp.portal_visible,
+                    sp.name, sp.description, sp.currency, o.order_number,
+                    spi.id, c.service_name, c.service_key, spi.service_key,
+                    spi.description, spi.included_quantity, spi.unit_label,
+                    spi.requires_patient_approval,
+                    finance.visible_invoice_count, finance.overdue_invoice_count,
+                    finance.settled_amount, finance.balance_due, finance.amounts_visible,
+                    finance.linked_subscription_count
+           ORDER BY
+               CASE
+                   WHEN psp.status = 'completed' OR psp.ends_on < CURRENT_DATE THEN 3
+                   WHEN psp.starts_on > CURRENT_DATE THEN 2
+                   ELSE 1
+               END,
+               psp.starts_on NULLS FIRST,
+               psp.assigned_at DESC,
+               spi.sort_order,
+               spi.created_at"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "list patient portal subscriptions");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load subscriptions",
+            );
+        }
+    };
+
+    let today = Utc::now().date_naive();
+    let mut subscriptions = Vec::<Value>::new();
+    let mut subscription_indexes = HashMap::<Uuid, usize>::new();
+
+    for row in rows {
+        let subscription_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let subscription_index = if let Some(index) = subscription_indexes.get(&subscription_id) {
+            *index
+        } else {
+            let starts_on = row
+                .try_get::<Option<NaiveDate>, _>("starts_on")
+                .unwrap_or_default();
+            let ends_on = row
+                .try_get::<Option<NaiveDate>, _>("ends_on")
+                .unwrap_or_default();
+            let status = row.try_get::<String, _>("status").unwrap_or_default();
+            let lifecycle = if status == "completed" || ends_on.is_some_and(|date| date < today) {
+                "completed"
+            } else if starts_on.is_some_and(|date| date > today) {
+                "upcoming"
+            } else {
+                "active"
+            };
+            let visible_invoice_count = row
+                .try_get::<i64, _>("visible_invoice_count")
+                .unwrap_or_default();
+            let overdue_invoice_count = row
+                .try_get::<i64, _>("overdue_invoice_count")
+                .unwrap_or_default();
+            let settled_amount = row
+                .try_get::<Decimal, _>("settled_amount")
+                .unwrap_or(Decimal::ZERO);
+            let balance_due = row
+                .try_get::<Decimal, _>("balance_due")
+                .unwrap_or(Decimal::ZERO);
+            let amounts_visible = row.try_get::<bool, _>("amounts_visible").unwrap_or(true);
+            let linked_subscription_count = row
+                .try_get::<i64, _>("linked_subscription_count")
+                .unwrap_or_default();
+            let balance_disclosure = if !amounts_visible {
+                "hidden_by_invoice"
+            } else if linked_subscription_count > 1 {
+                "shared_order"
+            } else {
+                "visible"
+            };
+            let balance_visible = balance_disclosure == "visible";
+            let financial_status = if visible_invoice_count == 0 {
+                "not_invoiced"
+            } else if balance_due <= Decimal::ZERO {
+                "paid"
+            } else if overdue_invoice_count > 0 {
+                "overdue"
+            } else if settled_amount > Decimal::ZERO {
+                "partially_paid"
+            } else {
+                "open"
+            };
+            let index = subscriptions.len();
+            subscriptions.push(serde_json::json!({
+                "id": subscription_id,
+                "package_id": row.try_get::<Uuid, _>("package_id").unwrap_or_default(),
+                "package_name": row.try_get::<String, _>("package_name").unwrap_or_default(),
+                "description": row.try_get::<Option<String>, _>("package_description").unwrap_or_default(),
+                "status": status,
+                "lifecycle": lifecycle,
+                "starts_on": starts_on.map(|date| date.to_string()),
+                "ends_on": ends_on.map(|date| date.to_string()),
+                "assigned_at": row.try_get::<chrono::DateTime<Utc>, _>("assigned_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+                "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+                "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                "portal_visible": true,
+                "financial": {
+                    "scope": "linked_order",
+                    "status": financial_status,
+                    "visible_invoice_count": visible_invoice_count,
+                    "linked_subscription_count": linked_subscription_count,
+                    "amounts_visible": balance_visible,
+                    "balance_disclosure": balance_disclosure,
+                    "balance_due": if balance_visible {
+                        serde_json::json!(decimal_to_string(balance_due))
+                    } else {
+                        Value::Null
+                    },
+                },
+                "services": [],
+            }));
+            subscription_indexes.insert(subscription_id, index);
+            index
+        };
+
+        let Some(package_item_id) = row
+            .try_get::<Option<Uuid>, _>("package_item_id")
+            .unwrap_or_default()
+        else {
+            continue;
+        };
+        let included_quantity = row
+            .try_get::<Decimal, _>("included_quantity")
+            .unwrap_or(Decimal::ZERO);
+        let used_quantity = row
+            .try_get::<Decimal, _>("used_quantity")
+            .unwrap_or(Decimal::ZERO);
+        let remaining_quantity = (included_quantity - used_quantity).max(Decimal::ZERO);
+        if let Some(services) = subscriptions[subscription_index]
+            .get_mut("services")
+            .and_then(Value::as_array_mut)
+        {
+            services.push(serde_json::json!({
+                "id": package_item_id,
+                "service_key": row.try_get::<Option<String>, _>("service_key").unwrap_or_default(),
+                "name": row.try_get::<String, _>("service_name").unwrap_or_else(|_| "Service".to_string()),
+                "description": row.try_get::<Option<String>, _>("service_description").unwrap_or_default(),
+                "included_quantity": decimal_to_string(included_quantity),
+                "used_quantity": decimal_to_string(used_quantity),
+                "remaining_quantity": decimal_to_string(remaining_quantity),
+                "overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("overage_quantity").unwrap_or(Decimal::ZERO)),
+                "pending_overage_quantity": decimal_to_string(row.try_get::<Decimal, _>("pending_overage_quantity").unwrap_or(Decimal::ZERO)),
+                "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
+                "requires_patient_approval": row.try_get::<bool, _>("requires_patient_approval").unwrap_or(false),
+            }));
+        }
+    }
+
+    let total = subscriptions.len();
+    Json(serde_json::json!({
+        "items": subscriptions,
+        "total": total,
+    }))
+    .into_response()
 }
 
 async fn assign_patient_service_package(
@@ -1002,8 +1262,8 @@ async fn assign_patient_service_package(
         r#"INSERT INTO patient_service_packages (
                 patient_id, order_id, package_id, status, starts_on, ends_on,
                 payer_contact_name, payer_contact_email, payer_contact_phone,
-                payer_contact_relationship, notes, assigned_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                payer_contact_relationship, portal_visible, notes, assigned_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id"#,
     )
     .bind(patient_id)
@@ -1018,17 +1278,32 @@ async fn assign_patient_service_package(
     .bind(normalize_optional(
         body.payer_contact_relationship.as_deref(),
     ))
+    .bind(body.portal_visible.unwrap_or(true))
     .bind(normalize_optional(body.notes.as_deref()))
     .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
     {
-        Ok(row) => Json(serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            "patient_id": patient_id,
-            "package_id": body.package_id,
-        }))
-        .into_response(),
+        Ok(row) => {
+            let patient_service_package_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "service_package.assigned",
+                patient_id,
+                serde_json::json!({
+                    "patient_service_package_id": patient_service_package_id,
+                    "package_id": body.package_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({
+                "id": patient_service_package_id,
+                "patient_id": patient_id,
+                "package_id": body.package_id,
+            }))
+            .into_response()
+        }
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23503") => {
             err(StatusCode::UNPROCESSABLE_ENTITY, "Package not found")
         }
@@ -1240,17 +1515,32 @@ async fn create_package_consumption(
     .fetch_one(&state.db)
     .await
     {
-        Ok(row) => Json(serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            "patient_service_package_id": patient_service_package_id,
-            "package_item_id": package_item_id,
-            "quantity": decimal_to_string(body.quantity),
-            "overage_quantity": decimal_to_string(overage_quantity),
-            "requires_patient_approval": requires_patient_approval,
-            "approval_status": approval_status,
-            "consumed_at": row.try_get::<chrono::DateTime<Utc>, _>("consumed_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        }))
-        .into_response(),
+        Ok(row) => {
+            let consumption_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "service_package.consumed",
+                patient_id,
+                serde_json::json!({
+                    "patient_service_package_id": patient_service_package_id,
+                    "package_item_id": package_item_id,
+                    "consumption_id": consumption_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({
+                "id": consumption_id,
+                "patient_service_package_id": patient_service_package_id,
+                "package_item_id": package_item_id,
+                "quantity": decimal_to_string(body.quantity),
+                "overage_quantity": decimal_to_string(overage_quantity),
+                "requires_patient_approval": requires_patient_approval,
+                "approval_status": approval_status,
+                "consumed_at": row.try_get::<chrono::DateTime<Utc>, _>("consumed_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            }))
+            .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, patient_service_package_id = %patient_service_package_id, "create package consumption");
             err(
@@ -1317,13 +1607,28 @@ async fn update_overage_approval(
     .execute(&state.db)
     .await
     {
-        Ok(result) => Json(serde_json::json!({
-            "patient_service_package_id": patient_service_package_id,
-            "package_item_id": body.package_item_id,
-            "approval_status": body.approval_status,
-            "updated_count": result.rows_affected(),
-        }))
-        .into_response(),
+        Ok(result) => {
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "service_package.overage_updated",
+                patient_id,
+                serde_json::json!({
+                    "patient_service_package_id": patient_service_package_id,
+                    "package_item_id": body.package_item_id,
+                    "approval_status": body.approval_status.clone(),
+                    "updated_count": result.rows_affected(),
+                }),
+            )
+            .await;
+            Json(serde_json::json!({
+                "patient_service_package_id": patient_service_package_id,
+                "package_item_id": body.package_item_id,
+                "approval_status": body.approval_status,
+                "updated_count": result.rows_affected(),
+            }))
+            .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, patient_service_package_id = %patient_service_package_id, "update overage approval");
             err(

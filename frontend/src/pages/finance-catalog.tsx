@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ChevronDown,
+  ClipboardPlus,
   CornerDownRight,
   Pencil,
   Plus,
@@ -68,6 +69,7 @@ import type {
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount } from "@/lib/money";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 type TaxProfile = {
   id: string;
@@ -92,6 +94,12 @@ type CatalogTaxProfile = {
   tax_profile_key?: string | null;
   tax_profile_name?: string | null;
   tax_profile_vat_rate?: string | null;
+};
+
+type AgencyServiceRemovalResult = {
+  ok: boolean;
+  action: "archived" | "deleted";
+  usage_count: number;
 };
 
 type ServicePackage = {
@@ -519,6 +527,7 @@ function createFinanceCatalogFieldPatch<K extends keyof FinanceCatalogState>(
 function useFinanceCatalogPageContent() {
   const { user } = useAuth();
   const { t } = useLang();
+  const { staffGo } = useStaffNavigate();
   const vatCategoryLabel = (value: string | null | undefined) =>
     formatEnumLabelFromKeys(value, VAT_CATEGORY_LABEL_KEYS, t);
   const vatSourceLabel = (value: string | null | undefined) =>
@@ -541,6 +550,7 @@ function useFinanceCatalogPageContent() {
     [t.finance_catalog_unit_default],
   );
   const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
+  const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
 
   const [financeCatalogState, dispatchFinanceCatalogState] = useReducer(
     financeCatalogReducer,
@@ -670,6 +680,9 @@ function useFinanceCatalogPageContent() {
     filteredAgencyServices,
     catalogSearch,
   );
+  const selectedAgencyService = agencyServiceForm.id
+    ? agencyServices.find((item) => item.id === agencyServiceForm.id) ?? null
+    : null;
   const vatMappingPagination = useDataTablePagination(
     catalogRows,
     "agency-service-vat-mapping",
@@ -1564,6 +1577,40 @@ function useFinanceCatalogPageContent() {
     }
   }
 
+  async function handleRemoveAgencyService() {
+    if (!agencyServiceForm.id || agencyServiceBusy) return;
+    const usageCount = selectedAgencyService?.usage_count ?? 0;
+    const actionLabel = usageCount > 0 ? t.common_archive : t.common_delete;
+    if (
+      !window.confirm(
+        `${actionLabel}: ${agencyServiceForm.serviceName.trim() || agencyServiceForm.serviceKey.trim()}?`,
+      )
+    ) {
+      return;
+    }
+
+    setAgencyServiceBusy(true);
+    setAgencyServiceError("");
+    try {
+      await apiFetch<AgencyServiceRemovalResult>(
+        `/agency-services/${agencyServiceForm.id}`,
+        { method: "DELETE" },
+      );
+      clearApiCache("/agency-services");
+      setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
+      setAgencyServiceFormOpen(false);
+      await load();
+    } catch (err) {
+      setAgencyServiceError(
+        err instanceof Error
+          ? err.message
+          : t.finance_catalog_error_save_agency_service,
+      );
+    } finally {
+      setAgencyServiceBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1627,6 +1674,8 @@ function useFinanceCatalogPageContent() {
         columns={agencyServiceColumns}
         dictionary={t as unknown as Record<string, string>}
         rowId={(item) => item.id}
+        activeRowId={agencyServiceFormOpen ? agencyServiceForm.id : null}
+        onRowClick={canManageTaxProfiles ? openEditAgencyService : undefined}
         emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
         tableClassName="max-h-[560px]"
         toolbarStart={
@@ -1690,19 +1739,42 @@ function useFinanceCatalogPageContent() {
           />
         }
         rowActions={
-          canManageTaxProfiles
+          canManageTaxProfiles || canCreateOrders
             ? (item) => (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={() => openEditAgencyService(item)}
-                  aria-label={t.finance_catalog_edit}
-                  title={t.finance_catalog_edit}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  {canCreateOrders && item.is_active ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        staffGo(`/orders?create=1&service=${item.id}`);
+                      }}
+                      aria-label={t.orders_new_button}
+                      title={t.orders_new_button}
+                    >
+                      <ClipboardPlus className="size-3.5" />
+                    </Button>
+                  ) : null}
+                  {canManageTaxProfiles ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openEditAgencyService(item);
+                      }}
+                      aria-label={t.finance_catalog_edit}
+                      title={t.finance_catalog_edit}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  ) : null}
+                </div>
               )
             : undefined
         }
@@ -2334,6 +2406,22 @@ function useFinanceCatalogPageContent() {
                       disabled={agencyServiceBusy}
                     />
                   </Field>
+                  {agencyServiceForm.id ? (
+                    <div className="mt-3 flex items-center justify-end border-t border-border/60 pt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                        onClick={() => void handleRemoveAgencyService()}
+                        disabled={agencyServiceBusy}
+                      >
+                        <Trash2 className="size-4" />
+                        {(selectedAgencyService?.usage_count ?? 0) > 0
+                          ? t.common_archive
+                          : t.common_delete}
+                      </Button>
+                    </div>
+                  ) : null}
                 </Section>
               </div>
             </AdminSheetScaffold>

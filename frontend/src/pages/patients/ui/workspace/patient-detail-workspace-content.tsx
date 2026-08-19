@@ -229,6 +229,7 @@ type PatientDetailWorkspaceContentProps = {
   assignBusy: boolean;
   assignments: PatientAssignment[];
   assignableStaff: StaffOption[];
+  canCreateOrders: boolean;
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
   canManage: boolean;
@@ -238,6 +239,7 @@ type PatientDetailWorkspaceContentProps = {
   canManageRelations: boolean;
   canManageWorkflowChecklist: boolean;
   canOpenComplianceWorkspace: boolean;
+  canOpenLeadWizard: boolean;
   canOpenDocumentsWorkspace: boolean;
   canPrintPatientLabel: boolean;
   canViewClinical: boolean;
@@ -393,6 +395,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     assignBusy,
     assignments,
     assignableStaff,
+    canCreateOrders,
     canEditPatientProfile,
     canExportPatientCompliance,
     canManage,
@@ -402,6 +405,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canManageRelations,
     canManageWorkflowChecklist,
     canOpenComplianceWorkspace,
+    canOpenLeadWizard,
     canOpenDocumentsWorkspace,
     canPrintPatientLabel,
     canViewClinical,
@@ -801,9 +805,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               />
               <LazyPatientProfileTab
               profileControls={{
+                canCreateOrders,
                 canEditPatientProfile,
                 canExportPatientCompliance,
                 canOpenComplianceWorkspace,
+                canOpenLeadWizard,
                 canViewContracts,
                 canViewDocuments,
                 canViewInvoices,
@@ -874,6 +880,9 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <LazyPatientOrdersTab
               emptyLabel={emptyOrdersLabel}
               formatDate={formatDate}
+              onCreateOrder={canCreateOrders && id
+                ? () => staffGo(`/orders?create=1&patient=${encodeURIComponent(id)}`)
+                : undefined}
               onOpenOrder={onOpenOrder}
               orderPhaseLabel={orderPhaseLabel}
               orders={orders}

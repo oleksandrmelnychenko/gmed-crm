@@ -5,6 +5,7 @@ import type {
   DunningEvent,
   InvoiceItem,
   InvoiceListResponse,
+  InvoicePaymentHistoryResponse,
   OrderOption,
   PatientOption,
   QuoteOption,
@@ -53,11 +54,12 @@ export function fetchInvoices(path: string) {
 }
 
 export async function fetchInvoiceWorkspace(invoiceId: string) {
-  const [invoice, dunning] = await Promise.all([
+  const [invoice, dunning, payments] = await Promise.all([
     apiFetch<InvoiceItem>(`/invoices/${invoiceId}`),
     apiFetch<DunningEvent[]>(`/invoices/${invoiceId}/dunning`),
+    apiFetch<InvoicePaymentHistoryResponse>(`/invoices/${invoiceId}/payments`),
   ]);
-  return { invoice, dunning };
+  return { invoice, dunning, payments: payments.items };
 }
 
 export function fetchAccountingLedger(year: string) {
@@ -74,12 +76,44 @@ export function updateInvoiceStatus(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/status`, payload);
 }
 
+export function createInvoicePayment(invoiceId: string, payload: JsonPayload) {
+  return postJson(`/invoices/${invoiceId}/payments`, payload);
+}
+
+export function reverseInvoicePayment(
+  invoiceId: string,
+  paymentId: string,
+  payload: JsonPayload,
+) {
+  return postJson(
+    `/invoices/${invoiceId}/payments/${paymentId}/reversal`,
+    payload,
+  );
+}
+
 export function updateInvoiceVisibility(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/visibility`, payload);
 }
 
 export function updateInvoicePayer(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/payer`, payload);
+}
+
+export function applyInvoicePrepayment(invoiceId: string, payload: JsonPayload) {
+  return postJson<InvoiceItem>(
+    `/invoices/${invoiceId}/prepayment-allocations`,
+    payload,
+  );
+}
+
+export function releaseInvoicePrepayment(
+  invoiceId: string,
+  allocationId: string,
+) {
+  return apiFetch<InvoiceItem>(
+    `/invoices/${invoiceId}/prepayment-allocations/${allocationId}`,
+    { method: "DELETE" },
+  );
 }
 
 export function createDunningEvent(invoiceId: string, payload: JsonPayload) {

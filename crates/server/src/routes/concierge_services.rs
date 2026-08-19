@@ -38,6 +38,19 @@ pub fn router() -> Router<AppState> {
             "/concierge-services/{service_id}/update",
             post(update_concierge_service),
         )
+        .route(
+            "/concierge-services/{service_id}/key-events",
+            get(list_concierge_service_key_events).post(record_concierge_service_key_event),
+        )
+        .route(
+            "/concierge-services/{service_id}/partner-interactions",
+            get(list_concierge_service_partner_interactions)
+                .post(record_concierge_service_partner_interaction),
+        )
+        .route(
+            "/concierge-services/{service_id}/partner-interactions/{interaction_id}/apply-cost-estimate",
+            post(apply_partner_quote_as_cost_estimate),
+        )
 }
 
 #[derive(Deserialize)]
@@ -129,6 +142,26 @@ struct UpdateConciergeServiceRequest {
     currency: Option<String>,
     service_notes: NullablePatchValue,
     billing_notes: NullablePatchValue,
+}
+
+#[derive(Deserialize)]
+struct RecordConciergeServiceKeyEventRequest {
+    action: String,
+    responsible_user_id: Option<Uuid>,
+    occurred_at: Option<String>,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RecordConciergeServicePartnerInteractionRequest {
+    channel: String,
+    direction: String,
+    outcome: String,
+    occurred_at: Option<String>,
+    contact_person: Option<String>,
+    note: Option<String>,
+    quoted_cost: Option<f64>,
+    quoted_currency: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -765,13 +798,15 @@ async fn list_concierge_services(
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
+                  cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
-                  pr.name AS provider_name,
+                  pr.name AS provider_name, pr.provider_type AS linked_provider_type,
                   sc.service_name AS provider_service_name,
                   ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
+                  ku.name AS key_responsible_user_name,
                   a.title AS appointment_title
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
@@ -779,6 +814,7 @@ async fn list_concierge_services(
            LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
            LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
+           LEFT JOIN users ku ON ku.id = cs.key_responsible_user_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
@@ -848,7 +884,7 @@ async fn list_concierge_services(
             .try_get::<Option<Uuid>, _>("assigned_concierge_id")
             .unwrap_or_default();
         match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
-            Ok(true) => items.push(build_service_json(&row)),
+            Ok(true) => items.push(build_service_json_for_role(&row, auth.role)),
             Ok(false) => {}
             Err(resp) => return resp,
         }
@@ -881,7 +917,7 @@ async fn get_concierge_service(
                 .try_get::<Option<Uuid>, _>("assigned_concierge_id")
                 .unwrap_or_default();
             match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
-                Ok(true) => Json(build_service_json(&row)).into_response(),
+                Ok(true) => Json(build_service_json_for_role(&row, auth.role)).into_response(),
                 Ok(false) => err(StatusCode::FORBIDDEN, "Insufficient permissions"),
                 Err(resp) => resp,
             }
@@ -889,6 +925,768 @@ async fn get_concierge_service(
         Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(resp) => resp,
     }
+}
+
+async fn list_concierge_service_key_events(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+        return resp;
+    }
+
+    match sqlx::query(
+        r#"SELECT e.id, e.concierge_service_id, e.action, e.responsible_user_id,
+                  responsible.name AS responsible_user_name, e.occurred_at, e.note,
+                  e.recorded_by, recorder.name AS recorded_by_name, e.created_at
+           FROM concierge_service_key_events e
+           JOIN users responsible ON responsible.id = e.responsible_user_id
+           JOIN users recorder ON recorder.id = e.recorded_by
+           WHERE e.concierge_service_id = $1
+           ORDER BY e.occurred_at, e.created_at, e.id"#,
+    )
+    .bind(service_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_key_event_json)
+                .collect::<Vec<serde_json::Value>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "list concierge key events");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load key custody history",
+            )
+        }
+    }
+}
+
+async fn record_concierge_service_key_event(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<RecordConciergeServiceKeyEventRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+    if !is_valid_key_action(&body.action) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid key action");
+    }
+
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+        return resp;
+    }
+
+    let responsible_user_id = body.responsible_user_id.unwrap_or(auth.user_id);
+    if auth.role == Role::Concierge && responsible_user_id != auth.user_id {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge can only record their own key custody",
+        );
+    }
+    let responsible_user_name =
+        match load_active_operational_user_name(&state, responsible_user_id).await {
+            Ok(Some(name)) => name,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "responsible_user_id must reference active operational staff",
+                );
+            }
+            Err(resp) => return resp,
+        };
+    let recorded_by_name = if responsible_user_id == auth.user_id {
+        responsible_user_name.clone()
+    } else {
+        match load_active_operational_user_name(&state, auth.user_id).await {
+            Ok(Some(name)) => name,
+            Ok(None) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "Recorder is not active operational staff",
+                );
+            }
+            Err(resp) => return resp,
+        }
+    };
+
+    let occurred_at = match body.occurred_at.as_deref() {
+        Some(value) => match parse_optional_datetime(Some(value)) {
+            Ok(Some(value)) => value,
+            Ok(None) => chrono::Utc::now(),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => chrono::Utc::now(),
+    };
+    if occurred_at > chrono::Utc::now() + chrono::Duration::minutes(5) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "occurred_at cannot be in the future",
+        );
+    }
+
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 1000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 1000 characters",
+        );
+    }
+
+    let current_status = service
+        .try_get::<Option<String>, _>("key_status")
+        .unwrap_or_default();
+    let current_status_at = service
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("key_status_at")
+        .unwrap_or_default();
+    if !is_valid_key_transition(current_status.as_deref(), &body.action) {
+        return err(
+            StatusCode::CONFLICT,
+            "Key custody transition is not allowed",
+        );
+    }
+    if current_status_at
+        .as_ref()
+        .is_some_and(|value| &occurred_at < value)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "occurred_at must not precede the current key status",
+        );
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "begin concierge key event transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    };
+    let update = sqlx::query(
+        r#"UPDATE concierge_services
+           SET key_status = $2,
+               key_responsible_user_id = $3,
+               key_status_at = $4
+           WHERE id = $1
+             AND key_status IS NOT DISTINCT FROM $5
+             AND key_status_at IS NOT DISTINCT FROM $6"#,
+    )
+    .bind(service_id)
+    .bind(&body.action)
+    .bind(responsible_user_id)
+    .bind(occurred_at)
+    .bind(current_status.as_deref())
+    .bind(current_status_at)
+    .execute(&mut *tx)
+    .await;
+
+    match update {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Key custody changed; refresh before recording another action",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "update concierge key state");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    }
+
+    let event = match sqlx::query(
+        r#"INSERT INTO concierge_service_key_events (
+               concierge_service_id, action, responsible_user_id, occurred_at, note, recorded_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, created_at"#,
+    )
+    .bind(service_id)
+    .bind(&body.action)
+    .bind(responsible_user_id)
+    .bind(occurred_at)
+    .bind(note.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "insert concierge key event");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    };
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, service_id = %service_id, "commit concierge key event");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record key custody",
+        );
+    }
+
+    let event_id: Uuid = event.try_get("id").unwrap_or_default();
+    let created_at = event
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    state.audit_sender.try_send(audit::domain_event(
+        "record_concierge_service_key_event",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "event_id": event_id,
+            "action": &body.action,
+            "responsible_user_id": responsible_user_id,
+            "occurred_at": occurred_at.to_rfc3339(),
+        }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.key_updated",
+        service_id,
+        serde_json::json!({
+            "key_status": &body.action,
+            "key_responsible_user_id": responsible_user_id,
+            "key_status_at": occurred_at.to_rfc3339(),
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "event": {
+            "id": event_id,
+            "concierge_service_id": service_id,
+            "action": &body.action,
+            "responsible_user_id": responsible_user_id,
+            "responsible_user_name": responsible_user_name,
+            "occurred_at": occurred_at.to_rfc3339(),
+            "note": note,
+            "recorded_by": auth.user_id,
+            "recorded_by_name": recorded_by_name,
+            "created_at": created_at.to_rfc3339(),
+        },
+        "key_status": &body.action,
+        "key_responsible_user_id": responsible_user_id,
+        "key_responsible_user_name": responsible_user_name,
+        "key_status_at": occurred_at.to_rfc3339(),
+    }))
+    .into_response()
+}
+
+async fn list_concierge_service_partner_interactions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+        return resp;
+    }
+    if let Err(resp) = load_service_non_medical_partner_id(&state, &service).await {
+        return resp;
+    }
+
+    match sqlx::query(
+        r#"SELECT i.id, i.concierge_service_id, i.provider_id, p.name AS provider_name,
+                  i.channel, i.direction, i.outcome, i.occurred_at, i.contact_person,
+                  i.note, i.quoted_cost, i.quoted_currency,
+                  decision.applied_at AS applied_as_cost_estimate_at,
+                  decision.applied_by, applier.name AS applied_by_name, i.recorded_by,
+                  recorder.name AS recorded_by_name, i.created_at
+           FROM concierge_service_partner_interactions i
+           JOIN providers p
+             ON p.id = i.provider_id
+            AND p.provider_type = 'non_medical'
+           JOIN users recorder ON recorder.id = i.recorded_by
+           LEFT JOIN concierge_service_cost_estimate_decisions decision
+             ON decision.partner_interaction_id = i.id
+           LEFT JOIN users applier ON applier.id = decision.applied_by
+           WHERE i.concierge_service_id = $1
+           ORDER BY i.occurred_at, i.created_at, i.id"#,
+    )
+    .bind(service_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_partner_interaction_json)
+                .collect::<Vec<serde_json::Value>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, "list concierge partner interactions");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load partner interaction history",
+            )
+        }
+    }
+}
+
+async fn record_concierge_service_partner_interaction(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<RecordConciergeServicePartnerInteractionRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+    if !is_valid_partner_channel(&body.channel) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction channel",
+        );
+    }
+    if !matches!(body.direction.as_str(), "outbound" | "inbound") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction direction",
+        );
+    }
+    if !is_valid_partner_outcome(&body.outcome) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction outcome",
+        );
+    }
+
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+        return resp;
+    }
+    let provider_id = match load_service_non_medical_partner_id(&state, &service).await {
+        Ok(provider_id) => provider_id,
+        Err(resp) => return resp,
+    };
+
+    let occurred_at = match body.occurred_at.as_deref() {
+        Some(value) => match parse_optional_datetime(Some(value)) {
+            Ok(Some(value)) => value,
+            Ok(None) => chrono::Utc::now(),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => chrono::Utc::now(),
+    };
+    if occurred_at > chrono::Utc::now() + chrono::Duration::minutes(5) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "occurred_at cannot be in the future",
+        );
+    }
+
+    let contact_person = normalize_optional_text(body.contact_person.as_deref());
+    if contact_person
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contact_person must not exceed 160 characters",
+        );
+    }
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 2000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 2000 characters",
+        );
+    }
+
+    let quoted_cost = match normalize_optional_non_negative(body.quoted_cost, "quoted_cost") {
+        Ok(value) => value.map(round_money),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if quoted_cost.is_none() && body.quoted_currency.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "quoted_currency requires quoted_cost",
+        );
+    }
+    let quoted_currency = if quoted_cost.is_some() {
+        let value = body.quoted_currency.unwrap_or_else(|| {
+            service
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string())
+        });
+        let normalized = value.trim().to_uppercase();
+        if normalized.len() != 3
+            || !normalized
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "quoted_currency must be 3 letters",
+            );
+        }
+        Some(normalized)
+    } else {
+        None
+    };
+
+    let recorder_name = match load_active_operational_user_name(&state, auth.user_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Recorder is not active operational staff",
+            );
+        }
+        Err(resp) => return resp,
+    };
+
+    let interaction = match sqlx::query(
+        r#"INSERT INTO concierge_service_partner_interactions (
+               concierge_service_id, provider_id, channel, direction, outcome,
+               occurred_at, contact_person, note, quoted_cost, quoted_currency, recorded_by
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id, created_at"#,
+    )
+    .bind(service_id)
+    .bind(provider_id)
+    .bind(&body.channel)
+    .bind(&body.direction)
+    .bind(&body.outcome)
+    .bind(occurred_at)
+    .bind(contact_person.as_deref())
+    .bind(note.as_deref())
+    .bind(quoted_cost)
+    .bind(quoted_currency.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, provider_id = %provider_id, "record concierge partner interaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record partner interaction",
+            );
+        }
+    };
+
+    let interaction_id: Uuid = interaction.try_get("id").unwrap_or_default();
+    let created_at = interaction
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let provider_name = service
+        .try_get::<Option<String>, _>("provider_name")
+        .unwrap_or_default()
+        .unwrap_or_default();
+
+    state.audit_sender.try_send(audit::domain_event(
+        "record_concierge_service_partner_interaction",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "channel": &body.channel,
+            "direction": &body.direction,
+            "outcome": &body.outcome,
+            "occurred_at": occurred_at.to_rfc3339(),
+            "quoted_cost": quoted_cost,
+            "quoted_currency": quoted_currency,
+        }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.partner_interaction_recorded",
+        service_id,
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "outcome": &body.outcome,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "id": interaction_id,
+        "concierge_service_id": service_id,
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "channel": &body.channel,
+        "direction": &body.direction,
+        "outcome": &body.outcome,
+        "occurred_at": occurred_at.to_rfc3339(),
+        "contact_person": contact_person,
+        "note": note,
+        "quoted_cost": quoted_cost.map(|value| format!("{value:.2}")),
+        "quoted_currency": quoted_currency,
+        "applied_as_cost_estimate_at": serde_json::Value::Null,
+        "applied_by": serde_json::Value::Null,
+        "applied_by_name": serde_json::Value::Null,
+        "recorded_by": auth.user_id,
+        "recorded_by_name": recorder_name,
+        "created_at": created_at.to_rfc3339(),
+    }))
+    .into_response()
+}
+
+async fn apply_partner_quote_as_cost_estimate(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((service_id, interaction_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
+        return resp;
+    }
+    let provider_id = match load_service_non_medical_partner_id(&state, &service).await {
+        Ok(provider_id) => provider_id,
+        Err(resp) => return resp,
+    };
+    let applied_by_name = match load_active_operational_user_name(&state, auth.user_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return err(
+                StatusCode::FORBIDDEN,
+                "User is not active operational staff",
+            );
+        }
+        Err(resp) => return resp,
+    };
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "begin partner quote application");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    };
+    let quote = match sqlx::query(
+        r#"SELECT interaction.provider_id, interaction.quoted_cost,
+                  interaction.quoted_currency, decision.id AS decision_id,
+                  service.currency, service.billing_status, service.status
+           FROM concierge_service_partner_interactions interaction
+           JOIN concierge_services service
+             ON service.id = interaction.concierge_service_id
+           LEFT JOIN concierge_service_cost_estimate_decisions decision
+             ON decision.partner_interaction_id = interaction.id
+           WHERE interaction.id = $1
+             AND interaction.concierge_service_id = $2
+           FOR UPDATE OF interaction, service"#,
+    )
+    .bind(interaction_id)
+    .bind(service_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Partner quote not found"),
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "lock partner quote");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    };
+
+    if quote.try_get::<Uuid, _>("provider_id").ok() != Some(provider_id) {
+        return err(
+            StatusCode::CONFLICT,
+            "Partner quote does not match the service provider",
+        );
+    }
+    let Some(quoted_cost) = quote
+        .try_get::<Option<rust_decimal::Decimal>, _>("quoted_cost")
+        .unwrap_or_default()
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Interaction has no quoted cost",
+        );
+    };
+    let quoted_currency = quote
+        .try_get::<Option<String>, _>("quoted_currency")
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let service_currency = quote
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    if quoted_currency != service_currency {
+        return err(
+            StatusCode::CONFLICT,
+            "Partner quote currency must match the service currency",
+        );
+    }
+    if quote
+        .try_get::<Option<Uuid>, _>("decision_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(StatusCode::CONFLICT, "Partner quote was already applied");
+    }
+    if quote.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
+        || matches!(
+            quote
+                .try_get::<String, _>("billing_status")
+                .unwrap_or_default()
+                .as_str(),
+            "billed" | "settled" | "waived"
+        )
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Closed or billed service costs cannot be changed",
+        );
+    }
+
+    let applied_at = chrono::Utc::now();
+    match sqlx::query(
+        r#"INSERT INTO concierge_service_cost_estimate_decisions (
+               concierge_service_id, partner_interaction_id, amount_gross,
+               currency, applied_by, applied_at
+           ) VALUES ($1, $2, $3, $4, $5, $6)"#,
+    )
+    .bind(service_id)
+    .bind(interaction_id)
+    .bind(quoted_cost)
+    .bind(&service_currency)
+    .bind(auth.user_id)
+    .bind(applied_at)
+    .execute(&mut *transaction)
+    .await
+    {
+        Ok(_) => {}
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(StatusCode::CONFLICT, "Partner quote was already applied");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "mark partner quote applied");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    }
+    if let Err(e) = sqlx::query(
+        r#"UPDATE concierge_services
+           SET cost_estimate = $2,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .bind(quoted_cost)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "apply partner quote to service");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "commit partner quote application");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "apply_partner_quote_as_cost_estimate",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "cost_estimate": quoted_cost,
+            "currency": service_currency,
+        }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.cost_estimate_applied",
+        service_id,
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "cost_estimate": quoted_cost,
+            "currency": service_currency,
+        }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "interaction_id": interaction_id,
+        "cost_estimate": quoted_cost.round_dp(2).to_string(),
+        "currency": service_currency,
+        "applied_as_cost_estimate_at": applied_at.to_rfc3339(),
+        "applied_by": auth.user_id,
+        "applied_by_name": applied_by_name,
+    }))
+    .into_response()
 }
 
 async fn create_concierge_service(
@@ -1151,7 +1949,11 @@ async fn create_concierge_service(
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => {
-                    (StatusCode::CREATED, Json(build_service_json(&service))).into_response()
+                    (
+                        StatusCode::CREATED,
+                        Json(build_service_json_for_role(&service, auth.role)),
+                    )
+                        .into_response()
                 }
                 Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
                 Err(resp) => resp,
@@ -1535,7 +2337,9 @@ async fn update_concierge_service(
             .await;
 
             match load_service_row(&state, service_id).await {
-                Ok(Some(service)) => Json(build_service_json(&service)).into_response(),
+                Ok(Some(service)) => {
+                    Json(build_service_json_for_role(&service, auth.role)).into_response()
+                }
                 Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
                 Err(resp) => resp,
             }
@@ -1557,13 +2361,15 @@ async fn load_service_row(
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
+                  cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
-                  pr.name AS provider_name,
+                  pr.name AS provider_name, pr.provider_type AS linked_provider_type,
                   sc.service_name AS provider_service_name,
                   ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
+                  ku.name AS key_responsible_user_name,
                   a.title AS appointment_title
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
@@ -1571,6 +2377,7 @@ async fn load_service_row(
            LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
            LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
+           LEFT JOIN users ku ON ku.id = cs.key_responsible_user_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
            WHERE cs.id = $1"#,
     )
@@ -1669,6 +2476,93 @@ async fn load_first_assigned_concierge_id(
         )
     })
     .map(|row| row.and_then(|value| value.try_get::<Uuid, _>("id").ok()))
+}
+
+async fn ensure_operational_service_access(
+    state: &AppState,
+    auth: &AuthUser,
+    service: &sqlx::postgres::PgRow,
+) -> Result<(), axum::response::Response> {
+    let patient_id: Uuid = service.try_get("patient_id").map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate key custody access",
+        )
+    })?;
+    let assigned_concierge_id = service
+        .try_get::<Option<Uuid>, _>("assigned_concierge_id")
+        .unwrap_or_default();
+    match can_access_service(state, auth, patient_id, assigned_concierge_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
+        Err(resp) => Err(resp),
+    }
+}
+
+async fn load_service_non_medical_partner_id(
+    state: &AppState,
+    service: &sqlx::postgres::PgRow,
+) -> Result<Uuid, axum::response::Response> {
+    let Some(provider_id) = service
+        .try_get::<Option<Uuid>, _>("provider_id")
+        .unwrap_or_default()
+    else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service has no linked non-medical partner",
+        ));
+    };
+
+    let is_non_medical = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM providers
+               WHERE id = $1
+                 AND provider_type = 'non_medical'
+           )"#,
+    )
+    .bind(provider_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, provider_id = %provider_id, "Failed to validate service partner");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate service partner",
+        )
+    })?;
+
+    if is_non_medical {
+        Ok(provider_id)
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service has no linked non-medical partner",
+        ))
+    }
+}
+
+async fn load_active_operational_user_name(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<Option<String>, axum::response::Response> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT name
+           FROM users
+           WHERE id = $1
+             AND is_active = true
+             AND role IN ('ceo', 'patient_manager', 'concierge')"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to validate operational user");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate operational user",
+        )
+    })
 }
 
 async fn load_active_concierge_role(
@@ -1908,6 +2802,42 @@ fn validate_update_fields_for_role(
     }
 
     Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+}
+
+fn is_valid_key_action(value: &str) -> bool {
+    matches!(value, "received" | "stored" | "handed_over" | "returned")
+}
+
+fn is_valid_key_transition(current: Option<&str>, next: &str) -> bool {
+    matches!(
+        (current, next),
+        (None, "received")
+            | (Some("received"), "stored" | "handed_over" | "returned")
+            | (Some("stored"), "handed_over" | "returned")
+            | (Some("handed_over"), "returned")
+            | (Some("returned"), "received")
+    )
+}
+
+fn is_valid_partner_channel(value: &str) -> bool {
+    matches!(
+        value,
+        "phone" | "email" | "messaging" | "in_person" | "other"
+    )
+}
+
+fn is_valid_partner_outcome(value: &str) -> bool {
+    matches!(
+        value,
+        "no_answer"
+            | "reached"
+            | "quote_requested"
+            | "quote_received"
+            | "follow_up_needed"
+            | "booking_confirmed"
+            | "declined"
+            | "cancelled"
+    )
 }
 
 async fn ensure_patient_access(
@@ -2208,6 +3138,10 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
+        "key_status": row.try_get::<Option<String>, _>("key_status").unwrap_or_default(),
+        "key_responsible_user_id": row.try_get::<Option<Uuid>, _>("key_responsible_user_id").unwrap_or_default(),
+        "key_responsible_user_name": row.try_get::<Option<String>, _>("key_responsible_user_name").unwrap_or_default(),
+        "key_status_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("key_status_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
         "billing_notes": row.try_get::<Option<String>, _>("billing_notes").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
@@ -2215,6 +3149,94 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "billed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("billed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde_json::Value {
+    let mut value = build_service_json(row);
+    if role.can_see_medical_data() {
+        return value;
+    }
+
+    let Some(service) = value.as_object_mut() else {
+        return value;
+    };
+    let has_appointment = row
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default()
+        .is_some();
+    if has_appointment {
+        service.insert(
+            "title".to_string(),
+            serde_json::Value::String("Service request".to_string()),
+        );
+        service.insert("appointment_title".to_string(), serde_json::Value::Null);
+        service.insert("service_notes".to_string(), serde_json::Value::Null);
+    }
+
+    let provider_is_non_medical = row
+        .try_get::<Option<String>, _>("linked_provider_type")
+        .unwrap_or_default()
+        .as_deref()
+        == Some("non_medical");
+    if !provider_is_non_medical {
+        service.insert(
+            "title".to_string(),
+            serde_json::Value::String("Service request".to_string()),
+        );
+        service.insert("service_notes".to_string(), serde_json::Value::Null);
+        for field in [
+            "provider_id",
+            "provider_name",
+            "provider_service_id",
+            "provider_service_name",
+            "taxonomy_node_id",
+            "taxonomy_node_code",
+            "taxonomy_node_name_de",
+            "taxonomy_node_name_ru",
+        ] {
+            service.insert(field.to_string(), serde_json::Value::Null);
+        }
+    }
+
+    value
+}
+
+fn build_key_event_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
+        "action": row.try_get::<String, _>("action").unwrap_or_default(),
+        "responsible_user_id": row.try_get::<Uuid, _>("responsible_user_id").unwrap_or_default(),
+        "responsible_user_name": row.try_get::<String, _>("responsible_user_name").unwrap_or_default(),
+        "occurred_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("occurred_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "recorded_by": row.try_get::<Uuid, _>("recorded_by").unwrap_or_default(),
+        "recorded_by_name": row.try_get::<String, _>("recorded_by_name").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+fn build_partner_interaction_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
+        "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or_default(),
+        "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
+        "channel": row.try_get::<String, _>("channel").unwrap_or_default(),
+        "direction": row.try_get::<String, _>("direction").unwrap_or_default(),
+        "outcome": row.try_get::<String, _>("outcome").unwrap_or_default(),
+        "occurred_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("occurred_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "contact_person": row.try_get::<Option<String>, _>("contact_person").unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "quoted_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("quoted_cost").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "quoted_currency": row.try_get::<Option<String>, _>("quoted_currency").unwrap_or_default(),
+        "applied_as_cost_estimate_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("applied_as_cost_estimate_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "applied_by": row.try_get::<Option<Uuid>, _>("applied_by").unwrap_or_default(),
+        "applied_by_name": row.try_get::<Option<String>, _>("applied_by_name").unwrap_or_default(),
+        "recorded_by": row.try_get::<Uuid, _>("recorded_by").unwrap_or_default(),
+        "recorded_by_name": row.try_get::<String, _>("recorded_by_name").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }
 
