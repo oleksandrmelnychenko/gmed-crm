@@ -9,8 +9,9 @@ import type {
   PortalDocumentItem,
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
-    PortalInvoiceItem,
-    PortalInvoicePaymentHistoryResponse,
+  PortalInvoiceCreditNoteHistoryResponse,
+  PortalInvoiceItem,
+  PortalInvoicePaymentHistoryResponse,
   PortalNextActionItem,
   PortalNextActionsResponse,
   PortalPrivacyRequest,
@@ -226,6 +227,12 @@ export function fetchPortalInvoiceDetail(invoiceId: string) {
 export function fetchPortalInvoicePayments(invoiceId: string) {
   return apiFetch<PortalInvoicePaymentHistoryResponse>(
     `/me/invoices/${invoiceId}/payments`,
+  );
+}
+
+export function fetchPortalInvoiceCreditNotes(invoiceId: string) {
+  return apiFetch<PortalInvoiceCreditNoteHistoryResponse>(
+    `/me/invoices/${invoiceId}/credit-notes`,
   );
 }
 

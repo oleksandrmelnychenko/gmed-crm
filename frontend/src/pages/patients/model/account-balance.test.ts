@@ -23,22 +23,22 @@ describe("resolvePatientBalancePresentation", () => {
     ).toEqual({ amount: 125.5, side: "credit", needsReconciliation: false });
   });
 
-  it("keeps the calculated figure visible while reconciliation is required", () => {
+  it("hides the calculated figure while reconciliation is required", () => {
     expect(
       resolvePatientBalancePresentation({
         calculated_balance: "2050.00",
         closing_balance: null,
         balance_side: "reconciliation_required",
       }),
-    ).toEqual({ amount: 2050, side: "debit", needsReconciliation: true });
+    ).toEqual({ amount: null, side: "reconciliation_required", needsReconciliation: true });
   });
 
   it("does not render an invalid balance", () => {
     expect(
       resolvePatientBalancePresentation({
-        calculated_balance: "not-a-number",
-        closing_balance: null,
-        balance_side: "reconciliation_required",
+        calculated_balance: "450.00",
+        closing_balance: "not-a-number",
+        balance_side: "debit",
       }),
     ).toBeNull();
   });

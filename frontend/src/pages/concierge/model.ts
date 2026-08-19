@@ -35,6 +35,7 @@ export type ConciergeService = {
   booking_reference: string | null;
   vendor_name: string | null;
   vendor_contact: string | null;
+  service_address: string | null;
   starts_at: string | null;
   ends_at: string | null;
   cost_estimate: string | null;
@@ -87,6 +88,7 @@ export type ConciergePartnerOutcome =
   | "quote_requested"
   | "quote_received"
   | "follow_up_needed"
+  | "booking_requested"
   | "booking_confirmed"
   | "declined"
   | "cancelled";
@@ -178,6 +180,7 @@ export type ConciergeAgendaItem = {
   priority: string | null;
   patientName: string | null;
   providerId: string | null;
+  address: string | null;
 };
 
 export type ConciergeProviderCategory = "all" | "restaurants" | "drivers" | "hotels" | "other";
@@ -280,10 +283,6 @@ export function conciergeServiceColumn(service: ConciergeService): ConciergeBoar
 
 export function nextConciergeServiceStatus(status: string): ConciergeServiceStatus | null {
   switch (status) {
-    case "planned":
-      return "booked";
-    case "booked":
-      return "confirmed";
     case "confirmed":
       return "in_service";
     case "in_service":
@@ -350,6 +349,7 @@ export function filterConciergeServices(
       service.appointment_id ? null : service.provider_name,
       service.vendor_name,
       service.vendor_contact,
+      service.service_address,
       service.booking_reference,
       service.taxonomy_node_code,
       service.taxonomy_node_name_de,
@@ -472,6 +472,27 @@ export function sortConciergeProviders(providers: ConciergeProvider[]): Concierg
   });
 }
 
+export function eligibleConciergeServicesForProvider(
+  services: ConciergeService[],
+  providerId: string,
+): ConciergeService[] {
+  return sortConciergeServices(
+    services.filter(
+      (service) =>
+        ["planned", "booked"].includes(service.status) &&
+        (service.provider_id === null || service.provider_id === providerId),
+    ),
+  );
+}
+
+export function conciergeServiceRouteAddress(
+  service: ConciergeService,
+  provider: ConciergeProvider | null | undefined,
+): string | null {
+  const serviceAddress = service.service_address?.trim();
+  return serviceAddress || conciergeProviderAddress(provider);
+}
+
 export function buildConciergeAgenda(
   services: ConciergeService[],
   tasks: ConciergeTask[],
@@ -491,6 +512,7 @@ export function buildConciergeAgenda(
       priority: null,
       patientName: service.patient_name,
       providerId: service.provider_id,
+      address: service.service_address,
     });
   }
   for (const task of tasks) {
@@ -505,6 +527,7 @@ export function buildConciergeAgenda(
       priority: task.priority,
       patientName: null,
       providerId: null,
+      address: task.location,
     });
   }
   return items.sort((left, right) => left.date.localeCompare(right.date));

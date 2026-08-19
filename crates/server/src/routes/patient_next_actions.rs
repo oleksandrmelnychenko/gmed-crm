@@ -236,14 +236,15 @@ async fn load_invoice_actions(
     patient_id: Uuid,
 ) -> Result<Vec<Value>, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT id, invoice_number, status, due_date, total_gross, paid_amount,
+        r#"SELECT id, invoice_number, status, due_date, total_gross, credited_amount, paid_amount,
+                  prepayment_applied_amount,
                   portal_visible, hide_amounts_from_patient, pdf_visible_to_patient
            FROM invoices
            WHERE patient_id = $1
              AND portal_visible = true
              AND hide_amounts_from_patient = false
              AND status IN ('sent', 'partially_paid', 'overdue')
-             AND (total_gross - paid_amount - prepayment_applied_amount) > 0
+             AND (total_gross - credited_amount - paid_amount - prepayment_applied_amount) > 0
            ORDER BY due_date ASC NULLS LAST, issued_at DESC
            LIMIT 10"#,
     )
@@ -268,7 +269,13 @@ async fn load_invoice_actions(
             let paid = row
                 .try_get::<Decimal, _>("paid_amount")
                 .unwrap_or(Decimal::ZERO);
-            let balance = (total - paid).max(Decimal::ZERO);
+            let credited = row
+                .try_get::<Decimal, _>("credited_amount")
+                .unwrap_or(Decimal::ZERO);
+            let prepayment = row
+                .try_get::<Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(Decimal::ZERO);
+            let balance = (total - credited - paid - prepayment).max(Decimal::ZERO);
             let due_date = row
                 .try_get::<Option<chrono::NaiveDate>, _>("due_date")
                 .unwrap_or_default()

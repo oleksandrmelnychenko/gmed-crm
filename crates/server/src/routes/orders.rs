@@ -242,6 +242,7 @@ struct UpdateExternalInvoiceRequest {
 
 #[derive(Deserialize)]
 struct CreateExternalInvoiceAllocationRequest {
+    request_id: Uuid,
     patient_invoice_id: Uuid,
     amount_gross: String,
 }
@@ -553,12 +554,13 @@ async fn list_debt_management_queue(
                     FROM invoices i
                     WHERE i.order_id = o.id
                       AND i.status = 'overdue'
-                      AND i.total_gross > COALESCE(i.paid_amount, 0)
+                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
                                             + COALESCE(i.prepayment_applied_amount, 0)
                   ), 0) AS overdue_invoice_count,
                   COALESCE((
                     SELECT SUM(GREATEST(
                         i.total_gross
+                        - COALESCE(i.credited_amount, 0)
                         - COALESCE(i.paid_amount, 0)
                         - COALESCE(i.prepayment_applied_amount, 0),
                         0
@@ -566,7 +568,7 @@ async fn list_debt_management_queue(
                     FROM invoices i
                     WHERE i.order_id = o.id
                       AND i.status = 'overdue'
-                      AND i.total_gross > COALESCE(i.paid_amount, 0)
+                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
                                             + COALESCE(i.prepayment_applied_amount, 0)
                   ), 0) AS overdue_balance,
                   COALESCE((
@@ -575,6 +577,7 @@ async fn list_debt_management_queue(
                             WHEN i.status NOT IN ('paid', 'cancelled')
                             THEN GREATEST(
                                 i.total_gross
+                                - COALESCE(i.credited_amount, 0)
                                 - COALESCE(i.paid_amount, 0)
                                 - COALESCE(i.prepayment_applied_amount, 0),
                                 0
@@ -606,7 +609,7 @@ async fn list_debt_management_queue(
                         FROM invoices i
                         WHERE i.order_id = o.id
                           AND i.status = 'overdue'
-                          AND i.total_gross > COALESCE(i.paid_amount, 0)
+                          AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
                                                 + COALESCE(i.prepayment_applied_amount, 0)
                     )
                  )
@@ -1118,7 +1121,7 @@ async fn load_order_process_readiness(
     let finance_row = sqlx::query(
         r#"SELECT COUNT(*) FILTER (
                     WHERE status = 'overdue'
-                      AND total_gross > COALESCE(paid_amount, 0)
+                      AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
                                          + COALESCE(prepayment_applied_amount, 0)
                 ) AS overdue_invoice_count,
                   COALESCE(
@@ -1127,6 +1130,7 @@ async fn load_order_process_readiness(
                             WHEN status NOT IN ('paid', 'cancelled')
                             THEN GREATEST(
                                 total_gross
+                                - COALESCE(credited_amount, 0)
                                 - COALESCE(paid_amount, 0)
                                 - COALESCE(prepayment_applied_amount, 0),
                                 0
@@ -2942,12 +2946,13 @@ async fn get_order(
                        SUM(allocation.amount_gross_snapshot) AS line_gross,
                        GREATEST(
                            invoice.total_gross
+                               - invoice.credited_amount
                                - invoice.paid_amount
                                - COALESCE(invoice.prepayment_applied_amount, 0),
                            0
                        ) AS balance_due,
                        LEAST(
-                           invoice.total_gross,
+                           invoice.total_gross - invoice.credited_amount,
                            invoice.paid_amount
                                + COALESCE(invoice.prepayment_applied_amount, 0)
                        ) AS settled_amount
@@ -4757,7 +4762,7 @@ async fn load_external_invoice_allocation_workspace(
 
     let candidate_rows = sqlx::query(
         r#"SELECT invoice.id, invoice.invoice_number, invoice.invoice_type,
-                  invoice.status, invoice.total_gross, invoice.paid_amount,
+                  invoice.status, invoice.total_gross, invoice.credited_amount, invoice.paid_amount,
                   invoice.prepayment_applied_amount,
                   COALESCE(SUM(allocation.amount_gross) FILTER (
                       WHERE allocation.reversed_at IS NULL
@@ -4775,7 +4780,7 @@ async fn load_external_invoice_allocation_workspace(
              AND invoice.invoice_type <> 'advance'
              AND invoice.status NOT IN ('draft', 'cancelled')
            GROUP BY invoice.id
-           HAVING invoice.total_gross - COALESCE(SUM(allocation.amount_gross) FILTER (
+           HAVING invoice.total_gross - invoice.credited_amount - COALESCE(SUM(allocation.amount_gross) FILTER (
                       WHERE allocation.reversed_at IS NULL
                         AND linked_external.status <> 'cancelled'
                   ), 0) > 0
@@ -4795,6 +4800,9 @@ async fn load_external_invoice_allocation_workspace(
             let paid = row
                 .try_get::<rust_decimal::Decimal, _>("paid_amount")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
+            let credited = row
+                .try_get::<rust_decimal::Decimal, _>("credited_amount")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
             let prepayment = row
                 .try_get::<rust_decimal::Decimal, _>("prepayment_applied_amount")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -4807,9 +4815,10 @@ async fn load_external_invoice_allocation_workspace(
                 "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "total_gross": total.to_string(),
-                "balance_due": (total - paid - prepayment).max(rust_decimal::Decimal::ZERO).to_string(),
+                "credited_amount": credited.to_string(),
+                "balance_due": (total - credited - paid - prepayment).max(rust_decimal::Decimal::ZERO).to_string(),
                 "allocated_source_receivable": allocated.to_string(),
-                "allocatable_capacity": (total - allocated).max(rust_decimal::Decimal::ZERO).to_string(),
+                "allocatable_capacity": (total - credited - allocated).max(rust_decimal::Decimal::ZERO).to_string(),
             })
         })
         .collect::<Vec<_>>();
@@ -4913,12 +4922,6 @@ async fn create_external_invoice_allocation(
     let patient_receivable = external
         .try_get::<rust_decimal::Decimal, _>("patient_receivable_gross")
         .unwrap_or(rust_decimal::Decimal::ZERO);
-    if external_status == "cancelled" || patient_receivable <= rust_decimal::Decimal::ZERO {
-        return err(
-            StatusCode::CONFLICT,
-            "External invoice has no allocatable patient receivable",
-        );
-    }
     let patient_id = external
         .try_get::<Uuid, _>("patient_id")
         .unwrap_or_default();
@@ -4926,9 +4929,64 @@ async fn create_external_invoice_allocation(
         .try_get::<String, _>("currency")
         .unwrap_or_default();
 
+    let existing_request = match sqlx::query(
+        r#"SELECT id, patient_invoice_id, amount_gross
+           FROM external_invoice_patient_invoice_allocations
+           WHERE external_invoice_id = $1 AND request_id = $2"#,
+    )
+    .bind(external_invoice_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, external_invoice_id = %external_invoice_id, request_id = %body.request_id, "load external allocation idempotency key");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+    };
+    if let Some(existing) = existing_request {
+        let allocation_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        let same_request = existing
+            .try_get::<Uuid, _>("patient_invoice_id")
+            .map(|value| value == body.patient_invoice_id)
+            .unwrap_or(false)
+            && existing
+                .try_get::<rust_decimal::Decimal, _>("amount_gross")
+                .map(|value| value == amount)
+                .unwrap_or(false);
+        if !same_request {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another receivable allocation",
+            );
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "commit external allocation replay");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to allocate receivable",
+            );
+        }
+        return Json(serde_json::json!({
+            "id": allocation_id,
+            "idempotent_replay": true,
+        }))
+        .into_response();
+    }
+    if external_status == "cancelled" || patient_receivable <= rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::CONFLICT,
+            "External invoice has no allocatable patient receivable",
+        );
+    }
+
     let patient_invoice = match sqlx::query(
         r#"SELECT invoice.patient_id, invoice.order_id, invoice.invoice_type,
-                  invoice.status, invoice.total_gross, orders.currency
+                  invoice.status, invoice.total_gross, invoice.credited_amount, orders.currency
            FROM invoices invoice
            JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.id = $1
@@ -5026,20 +5084,24 @@ async fn create_external_invoice_allocation(
     };
     let invoice_total = patient_invoice
         .try_get::<rust_decimal::Decimal, _>("total_gross")
-        .unwrap_or(rust_decimal::Decimal::ZERO);
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        - patient_invoice
+            .try_get::<rust_decimal::Decimal, _>("credited_amount")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
     if invoice_allocated + amount > invoice_total {
         return err(
             StatusCode::CONFLICT,
-            "Allocation exceeds patient invoice gross total",
+            "Allocation exceeds adjusted patient invoice total",
         );
     }
 
     let allocation_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO external_invoice_patient_invoice_allocations (
-               external_invoice_id, patient_invoice_id, amount_gross, created_by
-           ) VALUES ($1, $2, $3, $4)
+               request_id, external_invoice_id, patient_invoice_id, amount_gross, created_by
+           ) VALUES ($1, $2, $3, $4, $5)
            RETURNING id"#,
     )
+    .bind(body.request_id)
     .bind(external_invoice_id)
     .bind(body.patient_invoice_id)
     .bind(amount)
@@ -5071,6 +5133,7 @@ async fn create_external_invoice_allocation(
         Some(external_invoice_id),
         serde_json::json!({
             "allocation_id": allocation_id,
+            "request_id": body.request_id,
             "patient_invoice_id": body.patient_invoice_id,
             "amount_gross": amount.to_string(),
             "currency": currency,
@@ -5084,6 +5147,7 @@ async fn create_external_invoice_allocation(
         serde_json::json!({
             "external_invoice_id": external_invoice_id,
             "allocation_id": allocation_id,
+            "request_id": body.request_id,
             "patient_invoice_id": body.patient_invoice_id,
         }),
     )
@@ -5578,6 +5642,8 @@ async fn update_external_invoice(
                END
            WHERE id = $1
              AND order_id = $2
+             AND status = $14
+             AND paid_by = $15
            RETURNING id"#,
     )
     .bind(external_invoice_id)
@@ -5593,6 +5659,8 @@ async fn update_external_invoice(
     .bind(paid_by)
     .bind(body.service_delivered)
     .bind(notes)
+    .bind(&current_status)
+    .bind(&current_paid_by)
     .fetch_optional(&state.db)
     .await
     {
@@ -5634,11 +5702,15 @@ async fn update_external_invoice(
             .await;
             Json(serde_json::json!({ "ok": true })).into_response()
         }
-        Ok(None) => err(StatusCode::NOT_FOUND, "External invoice not found"),
+        Ok(None) => err(
+            StatusCode::CONFLICT,
+            "External invoice changed concurrently; reload and try again",
+        ),
         Err(error) => {
             let database_message = error.to_string();
             if database_message.contains("locked by active allocations")
                 || database_message.contains("cannot be lower than active allocations")
+                || database_message.contains("cancelled external invoices cannot be reactivated")
             {
                 return err(
                     StatusCode::CONFLICT,

@@ -4,6 +4,7 @@ import type {
   AccountingLedgerPayload,
   DunningEvent,
   InvoiceItem,
+  InvoiceCreditNoteHistoryResponse,
   InvoiceListResponse,
   InvoicePaymentHistoryResponse,
   OrderOption,
@@ -54,12 +55,13 @@ export function fetchInvoices(path: string) {
 }
 
 export async function fetchInvoiceWorkspace(invoiceId: string) {
-  const [invoice, dunning, payments] = await Promise.all([
+  const [invoice, dunning, payments, creditNotes] = await Promise.all([
     apiFetch<InvoiceItem>(`/invoices/${invoiceId}`),
     apiFetch<DunningEvent[]>(`/invoices/${invoiceId}/dunning`),
     apiFetch<InvoicePaymentHistoryResponse>(`/invoices/${invoiceId}/payments`),
+    apiFetch<InvoiceCreditNoteHistoryResponse>(`/invoices/${invoiceId}/credit-notes`),
   ]);
-  return { invoice, dunning, payments: payments.items };
+  return { invoice, dunning, payments: payments.items, creditNotes: creditNotes.items };
 }
 
 export function fetchAccountingLedger(year: string) {
@@ -87,6 +89,21 @@ export function reverseInvoicePayment(
 ) {
   return postJson(
     `/invoices/${invoiceId}/payments/${paymentId}/reversal`,
+    payload,
+  );
+}
+
+export function createInvoiceCreditNote(invoiceId: string, payload: JsonPayload) {
+  return postJson(`/invoices/${invoiceId}/credit-notes`, payload);
+}
+
+export function reverseInvoiceCreditNote(
+  invoiceId: string,
+  creditNoteId: string,
+  payload: JsonPayload,
+) {
+  return postJson(
+    `/invoices/${invoiceId}/credit-notes/${creditNoteId}/reversal`,
     payload,
   );
 }

@@ -49,6 +49,7 @@ export function ExternalInvoiceAllocationSheet({
   const [error, setError] = useState("");
   const [patientInvoiceId, setPatientInvoiceId] = useState("");
   const [amountGross, setAmountGross] = useState("");
+  const [allocationRequestId, setAllocationRequestId] = useState(() => crypto.randomUUID());
   const [reversalNote, setReversalNote] = useState("");
 
   const load = useCallback(async () => {
@@ -79,6 +80,7 @@ export function ExternalInvoiceAllocationSheet({
       setWorkspace(null);
       setPatientInvoiceId("");
       setAmountGross("");
+      setAllocationRequestId(crypto.randomUUID());
       setReversalNote("");
       setError("");
       return;
@@ -99,9 +101,11 @@ export function ExternalInvoiceAllocationSheet({
       await createExternalInvoiceAllocation(
         orderId,
         externalInvoiceId,
+        allocationRequestId,
         patientInvoiceId,
         amountGross.trim(),
       );
+      setAllocationRequestId(crypto.randomUUID());
       await load();
       await onChanged();
     } catch (saveError) {

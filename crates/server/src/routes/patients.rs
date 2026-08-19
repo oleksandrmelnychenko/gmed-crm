@@ -7006,7 +7006,7 @@ async fn list_patient_invoices(
 
     let rows = sqlx::query(
         r#"SELECT i.id, i.invoice_number, i.invoice_type, i.status, i.issued_at, i.due_date,
-                  i.total_gross, i.paid_amount, i.prepayment_applied_amount,
+                  i.total_gross, i.credited_amount, i.paid_amount, i.prepayment_applied_amount,
                   o.order_number, q.quote_number
            FROM invoices i
            LEFT JOIN orders o ON o.id = i.order_id
@@ -7034,6 +7034,9 @@ async fn list_patient_invoices(
             let paid_amount = row
                 .try_get::<rust_decimal::Decimal, _>("paid_amount")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
+            let credited_amount = row
+                .try_get::<rust_decimal::Decimal, _>("credited_amount")
+                .unwrap_or(rust_decimal::Decimal::ZERO);
             let prepayment_applied_amount = row
                 .try_get::<rust_decimal::Decimal, _>("prepayment_applied_amount")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -7045,9 +7048,11 @@ async fn list_patient_invoices(
                 "issued_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("issued_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
                 "total_gross": total_gross.round_dp(2).normalize().to_string(),
+                "credited_amount": credited_amount.round_dp(2).normalize().to_string(),
+                "adjusted_total_gross": (total_gross - credited_amount).max(rust_decimal::Decimal::ZERO).round_dp(2).normalize().to_string(),
                 "paid_amount": paid_amount.round_dp(2).normalize().to_string(),
                 "prepayment_applied_amount": prepayment_applied_amount.round_dp(2).normalize().to_string(),
-                "balance_due": (total_gross - paid_amount - prepayment_applied_amount).max(rust_decimal::Decimal::ZERO).round_dp(2).normalize().to_string(),
+                "balance_due": (total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(rust_decimal::Decimal::ZERO).round_dp(2).normalize().to_string(),
                 "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                 "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
             })

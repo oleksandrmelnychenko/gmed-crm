@@ -149,7 +149,7 @@ pub(crate) async fn load_patient_debt_management_state(
         r#"SELECT
                 COUNT(*) FILTER (
                     WHERE status = 'overdue'
-                      AND total_gross > COALESCE(paid_amount, 0)
+                      AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
                                          + COALESCE(prepayment_applied_amount, 0)
                 ) AS overdue_invoice_count,
                 COALESCE(
@@ -158,6 +158,7 @@ pub(crate) async fn load_patient_debt_management_state(
                             WHEN status NOT IN ('paid', 'cancelled')
                             THEN GREATEST(
                                 total_gross
+                                - COALESCE(credited_amount, 0)
                                 - COALESCE(paid_amount, 0)
                                 - COALESCE(prepayment_applied_amount, 0),
                                 0
@@ -213,7 +214,7 @@ pub(crate) async fn load_patient_debt_management_state(
                     FROM invoices i
                     WHERE i.order_id = dm.order_id
                       AND i.status = 'overdue'
-                      AND i.total_gross > COALESCE(i.paid_amount, 0)
+                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
                                             + COALESCE(i.prepayment_applied_amount, 0)
                   ) AS order_overdue_invoice_count,
                   (
@@ -223,6 +224,7 @@ pub(crate) async fn load_patient_debt_management_state(
                                 WHEN i.status NOT IN ('paid', 'cancelled')
                                 THEN GREATEST(
                                     i.total_gross
+                                    - COALESCE(i.credited_amount, 0)
                                     - COALESCE(i.paid_amount, 0)
                                     - COALESCE(i.prepayment_applied_amount, 0),
                                     0
@@ -253,7 +255,7 @@ pub(crate) async fn load_patient_debt_management_state(
                         FROM invoices i
                         WHERE i.order_id = dm.order_id
                           AND i.status = 'overdue'
-                          AND i.total_gross > COALESCE(i.paid_amount, 0)
+                          AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
                                                 + COALESCE(i.prepayment_applied_amount, 0)
                     )
                  )

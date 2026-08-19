@@ -113,6 +113,12 @@ const PatientSubscriptionsPage = lazy(() =>
   })),
 );
 
+const PatientNotificationsPage = lazy(() =>
+  import("@/pages/patients/portal-notifications-page").then((module) => ({
+    default: module.PatientNotificationsPage,
+  })),
+);
+
 const LeadsPage = lazy(() =>
   import("@/pages/leads").then((module) => ({
     default: module.LeadsPage,
@@ -349,6 +355,7 @@ function AppRoutes() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
+            <Route path="notifications" element={<PatientNotificationsPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="sops" element={<SopsPage />} />

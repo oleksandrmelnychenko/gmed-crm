@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use uuid::Uuid;
+use gmed_domain::role::Role;
 
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
@@ -57,13 +58,19 @@ async fn unread_count(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    let count = sqlx::query_scalar!(
+    let count = match sqlx::query_scalar!(
         r#"SELECT count(*) AS "c!" FROM user_notifications WHERE user_id = $1 AND NOT is_read"#,
         auth.user_id
     )
     .fetch_one(&state.db)
     .await
-    .unwrap_or(0);
+    {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(%error, user_id = %auth.user_id, "count unread notifications");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to count notifications");
+        }
+    };
 
     Json(serde_json::json!({ "count": count })).into_response()
 }
@@ -73,13 +80,23 @@ async fn mark_read(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    let _ = sqlx::query!(
+    let result = sqlx::query!(
         "UPDATE user_notifications SET is_read = true WHERE id = $1 AND user_id = $2",
         id,
         auth.user_id
     )
     .execute(&state.db)
     .await;
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            tracing::error!(%error, notification_id = %id, user_id = %auth.user_id, "mark notification read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update notification");
+        }
+    };
+    if outcome.rows_affected() == 0 {
+        return err(StatusCode::NOT_FOUND, "Notification not found");
+    }
     crate::realtime::publish_notification_event(
         &state,
         auth.user_id,
@@ -95,12 +112,16 @@ async fn mark_all_read(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    let _ = sqlx::query!(
+    if let Err(error) = sqlx::query!(
         "UPDATE user_notifications SET is_read = true WHERE user_id = $1 AND NOT is_read",
         auth.user_id
     )
     .execute(&state.db)
-    .await;
+    .await
+    {
+        tracing::error!(%error, user_id = %auth.user_id, "mark all notifications read");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update notifications");
+    }
     crate::realtime::publish_notification_event(
         &state,
         auth.user_id,
@@ -114,8 +135,11 @@ async fn mark_all_read(
 
 async fn online_users(
     State(state): State<AppState>,
-    Extension(_auth): Extension<AuthUser>,
+    Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
+    if auth.role == Role::Patient {
+        return err(StatusCode::FORBIDDEN, "Staff access required");
+    }
     match sqlx::query!(
         r#"SELECT DISTINCT ON (tf.user_id)
                   tf.user_id, u.name AS "user_name!", u.email AS "user_email!", u.role AS "role!"

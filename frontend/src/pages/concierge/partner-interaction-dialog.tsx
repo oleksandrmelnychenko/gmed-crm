@@ -71,6 +71,7 @@ const copy = {
     quote_requested: "Angebot angefragt",
     quote_received: "Angebot erhalten",
     follow_up_needed: "Rückmeldung erforderlich",
+    booking_requested: "Buchung angefragt",
     booking_confirmed: "Buchung bestätigt",
     declined: "Abgelehnt",
     cancelled: "Storniert",
@@ -111,6 +112,7 @@ const copy = {
     quote_requested: "Цена запрошена",
     quote_received: "Цена получена",
     follow_up_needed: "Нужен повторный контакт",
+    booking_requested: "Бронирование запрошено",
     booking_confirmed: "Бронирование подтверждено",
     declined: "Отказ",
     cancelled: "Отменено",
@@ -128,7 +130,6 @@ const OUTCOMES: ConciergePartnerOutcome[] = [
   "quote_requested",
   "quote_received",
   "follow_up_needed",
-  "booking_confirmed",
   "declined",
   "cancelled",
 ];

@@ -1017,7 +1017,7 @@ async fn list_my_subscriptions(
                SELECT COUNT(*)::BIGINT AS visible_invoice_count,
                       COUNT(*) FILTER (
                           WHERE invoice.status = 'overdue'
-                            AND invoice.total_gross
+                            AND invoice.total_gross - invoice.credited_amount
                                 > invoice.paid_amount + invoice.prepayment_applied_amount
                       )::BIGINT AS overdue_invoice_count,
                       COALESCE(SUM(
@@ -1025,6 +1025,7 @@ async fn list_my_subscriptions(
                       ), 0) AS settled_amount,
                       COALESCE(SUM(GREATEST(
                           invoice.total_gross
+                          - invoice.credited_amount
                           - invoice.paid_amount
                           - invoice.prepayment_applied_amount,
                           0

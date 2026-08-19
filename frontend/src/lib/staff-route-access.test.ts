@@ -138,6 +138,7 @@ describe("patient portal routes", () => {
     expect(canAccessPatientPortalRoute("/chat")).toBe(true);
     expect(canAccessPatientPortalRoute("/documents?tab=portal")).toBe(true);
     expect(canAccessPatientPortalRoute("/subscriptions")).toBe(true);
+    expect(canAccessPatientPortalRoute("/notifications")).toBe(true);
     expect(canAccessPatientPortalRoute("/reports")).toBe(false);
     expect(canAccessPatientPortalRoute("/patients")).toBe(false);
   });
@@ -145,6 +146,7 @@ describe("patient portal routes", () => {
   it("keeps the canonical portal navigation order", () => {
     expect(listPatientPortalNavItems().map((item) => item.to)).toEqual([
       "/",
+      "/notifications",
       "/chat",
       "/appointments",
       "/recommendations",

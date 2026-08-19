@@ -390,13 +390,18 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
     .await;
     assert_eq!(status, StatusCode::OK, "send settlement: {sent:?}");
 
-    for amount in ["20.00", "39.50"] {
+    let first_prepayment_request_id = Uuid::new_v4();
+    for (amount, request_id) in [
+        ("20.00", first_prepayment_request_id),
+        ("39.50", Uuid::new_v4()),
+    ] {
         let (status, body) = json_request(
             &app,
             "POST",
             &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
             &billing,
             Some(json!({
+                "request_id": request_id,
                 "advance_invoice_id": advance_id,
                 "amount_gross": amount
             })),
@@ -408,6 +413,34 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
             "prepayment apply response: {body:?}"
         );
     }
+
+    let (status, replayed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
+        &billing,
+        Some(json!({
+            "request_id": first_prepayment_request_id,
+            "advance_invoice_id": advance_id,
+            "amount_gross": "20.00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "prepayment replay: {replayed:?}");
+    assert_eq!(replayed["prepayment_applied_amount"], "59.50");
+    let (status, drift) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
+        &billing,
+        Some(json!({
+            "request_id": first_prepayment_request_id,
+            "advance_invoice_id": advance_id,
+            "amount_gross": "20.01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "prepayment drift: {drift:?}");
 
     let applied: rust_decimal::Decimal =
         sqlx::query_scalar("SELECT prepayment_applied_amount FROM invoices WHERE id = $1")
@@ -428,16 +461,26 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
     assert_eq!(status, StatusCode::OK);
     assert_eq!(detail["status"], "paid");
     assert!(detail["paid_at"].as_str().is_some());
-    let allocation_id = detail["prepayment_allocations"][0]["id"].as_str().unwrap();
-    let (status, released) = json_request(
-        &app,
-        "DELETE",
-        &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations/{allocation_id}"),
-        &billing,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "release response: {released:?}");
+    let allocation_ids = detail["prepayment_allocations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|allocation| allocation["id"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(allocation_ids.len(), 2);
+    let mut released = Value::Null;
+    for allocation_id in allocation_ids {
+        let (status, body) = json_request(
+            &app,
+            "DELETE",
+            &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations/{allocation_id}"),
+            &billing,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "release response: {body:?}");
+        released = body;
+    }
     assert_eq!(released["status"], "sent");
     assert!(released["paid_at"].is_null());
     assert_eq!(released["prepayment_applied_amount"], "0");
@@ -448,6 +491,7 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
         &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
         &billing,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "advance_invoice_id": advance_id,
             "amount_gross": "59.50"
         })),

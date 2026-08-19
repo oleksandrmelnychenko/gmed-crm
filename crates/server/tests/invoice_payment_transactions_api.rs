@@ -160,6 +160,7 @@ async fn record_payment(
     app: &axum::Router,
     bearer: &str,
     invoice_id: Uuid,
+    request_id: Uuid,
     amount: i64,
     reference: &str,
 ) -> Value {
@@ -169,6 +170,7 @@ async fn record_payment(
         &format!("/api/v1/invoices/{invoice_id}/payments"),
         bearer,
         Some(json!({
+            "request_id": request_id,
             "amount_gross": amount,
             "payment_method": "bank_transfer",
             "payment_reference": reference,
@@ -224,6 +226,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
         &format!("/api/v1/invoices/{invoice_id}/payments"),
         &manager,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "payment_method": "cash",
             "received_on": chrono::Utc::now().date_naive().to_string()
@@ -232,14 +235,66 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "manager response: {body:?}");
 
-    let first = record_payment(&app, &billing, invoice_id, 40, "BANK-001").await;
+    let first_request_id = Uuid::new_v4();
+    let first = record_payment(
+        &app,
+        &billing,
+        invoice_id,
+        first_request_id,
+        40,
+        "BANK-001",
+    )
+    .await;
     let first_payment_id =
         Uuid::parse_str(first["payment_transaction_id"].as_str().unwrap()).unwrap();
     assert_eq!(first["invoice"]["paid_amount"], "40");
     assert_eq!(first["invoice"]["status"], "partially_paid");
     assert_eq!(first["invoice"]["balance_due"], "79");
 
-    let second = record_payment(&app, &billing, invoice_id, 79, "BANK-002").await;
+    let (replay_status, replay) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": first_request_id,
+            "amount_gross": 40,
+            "payment_method": "bank_transfer",
+            "payment_reference": "BANK-001",
+            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "note": "Internal BANK-001"
+        })),
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK, "payment replay: {replay:?}");
+    assert_eq!(replay["payment_transaction_id"], first_payment_id.to_string());
+    assert_eq!(replay["idempotent_replay"], true);
+    let (drift_status, drift) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": first_request_id,
+            "amount_gross": 41,
+            "payment_method": "bank_transfer",
+            "payment_reference": "BANK-001",
+            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "note": "Internal BANK-001"
+        })),
+    )
+    .await;
+    assert_eq!(drift_status, StatusCode::CONFLICT, "payment drift: {drift:?}");
+
+    let second = record_payment(
+        &app,
+        &billing,
+        invoice_id,
+        Uuid::new_v4(),
+        79,
+        "BANK-002",
+    )
+    .await;
     assert_eq!(second["invoice"]["paid_amount"], "119");
     assert_eq!(second["invoice"]["status"], "paid");
     assert_eq!(second["invoice"]["balance_due"], "0");
@@ -257,6 +312,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
         &format!("/api/v1/invoices/{invoice_id}/payments"),
         &billing,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "payment_method": "cash",
             "received_on": chrono::Utc::now().date_naive().to_string()
@@ -412,8 +468,24 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
     .await;
     let billing = auth_header_for(billing_id, "billing");
 
-    record_payment(&app, &billing, advance_id, 60, "ADVANCE").await;
-    let settlement_payment = record_payment(&app, &billing, settlement_id, 59, "CASH").await;
+    record_payment(
+        &app,
+        &billing,
+        advance_id,
+        Uuid::new_v4(),
+        60,
+        "ADVANCE",
+    )
+    .await;
+    let settlement_payment = record_payment(
+        &app,
+        &billing,
+        settlement_id,
+        Uuid::new_v4(),
+        59,
+        "CASH",
+    )
+    .await;
     let settlement_payment_id = Uuid::parse_str(
         settlement_payment["payment_transaction_id"]
             .as_str()
@@ -427,6 +499,7 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
         &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
         &billing,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "advance_invoice_id": advance_id,
             "amount_gross": 60
         })),

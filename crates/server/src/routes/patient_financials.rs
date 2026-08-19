@@ -251,6 +251,43 @@ async fn load_patient_settlement_ledger(
 
            UNION ALL
 
+           SELECT 'credit-note:' || credit.id::text,
+                  CASE
+                      WHEN credit.transaction_type = 'reversal'
+                          THEN 'credit_note_reversal'
+                      ELSE 'credit_note'
+                  END,
+                  credit.issued_on,
+                  credit.created_at,
+                  invoice.order_id,
+                  invoice.order_number,
+                  CASE
+                      WHEN $5::boolean = true AND credit.portal_visible = false
+                          THEN invoice.invoice_number
+                      ELSE credit.document_number
+                  END,
+                  CASE
+                      WHEN $5::boolean = true AND credit.portal_visible = false
+                          THEN 'Invoice adjustment'
+                      ELSE credit.reason
+                  END,
+                  CASE
+                      WHEN credit.transaction_type = 'reversal'
+                          THEN credit.amount_gross
+                      ELSE 0::numeric
+                  END,
+                  CASE
+                      WHEN credit.transaction_type = 'credit_note'
+                          THEN credit.amount_gross
+                      ELSE 0::numeric
+                  END
+           FROM invoice_credit_note_transactions credit
+           JOIN scoped_invoices invoice ON invoice.id = credit.invoice_id
+           WHERE invoice.invoice_type <> 'advance'
+             AND ($2::date IS NULL OR credit.issued_on <= $2)
+
+           UNION ALL
+
            SELECT 'payment:' || payment.id::text,
                   CASE
                       WHEN payment.transaction_type = 'reversal'
@@ -430,8 +467,15 @@ async fn load_patient_settlement_ledger(
 
     let settlement_invoice_debit = source_movements
         .iter()
-        .filter(|movement| movement.kind == "invoice")
-        .fold(Decimal::ZERO, |total, movement| total + movement.debit)
+        .filter(|movement| {
+            matches!(
+                movement.kind.as_str(),
+                "invoice" | "credit_note" | "credit_note_reversal"
+            )
+        })
+        .fold(Decimal::ZERO, |total, movement| {
+            total + movement.debit - movement.credit
+        })
         .round_dp(2);
     let external_balance = source_movements
         .iter()
@@ -473,7 +517,7 @@ async fn load_patient_settlement_ledger(
             "debit": decimal_to_string(movement.debit),
             "credit": decimal_to_string(movement.credit),
             "balance_after": decimal_to_string(running_balance),
-            "currency": currency,
+            "currency": currency.clone(),
         }));
     }
 
@@ -546,13 +590,32 @@ async fn load_patient_account_statement(
     let invoice_rows = sqlx::query(
         r#"SELECT invoice.id, invoice.order_id, invoice.invoice_number,
                   invoice.invoice_type, invoice.status, invoice.issued_at,
-                  invoice.due_date, invoice.total_gross, invoice.paid_amount,
-                  invoice.prepayment_applied_amount, invoice.portal_visible,
+                  invoice.due_date, invoice.total_gross,
+                  COALESCE((
+                      SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note' THEN credit.amount_gross ELSE -credit.amount_gross END)
+                      FROM invoice_credit_note_transactions credit
+                      WHERE credit.invoice_id = invoice.id
+                        AND ($3::date IS NULL OR credit.issued_on <= $3)
+                  ), 0) AS credited_amount,
+                  CASE WHEN $3::date IS NULL THEN invoice.paid_amount ELSE COALESCE((
+                      SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
+                      FROM invoice_payment_transactions payment
+                      WHERE payment.invoice_id = invoice.id
+                        AND payment.received_on <= $3
+                  ), 0) END AS paid_amount,
+                  CASE WHEN $3::date IS NULL THEN invoice.prepayment_applied_amount ELSE COALESCE((
+                      SELECT SUM(allocation.amount_gross)
+                      FROM invoice_prepayment_allocations allocation
+                      WHERE allocation.target_invoice_id = invoice.id
+                        AND allocation.created_at::date <= $3
+                  ), 0) END AS prepayment_applied_amount,
+                  invoice.portal_visible,
                   invoice.hide_amounts_from_patient, orders.order_number,
                   COALESCE((
                       SELECT SUM(allocation.amount_gross)
                       FROM invoice_prepayment_allocations allocation
                       WHERE allocation.advance_invoice_id = invoice.id
+                        AND ($3::date IS NULL OR allocation.created_at::date <= $3)
                   ), 0) AS allocated_from_advance
            FROM invoices invoice
            JOIN orders ON orders.id = invoice.order_id
@@ -616,6 +679,9 @@ async fn load_patient_account_statement(
         let paid = row
             .try_get::<Decimal, _>("paid_amount")
             .unwrap_or(Decimal::ZERO);
+        let credited = row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO);
         let applied = row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO);
@@ -625,10 +691,10 @@ async fn load_patient_account_statement(
         let due = if status == "draft" {
             Decimal::ZERO
         } else {
-            (total_gross - paid - applied).max(Decimal::ZERO)
+            (total_gross - credited - paid - applied).max(Decimal::ZERO)
         };
         let advance_available = if invoice_type == "advance" {
-            (paid - allocated).max(Decimal::ZERO)
+            (paid.min(total_gross - credited) - allocated).max(Decimal::ZERO)
         } else {
             Decimal::ZERO
         };
@@ -649,7 +715,7 @@ async fn load_patient_account_statement(
         };
 
         if amounts_visible {
-            invoiced_gross += total_gross;
+            invoiced_gross += (total_gross - credited).max(Decimal::ZERO);
             cash_paid += paid;
             prepayment_applied += applied;
             available_prepayment += advance_available;
@@ -671,12 +737,89 @@ async fn load_patient_account_statement(
             "paid_by": "patient",
             "amounts_visible": amounts_visible,
             "amount_gross": if amounts_visible { serde_json::json!(decimal_to_string(total_gross)) } else { Value::Null },
+            "credited_amount": if amounts_visible { serde_json::json!(decimal_to_string(credited)) } else { Value::Null },
+            "adjusted_amount_gross": if amounts_visible { serde_json::json!(decimal_to_string((total_gross - credited).max(Decimal::ZERO))) } else { Value::Null },
             "cash_paid": if amounts_visible { serde_json::json!(decimal_to_string(paid)) } else { Value::Null },
             "prepayment_applied": if amounts_visible { serde_json::json!(decimal_to_string(applied)) } else { Value::Null },
             "prepayment_allocated": if amounts_visible && invoice_type == "advance" { serde_json::json!(decimal_to_string(allocated)) } else { Value::Null },
             "prepayment_available": if amounts_visible && invoice_type == "advance" { serde_json::json!(decimal_to_string(advance_available)) } else { Value::Null },
             "amount_due": if amounts_visible { serde_json::json!(decimal_to_string(due)) } else { Value::Null },
             "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
+        }));
+    }
+
+    let credit_rows = sqlx::query(
+        r#"SELECT credit.id, credit.transaction_type, credit.document_number,
+                  credit.reason, credit.amount_gross, credit.issued_on,
+                  credit.portal_visible, invoice.id AS invoice_id,
+                  invoice.order_id, invoice.invoice_number,
+                  invoice.hide_amounts_from_patient, orders.order_number
+           FROM invoice_credit_note_transactions credit
+           JOIN invoices invoice ON invoice.id = credit.invoice_id
+           JOIN orders ON orders.id = invoice.order_id
+           WHERE invoice.patient_id = $1
+             AND invoice.status <> 'cancelled'
+             AND ($2::date IS NULL OR credit.issued_on >= $2)
+             AND ($3::date IS NULL OR credit.issued_on <= $3)
+             AND ($4::uuid IS NULL OR invoice.order_id = $4)
+             AND ($5::uuid IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM patient_service_packages package
+                    WHERE package.patient_id = invoice.patient_id
+                      AND package.package_id = $5
+                      AND package.order_id = invoice.order_id
+             ))
+             AND orders.currency = $6
+             AND (
+                    $7::boolean = false
+                    OR (
+                        invoice.portal_visible = true
+                        AND credit.portal_visible = true
+                    )
+             )
+           ORDER BY credit.issued_on DESC, credit.created_at DESC"#,
+    )
+    .bind(patient_id)
+    .bind(from)
+    .bind(to)
+    .bind(query.order_id)
+    .bind(query.package_id)
+    .bind(&currency)
+    .bind(portal_scope)
+    .fetch_all(&state.db)
+    .await?;
+
+    for row in credit_rows {
+        let transaction_type = row
+            .try_get::<String, _>("transaction_type")
+            .unwrap_or_default();
+        let amount = row
+            .try_get::<Decimal, _>("amount_gross")
+            .unwrap_or(Decimal::ZERO);
+        let effective_amount = if transaction_type == "credit_note" {
+            -amount
+        } else {
+            amount
+        };
+        let amounts_visible = !portal_scope
+            || !row
+                .try_get::<bool, _>("hide_amounts_from_patient")
+                .unwrap_or(true);
+        items.push(serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "kind": if transaction_type == "credit_note" { "credit_note" } else { "credit_note_reversal" },
+            "entry_date": row.try_get::<NaiveDate, _>("issued_on").map(|value| value.to_string()).unwrap_or_default(),
+            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+            "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
+            "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+            "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
+            "description": row.try_get::<String, _>("reason").unwrap_or_default(),
+            "status": if transaction_type == "credit_note" { "credited" } else { "reversed" },
+            "payment_state": "invoice_adjustment",
+            "amounts_visible": amounts_visible,
+            "amount_gross": if amounts_visible { serde_json::json!(decimal_to_string(effective_amount)) } else { Value::Null },
+            "currency": currency,
         }));
     }
 
@@ -705,8 +848,27 @@ async fn load_patient_account_statement(
                       external.created_at, external.status, external.paid_by,
                       external.service_delivered, external.amount_gross,
                       external.currency, external.patient_receivable_gross,
-                      balance.allocated_receivable_gross,
-                      balance.remaining_receivable_gross,
+                      CASE WHEN $3::date IS NULL THEN balance.allocated_receivable_gross ELSE COALESCE((
+                          SELECT SUM(allocation.amount_gross)
+                          FROM external_invoice_patient_invoice_allocations allocation
+                          JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
+                          WHERE allocation.external_invoice_id = external.id
+                            AND allocation.created_at::date <= $3
+                            AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
+                            AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                      ), 0) END AS allocated_receivable_gross,
+                      CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
+                          external.patient_receivable_gross - COALESCE((
+                              SELECT SUM(allocation.amount_gross)
+                              FROM external_invoice_patient_invoice_allocations allocation
+                              JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
+                              WHERE allocation.external_invoice_id = external.id
+                                AND allocation.created_at::date <= $3
+                                AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
+                                AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                          ), 0),
+                          0
+                      ) END AS remaining_receivable_gross,
                       external.provider_liability_gross, orders.order_number,
                       provider.name AS provider_name
                FROM external_invoices external
@@ -1047,8 +1209,38 @@ async fn get_patient_financial_summary(
 
     let invoice_rows = match sqlx::query(
         r#"SELECT id, order_id, invoice_number, status, issued_at, due_date,
-                  total_net, total_vat, total_gross, paid_amount,
-                  prepayment_applied_amount, line_items
+                  total_net, total_vat, total_gross,
+                  COALESCE((
+                      SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note' THEN credit.amount_gross ELSE -credit.amount_gross END)
+                      FROM invoice_credit_note_transactions credit
+                      WHERE credit.invoice_id = invoices.id
+                        AND ($3::date IS NULL OR credit.issued_on <= $3)
+                  ), 0) AS credited_amount,
+                  CASE WHEN $3::date IS NULL THEN paid_amount ELSE COALESCE((
+                      SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
+                      FROM invoice_payment_transactions payment
+                      WHERE payment.invoice_id = invoices.id
+                        AND payment.received_on <= $3
+                  ), 0) END AS paid_amount,
+                  COALESCE((
+                      SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note' THEN credit.amount_net ELSE -credit.amount_net END)
+                      FROM invoice_credit_note_transactions credit
+                      WHERE credit.invoice_id = invoices.id
+                        AND ($3::date IS NULL OR credit.issued_on <= $3)
+                  ), 0) AS credited_net,
+                  COALESCE((
+                      SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note' THEN credit.amount_vat ELSE -credit.amount_vat END)
+                      FROM invoice_credit_note_transactions credit
+                      WHERE credit.invoice_id = invoices.id
+                        AND ($3::date IS NULL OR credit.issued_on <= $3)
+                  ), 0) AS credited_vat,
+                  CASE WHEN $3::date IS NULL THEN prepayment_applied_amount ELSE COALESCE((
+                      SELECT SUM(allocation.amount_gross)
+                      FROM invoice_prepayment_allocations allocation
+                      WHERE allocation.target_invoice_id = invoices.id
+                        AND allocation.created_at::date <= $3
+                  ), 0) END AS prepayment_applied_amount,
+                  line_items
            FROM invoices
            WHERE patient_id = $1
              AND status <> 'cancelled'
@@ -1101,7 +1293,20 @@ async fn get_patient_financial_summary(
     };
 
     let external_receivable_row = match sqlx::query(
-        r#"SELECT COALESCE(SUM(balance.remaining_receivable_gross), 0) AS patient_receivable_gross
+        r#"SELECT COALESCE(SUM(
+                  CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
+                      external.patient_receivable_gross - COALESCE((
+                          SELECT SUM(allocation.amount_gross)
+                          FROM external_invoice_patient_invoice_allocations allocation
+                          JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
+                          WHERE allocation.external_invoice_id = external.id
+                            AND allocation.created_at::date <= $3
+                            AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
+                            AND patient_invoice.status NOT IN ('draft', 'cancelled')
+                      ), 0),
+                      0
+                  ) END
+               ), 0) AS patient_receivable_gross
            FROM external_invoices external
            JOIN external_invoice_receivable_balances balance
              ON balance.external_invoice_id = external.id
@@ -1198,7 +1403,7 @@ async fn get_patient_financial_summary(
     let mut overdue_amount = Decimal::ZERO;
     let mut order_breakdown = Vec::new();
     let mut service_breakdown = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
-    let today = Utc::now().date_naive();
+    let as_of_date = to.unwrap_or_else(|| Utc::now().date_naive());
 
     for row in invoice_rows {
         let total_net = row
@@ -1210,13 +1415,23 @@ async fn get_patient_financial_summary(
         let total_gross = row
             .try_get::<Decimal, _>("total_gross")
             .unwrap_or(Decimal::ZERO);
+        let credited = row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO);
+        let credited_net = row
+            .try_get::<Decimal, _>("credited_net")
+            .unwrap_or(Decimal::ZERO);
+        let credited_vat = row
+            .try_get::<Decimal, _>("credited_vat")
+            .unwrap_or(Decimal::ZERO);
         let paid = row
             .try_get::<Decimal, _>("paid_amount")
             .unwrap_or(Decimal::ZERO);
         let prepayment_applied = row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO);
-        let balance = (total_gross - paid - prepayment_applied).max(Decimal::ZERO);
+        let balance =
+            (total_gross - credited - paid - prepayment_applied).max(Decimal::ZERO);
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let due_date = row
             .try_get::<Option<NaiveDate>, _>("due_date")
@@ -1225,22 +1440,38 @@ async fn get_patient_financial_summary(
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| serde_json::json!([]));
 
-        revenue_net += total_net;
-        revenue_vat += total_vat;
-        revenue_gross += total_gross;
+        revenue_net += (total_net - credited_net).max(Decimal::ZERO);
+        revenue_vat += (total_vat - credited_vat).max(Decimal::ZERO);
+        revenue_gross += (total_gross - credited).max(Decimal::ZERO);
         paid_amount += paid;
         prepayment_applied_amount += prepayment_applied;
         open_balance += balance;
-        if status == "overdue"
-            || due_date.is_some_and(|value| value < today && balance > Decimal::ZERO)
+        if (to.is_none() && status == "overdue")
+            || due_date.is_some_and(|value| value < as_of_date && balance > Decimal::ZERO)
         {
             overdue_amount += balance;
         }
 
         if let Some(items) = line_items.as_array() {
             for item in items {
-                let gross = value_to_decimal(item.get("line_gross").unwrap_or(&Value::Null));
-                let net = value_to_decimal(item.get("line_net").unwrap_or(&Value::Null));
+                let original_gross =
+                    value_to_decimal(item.get("line_gross").unwrap_or(&Value::Null));
+                let original_net =
+                    value_to_decimal(item.get("line_net").unwrap_or(&Value::Null));
+                let gross = if total_gross > Decimal::ZERO {
+                    (original_gross * (total_gross - credited).max(Decimal::ZERO)
+                        / total_gross)
+                        .round_dp(2)
+                } else {
+                    Decimal::ZERO
+                };
+                let net = if total_net > Decimal::ZERO {
+                    (original_net * (total_net - credited_net).max(Decimal::ZERO)
+                        / total_net)
+                        .round_dp(2)
+                } else {
+                    Decimal::ZERO
+                };
                 let entry = service_breakdown
                     .entry(line_service_type(item))
                     .or_insert((Decimal::ZERO, Decimal::ZERO));
@@ -1257,6 +1488,10 @@ async fn get_patient_financial_summary(
             "revenue_net": decimal_to_string(total_net),
             "revenue_vat": decimal_to_string(total_vat),
             "revenue_gross": decimal_to_string(total_gross),
+            "credited_amount": decimal_to_string(credited),
+            "adjusted_revenue_net": decimal_to_string((total_net - credited_net).max(Decimal::ZERO)),
+            "adjusted_revenue_vat": decimal_to_string((total_vat - credited_vat).max(Decimal::ZERO)),
+            "adjusted_revenue_gross": decimal_to_string((total_gross - credited).max(Decimal::ZERO)),
             "paid_amount": decimal_to_string(paid),
             "prepayment_applied_amount": decimal_to_string(prepayment_applied),
             "settled_amount": decimal_to_string(paid + prepayment_applied),

@@ -392,6 +392,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
 
 const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "dashboard", to: "/", labelKey: "nav_dashboard" },
+  { id: "notifications", to: "/notifications", labelKey: "nav_my_notifications" },
   { id: "chat", to: "/chat", labelKey: "nav_chat" },
   { id: "appointments", to: "/appointments", labelKey: "nav_my_appointments" },
   { id: "recommendations", to: "/recommendations", labelKey: "nav_my_recommendations" },

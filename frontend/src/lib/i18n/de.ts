@@ -28,6 +28,7 @@ export const de = {
   nav_users_roles: "Benutzer & Rollen",
   nav_access_matrix: "Zugriffsmatrix",
   nav_logout: "Abmelden",
+  nav_my_notifications: "Meine Benachrichtigungen",
   nav_my_documents: "Meine Dokumente",
   nav_my_appointments: "Meine Termine",
   nav_my_recommendations: "Meine Empfehlungen",

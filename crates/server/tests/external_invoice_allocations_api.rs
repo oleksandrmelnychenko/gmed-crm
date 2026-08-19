@@ -187,6 +187,7 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
         &base,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "patient_invoice_id": other_invoice_id,
             "amount_gross": "10"
         })),
@@ -194,12 +195,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     .await;
     assert_eq!(cross_status, StatusCode::UNPROCESSABLE_ENTITY, "{cross}");
 
+    let first_request_id = Uuid::new_v4();
     let (first_status, first) = request_json(
         &ctx.app,
         "POST",
         &base,
         &bearer,
         Some(json!({
+            "request_id": first_request_id,
             "patient_invoice_id": invoice_id,
             "amount_gross": "60"
         })),
@@ -207,6 +210,35 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     .await;
     assert_eq!(first_status, StatusCode::CREATED, "{first}");
     let first_allocation_id = first["id"].as_str().unwrap();
+
+    let (replay_status, replay) = request_json(
+        &ctx.app,
+        "POST",
+        &base,
+        &bearer,
+        Some(json!({
+            "request_id": first_request_id,
+            "patient_invoice_id": invoice_id,
+            "amount_gross": "60"
+        })),
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["id"], first_allocation_id);
+    assert_eq!(replay["idempotent_replay"], true);
+    let (drift_status, drift) = request_json(
+        &ctx.app,
+        "POST",
+        &base,
+        &bearer,
+        Some(json!({
+            "request_id": first_request_id,
+            "patient_invoice_id": invoice_id,
+            "amount_gross": "61"
+        })),
+    )
+    .await;
+    assert_eq!(drift_status, StatusCode::CONFLICT, "{drift}");
 
     let (partial_status, partial) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(partial_status, StatusCode::OK, "{partial}");
@@ -231,6 +263,7 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
         &base,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "patient_invoice_id": invoice_id,
             "amount_gross": "40"
         })),
@@ -244,6 +277,7 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
         &base,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "patient_invoice_id": invoice_id,
             "amount_gross": "0.01"
         })),

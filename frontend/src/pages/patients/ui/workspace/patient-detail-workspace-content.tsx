@@ -596,9 +596,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       : balance?.side === "credit"
         ? lang === "de" ? "Haben" : "Кт"
         : lang === "de" ? "ausgeglichen" : "закрыто";
-  const balanceValue = balance
-    ? `${formatMoney(String(balance.amount), accountStatement?.currency)} ${balanceSideLabel}`
-    : accountStatementLoading ? "…" : "—";
+  const balanceValue = balance?.needsReconciliation
+    ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
+    : balance?.amount != null
+      ? `${formatMoney(String(balance.amount), accountStatement?.currency)} ${balanceSideLabel}`
+      : accountStatementLoading ? "…" : "—";
   const balanceTitle = balance?.needsReconciliation
     ? lang === "de"
       ? "Berechneter Saldo – Abstimmung erforderlich. Rechnungen öffnen."

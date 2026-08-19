@@ -62,6 +62,7 @@ const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
 
 const NAV_ICONS: Record<string, React.ElementType> = {
   dashboard: LayoutDashboard,
+  notifications: BellRing,
   concierge: ConciergeBell,
   chat: MessagesSquare,
   feedback: MessageCircleHeart,

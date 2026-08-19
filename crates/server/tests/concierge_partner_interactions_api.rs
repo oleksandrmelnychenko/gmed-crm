@@ -191,7 +191,7 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
         Some(json!({
             "channel": "email",
             "direction": "inbound",
-            "outcome": "booking_confirmed",
+            "outcome": "reached",
             "contact_person": "Anna Booking"
         })),
     )
@@ -205,7 +205,7 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
     assert_eq!(rows[0]["outcome"], "quote_received");
     assert_eq!(rows[0]["applied_by"], concierge_id.to_string());
     assert!(rows[0]["applied_as_cost_estimate_at"].is_string());
-    assert_eq!(rows[1]["outcome"], "booking_confirmed");
+    assert_eq!(rows[1]["outcome"], "reached");
 
     let (status, forbidden) = json_request(&ctx.app, "GET", &path, &other_bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");

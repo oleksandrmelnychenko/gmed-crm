@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   CalendarDays,
   CalendarClock,
+  CalendarCheck2,
   CheckCircle2,
   Clock3,
   ExternalLink,
@@ -27,7 +28,9 @@ import {
   conciergeProviderAddress,
   conciergeProviderTaxonomyLabel,
   conciergeServiceDisplayTitle,
+  conciergeServiceRouteAddress,
   conciergeTaskDisplayTitle,
+  eligibleConciergeServicesForProvider,
   filterConciergeProviders,
   googleMapsDirectionsUrl,
   googleMapsSearchUrl,
@@ -89,6 +92,7 @@ const copy = {
     phone: "Anrufen",
     openMap: "Karte",
     directions: "Route öffnen",
+    book: "Partner buchen",
   },
   ru: {
     tasks: "Мои задачи",
@@ -135,6 +139,7 @@ const copy = {
     phone: "Позвонить",
     openMap: "Карта",
     directions: "Открыть маршрут",
+    book: "Забронировать",
   },
 } as const;
 
@@ -339,7 +344,7 @@ export function ConciergeAgendaView({
           <div className="divide-y divide-border/60">
             {group.items.map((item) => {
               const provider = item.providerId ? providersById.get(item.providerId) : null;
-              const address = conciergeProviderAddress(provider);
+              const address = item.address || conciergeProviderAddress(provider);
               const directions = googleMapsDirectionsUrl(address);
               return (
                 <article key={`${item.kind}:${item.id}`} className="grid gap-2 px-4 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
@@ -375,23 +380,23 @@ export function ConciergeMapView({
   services,
   providers,
   lang,
+  onBookProvider,
 }: {
   services: ConciergeService[];
   providers: ConciergeProvider[];
   lang: Lang;
+  onBookProvider: (provider: ConciergeProvider) => void;
 }) {
   const labels = copy[lang];
   const [category, setCategory] = useState<ConciergeProviderCategory>("all");
   const [providerQuery, setProviderQuery] = useState("");
   const providersById = useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
   const destinations = useMemo(() => {
-    const seen = new Set<string>();
     return services.flatMap((service) => {
-      if (!service.provider_id || seen.has(service.provider_id)) return [];
+      if (!service.provider_id) return [];
       const provider = providersById.get(service.provider_id);
-      const address = conciergeProviderAddress(provider);
+      const address = conciergeServiceRouteAddress(service, provider);
       if (!provider || !address) return [];
-      seen.add(service.provider_id);
       return [{ service, provider, address }];
     });
   }, [providersById, services]);
@@ -413,7 +418,7 @@ export function ConciergeMapView({
         ) : (
           <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
             {destinations.map(({ service, provider, address }) => (
-              <article key={provider.id} className="rounded-lg border border-border/70 p-3">
+              <article key={service.id} className="rounded-lg border border-border/70 p-3">
                 <h3 className="truncate text-sm font-semibold">{provider.name}</h3>
                 <p className="mt-1 truncate text-xs text-muted-foreground">
                   {conciergeServiceDisplayTitle(service, lang)}
@@ -451,6 +456,7 @@ export function ConciergeMapView({
             {recommendations.slice(0, 24).map((provider) => {
               const address = conciergeProviderAddress(provider);
               const rating = provider.internal_rating ?? provider.avg_rating;
+              const canBook = eligibleConciergeServicesForProvider(services, provider.id).length > 0;
               return (
                 <article key={provider.id} className="flex min-w-0 flex-col rounded-lg border border-border/70 p-3">
                   <div className="flex min-w-0 items-start justify-between gap-2">
@@ -471,6 +477,11 @@ export function ConciergeMapView({
                     ) : (
                       <MapAction href={googleMapsSearchUrl(address)} label={labels.openMap} icon={MapPin} />
                     )}
+                    {canBook ? (
+                      <Button type="button" variant="default" size="sm" className="col-span-2" onClick={() => onBookProvider(provider)}>
+                        <CalendarCheck2 />{labels.book}
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
               );

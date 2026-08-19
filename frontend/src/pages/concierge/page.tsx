@@ -58,6 +58,11 @@ import {
   type RecordPartnerInteractionInput,
 } from "./partner-interaction-dialog";
 import {
+  ConciergeProviderBookingDialog,
+  type BookConciergeProviderInput,
+  type BookConciergeProviderResponse,
+} from "./provider-booking-dialog";
+import {
   ConciergeTaskEventDialog,
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
@@ -75,6 +80,8 @@ const REALTIME_EVENTS = [
   "concierge_service.key_updated",
   "concierge_service.partner_interaction_recorded",
   "concierge_service.cost_estimate_applied",
+  "concierge_service.booking_requested",
+  "concierge_service.booking_confirmed",
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
 ] as const;
@@ -432,6 +439,9 @@ export function ConciergeWorkspacePage() {
   const [loadingPartnerEvents, setLoadingPartnerEvents] = useState(false);
   const [submittingPartnerEvent, setSubmittingPartnerEvent] = useState(false);
   const [applyingPartnerQuoteId, setApplyingPartnerQuoteId] = useState<string | null>(null);
+  const [bookingProviderId, setBookingProviderId] = useState<string | null>(null);
+  const [bookingError, setBookingError] = useState("");
+  const [submittingBooking, setSubmittingBooking] = useState(false);
   const now = useMemo(() => new Date(), [version, services, tasks]);
 
   const requestRefresh = useCallback(() => {
@@ -520,6 +530,37 @@ export function ConciergeWorkspacePage() {
     () => partnerService?.provider_id ? providersById.get(partnerService.provider_id) ?? null : null,
     [partnerService, providersById],
   );
+  const bookingProvider = useMemo(
+    () => providers.find((provider) => provider.id === bookingProviderId) ?? null,
+    [bookingProviderId, providers],
+  );
+
+  function openProviderBooking(provider: ConciergeProvider) {
+    setBookingProviderId(provider.id);
+    setBookingError("");
+  }
+
+  async function saveProviderBooking(serviceId: string, input: BookConciergeProviderInput) {
+    if (submittingBooking) return;
+    setSubmittingBooking(true);
+    setBookingError("");
+    try {
+      const response = await apiFetch<BookConciergeProviderResponse>(
+        `/concierge-services/${serviceId}/book-provider`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+      clearApiCache("/concierge-services");
+      setServices((current) =>
+        current.map((service) => service.id === response.service.id ? response.service : service),
+      );
+      setBookingProviderId(null);
+    } catch (bookingFailure) {
+      setBookingError(bookingFailure instanceof Error ? bookingFailure.message : labels.updateFailed);
+      throw bookingFailure;
+    } finally {
+      setSubmittingBooking(false);
+    }
+  }
 
   async function openPartnerInteraction(service: ConciergeService) {
     setPartnerServiceId(service.id);
@@ -859,7 +900,7 @@ export function ConciergeWorkspacePage() {
           lang={lang}
         />
       ) : viewMode === "map" ? (
-        <ConciergeMapView services={visibleServices} providers={providers} lang={lang} />
+        <ConciergeMapView services={visibleServices} providers={providers} lang={lang} onBookProvider={openProviderBooking} />
       ) : (
         <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0">
@@ -969,6 +1010,18 @@ export function ConciergeWorkspacePage() {
         }}
         onRecord={recordPartnerInteraction}
         onApplyQuote={applyPartnerQuote}
+      />
+      <ConciergeProviderBookingDialog
+        provider={bookingProvider}
+        services={services}
+        lang={lang}
+        open={Boolean(bookingProvider)}
+        submitting={submittingBooking}
+        error={bookingError}
+        onOpenChange={(open) => {
+          if (!open) setBookingProviderId(null);
+        }}
+        onSave={saveProviderBooking}
       />
       <ConciergeTaskEventDialog
         item={editingTask}

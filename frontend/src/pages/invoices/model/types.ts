@@ -72,6 +72,31 @@ export type InvoicePaymentHistoryResponse = {
   items: InvoicePaymentTransaction[];
 };
 
+export type InvoiceCreditNoteTransaction = {
+  id: string;
+  invoice_id: string;
+  transaction_type: "credit_note" | "reversal";
+  reverses_transaction_id: string | null;
+  reversed_by_transaction_id: string | null;
+  is_reversed: boolean;
+  document_number: string;
+  reason: string;
+  amounts_visible: boolean;
+  amount_net: unknown;
+  amount_vat: unknown;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  currency: string;
+  issued_on: string;
+  portal_visible: boolean;
+  created_by_name?: string;
+  created_at: string;
+};
+
+export type InvoiceCreditNoteHistoryResponse = {
+  items: InvoiceCreditNoteTransaction[];
+};
+
 type SupportingDocument = {
   id: string;
   auto_name: string;
@@ -119,9 +144,12 @@ export type InvoiceItem = {
   total_net: unknown;
   total_vat: unknown;
   total_gross: unknown;
+  credited_amount?: unknown;
+  adjusted_total_gross?: unknown;
   paid_amount: unknown;
   prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  credit_balance?: unknown;
   paid_at: string | null;
   notes: string | null;
   portal_visible?: boolean;

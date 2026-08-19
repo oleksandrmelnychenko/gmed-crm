@@ -361,12 +361,14 @@ export function fetchExternalInvoiceAllocations(orderId: string, externalInvoice
 export function createExternalInvoiceAllocation(
   orderId: string,
   externalInvoiceId: string,
+  requestId: string,
   patientInvoiceId: string,
   amountGross: string,
 ) {
   return postJson<{ id: string }>(
     `/orders/${orderId}/external-invoices/${externalInvoiceId}/allocations`,
     {
+      request_id: requestId,
       patient_invoice_id: patientInvoiceId,
       amount_gross: amountGross,
     },

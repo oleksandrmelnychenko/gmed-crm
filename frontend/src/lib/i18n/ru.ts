@@ -28,6 +28,7 @@ export const ru = {
   nav_users_roles: "Пользователи и роли",
   nav_access_matrix: "Матрица доступа",
   nav_logout: "Выход",
+  nav_my_notifications: "Мои уведомления",
   nav_my_documents: "Мои документы",
   nav_my_appointments: "Мои визиты",
   nav_my_recommendations: "Мои рекомендации",

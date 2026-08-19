@@ -121,8 +121,11 @@ export type PortalInvoiceItem = {
   total_net: unknown;
   total_vat: unknown;
   total_gross: unknown;
+  credited_amount?: unknown;
+  adjusted_total_gross?: unknown;
   paid_amount: unknown;
   balance_due: unknown;
+  credit_balance?: unknown;
   paid_at: string | null;
   notes: string | null;
   created_at: string;
@@ -152,15 +155,31 @@ export type PortalInvoicePaymentHistoryResponse = {
   items: PortalInvoicePaymentTransaction[];
 };
 
+export type PortalInvoiceCreditNoteTransaction = {
+  id: string;
+  transaction_type: "credit_note" | "reversal";
+  document_number: string;
+  reason: string;
+  is_reversed: boolean;
+  amounts_visible: boolean;
+  amount_gross: unknown;
+  issued_on: string;
+  created_at: string;
+};
+
+export type PortalInvoiceCreditNoteHistoryResponse = {
+  items: PortalInvoiceCreditNoteTransaction[];
+};
+
 export type PortalAccountStatementItem = {
   id: string;
-  kind: "invoice" | "prepayment";
+  kind: "invoice" | "prepayment" | "credit_note" | "credit_note_reversal";
   entry_date: string;
   order_number?: string | null;
   document_number?: string | null;
   description: string;
   status: string;
-  payment_state: "paid" | "partially_paid" | "unpaid" | "amount_hidden";
+  payment_state: "paid" | "partially_paid" | "unpaid" | "amount_hidden" | "invoice_adjustment";
   amounts_visible: boolean;
   amount_gross?: string | null;
   cash_paid?: string | null;

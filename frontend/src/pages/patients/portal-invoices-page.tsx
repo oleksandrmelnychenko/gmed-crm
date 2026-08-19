@@ -30,6 +30,7 @@ import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchPortalAccountStatement,
   fetchPortalInvoiceDetail,
+  fetchPortalInvoiceCreditNotes,
   fetchPortalInvoicePayments,
   fetchPortalInvoices,
   uploadPortalPaymentProof,
@@ -46,6 +47,7 @@ import {
 import type {
   PortalAccountStatement,
   PortalInvoiceItem,
+  PortalInvoiceCreditNoteTransaction,
   PortalInvoiceLineItem,
   PortalInvoicePaymentTransaction,
 } from "@/pages/patients/model/portal-shared";
@@ -87,6 +89,7 @@ function portalAccountStateLabel(state: string, lang: string) {
     partially_paid: ["Teilbezahlt – Rest offen", "Частично оплачено — требуется доплата"],
     unpaid: ["Nicht bezahlt", "Не оплачено"],
     amount_hidden: ["Betrag nicht freigegeben", "Сумма не открыта для просмотра"],
+    invoice_adjustment: ["Rechnung korrigiert", "Счёт скорректирован"],
   };
   const label = labels[state];
   return label ? (lang === "de" ? label[0] : label[1]) : state;
@@ -97,6 +100,8 @@ const PORTAL_INVOICE_REALTIME_EVENTS = [
   "invoice.status_changed",
   "invoice.payment_recorded",
   "invoice.payment_reversed",
+  "invoice.credit_note_created",
+  "invoice.credit_note_reversed",
   "invoice.dunning_created",
   "invoice.overdue_marked",
   "document.payment_proof_uploaded",
@@ -117,6 +122,7 @@ interface PatientInvoicesState {
   selectedInvoiceId: string;
   detail: PortalInvoiceItem | null;
   detailPayments: PortalInvoicePaymentTransaction[];
+  detailCreditNotes: PortalInvoiceCreditNoteTransaction[];
   detailBusy: boolean;
   detailError: string;
   uploadOpen: boolean;
@@ -141,6 +147,7 @@ const INITIAL_PATIENT_INVOICES_STATE: PatientInvoicesState = {
   selectedInvoiceId: "",
   detail: null,
   detailPayments: [],
+  detailCreditNotes: [],
   detailBusy: false,
   detailError: "",
   uploadOpen: false,
@@ -172,6 +179,7 @@ function usePatientInvoicesPageContent() {
     accountStatement,
     detail,
     detailPayments,
+    detailCreditNotes,
     detailBusy,
     detailError,
     error,
@@ -193,10 +201,12 @@ function usePatientInvoicesPageContent() {
     if (event.entity_type === "invoice") {
       clearApiCache(`/me/invoices/${event.entity_id}`);
       clearApiCache(`/me/invoices/${event.entity_id}/payments`);
+      clearApiCache(`/me/invoices/${event.entity_id}/credit-notes`);
     }
     if (selectedInvoiceId) {
       clearApiCache(`/me/invoices/${selectedInvoiceId}`);
       clearApiCache(`/me/invoices/${selectedInvoiceId}/payments`);
+      clearApiCache(`/me/invoices/${selectedInvoiceId}/credit-notes`);
     }
     dispatchInvoicesState((current) => ({ version: current.version + 1 }));
   });
@@ -251,7 +261,7 @@ function usePatientInvoicesPageContent() {
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      dispatchInvoicesState({ detail: null, detailPayments: [], detailError: "" });
+      dispatchInvoicesState({ detail: null, detailPayments: [], detailCreditNotes: [], detailError: "" });
       return;
     }
 
@@ -261,13 +271,17 @@ function usePatientInvoicesPageContent() {
       dispatchInvoicesState({ detailBusy: true });
       try {
         const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
-        const payments = invoiceAmountsVisible(invoice)
-          ? (await fetchPortalInvoicePayments(selectedInvoiceId)).items
-          : [];
+        const [payments, creditNotes] = await Promise.all([
+          invoiceAmountsVisible(invoice)
+            ? fetchPortalInvoicePayments(selectedInvoiceId).then((response) => response.items)
+            : Promise.resolve([]),
+          fetchPortalInvoiceCreditNotes(selectedInvoiceId).then((response) => response.items),
+        ]);
         if (cancelled) return;
         dispatchInvoicesState({
           detail: invoice,
           detailPayments: payments,
+          detailCreditNotes: creditNotes,
           detailError: "",
           detailBusy: false,
         });
@@ -447,12 +461,18 @@ function usePatientInvoicesPageContent() {
               : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам."}
           </p>
           <div className="mt-4 space-y-2">
-            {accountStatement.items.map((item) => (
+            {accountStatement.items.map((item) => {
+              const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
+              return (
               <ListItem key={`${item.kind}:${item.id}`} className="space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className={tokens.text.eyebrow}>
-                      {item.kind === "prepayment"
+                      {isCreditAdjustment
+                        ? item.kind === "credit_note"
+                          ? lang === "de" ? "Gutschrift" : "Кредит-нота"
+                          : lang === "de" ? "Gutschrift storniert" : "Отмена кредит-ноты"
+                        : item.kind === "prepayment"
                         ? lang === "de" ? "Vorauszahlung" : "Предоплата"
                         : lang === "de" ? "Rechnung" : "Счёт"}
                       {item.document_number ? ` · ${item.document_number}` : ""}
@@ -470,25 +490,26 @@ function usePatientInvoicesPageContent() {
                     {portalAccountStateLabel(item.payment_state, lang)}
                   </StatusBadge>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className={cn("grid gap-3", !isCreditAdjustment && "sm:grid-cols-3")}>
                   <InfoRow
                     className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                     label={lang === "de" ? "Gesamt" : "Всего"}
                     value={item.amounts_visible && item.amount_gross != null ? formatPortalCurrency(item.amount_gross, accountStatement.currency) : t.portal_invoices_hidden}
                   />
-                  <InfoRow
+                  {!isCreditAdjustment ? <InfoRow
                     className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                     label={lang === "de" ? "Bezahlt / verrechnet" : "Оплачено / зачтено"}
                     value={item.amounts_visible ? formatPortalCurrency(Number(item.cash_paid ?? 0) + Number(item.prepayment_applied ?? 0), accountStatement.currency) : t.portal_invoices_hidden}
-                  />
-                  <InfoRow
+                  /> : null}
+                  {!isCreditAdjustment ? <InfoRow
                     className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                     label={item.kind === "prepayment" ? (lang === "de" ? "Noch verfügbar" : "Ещё доступно") : (lang === "de" ? "Noch zu zahlen" : "Требуется доплатить")}
                     value={item.amounts_visible ? formatPortalCurrency(item.kind === "prepayment" ? item.prepayment_available : item.amount_due, accountStatement.currency) : t.portal_invoices_hidden}
-                  />
+                  /> : null}
                 </div>
               </ListItem>
-            ))}
+              );
+            })}
           </div>
         </Section>
       ) : null}
@@ -634,6 +655,9 @@ function usePatientInvoicesPageContent() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_quote} value={detail.quote_number || t.portal_invoices_not_set} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_total_gross} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : t.portal_invoices_hidden} />
+                    {invoiceAmountsVisible(detail) && Number(detail.credited_amount ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Gutschriften" : "Кредит-ноты"} value={`−${formatPortalCurrency(detail.credited_amount)}`} />
+                    ) : null}
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : t.portal_invoices_hidden} />
                   </div>
                   {detail.notes ? (
@@ -642,6 +666,34 @@ function usePatientInvoicesPageContent() {
                     </div>
                   ) : null}
                 </section>
+
+                {detailCreditNotes.length > 0 ? (
+                  <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                    <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span>{lang === "de" ? "Rechnungskorrekturen" : "Корректировки счета"}</span>
+                    </h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {lang === "de" ? "Hier sehen Sie freigegebene Gutschriften und Stornierungen." : "Здесь показаны доступные вам кредит-ноты и их отмены."}
+                    </p>
+                    <div className="mt-5 space-y-2">
+                      {detailCreditNotes.map((credit) => {
+                        const isReversal = credit.transaction_type === "reversal";
+                        return (
+                          <div key={credit.id} className={cn("flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3", credit.is_reversed && "opacity-70")}>
+                            <div>
+                              <div className="text-sm font-semibold text-foreground">{credit.document_number}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">{formatPortalDate(credit.issued_on)} · {credit.reason}</div>
+                            </div>
+                            <div className="font-mono font-semibold tabular-nums text-emerald-700">
+                              {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross)}` : t.portal_invoices_hidden}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
 
                 {invoiceAmountsVisible(detail) ? (
                   <section className={cn("rounded-xl p-5", tokens.surface.card)}>

@@ -39,6 +39,10 @@ pub fn router() -> Router<AppState> {
             post(update_concierge_service),
         )
         .route(
+            "/concierge-services/{service_id}/book-provider",
+            post(book_concierge_service_provider),
+        )
+        .route(
             "/concierge-services/{service_id}/key-events",
             get(list_concierge_service_key_events).post(record_concierge_service_key_event),
         )
@@ -162,6 +166,22 @@ struct RecordConciergeServicePartnerInteractionRequest {
     note: Option<String>,
     quoted_cost: Option<f64>,
     quoted_currency: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BookConciergeServiceProviderRequest {
+    request_id: Uuid,
+    provider_id: Uuid,
+    booking_state: String,
+    channel: String,
+    contact_person: Option<String>,
+    vendor_contact: Option<String>,
+    booking_reference: Option<String>,
+    starts_at: String,
+    ends_at: Option<String>,
+    service_address: Option<String>,
+    note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -415,7 +435,7 @@ async fn list_my_concierge_services(
     match sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
-                  cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
+                  cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at, cs.request_source,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
@@ -796,7 +816,7 @@ async fn list_concierge_services(
     let rows = match sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
-                  cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
+                  cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
@@ -924,6 +944,392 @@ async fn get_concierge_service(
         }
         Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(resp) => resp,
+    }
+}
+
+async fn book_concierge_service_provider(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<BookConciergeServiceProviderRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::Concierge]) {
+        return response;
+    }
+    if !matches!(body.booking_state.as_str(), "requested" | "confirmed") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "booking_state must be requested or confirmed",
+        );
+    }
+    if !is_valid_partner_channel(&body.channel) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction channel",
+        );
+    }
+
+    let starts_at = match parse_optional_datetime(Some(&body.starts_at)) {
+        Ok(Some(value)) => value,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "starts_at is required (RFC3339)",
+            );
+        }
+    };
+    let ends_at = match parse_optional_datetime(body.ends_at.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if ends_at
+        .as_ref()
+        .is_some_and(|value| value <= &starts_at)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ends_at must be later than starts_at",
+        );
+    }
+
+    let contact_person = normalize_optional_text(body.contact_person.as_deref());
+    if contact_person
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contact_person must not exceed 160 characters",
+        );
+    }
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 2000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 2000 characters",
+        );
+    }
+    let booking_reference = normalize_optional_text(body.booking_reference.as_deref());
+    if booking_reference
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "booking_reference must not exceed 160 characters",
+        );
+    }
+    if body.booking_state == "confirmed"
+        && booking_reference.is_none()
+        && contact_person.is_none()
+        && note.is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Confirmed booking requires a reference, contact person, or note",
+        );
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "begin provider booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let service = match sqlx::query(
+        r#"SELECT patient_id, assigned_concierge_id, provider_id, status, billing_status
+           FROM concierge_services
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "lock concierge service for booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let patient_id = match service.try_get::<Uuid, _>("patient_id") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+    };
+    let assigned_concierge_id = service
+        .try_get::<Option<Uuid>, _>("assigned_concierge_id")
+        .unwrap_or_default();
+    match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let expected_outcome = if body.booking_state == "confirmed" {
+        "booking_confirmed"
+    } else {
+        "booking_requested"
+    };
+    let existing_request = match sqlx::query(
+        r#"SELECT id, provider_id, outcome
+           FROM concierge_service_partner_interactions
+           WHERE concierge_service_id = $1
+             AND request_id = $2"#,
+    )
+    .bind(service_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, request_id = %body.request_id, "load provider booking request");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(existing_request) = existing_request {
+        let existing_provider_id = existing_request
+            .try_get::<Uuid, _>("provider_id")
+            .unwrap_or_default();
+        let existing_outcome = existing_request
+            .try_get::<String, _>("outcome")
+            .unwrap_or_default();
+        if existing_provider_id != body.provider_id || existing_outcome != expected_outcome {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another booking operation",
+            );
+        }
+        let interaction_id = existing_request
+            .try_get::<Uuid, _>("id")
+            .unwrap_or_default();
+        if let Err(error) = transaction.commit().await {
+            tracing::error!(error = %error, service_id = %service_id, "finish idempotent provider booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return match load_service_row(&state, service_id).await {
+            Ok(Some(row)) => Json(serde_json::json!({
+                "service": build_service_json_for_role(&row, auth.role),
+                "interaction_id": interaction_id,
+            }))
+            .into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+            Err(response) => response,
+        };
+    }
+    let current_status = service.try_get::<String, _>("status").unwrap_or_default();
+    if !matches!(current_status.as_str(), "planned" | "booked") {
+        return err(
+            StatusCode::CONFLICT,
+            "Only planned or booked services can enter the booking flow",
+        );
+    }
+    if current_status == "booked" && body.booking_state == "requested" {
+        return err(
+            StatusCode::CONFLICT,
+            "Booking was already requested; confirm it instead",
+        );
+    }
+    if matches!(
+        service
+            .try_get::<String, _>("billing_status")
+            .unwrap_or_default()
+            .as_str(),
+        "billed" | "settled" | "waived"
+    ) {
+        return err(StatusCode::CONFLICT, "Closed billing service cannot be booked");
+    }
+    let current_provider_id = service
+        .try_get::<Option<Uuid>, _>("provider_id")
+        .unwrap_or_default();
+    if current_provider_id.is_some_and(|value| value != body.provider_id) {
+        return err(
+            StatusCode::CONFLICT,
+            "Service is already linked to a different provider",
+        );
+    }
+
+    let provider = match sqlx::query(
+        r#"SELECT name, phone, email, address_street, address_city, address_country
+           FROM providers
+           WHERE id = $1
+             AND provider_type = 'non_medical'
+             AND is_active = true
+           FOR SHARE"#,
+    )
+    .bind(body.provider_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_id must reference an active non-medical provider",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %body.provider_id, "load booking provider");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let provider_name = provider.try_get::<String, _>("name").unwrap_or_default();
+    let provider_contact = provider
+        .try_get::<Option<String>, _>("phone")
+        .unwrap_or_default()
+        .or_else(|| {
+            provider
+                .try_get::<Option<String>, _>("email")
+                .unwrap_or_default()
+        });
+    let vendor_contact = normalize_optional_text(body.vendor_contact.as_deref())
+        .or_else(|| provider_contact.and_then(|value| normalize_optional_text(Some(&value))));
+    if vendor_contact
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 255)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "vendor_contact must not exceed 255 characters",
+        );
+    }
+    let provider_address = [
+        provider
+            .try_get::<Option<String>, _>("address_street")
+            .unwrap_or_default(),
+        provider
+            .try_get::<Option<String>, _>("address_city")
+            .unwrap_or_default(),
+        provider
+            .try_get::<Option<String>, _>("address_country")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|value| normalize_optional_text(Some(&value)))
+    .collect::<Vec<_>>()
+    .join(", ");
+    let service_address = normalize_optional_text(body.service_address.as_deref())
+        .or_else(|| normalize_optional_text(Some(&provider_address)));
+    let Some(service_address) = service_address else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_address is required when provider address is unavailable",
+        );
+    };
+    if service_address.chars().count() > 500 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_address must not exceed 500 characters",
+        );
+    }
+
+    let next_status = if body.booking_state == "confirmed" {
+        "confirmed"
+    } else {
+        "booked"
+    };
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_services
+           SET provider_id = $2,
+               vendor_name = $3,
+               vendor_contact = $4,
+               booking_reference = $5,
+               starts_at = $6,
+               ends_at = $7,
+               service_address = $8,
+               status = $9,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .bind(body.provider_id)
+    .bind(&provider_name)
+    .bind(vendor_contact.as_deref())
+    .bind(booking_reference.as_deref())
+    .bind(starts_at)
+    .bind(ends_at)
+    .bind(&service_address)
+    .bind(next_status)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(error = %error, service_id = %service_id, "update concierge provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let outcome = expected_outcome;
+    let interaction_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO concierge_service_partner_interactions (
+               concierge_service_id, provider_id, request_id, channel, direction, outcome,
+               occurred_at, contact_person, note, recorded_by
+           ) VALUES ($1, $2, $3, $4, 'outbound', $5, now(), $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(service_id)
+    .bind(body.provider_id)
+    .bind(body.request_id)
+    .bind(&body.channel)
+    .bind(outcome)
+    .bind(contact_person.as_deref())
+    .bind(note.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "record provider booking interaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(error = %error, service_id = %service_id, "commit provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "book_concierge_service_provider",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "provider_id": body.provider_id,
+            "booking_state": body.booking_state,
+            "status": next_status,
+            "interaction_id": interaction_id,
+        }),
+    ));
+    let event_type = if next_status == "confirmed" {
+        "concierge_service.booking_confirmed"
+    } else {
+        "concierge_service.booking_requested"
+    };
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        event_type,
+        service_id,
+        serde_json::json!({
+            "provider_id": body.provider_id,
+            "status": next_status,
+            "interaction_id": interaction_id,
+        }),
+    )
+    .await;
+
+    match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => Json(serde_json::json!({
+            "service": build_service_json_for_role(&row, auth.role),
+            "interaction_id": interaction_id,
+        }))
+        .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => response,
     }
 }
 
@@ -1293,6 +1699,20 @@ async fn record_concierge_service_partner_interaction(
             "Invalid interaction outcome",
         );
     }
+    if matches!(
+        body.outcome.as_str(),
+        "booking_requested" | "booking_confirmed"
+    ) {
+        let status = if auth.role == Role::PatientManager {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::CONFLICT
+        };
+        return err(
+            status,
+            "Use the provider booking endpoint for booking lifecycle outcomes",
+        );
+    }
 
     let service = match load_service_row(&state, service_id).await {
         Ok(Some(row)) => row,
@@ -1455,7 +1875,6 @@ async fn record_concierge_service_partner_interaction(
         }),
     )
     .await;
-
     Json(serde_json::json!({
         "id": interaction_id,
         "concierge_service_id": service_id,
@@ -2014,6 +2433,12 @@ async fn update_concierge_service(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
+    if matches!(body.status.as_deref(), Some("booked" | "confirmed")) {
+        return err(
+            StatusCode::CONFLICT,
+            "Use the provider booking endpoint for booked or confirmed status",
+        );
+    }
     if let Some(ref value) = body.billing_status
         && !is_valid_billing_status(value)
     {
@@ -2359,7 +2784,7 @@ async fn load_service_row(
     sqlx::query(
         r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
-                  cs.vendor_contact, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
+                  cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
@@ -2834,6 +3259,7 @@ fn is_valid_partner_outcome(value: &str) -> bool {
             | "quote_requested"
             | "quote_received"
             | "follow_up_needed"
+            | "booking_requested"
             | "booking_confirmed"
             | "declined"
             | "cancelled"
@@ -3085,6 +3511,7 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
         "vendor_name": row.try_get::<Option<String>, _>("vendor_name").unwrap_or_default(),
         "vendor_contact": row.try_get::<Option<String>, _>("vendor_contact").unwrap_or_default(),
+        "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
@@ -3130,6 +3557,7 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
         "vendor_name": row.try_get::<Option<String>, _>("vendor_name").unwrap_or_default(),
         "vendor_contact": row.try_get::<Option<String>, _>("vendor_contact").unwrap_or_default(),
+        "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
@@ -3190,6 +3618,10 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
             "provider_name",
             "provider_service_id",
             "provider_service_name",
+            "vendor_name",
+            "vendor_contact",
+            "booking_reference",
+            "service_address",
             "taxonomy_node_id",
             "taxonomy_node_code",
             "taxonomy_node_name_de",

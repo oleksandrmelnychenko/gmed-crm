@@ -5,6 +5,7 @@ import {
   conciergeServiceColumn,
   conciergeWorkspaceStats,
   conciergeProviderAddress,
+  conciergeServiceRouteAddress,
   conciergeProviderCategory,
   conciergePartnerEmailUrl,
   conciergePartnerPhoneUrl,
@@ -13,6 +14,7 @@ import {
   conciergeTaskDisplayTitle,
   filterConciergeServices,
   filterConciergeProviders,
+  eligibleConciergeServicesForProvider,
   googleMapsDirectionsUrl,
   googleMapsSearchUrl,
   nextConciergeTaskStatus,
@@ -44,6 +46,7 @@ function service(overrides: Partial<ConciergeService> = {}): ConciergeService {
     booking_reference: "BOOK-1",
     vendor_name: "City Driver",
     vendor_contact: "+49 30 123456",
+    service_address: null,
     starts_at: "2026-08-19T08:00:00.000Z",
     ends_at: null,
     cost_estimate: "120.00",
@@ -122,8 +125,8 @@ describe("concierge workspace model", () => {
   });
 
   it("moves only active services through the supported workflow", () => {
-    expect(nextConciergeServiceStatus("planned")).toBe("booked");
-    expect(nextConciergeServiceStatus("booked")).toBe("confirmed");
+    expect(nextConciergeServiceStatus("planned")).toBeNull();
+    expect(nextConciergeServiceStatus("booked")).toBeNull();
     expect(nextConciergeServiceStatus("confirmed")).toBe("in_service");
     expect(nextConciergeServiceStatus("in_service")).toBe("completed");
     expect(nextConciergeServiceStatus("completed")).toBeNull();
@@ -184,6 +187,12 @@ describe("concierge workspace model", () => {
     expect(filterConciergeServices(services, "anna").map((item) => item.id)).toEqual([
       "service-1",
     ]);
+    expect(
+      filterConciergeServices(
+        [service({ service_address: "Terminal 1, München" })],
+        "terminal 1",
+      ),
+    ).toHaveLength(1);
   });
 
   it("redacts appointment-linked service titles while retaining their service category", () => {
@@ -289,5 +298,32 @@ describe("concierge workspace model", () => {
       "restaurant",
       "driver",
     ]);
+  });
+
+  it("offers only planned or requested services that can use the selected partner", () => {
+    const rows = eligibleConciergeServicesForProvider(
+      [
+        service({ id: "unlinked", provider_id: null, starts_at: "2026-08-19T07:00:00.000Z" }),
+        service({ id: "same", status: "booked", provider_id: "provider-1" }),
+        service({ id: "other", provider_id: "provider-2" }),
+        service({ id: "confirmed", status: "confirmed", provider_id: "provider-1" }),
+      ],
+      "provider-1",
+    );
+
+    expect(rows.map((item) => item.id)).toEqual(["unlinked", "same"]);
+  });
+
+  it("uses a service-specific destination before the provider profile address", () => {
+    const selectedProvider = provider();
+    expect(
+      conciergeServiceRouteAddress(
+        service({ service_address: "Terminal 1, München" }),
+        selectedProvider,
+      ),
+    ).toBe("Terminal 1, München");
+    expect(conciergeServiceRouteAddress(service(), selectedProvider)).toBe(
+      "Leopoldstr. 1, München, Deutschland",
+    );
   });
 });

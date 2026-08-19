@@ -37,6 +37,7 @@ export interface Translations
   nav_users_roles: string;
   nav_access_matrix: string;
   nav_logout: string;
+  nav_my_notifications: string;
   nav_my_documents: string;
   nav_my_appointments: string;
   nav_my_recommendations: string;

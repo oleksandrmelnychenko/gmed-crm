@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
+  ChevronRight,
   Globe,
   PanelLeft,
   X,
@@ -23,9 +24,11 @@ import {
   fetchNotificationPanelWorkspace,
   fetchTopbarChatMessages,
   fetchTopbarPresence,
+  fetchUnreadNotificationCount,
   markAllNotificationsRead,
   markNotificationRead,
   markTopbarChatRead,
+  notificationHrefForRole,
   sendTopbarChatMessage,
   type ActiveAnnouncement,
   type ActiveSession,
@@ -125,26 +128,6 @@ function RealtimeConnectionIndicator({
   );
 }
 
-function notificationHref(item: Notification, staffRole: string) {
-  if (!item.entity_id || !item.entity_type) return null;
-  if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
-  if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
-  if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
-  if (item.entity_type === "provider") return `/providers/${item.entity_id}`;
-  if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;
-  if (item.entity_type === "appointment") return `/appointments?appointment=${item.entity_id}`;
-  if (item.entity_type === "appointment_request") return "/appointments";
-  if (item.entity_type === "concierge_service") {
-    return staffRole === "concierge" ? "/concierge" : "/services";
-  }
-  if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
-  if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
-  if (item.entity_type === "privacy_request") return "/admin/compliance";
-  if (item.entity_type === "feedback") return "/feedback";
-  if (item.entity_type === "case") return "/patients";
-  return null;
-}
-
 export function Topbar() {
   const { user } = useAuth();
   const location = useLocation();
@@ -186,14 +169,16 @@ export function Topbar() {
   }, [notifOpen, usersOpen]);
 
   useEffect(() => {
-    if (isPatientPortal) {
-      return;
-    }
-
     let cancelled = false;
 
     function load() {
       if (cancelled) return;
+      if (isPatientPortal) {
+        void fetchUnreadNotificationCount().then((count) => {
+          if (!cancelled) setUnread(count);
+        });
+        return;
+      }
       void fetchTopbarPresence().then((presence) => {
         if (cancelled) return;
         setUnread(presence.unreadCount);
@@ -213,13 +198,17 @@ export function Topbar() {
   }, [isPatientPortal]);
 
   useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
-    if (isPatientPortal) return;
     if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
     }
     if (events.every((event) => event.type.startsWith("announcement."))) return;
 
     clearApiCache("/notifications");
+    clearApiCache("/notifications/unread-count");
+    if (isPatientPortal) {
+      void fetchUnreadNotificationCount().then(setUnread);
+      return;
+    }
     void fetchTopbarPresence().then((presence) => {
       setUnread(presence.unreadCount);
       setOnlineUsers(presence.onlineUsers);
@@ -435,26 +424,35 @@ function NotificationPanel({
   }, 150);
 
   const markAll = () => {
-    markAllNotificationsRead().catch(() => {});
-    onUnreadChange(0);
-    setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    void markAllNotificationsRead()
+      .then(() => {
+        clearApiCache("/notifications");
+        clearApiCache("/notifications/unread-count");
+        onUnreadChange(0);
+        setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      })
+      .catch(() => {});
   };
 
   const markOne = (id: string) => {
-    markNotificationRead(id).catch(() => {});
-    setNotifs((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
-    );
-    onUnreadChange(
-      notifs.filter((n) => !n.is_read && n.id !== id).length
-    );
+    void markNotificationRead(id)
+      .then(() => {
+        clearApiCache("/notifications");
+        clearApiCache("/notifications/unread-count");
+        setNotifs((prev) => {
+          const next = prev.map((n) => (n.id === id ? { ...n, is_read: true } : n));
+          onUnreadChange(next.filter((n) => !n.is_read).length);
+          return next;
+        });
+      })
+      .catch(() => {});
   };
 
   const handleOpen = (item: Notification) => {
     if (!item.is_read) {
       markOne(item.id);
     }
-    const href = notificationHref(item, staffRole);
+    const href = notificationHrefForRole(item, staffRole);
     if (href) {
       navigate(staffHrefIfAllowed(staffRole, href));
       onClose();
@@ -535,6 +533,19 @@ function NotificationPanel({
             ))
           )}
         </div>
+        {staffRole === "patient" ? (
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-1.5 border-t border-border px-4 py-3 text-xs font-medium text-primary transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={() => {
+              navigate("/notifications");
+              onClose();
+            }}
+          >
+            {t.nav_my_notifications}
+            <ChevronRight className="size-3.5" />
+          </button>
+        ) : null}
       </div>
     </>
   );
