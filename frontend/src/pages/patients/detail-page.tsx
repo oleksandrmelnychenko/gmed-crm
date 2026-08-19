@@ -1507,6 +1507,7 @@ function usePatientDetailPageContent() {
     clearApiCache(`/patients/${id}/framework-contracts`);
     clearApiCache(`/patients/${id}/financial-ledger`);
     clearApiCache(`/patients/${id}/financial-summary`);
+    clearApiCache(`/patients/${id}/account-statement`);
     clearApiCache(`/patients/${id}/invoices`);
     clearApiCache(`/patients/${id}/service-packages`);
     clearApiCache(`/patients/${id}/timeline`);
@@ -2113,6 +2114,7 @@ function usePatientDetailPageContent() {
         invoiceTypeLabel={invoiceTypeLabel}
         invoices={invoices}
         isContractExpiringSoon={isContractExpiringSoon}
+        lang={lang}
         l={l}
         legalStatus={legalStatus}
         legalStatusChecklist={legalStatusChecklist}

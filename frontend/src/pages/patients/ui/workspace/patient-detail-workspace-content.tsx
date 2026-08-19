@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
+  BadgeEuro,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -24,8 +25,10 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import type { Translations } from "@/lib/i18n";
+import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+import { resolvePatientBalancePresentation } from "../../model/account-balance";
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
   patientLabelFormatLabel,
@@ -41,6 +44,7 @@ import type {
   DocumentItem,
   PatientFinancialLedger,
   PatientFinancialSummary,
+  PatientAccountStatement,
   PatientServicePackageItem,
   InvoiceItem,
   OrderItem,
@@ -290,6 +294,7 @@ type PatientDetailWorkspaceContentProps = {
   invoiceTypeLabel: (value: string) => string;
   invoices: InvoiceItem[];
   isContractExpiringSoon: (contract: ContractItem) => boolean;
+  lang: "de" | "ru";
   l: LocalizeFn;
   legalStatus: PatientLegalStatus;
   legalStatusChecklist: LegalStatusChecklistItem[];
@@ -456,6 +461,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     invoiceTypeLabel,
     invoices,
     isContractExpiringSoon,
+    lang,
     l,
     legalStatus,
     legalStatusChecklist,
@@ -551,6 +557,55 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImports, setClinicalImports] = useState<ClinicalDocumentImportSummary[]>([]);
   const [clinicalImportsLoading, setClinicalImportsLoading] = useState(false);
   const [clinicalImportsError, setClinicalImportsError] = useState(false);
+  const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
+  const [accountStatementLoading, setAccountStatementLoading] = useState(false);
+
+  useEffect(() => {
+    if (!id || !canViewInvoices) {
+      setAccountStatement(null);
+      setAccountStatementLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAccountStatementLoading(true);
+    void apiFetch<PatientAccountStatement>(`/patients/${id}/account-statement`, {
+      forceFresh: true,
+    })
+      .then((statement) => {
+        if (!cancelled) setAccountStatement(statement);
+      })
+      .catch(() => {
+        if (!cancelled) setAccountStatement(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAccountStatementLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, canViewInvoices, detail, id]);
+
+  const balance = accountStatement
+    ? resolvePatientBalancePresentation(accountStatement.summary)
+    : null;
+  const balanceSideLabel =
+    balance?.side === "debit"
+      ? lang === "de" ? "Soll" : "Дт"
+      : balance?.side === "credit"
+        ? lang === "de" ? "Haben" : "Кт"
+        : lang === "de" ? "ausgeglichen" : "закрыто";
+  const balanceValue = balance
+    ? `${formatMoney(String(balance.amount), accountStatement?.currency)} ${balanceSideLabel}`
+    : accountStatementLoading ? "…" : "—";
+  const balanceTitle = balance?.needsReconciliation
+    ? lang === "de"
+      ? "Berechneter Saldo – Abstimmung erforderlich. Rechnungen öffnen."
+      : "Расчётное сальдо — требуется сверка. Открыть счета."
+    : lang === "de"
+      ? "Rechnungen öffnen"
+      : "Открыть счета";
 
   const clinicalImportAttentionCount = clinicalImports.filter((item) =>
     ["queued", "processing", "review_required", "applying"].includes(item.status),
@@ -615,7 +670,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         <div className="flex items-center justify-center size-10 shrink-0 rounded-full bg-[var(--brand)] text-[12px] font-semibold text-white">
           {initials}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-[180px] flex-1 sm:min-w-[220px]">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight text-foreground truncate">{patientName(detail)}</h1>
             <StatusActionPill
@@ -638,6 +693,31 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           </div>
           <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">{detail.patient_id}</p>
         </div>
+        {canViewInvoices ? (
+          <button
+            type="button"
+            className="group flex h-10 shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`${t.invoices_workspace_balance}: ${balanceValue}. ${balanceTitle}`}
+            title={balanceTitle}
+            onClick={() => handleWorkspaceTabChange("invoices")}
+          >
+            <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+              <BadgeEuro className="size-4" />
+            </span>
+            <span>
+              <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {t.invoices_workspace_balance}
+              </span>
+              <span className="flex items-center gap-1 text-sm font-semibold tabular-nums text-foreground">
+                {balanceValue}
+                {balance?.needsReconciliation ? (
+                  <AlertTriangle className="size-3.5 text-amber-600" aria-hidden="true" />
+                ) : null}
+              </span>
+            </span>
+            <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          </button>
+        ) : null}
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
