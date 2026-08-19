@@ -517,7 +517,7 @@ async fn load_patient_settlement_ledger(
             "debit": decimal_to_string(movement.debit),
             "credit": decimal_to_string(movement.credit),
             "balance_after": decimal_to_string(running_balance),
-            "currency": currency.clone(),
+            "currency": currency,
         }));
     }
 
