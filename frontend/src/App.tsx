@@ -143,6 +143,12 @@ const InvoicesPage = lazy(() =>
   })),
 );
 
+const CompanyFinancePage = lazy(() =>
+  import("@/pages/company-finance").then((module) => ({
+    default: module.CompanyFinancePage,
+  })),
+);
+
 const FinanceCatalogPage = lazy(() =>
   import("@/pages/finance-catalog").then((module) => ({
     default: module.FinanceCatalogPage,
@@ -370,6 +376,7 @@ function AppRoutes() {
             <Route path="orders/:orderId" element={<OrdersPage />} />
             <Route path="contracts" element={<ContractsPage />} />
             <Route path="invoices" element={<InvoicesPage />} />
+            <Route path="company-finance" element={<CompanyFinancePage />} />
             <Route path="finance-catalog" element={<FinanceCatalogPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/intake" element={<DocumentsPage />} />

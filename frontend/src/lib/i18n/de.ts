@@ -23,6 +23,7 @@ export const de = {
   nav_specializations: "Spezialisierungen",
   nav_contracts: "Verträge",
   nav_invoices: "Rechnungen",
+  nav_company_finance: "Unternehmenssaldo",
   nav_finance_catalog: "Finanzkatalog",
   nav_admin: "Administration",
   nav_users_roles: "Benutzer & Rollen",

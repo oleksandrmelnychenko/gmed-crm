@@ -29,6 +29,7 @@ describe("first-release staff RBAC", () => {
       "/orders/order-1",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/documents/document-1",
       "/specializations",
@@ -68,6 +69,7 @@ describe("first-release staff RBAC", () => {
       "/orders",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/specializations",
       "/interpreters",
@@ -88,6 +90,7 @@ describe("first-release staff RBAC", () => {
       "/orders/order-1",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/documents",
       "/services",
@@ -117,6 +120,7 @@ describe("first-release staff RBAC", () => {
 
     const billing = listStaffNavItems("billing").map((item) => item.to);
     expect(billing).toContain("/invoices");
+    expect(billing).toContain("/company-finance");
     expect(billing).toContain("/finance-catalog");
     expect(billing).not.toContain("/concierge");
     expect(billing).not.toContain("/appointments");

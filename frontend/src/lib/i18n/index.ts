@@ -32,6 +32,7 @@ export interface Translations
   nav_specializations: string;
   nav_contracts: string;
   nav_invoices: string;
+  nav_company_finance: string;
   nav_finance_catalog: string;
   nav_admin: string;
   nav_users_roles: string;

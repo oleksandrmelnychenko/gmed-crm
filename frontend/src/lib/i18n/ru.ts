@@ -23,6 +23,7 @@ export const ru = {
   nav_specializations: "Специализации",
   nav_contracts: "Договоры",
   nav_invoices: "Счета",
+  nav_company_finance: "Баланс компании",
   nav_finance_catalog: "Финансовый каталог",
   nav_admin: "Администрирование",
   nav_users_roles: "Пользователи и роли",

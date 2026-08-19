@@ -321,6 +321,17 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "crm", labelKey: "nav_invoices" },
   },
   {
+    id: "company-finance",
+    match: "exact",
+    path: "/company-finance",
+    roles: ROLES_REPORTS,
+    nav: {
+      section: "crm",
+      labelKey: "nav_company_finance",
+      after: "invoices",
+    },
+  },
+  {
     id: "finance-catalog",
     match: "exact",
     path: "/finance-catalog",
