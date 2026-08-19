@@ -77,6 +77,7 @@ import {
   applyInvoicePrepayment,
   createInvoiceCreditNote,
   createInvoicePayment,
+  createInvoiceRefund,
   createDunningEvent,
   createInvoice,
   fetchAccountingLedger,
@@ -88,6 +89,7 @@ import {
   releaseInvoicePrepayment,
   reverseInvoicePayment,
   reverseInvoiceCreditNote,
+  reverseInvoiceRefund,
   updateInvoicePayer,
   updateInvoiceStatus,
   updateInvoiceVisibility,
@@ -123,6 +125,7 @@ import type {
   InvoiceCreditNoteTransaction,
   InvoiceLineItem,
   InvoicePaymentTransaction,
+  InvoiceRefundTransaction,
   InvoiceStatus,
   InvoiceType,
   OrderOption,
@@ -155,6 +158,7 @@ type InvoiceWorkspaceState = {
   dunningEvents: DunningEvent[];
   paymentTransactions: InvoicePaymentTransaction[];
   creditNoteTransactions: InvoiceCreditNoteTransaction[];
+  refundTransactions: InvoiceRefundTransaction[];
   detailBusy: boolean;
   detailError: string | null;
   reloadToken: number;
@@ -228,6 +232,10 @@ const STAFF_INVOICE_REALTIME_EVENTS = [
   "invoice.status_changed",
   "invoice.payment_recorded",
   "invoice.payment_reversed",
+  "invoice.refund_recorded",
+  "invoice.refund_reversed",
+  "invoice.credit_note_created",
+  "invoice.credit_note_reversed",
   "invoice.dunning_created",
   "invoice.overdue_marked",
   "document.payment_proof_uploaded",
@@ -522,6 +530,18 @@ function useStaffInvoicesPageContent() {
     reversePayment: lang === "de" ? "Zahlung stornieren" : "Сторнировать платёж",
     reversalReason: lang === "de" ? "Stornogrund" : "Причина сторнирования",
     reversed: lang === "de" ? "Storniert" : "Сторнирован",
+    refunds: lang === "de" ? "Rückzahlungen" : "Возвраты пациенту",
+    refundsDescription:
+      lang === "de"
+        ? "Tatsächlich an den Patienten ausgezahltes Guthaben. Eine Rückzahlung ist nur bis zur verfügbaren Bar-Gutschrift möglich."
+        : "Фактически возвращённые пациенту деньги. Возврат возможен только в пределах доступной денежной переплаты.",
+    recordRefund: lang === "de" ? "Rückzahlung erfassen" : "Записать возврат",
+    refundAmount: lang === "de" ? "Rückzahlung brutto" : "Сумма возврата брутто",
+    refundDate: lang === "de" ? "Auszahlungsdatum" : "Дата возврата",
+    refundReason: lang === "de" ? "Grund der Rückzahlung" : "Причина возврата",
+    refundNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    noRefunds: lang === "de" ? "Noch keine Rückzahlungen." : "Возвратов пока нет.",
+    reverseRefund: lang === "de" ? "Rückzahlung stornieren" : "Сторнировать возврат",
     paymentMethods: {
       bank_transfer: lang === "de" ? "Überweisung" : "Банковский перевод",
       card: lang === "de" ? "Karte" : "Карта",
@@ -606,6 +626,7 @@ function useStaffInvoicesPageContent() {
       dunningEvents: [],
       paymentTransactions: [],
       creditNoteTransactions: [],
+      refundTransactions: [],
       detailBusy: false,
       detailError: null,
       reloadToken: 0,
@@ -631,6 +652,7 @@ function useStaffInvoicesPageContent() {
     dunningEvents,
     paymentTransactions,
     creditNoteTransactions,
+    refundTransactions,
     detailBusy,
     detailError,
     reloadToken,
@@ -805,6 +827,19 @@ function useStaffInvoicesPageContent() {
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [reversingCreditNoteId, setReversingCreditNoteId] = useState("");
   const [creditNoteReversalReason, setCreditNoteReversalReason] = useState("");
+  const [refundForm, setRefundForm] = useState({
+    requestId: crypto.randomUUID(),
+    amountGross: "",
+    paymentMethod: "bank_transfer",
+    paymentReference: "",
+    refundedOn: new Date().toISOString().slice(0, 10),
+    reason: "",
+    note: "",
+  });
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [reversingRefundId, setReversingRefundId] = useState("");
+  const [refundReversalReason, setRefundReversalReason] = useState("");
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
 
@@ -1338,6 +1373,7 @@ function useStaffInvoicesPageContent() {
     dunning: typeof dunningEvents,
     payments: InvoicePaymentTransaction[],
     creditNotes: InvoiceCreditNoteTransaction[],
+    refunds: InvoiceRefundTransaction[],
   ) => {
     setStatusForm(invoiceToStatusForm(data));
     setVisibilityForm(invoiceToVisibilityForm(data));
@@ -1351,6 +1387,7 @@ function useStaffInvoicesPageContent() {
       dunningEvents: dunning,
       paymentTransactions: payments,
       creditNoteTransactions: creditNotes,
+      refundTransactions: refunds,
       detailError: null,
       detailBusy: false,
     });
@@ -1440,6 +1477,7 @@ function useStaffInvoicesPageContent() {
         dunningEvents: [],
         paymentTransactions: [],
         creditNoteTransactions: [],
+        refundTransactions: [],
         detailError: null,
       });
       return;
@@ -1448,10 +1486,10 @@ function useStaffInvoicesPageContent() {
     async function loadDetail() {
       dispatchWorkspaceState({ detailBusy: true });
       try {
-        const { invoice: data, dunning, payments, creditNotes } =
+        const { invoice: data, dunning, payments, creditNotes, refunds } =
           await fetchInvoiceWorkspace(selectedInvoiceId);
         if (!ignore) {
-          applyLoadedInvoiceDetail(data, dunning, payments, creditNotes);
+          applyLoadedInvoiceDetail(data, dunning, payments, creditNotes, refunds);
         }
       } catch (error) {
         if (!ignore) {
@@ -1647,6 +1685,56 @@ function useStaffInvoicesPageContent() {
       setCreditNoteError(error instanceof Error ? error.message : t.common_error);
     } finally {
       setCreditNoteBusy(false);
+    }
+  }
+
+  async function handleRecordRefund() {
+    if (!detail || Number(refundForm.amountGross) <= 0 || !refundForm.reason.trim()) return;
+    setRefundBusy(true);
+    setRefundError(null);
+    try {
+      await createInvoiceRefund(detail.id, {
+        request_id: refundForm.requestId,
+        amount_gross: Number(refundForm.amountGross),
+        payment_method: refundForm.paymentMethod,
+        payment_reference: refundForm.paymentReference.trim() || null,
+        refunded_on: refundForm.refundedOn,
+        reason: refundForm.reason.trim(),
+        note: refundForm.note.trim() || null,
+      });
+      setRefundForm({
+        requestId: crypto.randomUUID(),
+        amountGross: "",
+        paymentMethod: "bank_transfer",
+        paymentReference: "",
+        refundedOn: new Date().toISOString().slice(0, 10),
+        reason: "",
+        note: "",
+      });
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setRefundError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setRefundBusy(false);
+    }
+  }
+
+  async function handleReverseRefund(refundId: string) {
+    if (!detail || !refundReversalReason.trim()) return;
+    setRefundBusy(true);
+    setRefundError(null);
+    try {
+      await reverseInvoiceRefund(detail.id, refundId, {
+        reversed_on: new Date().toISOString().slice(0, 10),
+        reason: refundReversalReason.trim(),
+      });
+      setReversingRefundId("");
+      setRefundReversalReason("");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setRefundError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setRefundBusy(false);
     }
   }
 
@@ -2938,6 +3026,252 @@ function useStaffInvoicesPageContent() {
                                   <div className="flex gap-2">
                                     <Button type="button" variant="outline" onClick={() => { setReversingCreditNoteId(""); setCreditNoteReversalReason(""); }}>{t.common_cancel}</Button>
                                     <Button type="button" disabled={creditNoteBusy || !creditNoteReversalReason.trim()} onClick={() => void handleReverseCreditNote(credit.id)}>{lang === "de" ? "Stornieren" : "Отменить"}</Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard title={text.refunds}>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <p className="max-w-3xl text-sm text-muted-foreground">
+                        {text.refundsDescription}
+                      </p>
+                      <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-right">
+                        <div className="text-xs text-muted-foreground">
+                          {lang === "de" ? "Verfügbar zur Auszahlung" : "Доступно к возврату"}
+                        </div>
+                        <div className="font-mono font-semibold tabular-nums text-foreground">
+                          {formatMoney(detail.refundable_cash_amount ?? 0)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {access.canManage &&
+                    !["draft", "cancelled"].includes(detail.status) &&
+                    Number(detail.refundable_cash_amount ?? 0) > 0 ? (
+                      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <Field label={text.refundAmount}>
+                          <Input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            max={String(detail.refundable_cash_amount ?? "")}
+                            value={refundForm.amountGross}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                amountGross: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentMethod}>
+                          <NativeComboboxSelect
+                            value={refundForm.paymentMethod}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                paymentMethod: event.target.value,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            {[
+                              "bank_transfer",
+                              "card",
+                              "cash",
+                              "direct_debit",
+                              "cheque",
+                              "other",
+                            ].map((method) => (
+                              <option key={method} value={method}>
+                                {text.paymentMethods[method]}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={text.refundDate}>
+                          <Input
+                            type="date"
+                            min={detail.issued_at.slice(0, 10)}
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={refundForm.refundedOn}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                refundedOn: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.refundReason} className="sm:col-span-2">
+                          <Input
+                            value={refundForm.reason}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                reason: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentReference}>
+                          <Input
+                            value={refundForm.paymentReference}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                paymentReference: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.refundNote} className="sm:col-span-2">
+                          <Input
+                            value={refundForm.note}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                note: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <div className="flex items-end lg:justify-end">
+                          <Button
+                            type="button"
+                            disabled={
+                              refundBusy ||
+                              Number(refundForm.amountGross) <= 0 ||
+                              Number(refundForm.amountGross) >
+                                Number(detail.refundable_cash_amount ?? 0) ||
+                              !refundForm.reason.trim() ||
+                              !refundForm.refundedOn
+                            }
+                            onClick={() => void handleRecordRefund()}
+                          >
+                            {refundBusy ? (
+                              <LoaderCircle className="mr-2 size-4 animate-spin" />
+                            ) : null}
+                            {text.recordRefund}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {refundError ? <ShellBanner tone="error">{refundError}</ShellBanner> : null}
+
+                    {refundTransactions.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                        {text.noRefunds}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {refundTransactions.map((refund) => {
+                          const isReversal = refund.transaction_type === "reversal";
+                          const canReverse =
+                            access.canManage &&
+                            !isReversal &&
+                            !refund.is_reversed &&
+                            detail.status !== "cancelled";
+                          return (
+                            <div
+                              key={refund.id}
+                              className={cn(
+                                "rounded-lg border border-border/70 bg-background/70 p-3",
+                                refund.is_reversed && "opacity-70",
+                              )}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-foreground">
+                                      {isReversal ? text.reversal : text.recordRefund}
+                                    </span>
+                                    {refund.is_reversed ? (
+                                      <StatusBadge tone="neutral">{text.reversed}</StatusBadge>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {formatDate(refund.refunded_on, locale, t.common_not_set)} · {refund.reason}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {text.paymentMethods[refund.payment_method] ?? refund.payment_method}
+                                    {refund.payment_reference ? ` · ${refund.payment_reference}` : ""}
+                                  </div>
+                                  {refund.note ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">{refund.note}</div>
+                                  ) : null}
+                                  {refund.created_by_name ? (
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                      {refund.created_by_name}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="text-right">
+                                  <div
+                                    className={cn(
+                                      "font-mono font-semibold tabular-nums",
+                                      isReversal ? "text-foreground" : "text-rose-700",
+                                    )}
+                                  >
+                                    {isReversal ? "+" : "−"}
+                                    {formatMoney(refund.amount_gross)}
+                                  </div>
+                                  {canReverse ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="mt-1 h-7 px-2 text-xs"
+                                      onClick={() => {
+                                        setReversingRefundId(refund.id);
+                                        setRefundReversalReason("");
+                                      }}
+                                    >
+                                      {text.reverseRefund}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {reversingRefundId === refund.id ? (
+                                <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
+                                  <Input
+                                    value={refundReversalReason}
+                                    onChange={(event) => setRefundReversalReason(event.target.value)}
+                                    placeholder={text.reversalReason}
+                                    className={shellInputClassName}
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setReversingRefundId("");
+                                        setRefundReversalReason("");
+                                      }}
+                                    >
+                                      {t.common_cancel}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      disabled={refundBusy || !refundReversalReason.trim()}
+                                      onClick={() => void handleReverseRefund(refund.id)}
+                                    >
+                                      {text.reverseRefund}
+                                    </Button>
                                   </div>
                                 </div>
                               ) : null}

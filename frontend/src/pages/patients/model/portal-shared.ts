@@ -126,6 +126,7 @@ export type PortalInvoiceItem = {
   paid_amount: unknown;
   balance_due: unknown;
   credit_balance?: unknown;
+  refundable_cash_amount?: unknown;
   paid_at: string | null;
   notes: string | null;
   created_at: string;
@@ -169,6 +170,23 @@ export type PortalInvoiceCreditNoteTransaction = {
 
 export type PortalInvoiceCreditNoteHistoryResponse = {
   items: PortalInvoiceCreditNoteTransaction[];
+};
+
+export type PortalInvoiceRefundTransaction = {
+  id: string;
+  transaction_type: "refund" | "reversal";
+  is_reversed: boolean;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  payment_method: string;
+  payment_reference: string | null;
+  refunded_on: string;
+  reason: string;
+  created_at: string;
+};
+
+export type PortalInvoiceRefundHistoryResponse = {
+  items: PortalInvoiceRefundTransaction[];
 };
 
 export type PortalAccountStatementItem = {

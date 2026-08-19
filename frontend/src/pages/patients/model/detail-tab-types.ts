@@ -262,6 +262,8 @@ export type PatientAccountMovement = {
     | "invoice"
     | "payment"
     | "payment_reversal"
+    | "refund"
+    | "refund_reversal"
     | "external_receivable"
     | "external_allocation"
     | "external_allocation_reversal";

@@ -524,6 +524,8 @@ function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: st
     invoice: ["Patientenrechnung", "Счёт пациента"],
     payment: ["Zahlung", "Оплата"],
     payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
+    refund: ["Rückzahlung", "Возврат пациенту"],
+    refund_reversal: ["Rückzahlungsstorno", "Сторно возврата"],
     external_receivable: ["Externe Forderung", "Внешний долг"],
     external_allocation: ["Forderung zugeordnet", "Долг распределён"],
     external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
@@ -1994,6 +1996,8 @@ function usePatientInvoicesTabContent({
                   <option value="invoice">{accountMovementKindLabel("invoice", lang)}</option>
                   <option value="payment">{accountMovementKindLabel("payment", lang)}</option>
                   <option value="payment_reversal">{accountMovementKindLabel("payment_reversal", lang)}</option>
+                  <option value="refund">{accountMovementKindLabel("refund", lang)}</option>
+                  <option value="refund_reversal">{accountMovementKindLabel("refund_reversal", lang)}</option>
                   <option value="external_receivable">{accountMovementKindLabel("external_receivable", lang)}</option>
                   <option value="external_allocation">{accountMovementKindLabel("external_allocation", lang)}</option>
                   <option value="external_allocation_reversal">{accountMovementKindLabel("external_allocation_reversal", lang)}</option>

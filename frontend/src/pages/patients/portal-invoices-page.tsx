@@ -32,6 +32,7 @@ import {
   fetchPortalInvoiceDetail,
   fetchPortalInvoiceCreditNotes,
   fetchPortalInvoicePayments,
+  fetchPortalInvoiceRefunds,
   fetchPortalInvoices,
   uploadPortalPaymentProof,
 } from "@/pages/patients/data/portal-api";
@@ -50,6 +51,7 @@ import type {
   PortalInvoiceCreditNoteTransaction,
   PortalInvoiceLineItem,
   PortalInvoicePaymentTransaction,
+  PortalInvoiceRefundTransaction,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
@@ -102,6 +104,8 @@ const PORTAL_INVOICE_REALTIME_EVENTS = [
   "invoice.payment_reversed",
   "invoice.credit_note_created",
   "invoice.credit_note_reversed",
+  "invoice.refund_recorded",
+  "invoice.refund_reversed",
   "invoice.dunning_created",
   "invoice.overdue_marked",
   "document.payment_proof_uploaded",
@@ -123,6 +127,7 @@ interface PatientInvoicesState {
   detail: PortalInvoiceItem | null;
   detailPayments: PortalInvoicePaymentTransaction[];
   detailCreditNotes: PortalInvoiceCreditNoteTransaction[];
+  detailRefunds: PortalInvoiceRefundTransaction[];
   detailBusy: boolean;
   detailError: string;
   uploadOpen: boolean;
@@ -148,6 +153,7 @@ const INITIAL_PATIENT_INVOICES_STATE: PatientInvoicesState = {
   detail: null,
   detailPayments: [],
   detailCreditNotes: [],
+  detailRefunds: [],
   detailBusy: false,
   detailError: "",
   uploadOpen: false,
@@ -180,6 +186,7 @@ function usePatientInvoicesPageContent() {
     detail,
     detailPayments,
     detailCreditNotes,
+    detailRefunds,
     detailBusy,
     detailError,
     error,
@@ -202,11 +209,13 @@ function usePatientInvoicesPageContent() {
       clearApiCache(`/me/invoices/${event.entity_id}`);
       clearApiCache(`/me/invoices/${event.entity_id}/payments`);
       clearApiCache(`/me/invoices/${event.entity_id}/credit-notes`);
+      clearApiCache(`/me/invoices/${event.entity_id}/refunds`);
     }
     if (selectedInvoiceId) {
       clearApiCache(`/me/invoices/${selectedInvoiceId}`);
       clearApiCache(`/me/invoices/${selectedInvoiceId}/payments`);
       clearApiCache(`/me/invoices/${selectedInvoiceId}/credit-notes`);
+      clearApiCache(`/me/invoices/${selectedInvoiceId}/refunds`);
     }
     dispatchInvoicesState((current) => ({ version: current.version + 1 }));
   });
@@ -261,7 +270,7 @@ function usePatientInvoicesPageContent() {
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      dispatchInvoicesState({ detail: null, detailPayments: [], detailCreditNotes: [], detailError: "" });
+      dispatchInvoicesState({ detail: null, detailPayments: [], detailCreditNotes: [], detailRefunds: [], detailError: "" });
       return;
     }
 
@@ -271,17 +280,21 @@ function usePatientInvoicesPageContent() {
       dispatchInvoicesState({ detailBusy: true });
       try {
         const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
-        const [payments, creditNotes] = await Promise.all([
+        const [payments, creditNotes, refunds] = await Promise.all([
           invoiceAmountsVisible(invoice)
             ? fetchPortalInvoicePayments(selectedInvoiceId).then((response) => response.items)
             : Promise.resolve([]),
           fetchPortalInvoiceCreditNotes(selectedInvoiceId).then((response) => response.items),
+          invoiceAmountsVisible(invoice)
+            ? fetchPortalInvoiceRefunds(selectedInvoiceId).then((response) => response.items)
+            : Promise.resolve([]),
         ]);
         if (cancelled) return;
         dispatchInvoicesState({
           detail: invoice,
           detailPayments: payments,
           detailCreditNotes: creditNotes,
+          detailRefunds: refunds,
           detailError: "",
           detailBusy: false,
         });
@@ -755,6 +768,65 @@ function usePatientInvoicesPageContent() {
                           );
                         })
                       )}
+                    </div>
+                  </section>
+                ) : null}
+
+                {invoiceAmountsVisible(detail) && detailRefunds.length > 0 ? (
+                  <section className={cn("rounded-xl p-5", tokens.surface.card)}>
+                    <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span>{lang === "de" ? "Rückzahlungen" : "Возвраты"}</span>
+                    </h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {lang === "de"
+                        ? "Hier sehen Sie tatsächlich ausgezahlte Guthaben und eventuelle Stornierungen."
+                        : "Здесь показаны фактически возвращённые суммы и возможные сторнирования."}
+                    </p>
+                    <div className="mt-5 space-y-2">
+                      {detailRefunds.map((refund) => {
+                        const isReversal = refund.transaction_type === "reversal";
+                        return (
+                          <div
+                            key={refund.id}
+                            className={cn(
+                              "flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3",
+                              refund.is_reversed && "opacity-70",
+                            )}
+                          >
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                                <span>
+                                  {isReversal
+                                    ? lang === "de" ? "Rückzahlungsstorno" : "Сторно возврата"
+                                    : lang === "de" ? "Rückzahlung ausgeführt" : "Возврат выполнен"}
+                                </span>
+                                {refund.is_reversed ? (
+                                  <StatusBadge tone="neutral">
+                                    {lang === "de" ? "Storniert" : "Сторнирован"}
+                                  </StatusBadge>
+                                ) : null}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {formatPortalDate(refund.refunded_on)} · {refund.reason}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {portalPaymentMethodLabel(refund.payment_method, lang)}
+                                {refund.payment_reference ? ` · ${refund.payment_reference}` : ""}
+                              </div>
+                            </div>
+                            <div
+                              className={cn(
+                                "font-mono font-semibold tabular-nums",
+                                isReversal ? "text-foreground" : "text-rose-700",
+                              )}
+                            >
+                              {isReversal ? "+" : "−"}
+                              {formatPortalCurrency(refund.amount_gross)}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </section>
                 ) : null}

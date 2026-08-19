@@ -12,6 +12,7 @@ import type {
   PortalInvoiceCreditNoteHistoryResponse,
   PortalInvoiceItem,
   PortalInvoicePaymentHistoryResponse,
+  PortalInvoiceRefundHistoryResponse,
   PortalNextActionItem,
   PortalNextActionsResponse,
   PortalPrivacyRequest,
@@ -233,6 +234,12 @@ export function fetchPortalInvoicePayments(invoiceId: string) {
 export function fetchPortalInvoiceCreditNotes(invoiceId: string) {
   return apiFetch<PortalInvoiceCreditNoteHistoryResponse>(
     `/me/invoices/${invoiceId}/credit-notes`,
+  );
+}
+
+export function fetchPortalInvoiceRefunds(invoiceId: string) {
+  return apiFetch<PortalInvoiceRefundHistoryResponse>(
+    `/me/invoices/${invoiceId}/refunds`,
   );
 }
 

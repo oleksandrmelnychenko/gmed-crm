@@ -233,6 +233,17 @@ async fn load_patient_settlement_ledger(
                FROM invoice_payment_transactions payment
                JOIN scoped_invoices invoice ON invoice.id = payment.invoice_id
                GROUP BY payment.invoice_id
+           ), journal_refunded AS (
+               SELECT refund.invoice_id,
+                      COALESCE(SUM(
+                          CASE
+                              WHEN refund.transaction_type = 'refund' THEN refund.amount_gross
+                              ELSE -refund.amount_gross
+                          END
+                      ), 0) AS journal_amount
+               FROM invoice_refund_transactions refund
+               JOIN scoped_invoices invoice ON invoice.id = refund.invoice_id
+               GROUP BY refund.invoice_id
            )
            SELECT 'invoice:' || invoice.id::text AS movement_id,
                   'invoice'::text AS movement_kind,
@@ -322,6 +333,34 @@ async fn load_patient_settlement_ledger(
 
            UNION ALL
 
+           SELECT 'refund:' || refund.id::text,
+                  CASE
+                      WHEN refund.transaction_type = 'reversal'
+                          THEN 'refund_reversal'
+                      ELSE 'refund'
+                  END,
+                  refund.refunded_on,
+                  refund.created_at,
+                  invoice.order_id,
+                  invoice.order_number,
+                  invoice.invoice_number,
+                  refund.reason,
+                  CASE
+                      WHEN refund.transaction_type = 'refund'
+                          THEN refund.amount_gross
+                      ELSE 0::numeric
+                  END,
+                  CASE
+                      WHEN refund.transaction_type = 'reversal'
+                          THEN refund.amount_gross
+                      ELSE 0::numeric
+                  END
+           FROM invoice_refund_transactions refund
+           JOIN scoped_invoices invoice ON invoice.id = refund.invoice_id
+           WHERE $2::date IS NULL OR refund.refunded_on <= $2
+
+           UNION ALL
+
            SELECT 'payment-balance:' || invoice.id::text,
                   'payment'::text,
                   COALESCE(invoice.paid_at::date, invoice.issued_at::date),
@@ -335,10 +374,20 @@ async fn load_patient_settlement_ledger(
                       ELSE 'Payment opening balance'
                   END,
                   0::numeric,
-                  GREATEST(invoice.paid_amount - COALESCE(journal.journal_amount, 0), 0)
+                  GREATEST(
+                      invoice.paid_amount
+                          - (
+                              COALESCE(journal.journal_amount, 0)
+                              - COALESCE(refunded.journal_amount, 0)
+                          ),
+                      0
+                  )
            FROM scoped_invoices invoice
            LEFT JOIN journal_paid journal ON journal.invoice_id = invoice.id
-           WHERE invoice.paid_amount > COALESCE(journal.journal_amount, 0)
+           LEFT JOIN journal_refunded refunded ON refunded.invoice_id = invoice.id
+           WHERE invoice.paid_amount
+                 > COALESCE(journal.journal_amount, 0)
+                   - COALESCE(refunded.journal_amount, 0)
              AND ($2::date IS NULL OR COALESCE(invoice.paid_at::date, invoice.issued_at::date) <= $2)
 
            UNION ALL
@@ -597,12 +646,20 @@ async fn load_patient_account_statement(
                       WHERE credit.invoice_id = invoice.id
                         AND ($3::date IS NULL OR credit.issued_on <= $3)
                   ), 0) AS credited_amount,
-                  CASE WHEN $3::date IS NULL THEN invoice.paid_amount ELSE COALESCE((
-                      SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
-                      FROM invoice_payment_transactions payment
-                      WHERE payment.invoice_id = invoice.id
-                        AND payment.received_on <= $3
-                  ), 0) END AS paid_amount,
+                  CASE WHEN $3::date IS NULL THEN invoice.paid_amount ELSE
+                      COALESCE((
+                          SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
+                          FROM invoice_payment_transactions payment
+                          WHERE payment.invoice_id = invoice.id
+                            AND payment.received_on <= $3
+                      ), 0)
+                      - COALESCE((
+                          SELECT SUM(CASE WHEN refund.transaction_type = 'refund' THEN refund.amount_gross ELSE -refund.amount_gross END)
+                          FROM invoice_refund_transactions refund
+                          WHERE refund.invoice_id = invoice.id
+                            AND refund.refunded_on <= $3
+                      ), 0)
+                  END AS paid_amount,
                   CASE WHEN $3::date IS NULL THEN invoice.prepayment_applied_amount ELSE COALESCE((
                       SELECT SUM(allocation.amount_gross)
                       FROM invoice_prepayment_allocations allocation
@@ -1216,12 +1273,20 @@ async fn get_patient_financial_summary(
                       WHERE credit.invoice_id = invoices.id
                         AND ($3::date IS NULL OR credit.issued_on <= $3)
                   ), 0) AS credited_amount,
-                  CASE WHEN $3::date IS NULL THEN paid_amount ELSE COALESCE((
-                      SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
-                      FROM invoice_payment_transactions payment
-                      WHERE payment.invoice_id = invoices.id
-                        AND payment.received_on <= $3
-                  ), 0) END AS paid_amount,
+                  CASE WHEN $3::date IS NULL THEN paid_amount ELSE
+                      COALESCE((
+                          SELECT SUM(CASE WHEN payment.transaction_type = 'payment' THEN payment.amount_gross ELSE -payment.amount_gross END)
+                          FROM invoice_payment_transactions payment
+                          WHERE payment.invoice_id = invoices.id
+                            AND payment.received_on <= $3
+                      ), 0)
+                      - COALESCE((
+                          SELECT SUM(CASE WHEN refund.transaction_type = 'refund' THEN refund.amount_gross ELSE -refund.amount_gross END)
+                          FROM invoice_refund_transactions refund
+                          WHERE refund.invoice_id = invoices.id
+                            AND refund.refunded_on <= $3
+                      ), 0)
+                  END AS paid_amount,
                   COALESCE((
                       SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note' THEN credit.amount_net ELSE -credit.amount_net END)
                       FROM invoice_credit_note_transactions credit

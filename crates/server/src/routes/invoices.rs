@@ -56,6 +56,10 @@ pub fn router() -> Router<AppState> {
             get(list_my_invoice_credit_notes),
         )
         .route(
+            "/me/invoices/{invoice_id}/refunds",
+            get(list_my_invoice_refunds),
+        )
+        .route(
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
         )
@@ -83,6 +87,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/credit-notes/{credit_note_id}/reversal",
             post(reverse_invoice_credit_note),
+        )
+        .route(
+            "/invoices/{invoice_id}/refunds",
+            get(list_invoice_refunds).post(create_invoice_refund),
+        )
+        .route(
+            "/invoices/{invoice_id}/refunds/{refund_id}/reversal",
+            post(reverse_invoice_refund),
         )
         .route(
             "/invoices/{invoice_id}/visibility",
@@ -204,6 +216,23 @@ struct CreateInvoiceCreditNoteRequest {
 struct ReverseInvoiceCreditNoteRequest {
     reason: String,
     issued_on: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateInvoiceRefundRequest {
+    request_id: Uuid,
+    amount_gross: MoneyInput,
+    payment_method: String,
+    payment_reference: Option<String>,
+    refunded_on: String,
+    reason: String,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReverseInvoiceRefundRequest {
+    reversed_on: Option<String>,
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -570,6 +599,7 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
             "prepayment_applied_amount",
             "balance_due",
             "credit_balance",
+            "refundable_cash_amount",
         ] {
             map.insert(key.to_string(), Value::Null);
         }
@@ -856,6 +886,98 @@ async fn insert_invoice_payment_accounting_entries(
             "invoice_number": context.invoice_number,
             "invoice_payment_transaction_id": payment_transaction_id,
             "payment_transaction_type": transaction_type,
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+        }))
+        .bind(actor_id)
+        .execute(&mut **transaction)
+        .await?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_invoice_refund_accounting_entries(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    refund_transaction_id: Uuid,
+    transaction_type: &str,
+    amount_gross: Decimal,
+    payment_method: &str,
+    payment_reference: Option<&str>,
+    entry_date: NaiveDate,
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let signed_gross = if transaction_type == "refund" {
+        -amount_gross
+    } else {
+        amount_gross
+    };
+    let (_, passthrough_vat_total, passthrough_gross_total) =
+        invoice_passthrough_totals(&context.line_items);
+    let service_vat_total = context.total_vat - passthrough_vat_total;
+    let passthrough_gross =
+        proportional_share(signed_gross, passthrough_gross_total, context.total_gross);
+    let passthrough_vat =
+        proportional_share(signed_gross, passthrough_vat_total, context.total_gross);
+    let service_gross = signed_gross - passthrough_gross;
+    let service_vat = proportional_share(signed_gross, service_vat_total, context.total_gross);
+    let description_prefix = if transaction_type == "refund" {
+        "Invoice cash refund"
+    } else {
+        "Invoice cash refund reversal"
+    };
+
+    for (category, gross, vat, description) in [
+        (
+            "service_revenue",
+            service_gross,
+            service_vat,
+            format!("{description_prefix} {}", context.invoice_number),
+        ),
+        (
+            "cost_passthrough_revenue",
+            passthrough_gross,
+            passthrough_vat,
+            format!(
+                "Cost passthrough {description_prefix} {}",
+                context.invoice_number
+            ),
+        ),
+    ] {
+        let net = gross - vat;
+        if gross == Decimal::ZERO && vat == Decimal::ZERO && net == Decimal::ZERO {
+            continue;
+        }
+        sqlx::query(
+            r#"INSERT INTO accounting_entries (
+                    entry_kind, direction, category, source_invoice_id,
+                    source_invoice_refund_transaction_id, order_id, patient_id,
+                    entry_date, description, amount_net, amount_vat, amount_gross,
+                    currency, metadata, created_by
+               ) VALUES (
+                    'invoice_refund', 'income', $1, $2,
+                    $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    $11, $12, $13
+               )"#,
+        )
+        .bind(category)
+        .bind(context.invoice_id)
+        .bind(refund_transaction_id)
+        .bind(context.order_id)
+        .bind(context.patient_id)
+        .bind(entry_date)
+        .bind(description)
+        .bind(round_accounting_money(net))
+        .bind(round_accounting_money(vat))
+        .bind(round_accounting_money(gross))
+        .bind(&context.currency)
+        .bind(serde_json::json!({
+            "invoice_number": context.invoice_number,
+            "invoice_refund_transaction_id": refund_transaction_id,
+            "refund_transaction_type": transaction_type,
             "payment_method": payment_method,
             "payment_reference": payment_reference,
         }))
@@ -3446,6 +3568,11 @@ async fn load_invoice_detail(
         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
         "balance_due": decimal_to_string((total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
         "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
+        "refundable_cash_amount": decimal_to_string((
+            paid_amount
+                - (total_gross - credited_amount - prepayment_applied_amount)
+                    .max(Decimal::ZERO)
+        ).max(Decimal::ZERO)),
         "available_prepayments": available_prepayments,
         "prepayment_allocations": prepayment_allocations,
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
@@ -4948,6 +5075,15 @@ async fn recompute_invoice_settlement_status(
                SELECT MAX(allocation.created_at) AS latest_prepayment_at
                FROM invoice_prepayment_allocations allocation
                 WHERE allocation.target_invoice_id = $1
+           ), refund AS (
+               SELECT COALESCE(SUM(
+                          CASE
+                              WHEN transaction_type = 'refund' THEN amount_gross
+                              ELSE -amount_gross
+                          END
+                      ), 0) AS refunded_amount
+               FROM invoice_refund_transactions
+               WHERE invoice_id = $1
            ), credit AS (
                SELECT MAX(
                           credit_note.issued_on::timestamp AT TIME ZONE 'UTC'
@@ -4962,7 +5098,8 @@ async fn recompute_invoice_settlement_status(
                        AND reversal.transaction_type = 'reversal'
                  )
            ), computed AS (
-               SELECT locked.id, cash.paid_amount,
+               SELECT locked.id,
+                      GREATEST(cash.paid_amount - refund.refunded_amount, 0) AS paid_amount,
                       GREATEST(
                            cash.latest_cash_received_at,
                            prepayment.latest_prepayment_at,
@@ -4984,6 +5121,7 @@ async fn recompute_invoice_settlement_status(
                FROM locked
                 CROSS JOIN cash
                 CROSS JOIN prepayment
+                CROSS JOIN refund
                 CROSS JOIN credit
            )
            UPDATE invoices invoice
@@ -5980,7 +6118,28 @@ async fn create_invoice_payment(
             );
         }
     };
-    if current_cash_paid + amount_gross + context.prepayment_applied_amount
+    let current_cash_refunded: Decimal = match sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(
+                  CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END
+               ), 0)
+           FROM invoice_refund_transactions
+           WHERE invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "sum invoice refunds");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
+    if current_cash_paid - current_cash_refunded + amount_gross
+        + context.prepayment_applied_amount
         > context.total_gross - context.credited_amount
     {
         return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
@@ -6274,6 +6433,42 @@ async fn reverse_invoice_payment(
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| serde_json::json!([])),
     };
+    let reversal_capacity = match sqlx::query(
+        r#"SELECT
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_payment_transactions
+                   WHERE invoice_id = $1
+               ), 0) AS cash_received,
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_refund_transactions
+                   WHERE invoice_id = $1
+               ), 0) AS cash_refunded"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "load payment reversal capacity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse payment");
+        }
+    };
+    if reversal_capacity
+        .try_get::<Decimal, _>("cash_received")
+        .unwrap_or(Decimal::ZERO)
+        - amount_gross
+        < reversal_capacity
+            .try_get::<Decimal, _>("cash_refunded")
+            .unwrap_or(Decimal::ZERO)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Refunds must be reversed before this payment can be reversed",
+        );
+    }
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_payment_transactions (
                 invoice_id, transaction_type, reverses_transaction_id,
@@ -6825,6 +7020,674 @@ async fn reverse_invoice_credit_note(
         }),
     )
     .await;
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(serde_json::json!({
+            "reversal_transaction_id": reversal_id,
+            "invoice": invoice,
+        }))
+        .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+fn invoice_refund_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) -> Value {
+    let transaction_type = row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default();
+    let amount_gross = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let effective_amount_gross = if transaction_type == "refund" {
+        -amount_gross
+    } else {
+        amount_gross
+    };
+    let mut payload = serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
+        "transaction_type": transaction_type,
+        "reverses_transaction_id": row.try_get::<Option<Uuid>, _>("reverses_transaction_id").unwrap_or_default(),
+        "reversed_by_transaction_id": row.try_get::<Option<Uuid>, _>("reversed_by_transaction_id").unwrap_or_default(),
+        "is_reversed": row.try_get::<bool, _>("is_reversed").unwrap_or(false),
+        "amount_gross": decimal_to_string(amount_gross),
+        "effective_amount_gross": decimal_to_string(effective_amount_gross),
+        "payment_method": row.try_get::<String, _>("payment_method").unwrap_or_default(),
+        "payment_reference": row.try_get::<Option<String>, _>("payment_reference").unwrap_or_default(),
+        "refunded_on": row.try_get::<NaiveDate, _>("refunded_on").map(|value| value.to_string()).unwrap_or_default(),
+        "reason": row.try_get::<String, _>("reason").unwrap_or_default(),
+        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    });
+    if staff_view && let Some(map) = payload.as_object_mut() {
+        map.insert(
+            "note".to_string(),
+            serde_json::json!(row.try_get::<Option<String>, _>("note").unwrap_or_default()),
+        );
+        map.insert(
+            "created_by".to_string(),
+            serde_json::json!(row.try_get::<Uuid, _>("created_by").unwrap_or_default()),
+        );
+        map.insert(
+            "created_by_name".to_string(),
+            serde_json::json!(row.try_get::<String, _>("created_by_name").unwrap_or_default()),
+        );
+        map.insert(
+            "created_by_role".to_string(),
+            serde_json::json!(row.try_get::<String, _>("created_by_role").unwrap_or_default()),
+        );
+    }
+    payload
+}
+
+async fn load_invoice_refund_history(
+    state: &AppState,
+    invoice_id: Uuid,
+    staff_view: bool,
+) -> Result<Vec<Value>, sqlx::Error> {
+    sqlx::query(
+        r#"SELECT refund.id, refund.invoice_id, refund.transaction_type,
+                  refund.reverses_transaction_id, refund.amount_gross,
+                  refund.payment_method, refund.payment_reference,
+                  refund.refunded_on, refund.reason, refund.note,
+                  refund.created_by, refund.created_at,
+                  creator.name AS created_by_name,
+                  creator.role AS created_by_role,
+                  reversal.id AS reversed_by_transaction_id,
+                  (reversal.id IS NOT NULL) AS is_reversed
+           FROM invoice_refund_transactions refund
+           JOIN users creator ON creator.id = refund.created_by
+           LEFT JOIN invoice_refund_transactions reversal
+             ON reversal.reverses_transaction_id = refund.id
+            AND reversal.transaction_type = 'reversal'
+           WHERE refund.invoice_id = $1
+           ORDER BY refund.refunded_on DESC, refund.created_at DESC, refund.id DESC"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&state.db)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|row| invoice_refund_row_payload(&row, staff_view))
+            .collect()
+    })
+}
+
+async fn list_invoice_refunds(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice refund access");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds");
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    match load_invoice_refund_history(&state, invoice_id, true).await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice refunds");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds")
+        }
+    }
+}
+
+async fn list_my_invoice_refunds(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(patient_id) => patient_id,
+        Err(resp) => return resp,
+    };
+    let invoice = match sqlx::query(
+        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient
+           FROM invoices WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load portal refund access");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds");
+        }
+    };
+    if invoice
+        .try_get::<Uuid, _>("patient_id")
+        .map(|value| value != patient_id)
+        .unwrap_or(true)
+        || !invoice.try_get::<bool, _>("portal_visible").unwrap_or(false)
+        || !invoice_is_patient_visible(&invoice.try_get::<String, _>("status").unwrap_or_default())
+    {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    }
+    if invoice
+        .try_get::<bool, _>("hide_amounts_from_patient")
+        .unwrap_or(true)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Invoice refund amounts are hidden from patient",
+        );
+    }
+    match load_invoice_refund_history(&state, invoice_id, false).await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "list portal invoice refunds");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds")
+        }
+    }
+}
+
+async fn create_invoice_refund(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<CreateInvoiceRefundRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund amount");
+    };
+    let amount_gross = amount_gross.round_dp(2);
+    if amount_gross <= Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Refund amount must be greater than zero",
+        );
+    }
+    let payment_method = body.payment_method.trim();
+    if !is_valid_invoice_payment_method(payment_method) || payment_method == "legacy_import" {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund method");
+    }
+    let refunded_on = match parse_optional_date(Some(body.refunded_on.as_str())) {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund date"),
+    };
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(reason) => reason,
+        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Refund reason is required"),
+    };
+    let payment_reference = normalize_optional(body.payment_reference.as_deref());
+    let note = normalize_optional(body.note.as_deref());
+
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice refund context");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin invoice refund transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT invoice.order_id, invoice.patient_id, invoice.invoice_number,
+                  invoice.status, invoice.total_vat, invoice.total_gross,
+                  invoice.credited_amount, invoice.prepayment_applied_amount,
+                  invoice.paid_amount, invoice.line_items, orders.currency
+           FROM invoices invoice
+           JOIN orders ON orders.id = invoice.order_id
+           WHERE invoice.id = $1
+           FOR UPDATE OF invoice"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoice for refund");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        patient_id,
+        invoice_number: row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO),
+        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO),
+        credited_amount: row.try_get::<Decimal, _>("credited_amount").unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+
+    let existing_request = match sqlx::query(
+        r#"SELECT id, amount_gross, payment_method, payment_reference,
+                  refunded_on, reason, note
+           FROM invoice_refund_transactions
+           WHERE invoice_id = $1
+             AND request_id = $2
+             AND transaction_type = 'refund'"#,
+    )
+    .bind(invoice_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, request_id = %body.request_id, "load refund idempotency key");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
+    if let Some(existing) = existing_request {
+        let refund_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        let same_request = existing
+            .try_get::<Decimal, _>("amount_gross")
+            .map(|value| value == amount_gross)
+            .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("payment_method")
+                .map(|value| value == payment_method)
+                .unwrap_or(false)
+            && existing
+                .try_get::<Option<String>, _>("payment_reference")
+                .map(|value| value == payment_reference)
+                .unwrap_or(false)
+            && existing
+                .try_get::<NaiveDate, _>("refunded_on")
+                .map(|value| value == refunded_on)
+                .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("reason")
+                .map(|value| value == reason)
+                .unwrap_or(false)
+            && existing
+                .try_get::<Option<String>, _>("note")
+                .map(|value| value == note)
+                .unwrap_or(false);
+        if !same_request {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another refund",
+            );
+        }
+        if let Err(e) = transaction.commit().await {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "commit refund replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+        return match load_invoice_detail(&state, invoice_id, &auth).await {
+            Ok(Some(invoice)) => Json(serde_json::json!({
+                "refund_transaction_id": refund_id,
+                "invoice": invoice,
+                "idempotent_replay": true,
+            }))
+            .into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(resp) => resp,
+        };
+    }
+    if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
+        return err(StatusCode::CONFLICT, "Refunds require an active released invoice");
+    }
+    let current_refundable = (
+        row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)
+            - (context.total_gross
+                - context.credited_amount
+                - context.prepayment_applied_amount)
+                .max(Decimal::ZERO)
+    )
+    .max(Decimal::ZERO);
+    if amount_gross > current_refundable {
+        return err(StatusCode::CONFLICT, "Refund exceeds the refundable cash credit");
+    }
+
+    let refund_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_refund_transactions (
+                invoice_id, transaction_type, request_id, amount_gross,
+                payment_method, payment_reference, refunded_on, reason,
+                note, created_by
+           ) VALUES ($1, 'refund', $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(body.request_id)
+    .bind(amount_gross)
+    .bind(payment_method)
+    .bind(payment_reference.clone())
+    .bind(refunded_on)
+    .bind(&reason)
+    .bind(note.clone())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(id) => id,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+        {
+            return err(StatusCode::CONFLICT, "Refund is no longer available; reload and try again");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice refund");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
+    if let Err(e) = insert_invoice_refund_accounting_entries(
+        &mut transaction,
+        &context,
+        refund_id,
+        "refund",
+        amount_gross,
+        payment_method,
+        payment_reference.as_deref(),
+        refunded_on,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund accounting entries");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after refund");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice refund");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "refund_recorded",
+        invoice_id,
+        serde_json::json!({
+            "refund_transaction_id": refund_id,
+            "request_id": body.request_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+            "refunded_on": refunded_on.to_string(),
+            "reason": reason,
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.refund_recorded",
+        invoice_id,
+        serde_json::json!({
+            "refund_transaction_id": refund_id,
+            "request_id": body.request_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "refund_transaction_id": refund_id,
+                "invoice": invoice,
+            })),
+        )
+            .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+async fn reverse_invoice_refund(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, refund_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ReverseInvoiceRefundRequest>,
+) -> axum::response::Response {
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(reason) => reason,
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Refund reversal reason is required",
+            );
+        }
+    };
+    let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(None) => Utc::now().date_naive(),
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
+    };
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load refund reversal access");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin refund reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT refund.amount_gross, refund.payment_method,
+                  refund.payment_reference, refund.refunded_on,
+                  refund.transaction_type,
+                  invoice.order_id, invoice.invoice_number, invoice.status,
+                  invoice.total_vat, invoice.total_gross,
+                  invoice.credited_amount, invoice.prepayment_applied_amount,
+                  invoice.line_items, orders.currency,
+                  EXISTS (
+                      SELECT 1 FROM invoice_refund_transactions reversal
+                      WHERE reversal.reverses_transaction_id = refund.id
+                        AND reversal.transaction_type = 'reversal'
+                  ) AS already_reversed
+           FROM invoice_refund_transactions refund
+           JOIN invoices invoice ON invoice.id = refund.invoice_id
+           JOIN orders ON orders.id = invoice.order_id
+           WHERE refund.id = $1 AND refund.invoice_id = $2
+           FOR UPDATE OF refund, invoice"#,
+    )
+    .bind(refund_id)
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Refund not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "lock refund reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        }
+    };
+    if row.try_get::<String, _>("transaction_type").unwrap_or_default() != "refund" {
+        return err(StatusCode::CONFLICT, "Only a refund can be reversed");
+    }
+    if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
+        return err(StatusCode::CONFLICT, "Refund was already reversed");
+    }
+    let refunded_on = row
+        .try_get::<NaiveDate, _>("refunded_on")
+        .unwrap_or(reversed_on);
+    if reversed_on < refunded_on {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot precede the refund date",
+        );
+    }
+    let amount_gross = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let payment_method = row
+        .try_get::<String, _>("payment_method")
+        .unwrap_or_else(|_| "other".to_string());
+    let payment_reference = row
+        .try_get::<Option<String>, _>("payment_reference")
+        .unwrap_or_default();
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        patient_id,
+        invoice_number: row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO),
+        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO),
+        credited_amount: row.try_get::<Decimal, _>("credited_amount").unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+
+    let reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_refund_transactions (
+                invoice_id, transaction_type, reverses_transaction_id,
+                amount_gross, payment_method, payment_reference,
+                refunded_on, reason, note, created_by
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(refund_id)
+    .bind(amount_gross)
+    .bind(&payment_method)
+    .bind(payment_reference.clone())
+    .bind(reversed_on)
+    .bind(&reason)
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(id) => id,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+        {
+            return err(StatusCode::CONFLICT, "Refund was already reversed");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        }
+    };
+    if let Err(e) = insert_invoice_refund_accounting_entries(
+        &mut transaction,
+        &context,
+        reversal_id,
+        "reversal",
+        amount_gross,
+        &payment_method,
+        payment_reference.as_deref(),
+        reversed_on,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund-reversal accounting entries");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after refund reversal");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit refund reversal");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "refund_reversed",
+        invoice_id,
+        serde_json::json!({
+            "refund_transaction_id": refund_id,
+            "reversal_transaction_id": reversal_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "reason": reason,
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.refund_reversed",
+        invoice_id,
+        serde_json::json!({
+            "refund_transaction_id": refund_id,
+            "reversal_transaction_id": reversal_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
     match load_invoice_detail(&state, invoice_id, &auth).await {
         Ok(Some(invoice)) => Json(serde_json::json!({
             "reversal_transaction_id": reversal_id,
@@ -7466,6 +8329,15 @@ async fn update_invoice_status(
                       )
                       FROM invoice_payment_transactions payment
                       WHERE payment.invoice_id = invoice.id
+                  ), 0) - COALESCE((
+                      SELECT SUM(
+                          CASE
+                              WHEN refund.transaction_type = 'refund' THEN refund.amount_gross
+                              ELSE -refund.amount_gross
+                          END
+                      )
+                      FROM invoice_refund_transactions refund
+                      WHERE refund.invoice_id = invoice.id
                   ), 0) AS journal_paid_amount
            FROM invoices invoice
            WHERE invoice.id = $1"#,
@@ -7552,6 +8424,13 @@ async fn update_invoice_status(
                       )
                       FROM invoice_payment_transactions payment
                       WHERE payment.invoice_id = invoice.id
+                  ), 0) - COALESCE((
+                      SELECT SUM(
+                          CASE WHEN refund.transaction_type = 'refund'
+                               THEN refund.amount_gross ELSE -refund.amount_gross END
+                      )
+                      FROM invoice_refund_transactions refund
+                      WHERE refund.invoice_id = invoice.id
                   ), 0) AS journal_paid_amount
            FROM invoices invoice
            WHERE invoice.id = $1
@@ -7623,6 +8502,15 @@ async fn update_invoice_status(
                           )
                           FROM invoice_payment_transactions payment
                           WHERE payment.invoice_id = invoices.id
+                      ), 0) - COALESCE((
+                          SELECT SUM(
+                              CASE
+                                  WHEN refund.transaction_type = 'refund' THEN refund.amount_gross
+                                  ELSE -refund.amount_gross
+                              END
+                          )
+                          FROM invoice_refund_transactions refund
+                          WHERE refund.invoice_id = invoices.id
                       ), 0) AS journal_paid_amount
                FROM invoices
                JOIN orders ON orders.id = invoices.order_id

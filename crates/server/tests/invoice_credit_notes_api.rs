@@ -517,3 +517,243 @@ async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
         assert_eq!(status, StatusCode::CONFLICT);
     }
 }
+
+#[tokio::test]
+async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("invoice-refund-{}", Uuid::new_v4().simple());
+    let (patient_id, invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let patient_user_id = seed_user(&ctx.pool, &tag, "patient").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let patient = auth_header(patient_user_id, "patient");
+    let today = chrono::Utc::now().date_naive().to_string();
+
+    let (status, payment) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 100,
+            "payment_method": "bank_transfer",
+            "payment_reference": format!("PAY-REFUND-{tag}"),
+            "received_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{payment:?}");
+    let payment_id =
+        Uuid::parse_str(payment["payment_transaction_id"].as_str().unwrap()).unwrap();
+
+    let (status, credit) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 40,
+            "reason": "Service scope reduced after settlement",
+            "issued_on": today,
+            "portal_visible": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit:?}");
+    assert_eq!(credit["invoice"]["paid_amount"], "100");
+    assert_eq!(credit["invoice"]["credit_balance"], "40");
+    assert_eq!(credit["invoice"]["refundable_cash_amount"], "40");
+
+    let request_id = Uuid::new_v4();
+    let refund_payload = json!({
+        "request_id": request_id,
+        "amount_gross": 40,
+        "payment_method": "bank_transfer",
+        "payment_reference": format!("REFUND-{tag}"),
+        "refunded_on": today,
+        "reason": "Return patient credit",
+        "note": "Internal refund note"
+    });
+    let (status, refunded) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds"),
+        &ceo,
+        Some(refund_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{refunded:?}");
+    let refund_id =
+        Uuid::parse_str(refunded["refund_transaction_id"].as_str().unwrap()).unwrap();
+    assert_eq!(refunded["invoice"]["paid_amount"], "60");
+    assert_eq!(refunded["invoice"]["balance_due"], "0");
+    assert_eq!(refunded["invoice"]["credit_balance"], "0");
+    assert_eq!(refunded["invoice"]["refundable_cash_amount"], "0");
+
+    let (status, replay) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds"),
+        &ceo,
+        Some(refund_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay:?}");
+    assert_eq!(replay["idempotent_replay"], true);
+    assert_eq!(replay["refund_transaction_id"], refund_id.to_string());
+
+    let mut drifted_refund = refund_payload;
+    drifted_refund["amount_gross"] = json!(39);
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds"),
+        &ceo,
+        Some(drifted_refund),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 1,
+            "payment_method": "bank_transfer",
+            "refunded_on": today,
+            "reason": "Would over-refund"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/reversal"),
+        &ceo,
+        Some(json!({ "note": "Cannot reverse cash already refunded" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, portal_history) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/refunds"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{portal_history:?}");
+    assert_eq!(portal_history["items"].as_array().unwrap().len(), 1);
+    assert_eq!(portal_history["items"][0]["amount_gross"], "40");
+    assert_eq!(portal_history["items"][0]["effective_amount_gross"], "-40");
+    assert!(portal_history["items"][0].get("note").is_none());
+    assert!(portal_history["items"][0].get("created_by").is_none());
+
+    sqlx::query("UPDATE invoices SET hide_amounts_from_patient = true WHERE id = $1")
+        .bind(invoice_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, hidden_invoice) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hidden_invoice:?}");
+    assert!(hidden_invoice["refundable_cash_amount"].is_null());
+    let (status, _) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/refunds"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, statement) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=USD"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    assert_eq!(statement["summary"]["invoice_due"], "0");
+    assert_eq!(statement["settlement"]["closing_balance"], "0");
+    assert!(statement["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["movement_type"] == "refund" && item["debit"] == "40"));
+
+    let accounting = sqlx::query(
+        r#"SELECT COALESCE(SUM(amount), 0) AS amount,
+                  COUNT(*)::BIGINT AS entry_count,
+                  COUNT(source_invoice_refund_transaction_id)::BIGINT AS refund_entry_count
+           FROM accounting_entries
+           WHERE source_invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(accounting.get::<Decimal, _>("amount"), Decimal::new(60, 0));
+    assert_eq!(accounting.get::<i64, _>("entry_count"), 2);
+    assert_eq!(accounting.get::<i64, _>("refund_entry_count"), 1);
+
+    let (status, reversed) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds/{refund_id}/reversal"),
+        &ceo,
+        Some(json!({ "reason": "Refund transfer was rejected" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed:?}");
+    assert_eq!(reversed["invoice"]["paid_amount"], "100");
+    assert_eq!(reversed["invoice"]["credit_balance"], "40");
+    assert_eq!(reversed["invoice"]["refundable_cash_amount"], "40");
+
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds/{refund_id}/reversal"),
+        &ceo,
+        Some(json!({ "reason": "Second reversal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let immutable_error = sqlx::query(
+        "UPDATE invoice_refund_transactions SET reason = 'mutated' WHERE id = $1",
+    )
+    .bind(refund_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap_err();
+    assert!(immutable_error.to_string().contains("append-only"));
+}
