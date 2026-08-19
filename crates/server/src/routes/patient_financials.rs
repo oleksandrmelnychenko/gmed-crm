@@ -3,7 +3,7 @@ use axum::{
     extract::{Extension, Path, Query, State},
     http::{StatusCode, header},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
@@ -12,7 +12,7 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::access;
+use crate::{access, audit};
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
@@ -36,6 +36,14 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/account-statement",
             get(get_patient_account_statement),
         )
+        .route(
+            "/patients/{patient_id}/balance-adjustments",
+            get(list_patient_balance_adjustments).post(create_patient_balance_adjustment),
+        )
+        .route(
+            "/patients/{patient_id}/balance-adjustments/{adjustment_id}/reversal",
+            post(reverse_patient_balance_adjustment),
+        )
         .route("/me/account-statement", get(get_my_account_statement))
 }
 
@@ -47,6 +55,27 @@ struct PatientFinancialQuery {
     package_id: Option<Uuid>,
     include_pass_through: Option<bool>,
     currency: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientBalanceAdjustmentRequest {
+    request_id: Uuid,
+    direction: String,
+    category: String,
+    amount: Value,
+    currency: String,
+    effective_on: String,
+    order_id: Option<Uuid>,
+    reason: String,
+    note: Option<String>,
+    portal_visible: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ReversePatientBalanceAdjustmentRequest {
+    request_id: Uuid,
+    reason: String,
+    effective_on: Option<String>,
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
@@ -68,6 +97,10 @@ fn can_read_patient_financials(role: Role) -> bool {
 }
 
 fn can_read_profit_margin(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::Billing)
+}
+
+fn can_manage_patient_balance(role: Role) -> bool {
     matches!(role, Role::Ceo | Role::Billing)
 }
 
@@ -119,6 +152,15 @@ fn parse_query_currency(value: Option<&str>) -> Result<Option<String>, String> {
 
 fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
+}
+
+fn normalize_optional(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 fn value_to_decimal(value: &Value) -> Decimal {
@@ -222,6 +264,20 @@ async fn load_patient_settlement_ledger(
                           AND package.order_id = external.order_id
                  ))
                  AND external.currency = $6
+           ), scoped_adjustments AS (
+               SELECT adjustment.*, orders.order_number
+               FROM patient_balance_adjustments adjustment
+               LEFT JOIN orders ON orders.id = adjustment.order_id
+               WHERE adjustment.patient_id = $1
+                 AND adjustment.currency = $6
+                 AND ($3::uuid IS NULL OR adjustment.order_id = $3)
+                 AND ($4::uuid IS NULL OR EXISTS (
+                        SELECT 1
+                        FROM patient_service_packages package
+                        WHERE package.patient_id = adjustment.patient_id
+                          AND package.package_id = $4
+                          AND package.order_id = adjustment.order_id
+                 ))
            ), journal_paid AS (
                SELECT payment.invoice_id,
                       COALESCE(SUM(
@@ -358,6 +414,29 @@ async fn load_patient_settlement_ledger(
            FROM invoice_refund_transactions refund
            JOIN scoped_invoices invoice ON invoice.id = refund.invoice_id
            WHERE $2::date IS NULL OR refund.refunded_on <= $2
+
+           UNION ALL
+
+           SELECT 'adjustment:' || adjustment.id::text,
+                  CASE
+                      WHEN adjustment.transaction_type = 'reversal'
+                          THEN 'balance_adjustment_reversal'
+                      ELSE 'balance_adjustment'
+                  END,
+                  adjustment.effective_on,
+                  adjustment.created_at,
+                  adjustment.order_id,
+                  adjustment.order_number,
+                  NULL::text,
+                  CASE
+                      WHEN $5::boolean = true AND adjustment.portal_visible = false
+                          THEN 'Account adjustment'
+                      ELSE adjustment.reason
+                  END,
+                  CASE WHEN adjustment.direction = 'debit' THEN adjustment.amount ELSE 0::numeric END,
+                  CASE WHEN adjustment.direction = 'credit' THEN adjustment.amount ELSE 0::numeric END
+           FROM scoped_adjustments adjustment
+           WHERE $2::date IS NULL OR adjustment.effective_on <= $2
 
            UNION ALL
 
@@ -612,6 +691,10 @@ async fn load_patient_account_statement(
                  AND $2::boolean = false
                  AND external.status <> 'cancelled'
                  AND TRIM(COALESCE(external.currency, '')) <> ''
+               UNION ALL
+               SELECT adjustment.currency
+               FROM patient_balance_adjustments adjustment
+               WHERE adjustment.patient_id = $1
            ) currencies
            ORDER BY currency"#,
     )
@@ -1737,6 +1820,524 @@ async fn get_patient_financial_ledger(
             )
         }
     }
+}
+
+fn patient_balance_adjustment_payload(row: &sqlx::postgres::PgRow) -> Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+        "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+        "transaction_type": row.try_get::<String, _>("transaction_type").unwrap_or_default(),
+        "reverses_adjustment_id": row.try_get::<Option<Uuid>, _>("reverses_adjustment_id").unwrap_or_default(),
+        "reversed_by_adjustment_id": row.try_get::<Option<Uuid>, _>("reversed_by_adjustment_id").unwrap_or_default(),
+        "is_reversed": row.try_get::<bool, _>("is_reversed").unwrap_or(false),
+        "direction": row.try_get::<String, _>("direction").unwrap_or_default(),
+        "category": row.try_get::<String, _>("category").unwrap_or_default(),
+        "amount": decimal_to_string(row.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO)),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        "effective_on": row.try_get::<NaiveDate, _>("effective_on").map(|value| value.to_string()).unwrap_or_default(),
+        "reason": row.try_get::<String, _>("reason").unwrap_or_default(),
+        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+        "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(false),
+        "created_by": row.try_get::<Uuid, _>("created_by").unwrap_or_default(),
+        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+        "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
+async fn load_patient_balance_adjustments(
+    state: &AppState,
+    patient_id: Uuid,
+    query: &PatientFinancialQuery,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let from = parse_query_date(query.from.as_deref(), "from")
+        .map_err(sqlx::Error::Protocol)?;
+    let to = parse_query_date(query.to.as_deref(), "to")
+        .map_err(sqlx::Error::Protocol)?;
+    let currency = parse_query_currency(query.currency.as_deref())
+        .map_err(sqlx::Error::Protocol)?;
+    let rows = sqlx::query(
+        r#"SELECT adjustment.id, adjustment.patient_id, adjustment.order_id,
+                  adjustment.transaction_type, adjustment.reverses_adjustment_id,
+                  adjustment.direction, adjustment.category, adjustment.amount,
+                  adjustment.currency, adjustment.effective_on, adjustment.reason,
+                  adjustment.note, adjustment.portal_visible, adjustment.created_by,
+                  adjustment.created_at, orders.order_number,
+                  creator.name AS created_by_name, creator.role AS created_by_role,
+                  reversal.id AS reversed_by_adjustment_id,
+                  (reversal.id IS NOT NULL) AS is_reversed
+           FROM patient_balance_adjustments adjustment
+           JOIN users creator ON creator.id = adjustment.created_by
+           LEFT JOIN orders ON orders.id = adjustment.order_id
+           LEFT JOIN patient_balance_adjustments reversal
+             ON reversal.reverses_adjustment_id = adjustment.id
+            AND reversal.transaction_type = 'reversal'
+           WHERE adjustment.patient_id = $1
+             AND ($2::date IS NULL OR adjustment.effective_on >= $2)
+             AND ($3::date IS NULL OR adjustment.effective_on <= $3)
+             AND ($4::uuid IS NULL OR adjustment.order_id = $4)
+             AND ($5::text IS NULL OR adjustment.currency = $5)
+           ORDER BY adjustment.effective_on DESC, adjustment.created_at DESC, adjustment.id DESC"#,
+    )
+    .bind(patient_id)
+    .bind(from)
+    .bind(to)
+    .bind(query.order_id)
+    .bind(currency)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(patient_balance_adjustment_payload)
+        .collect())
+}
+
+async fn list_patient_balance_adjustments(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Query(query): Query<PatientFinancialQuery>,
+) -> axum::response::Response {
+    if !can_read_patient_financials(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    if let Err(message) = parse_query_date(query.from.as_deref(), "from") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, &message);
+    }
+    if let Err(message) = parse_query_date(query.to.as_deref(), "to") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, &message);
+    }
+    if let Err(message) = parse_query_currency(query.currency.as_deref()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, &message);
+    }
+    match load_patient_balance_adjustments(&state, patient_id, &query).await {
+        Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "list patient balance adjustments");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load balance adjustments",
+            )
+        }
+    }
+}
+
+async fn create_patient_balance_adjustment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<CreatePatientBalanceAdjustmentRequest>,
+) -> axum::response::Response {
+    if !can_manage_patient_balance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    let direction = body.direction.trim().to_lowercase();
+    if !matches!(direction.as_str(), "debit" | "credit") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment direction");
+    }
+    let category = body.category.trim().to_lowercase();
+    if !matches!(
+        category.as_str(),
+        "opening_balance" | "fee" | "goodwill" | "correction" | "other"
+    ) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment category");
+    }
+    let amount = value_to_decimal(&body.amount).round_dp(2);
+    if amount <= Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Adjustment amount must be greater than zero",
+        );
+    }
+    let currency = match parse_query_currency(Some(body.currency.as_str())) {
+        Ok(Some(currency)) => currency,
+        Ok(None) | Err(_) => {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment currency");
+        }
+    };
+    let effective_on = match parse_query_date(Some(body.effective_on.as_str()), "effective_on") {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment date"),
+    };
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(reason) => reason,
+        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Adjustment reason is required"),
+    };
+    let note = normalize_optional(body.note.as_deref());
+    let portal_visible = body.portal_visible.unwrap_or(true);
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "begin patient balance adjustment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        }
+    };
+    match sqlx::query("SELECT id FROM patients WHERE id = $1 FOR UPDATE")
+        .bind(patient_id)
+        .fetch_optional(&mut *transaction)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "lock patient for balance adjustment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        }
+    }
+    let existing = match sqlx::query(
+        r#"SELECT id, direction, category, amount, currency, effective_on,
+                  order_id, reason, note, portal_visible
+           FROM patient_balance_adjustments
+           WHERE patient_id = $1
+             AND request_id = $2
+             AND transaction_type = 'adjustment'"#,
+    )
+    .bind(patient_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, request_id = %body.request_id, "load balance adjustment idempotency key");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        }
+    };
+    if let Some(existing) = existing {
+        let same_request = existing
+            .try_get::<String, _>("direction")
+            .map(|value| value == direction)
+            .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("category")
+                .map(|value| value == category)
+                .unwrap_or(false)
+            && existing
+                .try_get::<Decimal, _>("amount")
+                .map(|value| value == amount)
+                .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("currency")
+                .map(|value| value == currency)
+                .unwrap_or(false)
+            && existing
+                .try_get::<NaiveDate, _>("effective_on")
+                .map(|value| value == effective_on)
+                .unwrap_or(false)
+            && existing
+                .try_get::<Option<Uuid>, _>("order_id")
+                .map(|value| value == body.order_id)
+                .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("reason")
+                .map(|value| value == reason)
+                .unwrap_or(false)
+            && existing
+                .try_get::<Option<String>, _>("note")
+                .map(|value| value == note)
+                .unwrap_or(false)
+            && existing
+                .try_get::<bool, _>("portal_visible")
+                .map(|value| value == portal_visible)
+                .unwrap_or(false);
+        if !same_request {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another balance adjustment",
+            );
+        }
+        let adjustment_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        if let Err(e) = transaction.commit().await {
+            tracing::error!(error = %e, patient_id = %patient_id, "commit balance adjustment replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        }
+        return Json(serde_json::json!({
+            "adjustment_id": adjustment_id,
+            "idempotent_replay": true,
+        }))
+        .into_response();
+    }
+
+    let adjustment_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_balance_adjustments (
+                patient_id, order_id, transaction_type, request_id,
+                direction, category, amount, currency, effective_on,
+                reason, note, portal_visible, created_by
+           ) VALUES ($1, $2, 'adjustment', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(body.order_id)
+    .bind(body.request_id)
+    .bind(&direction)
+    .bind(&category)
+    .bind(amount)
+    .bind(&currency)
+    .bind(effective_on)
+    .bind(&reason)
+    .bind(note.clone())
+    .bind(portal_visible)
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(id) => id,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+        {
+            return err(StatusCode::CONFLICT, "Balance adjustment is no longer valid; reload and try again");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "insert patient balance adjustment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        }
+    };
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_id, "commit patient balance adjustment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_patient_balance_adjustment",
+        Some(auth.user_id),
+        "patient_balance_adjustment",
+        Some(adjustment_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "order_id": body.order_id,
+            "direction": direction,
+            "category": category,
+            "amount": decimal_to_string(amount),
+            "currency": currency,
+            "effective_on": effective_on.to_string(),
+            "portal_visible": portal_visible,
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.balance_adjustment_created",
+        patient_id,
+        serde_json::json!({ "adjustment_id": adjustment_id }),
+    )
+    .await;
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "adjustment_id": adjustment_id })),
+    )
+        .into_response()
+}
+
+async fn reverse_patient_balance_adjustment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, adjustment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ReversePatientBalanceAdjustmentRequest>,
+) -> axum::response::Response {
+    if !can_manage_patient_balance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(reason) => reason,
+        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal reason is required"),
+    };
+    let effective_on = match parse_query_date(body.effective_on.as_deref(), "effective_on") {
+        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(None) => Utc::now().date_naive(),
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
+    };
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "begin balance adjustment reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+    };
+    match sqlx::query("SELECT id FROM patients WHERE id = $1 FOR UPDATE")
+        .bind(patient_id)
+        .fetch_optional(&mut *transaction)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "lock patient for balance adjustment reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+    }
+    let existing_reversal = match sqlx::query(
+        r#"SELECT id, reverses_adjustment_id, reason, effective_on
+           FROM patient_balance_adjustments
+           WHERE patient_id = $1
+             AND request_id = $2
+             AND transaction_type = 'reversal'"#,
+    )
+    .bind(patient_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, request_id = %body.request_id, "load balance adjustment reversal idempotency key");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+    };
+    if let Some(existing) = existing_reversal {
+        let same_request = existing
+            .try_get::<Option<Uuid>, _>("reverses_adjustment_id")
+            .map(|value| value == Some(adjustment_id))
+            .unwrap_or(false)
+            && existing
+                .try_get::<String, _>("reason")
+                .map(|value| value == reason)
+                .unwrap_or(false)
+            && body.effective_on.as_ref().is_none_or(|_| {
+                existing
+                    .try_get::<NaiveDate, _>("effective_on")
+                    .map(|value| value == effective_on)
+                    .unwrap_or(false)
+            });
+        if !same_request {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another balance adjustment reversal",
+            );
+        }
+        let reversal_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        if let Err(e) = transaction.commit().await {
+            tracing::error!(error = %e, patient_id = %patient_id, "commit balance adjustment reversal replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+        return Json(serde_json::json!({
+            "reversal_id": reversal_id,
+            "idempotent_replay": true,
+        }))
+        .into_response();
+    }
+    let row = match sqlx::query(
+        r#"SELECT adjustment.order_id, adjustment.transaction_type,
+                  adjustment.direction, adjustment.category, adjustment.amount,
+                  adjustment.currency, adjustment.effective_on,
+                  adjustment.portal_visible,
+                  EXISTS (
+                      SELECT 1
+                      FROM patient_balance_adjustments reversal
+                      WHERE reversal.reverses_adjustment_id = adjustment.id
+                        AND reversal.transaction_type = 'reversal'
+                  ) AS already_reversed
+           FROM patient_balance_adjustments adjustment
+           WHERE adjustment.id = $1 AND adjustment.patient_id = $2
+           FOR UPDATE OF adjustment"#,
+    )
+    .bind(adjustment_id)
+    .bind(patient_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Balance adjustment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "lock balance adjustment reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+    };
+    if row.try_get::<String, _>("transaction_type").unwrap_or_default() != "adjustment" {
+        return err(StatusCode::CONFLICT, "Only a balance adjustment can be reversed");
+    }
+    if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
+        return err(StatusCode::CONFLICT, "Balance adjustment was already reversed");
+    }
+    let original_date = row
+        .try_get::<NaiveDate, _>("effective_on")
+        .unwrap_or(effective_on);
+    if effective_on < original_date {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot precede the adjustment date",
+        );
+    }
+    let original_direction = row.try_get::<String, _>("direction").unwrap_or_default();
+    let reversal_direction = if original_direction == "debit" {
+        "credit"
+    } else {
+        "debit"
+    };
+    let reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_balance_adjustments (
+                patient_id, order_id, transaction_type, request_id, reverses_adjustment_id,
+                direction, category, amount, currency, effective_on,
+                reason, note, portal_visible, created_by
+           ) VALUES ($1, $2, 'reversal', $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default())
+    .bind(body.request_id)
+    .bind(adjustment_id)
+    .bind(reversal_direction)
+    .bind(row.try_get::<String, _>("category").unwrap_or_default())
+    .bind(row.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO))
+    .bind(row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()))
+    .bind(effective_on)
+    .bind(&reason)
+    .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(id) => id,
+        Err(sqlx::Error::Database(db_error))
+            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+        {
+            return err(StatusCode::CONFLICT, "Balance adjustment was already reversed");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "insert balance adjustment reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        }
+    };
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "commit balance adjustment reversal");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "reverse_patient_balance_adjustment",
+        Some(auth.user_id),
+        "patient_balance_adjustment",
+        Some(adjustment_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "reversal_id": reversal_id,
+            "reason": reason,
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.balance_adjustment_reversed",
+        patient_id,
+        serde_json::json!({
+            "adjustment_id": adjustment_id,
+            "reversal_id": reversal_id,
+        }),
+    )
+    .await;
+    Json(serde_json::json!({ "reversal_id": reversal_id })).into_response()
 }
 
 fn csv_escape(value: &str) -> String {

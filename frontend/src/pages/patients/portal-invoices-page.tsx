@@ -443,7 +443,20 @@ function usePatientInvoicesPageContent() {
             </div>
           }
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <InfoRow
+              className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
+              label={lang === "de" ? "Kontosaldo" : "Сальдо взаиморасчётов"}
+              value={
+                accountStatement.summary.closing_balance == null
+                  ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
+                  : Number(accountStatement.summary.closing_balance) > 0
+                    ? `${formatPortalCurrency(accountStatement.summary.closing_balance, accountStatement.currency)} ${lang === "de" ? "Soll" : "Дт"}`
+                    : Number(accountStatement.summary.closing_balance) < 0
+                      ? `${formatPortalCurrency(Math.abs(Number(accountStatement.summary.closing_balance)), accountStatement.currency)} ${lang === "de" ? "Haben" : "Кт"}`
+                      : formatPortalCurrency(0, accountStatement.currency)
+              }
+            />
             {[
               [lang === "de" ? "Rechnungen gesamt" : "Всего по счетам", accountStatement.summary.invoiced_gross],
               [lang === "de" ? "Bezahlt" : "Оплачено", accountStatement.summary.cash_paid],
@@ -473,6 +486,42 @@ function usePatientInvoicesPageContent() {
               ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen."
               : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам."}
           </p>
+          {accountStatement.movements.some((movement) =>
+            movement.kind === "balance_adjustment" ||
+            movement.kind === "balance_adjustment_reversal"
+          ) ? (
+            <div className="mt-4 space-y-2">
+              <div className={tokens.text.eyebrow}>
+                {lang === "de" ? "Weitere Kontokorrekturen" : "Дополнительные корректировки"}
+              </div>
+              {accountStatement.movements
+                .filter((movement) =>
+                  movement.kind === "balance_adjustment" ||
+                  movement.kind === "balance_adjustment_reversal"
+                )
+                .map((movement) => (
+                  <ListItem key={movement.id} className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">
+                        {movement.kind === "balance_adjustment_reversal"
+                          ? lang === "de" ? "Korrektur storniert" : "Сторно корректировки"
+                          : lang === "de" ? "Kontokorrektur" : "Корректировка счёта"}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {formatPortalDate(movement.entry_date)} · {movement.description}
+                      </div>
+                    </div>
+                    <div className="font-mono text-sm font-semibold tabular-nums text-foreground">
+                      {movement.direction === "debit" ? "+" : "−"}
+                      {formatPortalCurrency(
+                        movement.direction === "debit" ? movement.debit : movement.credit,
+                        movement.currency,
+                      )}
+                    </div>
+                  </ListItem>
+                ))}
+            </div>
+          ) : null}
           <div className="mt-4 space-y-2">
             {accountStatement.items.map((item) => {
               const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";

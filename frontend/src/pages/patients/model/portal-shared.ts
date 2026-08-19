@@ -208,6 +208,29 @@ export type PortalAccountStatementItem = {
   due_date?: string | null;
 };
 
+export type PortalAccountMovement = {
+  id: string;
+  kind:
+    | "invoice"
+    | "payment"
+    | "payment_reversal"
+    | "refund"
+    | "refund_reversal"
+    | "balance_adjustment"
+    | "balance_adjustment_reversal";
+  direction: "debit" | "credit";
+  entry_date: string;
+  occurred_at: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  document_number?: string | null;
+  description: string;
+  debit: string;
+  credit: string;
+  balance_after: string;
+  currency: string;
+};
+
 export type PortalAccountStatement = {
   patient_id: string;
   currency: string;
@@ -223,12 +246,20 @@ export type PortalAccountStatement = {
     external_receivable: null;
     total_due: string | null;
     reconciliation_required: boolean;
+    opening_balance: string;
+    debit_total: string;
+    credit_total: string;
+    calculated_balance: string;
+    closing_balance: string | null;
+    balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
+    unreconciled_external_debit: string;
   };
   redaction: {
     hidden_invoice_amount_count: number;
     external_expense_count: number;
     services_hidden: true;
   };
+  movements: PortalAccountMovement[];
   items: PortalAccountStatementItem[];
 };
 

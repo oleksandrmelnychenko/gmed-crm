@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
-  BadgeEuro,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -595,11 +594,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       ? lang === "de" ? "Soll" : "Дт"
       : balance?.side === "credit"
         ? lang === "de" ? "Haben" : "Кт"
-        : lang === "de" ? "ausgeglichen" : "закрыто";
+        : "";
   const balanceValue = balance?.needsReconciliation
     ? lang === "de" ? "Abstimmung erforderlich" : "Требуется сверка"
     : balance?.amount != null
-      ? `${formatMoney(String(balance.amount), accountStatement?.currency)} ${balanceSideLabel}`
+      ? [formatMoney(String(balance.amount), accountStatement?.currency), balanceSideLabel]
+          .filter(Boolean)
+          .join(" ")
       : accountStatementLoading ? "…" : "—";
   const balanceTitle = balance?.needsReconciliation
     ? lang === "de"
@@ -698,26 +699,20 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         {canViewInvoices ? (
           <button
             type="button"
-            className="group flex h-10 shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="group shrink-0 rounded-md px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`${t.invoices_workspace_balance}: ${balanceValue}. ${balanceTitle}`}
             title={balanceTitle}
             onClick={() => handleWorkspaceTabChange("invoices")}
           >
-            <span className="flex size-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-              <BadgeEuro className="size-4" />
+            <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t.invoices_workspace_balance}
             </span>
-            <span>
-              <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {t.invoices_workspace_balance}
-              </span>
-              <span className="flex items-center gap-1 text-sm font-semibold tabular-nums text-foreground">
-                {balanceValue}
-                {balance?.needsReconciliation ? (
-                  <AlertTriangle className="size-3.5 text-amber-600" aria-hidden="true" />
-                ) : null}
-              </span>
+            <span className="flex items-center gap-1 text-sm font-semibold tabular-nums text-foreground transition-colors group-hover:text-primary">
+              {balanceValue}
+              {balance?.needsReconciliation ? (
+                <AlertTriangle className="size-3.5 text-amber-600" aria-hidden="true" />
+              ) : null}
             </span>
-            <ChevronRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
           </button>
         ) : null}
         {canPrintPatientLabel ? (

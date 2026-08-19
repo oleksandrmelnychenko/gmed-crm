@@ -40,6 +40,7 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +49,8 @@ import type {
   PatientAccountMovement,
   PatientAccountStatement,
   PatientAccountStatementItem,
+  PatientBalanceAdjustment,
+  PatientBalanceAdjustmentResponse,
   PatientFinancialLedger,
   PatientFinancialLedgerEntry,
   PatientFinancialSummary,
@@ -100,6 +103,19 @@ type ConsumptionForm = {
   notes: string;
 };
 
+type BalanceAdjustmentForm = {
+  requestId: string;
+  direction: "debit" | "credit";
+  category: PatientBalanceAdjustment["category"];
+  amount: string;
+  currency: string;
+  effectiveOn: string;
+  orderId: string;
+  reason: string;
+  note: string;
+  portalVisible: boolean;
+};
+
 type FinanceFilters = {
   from: string;
   to: string;
@@ -149,6 +165,21 @@ const BLANK_CONSUMPTION_FORM: ConsumptionForm = {
   quantity: "1",
   notes: "",
 };
+
+function createBlankBalanceAdjustmentForm(currency = "EUR"): BalanceAdjustmentForm {
+  return {
+    requestId: crypto.randomUUID(),
+    direction: "debit",
+    category: "correction",
+    amount: "",
+    currency,
+    effectiveOn: new Date().toISOString().slice(0, 10),
+    orderId: "",
+    reason: "",
+    note: "",
+    portalVisible: true,
+  };
+}
 
 const BLANK_FINANCE_FILTERS: FinanceFilters = {
   from: "",
@@ -526,6 +557,8 @@ function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: st
     payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
     refund: ["Rückzahlung", "Возврат пациенту"],
     refund_reversal: ["Rückzahlungsstorno", "Сторно возврата"],
+    balance_adjustment: ["Kontokorrektur", "Корректировка баланса"],
+    balance_adjustment_reversal: ["Korrekturstorno", "Сторно корректировки"],
     external_receivable: ["Externe Forderung", "Внешний долг"],
     external_allocation: ["Forderung zugeordnet", "Долг распределён"],
     external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
@@ -555,7 +588,29 @@ function accountBalanceLabel(
   if (amount < 0) {
     return `${formatMoney(String(Math.abs(amount)), currency)} ${lang === "de" ? "Haben" : "Кт"}`;
   }
-  return `${formatMoney("0", currency)} ${lang === "de" ? "ausgeglichen" : "закрыто"}`;
+  return formatMoney("0", currency);
+}
+
+function balanceAdjustmentCategoryLabel(
+  category: PatientBalanceAdjustment["category"],
+  lang: string,
+) {
+  const labels = lang === "de"
+    ? {
+        opening_balance: "Übertragener Anfangssaldo",
+        fee: "Gebühr",
+        goodwill: "Kulanz",
+        correction: "Korrektur",
+        other: "Sonstiges",
+      }
+    : {
+        opening_balance: "Перенесённый остаток",
+        fee: "Комиссия",
+        goodwill: "Компенсация / goodwill",
+        correction: "Корректировка",
+        other: "Другое",
+      };
+  return labels[category];
 }
 
 async function downloadPatientLedgerExport(patientId: string, query: URLSearchParams) {
@@ -585,12 +640,24 @@ function usePatientInvoicesTabContent({
   invoiceTypeLabel,
 }: PatientInvoicesTabProps) {
   const { t, lang } = useLang();
+  const { user } = useAuth();
+  const canManageBalance = user?.role === "ceo" || user?.role === "billing";
   const [movementDirectionFilter, setMovementDirectionFilter] = useState<
     "all" | PatientAccountMovement["direction"]
   >("all");
   const [movementKindFilter, setMovementKindFilter] = useState<
     "all" | PatientAccountMovement["kind"]
   >("all");
+  const [balanceAdjustments, setBalanceAdjustments] = useState<PatientBalanceAdjustment[]>([]);
+  const [balanceAdjustmentOpen, setBalanceAdjustmentOpen] = useState(false);
+  const [balanceAdjustmentForm, setBalanceAdjustmentForm] = useState<BalanceAdjustmentForm>(() =>
+    createBlankBalanceAdjustmentForm(),
+  );
+  const [balanceAdjustmentBusy, setBalanceAdjustmentBusy] = useState(false);
+  const [balanceAdjustmentError, setBalanceAdjustmentError] = useState("");
+  const [reversingBalanceAdjustmentId, setReversingBalanceAdjustmentId] = useState("");
+  const [balanceAdjustmentReversalReason, setBalanceAdjustmentReversalReason] = useState("");
+  const [balanceAdjustmentReversalRequestId, setBalanceAdjustmentReversalRequestId] = useState("");
   const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
   const [financeState, dispatchFinanceState] = useReducer(
     patientInvoicesFinanceReducer,
@@ -741,7 +808,7 @@ function usePatientInvoicesTabContent({
       });
       try {
         const suffix = financeQuery.toString();
-        const [summary, ledger, statement, packages, catalog, orders] = await Promise.all([
+        const [summary, ledger, statement, packages, catalog, orders, adjustments] = await Promise.all([
           apiFetch<PatientFinancialSummary>(
             `/patients/${patientId}/financial-summary${suffix ? `?${suffix}` : ""}`,
           ),
@@ -754,8 +821,17 @@ function usePatientInvoicesTabContent({
           apiFetch<PatientServicePackageItem[]>(`/patients/${patientId}/service-packages`),
           apiFetch<PackageCatalogItem[]>("/service-packages").catch(() => []),
           apiFetch<OrderItem[]>(`/patients/${patientId}/orders`).catch(() => []),
+          apiFetch<PatientBalanceAdjustmentResponse>(
+            `/patients/${patientId}/balance-adjustments${suffix ? `?${suffix}` : ""}`,
+          ),
         ]);
         if (cancelled) return;
+        setBalanceAdjustments(adjustments.items);
+        setBalanceAdjustmentForm((current) =>
+          current.amount || current.reason
+            ? current
+            : { ...current, currency: statement.currency },
+        );
         dispatchFinanceState({
           refreshedFinancialSummary: summary,
           refreshedFinancialLedger: ledger,
@@ -790,6 +866,100 @@ function usePatientInvoicesTabContent({
       `/patients/${patientId}/service-packages`,
     );
     setRefreshedServicePackages(packages);
+  }
+
+  async function refreshBalanceWorkspace() {
+    if (!patientId) return;
+    const suffix = financeQuery.toString();
+    const [statement, adjustments] = await Promise.all([
+      apiFetch<PatientAccountStatement>(
+        `/patients/${patientId}/account-statement${suffix ? `?${suffix}` : ""}`,
+      ),
+      apiFetch<PatientBalanceAdjustmentResponse>(
+        `/patients/${patientId}/balance-adjustments${suffix ? `?${suffix}` : ""}`,
+      ),
+    ]);
+    dispatchFinanceState({ refreshedAccountStatement: statement });
+    setBalanceAdjustments(adjustments.items);
+  }
+
+  async function handleCreateBalanceAdjustment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !patientId ||
+      Number(balanceAdjustmentForm.amount.replace(",", ".")) <= 0 ||
+      !balanceAdjustmentForm.reason.trim()
+    ) {
+      return;
+    }
+    setBalanceAdjustmentBusy(true);
+    setBalanceAdjustmentError("");
+    try {
+      await apiFetch(`/patients/${patientId}/balance-adjustments`, {
+        method: "POST",
+        body: JSON.stringify({
+          request_id: balanceAdjustmentForm.requestId,
+          direction: balanceAdjustmentForm.direction,
+          category: balanceAdjustmentForm.category,
+          amount: balanceAdjustmentForm.amount.replace(",", "."),
+          currency: balanceAdjustmentForm.currency,
+          effective_on: balanceAdjustmentForm.effectiveOn,
+          order_id: balanceAdjustmentForm.orderId || null,
+          reason: balanceAdjustmentForm.reason.trim(),
+          note: balanceAdjustmentForm.note.trim() || null,
+          portal_visible: balanceAdjustmentForm.portalVisible,
+        }),
+      });
+      await refreshBalanceWorkspace();
+      setBalanceAdjustmentForm(
+        createBlankBalanceAdjustmentForm(
+          accountStatement?.currency ?? balanceAdjustmentForm.currency,
+        ),
+      );
+      setBalanceAdjustmentOpen(false);
+    } catch (error) {
+      setBalanceAdjustmentError(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Kontokorrektur konnte nicht gespeichert werden"
+            : "Не удалось сохранить корректировку",
+      );
+    } finally {
+      setBalanceAdjustmentBusy(false);
+    }
+  }
+
+  async function handleReverseBalanceAdjustment(adjustmentId: string) {
+    if (!patientId || !balanceAdjustmentReversalReason.trim()) return;
+    setBalanceAdjustmentBusy(true);
+    setBalanceAdjustmentError("");
+    try {
+      await apiFetch(
+        `/patients/${patientId}/balance-adjustments/${adjustmentId}/reversal`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            request_id: balanceAdjustmentReversalRequestId,
+            reason: balanceAdjustmentReversalReason.trim(),
+          }),
+        },
+      );
+      await refreshBalanceWorkspace();
+      setReversingBalanceAdjustmentId("");
+      setBalanceAdjustmentReversalReason("");
+      setBalanceAdjustmentReversalRequestId("");
+    } catch (error) {
+      setBalanceAdjustmentError(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Kontokorrektur konnte nicht storniert werden"
+            : "Не удалось сторнировать корректировку",
+      );
+    } finally {
+      setBalanceAdjustmentBusy(false);
+    }
   }
 
   async function handleAssignPackage(event: FormEvent<HTMLFormElement>) {
@@ -1942,15 +2112,156 @@ function usePatientInvoicesTabContent({
               </div>
             ))}
           </section>
-          <Banner tone="warning" withIcon>
-            {accountStatement.summary.reconciliation_required
-              ? lang === "de"
+          {accountStatement.summary.reconciliation_required ? (
+            <Banner tone="warning" withIcon>
+              {lang === "de"
                 ? "Der berechnete Saldo enthält noch nicht vollständig zugeordnete externe Forderungen. Ordnen Sie diese einer Patientenrechnung zu oder bestätigen Sie sie als separate Forderung; erst danach wird der Saldo als bestätigt angezeigt."
-                : "Расчётное сальдо содержит внешние требования, которые ещё не полностью распределены. Свяжите их со счётом пациента либо подтвердите как отдельный долг — после этого сальдо станет подтверждённым."
-              : lang === "de"
-                ? "Soll erhöht die Forderung an den Patienten, Haben reduziert sie. Ein Sollsaldo bedeutet: Patient zahlt an GMED. Ein Habensaldo ist ein Guthaben des Patienten."
-                : "Дебет увеличивает долг пациента, кредит уменьшает его. Сальдо Дт означает, что пациент должен GMED; сальдо Кт означает, что у пациента есть переплата."}
-          </Banner>
+                : "Расчётное сальдо содержит внешние требования, которые ещё не полностью распределены. Свяжите их со счётом пациента либо подтвердите как отдельный долг — после этого сальдо станет подтверждённым."}
+            </Banner>
+          ) : null}
+          <section className="rounded-xl border border-border/70 bg-card p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">
+                  {lang === "de" ? "Manuelle Kontokorrekturen" : "Ручные корректировки баланса"}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {lang === "de"
+                    ? "Nur für Salden, die nicht durch Rechnung, Zahlung oder Gutschrift abgebildet werden. Ein Fehler wird storniert, nie gelöscht."
+                    : "Только для сальдо, которое не отражено счётом, оплатой или кредит-нотой. Ошибка сторнируется, а не удаляется."}
+                </p>
+              </div>
+              {canManageBalance ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-lg"
+                  onClick={() => {
+                    setBalanceAdjustmentError("");
+                    setBalanceAdjustmentOpen(true);
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                  {lang === "de" ? "Korrektur buchen" : "Добавить корректировку"}
+                </Button>
+              ) : null}
+            </div>
+            {balanceAdjustmentError ? (
+              <div className="mt-3">
+                <Banner tone="error">{balanceAdjustmentError}</Banner>
+              </div>
+            ) : null}
+            {balanceAdjustments.length === 0 ? (
+              <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                {lang === "de" ? "Keine manuellen Kontokorrekturen" : "Ручных корректировок пока нет"}
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {balanceAdjustments.map((adjustment) => (
+                  <div
+                    key={adjustment.id}
+                    className={cn(
+                      "rounded-lg border border-border/70 bg-background/70 p-3",
+                      adjustment.is_reversed && "opacity-70",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "rounded-full text-[10px]",
+                              adjustment.direction === "debit"
+                                ? "border-rose-200 bg-rose-50 text-rose-700"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                            )}
+                          >
+                            {accountMovementDirectionLabel(adjustment.direction, lang)}
+                          </Badge>
+                          <span className="text-sm font-semibold text-foreground">
+                            {adjustment.transaction_type === "reversal"
+                              ? lang === "de" ? "Korrekturstorno" : "Сторно корректировки"
+                              : balanceAdjustmentCategoryLabel(adjustment.category, lang)}
+                          </span>
+                          {adjustment.is_reversed ? (
+                            <Badge variant="outline" className="rounded-full text-[10px]">
+                              {lang === "de" ? "Storniert" : "Сторнировано"}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {formatDate(adjustment.effective_on)} · {adjustment.reason}
+                          {adjustment.order_number ? ` · ${adjustment.order_number}` : ""}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {adjustment.created_by_name}
+                          {adjustment.portal_visible
+                            ? ` · ${lang === "de" ? "Begründung im Portal sichtbar" : "причина видна клиенту"}`
+                            : ` · ${lang === "de" ? "Begründung intern" : "причина скрыта"}`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
+                          {adjustment.direction === "debit" ? "+" : "−"}
+                          {formatMoney(adjustment.amount, adjustment.currency)}
+                        </span>
+                        {canManageBalance &&
+                        adjustment.transaction_type === "adjustment" &&
+                        !adjustment.is_reversed ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 rounded-lg"
+                            onClick={() => {
+                              setReversingBalanceAdjustmentId(adjustment.id);
+                              setBalanceAdjustmentReversalReason("");
+                              setBalanceAdjustmentReversalRequestId(crypto.randomUUID());
+                            }}
+                          >
+                            {lang === "de" ? "Stornieren" : "Сторнировать"}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                    {reversingBalanceAdjustmentId === adjustment.id ? (
+                      <div className="mt-3 flex flex-col gap-2 border-t border-border/70 pt-3 sm:flex-row">
+                        <Input
+                          value={balanceAdjustmentReversalReason}
+                          onChange={(event) => setBalanceAdjustmentReversalReason(event.target.value)}
+                          placeholder={lang === "de" ? "Grund der Stornierung" : "Причина сторно"}
+                          className={cn(inputClass, "h-8 flex-1")}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-lg"
+                          onClick={() => {
+                            setReversingBalanceAdjustmentId("");
+                            setBalanceAdjustmentReversalRequestId("");
+                          }}
+                          disabled={balanceAdjustmentBusy}
+                        >
+                          {lang === "de" ? "Abbrechen" : "Отмена"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          onClick={() => void handleReverseBalanceAdjustment(adjustment.id)}
+                          disabled={balanceAdjustmentBusy || !balanceAdjustmentReversalReason.trim()}
+                        >
+                          {lang === "de" ? "Storno buchen" : "Провести сторно"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
           <DataTableSurface
             rows={accountMovements}
             columns={accountMovementColumns}
@@ -1998,6 +2309,8 @@ function usePatientInvoicesTabContent({
                   <option value="payment_reversal">{accountMovementKindLabel("payment_reversal", lang)}</option>
                   <option value="refund">{accountMovementKindLabel("refund", lang)}</option>
                   <option value="refund_reversal">{accountMovementKindLabel("refund_reversal", lang)}</option>
+                  <option value="balance_adjustment">{accountMovementKindLabel("balance_adjustment", lang)}</option>
+                  <option value="balance_adjustment_reversal">{accountMovementKindLabel("balance_adjustment_reversal", lang)}</option>
                   <option value="external_receivable">{accountMovementKindLabel("external_receivable", lang)}</option>
                   <option value="external_allocation">{accountMovementKindLabel("external_allocation", lang)}</option>
                   <option value="external_allocation_reversal">{accountMovementKindLabel("external_allocation_reversal", lang)}</option>
@@ -2033,6 +2346,221 @@ function usePatientInvoicesTabContent({
           />
         </>
       ) : null}
+
+      <PatientSheetScaffold
+        open={balanceAdjustmentOpen && canManageBalance}
+        onOpenChange={(open) => {
+          setBalanceAdjustmentOpen(open);
+          if (!open) setBalanceAdjustmentError("");
+        }}
+        width="form-heavy"
+        onSubmit={handleCreateBalanceAdjustment}
+        title={lang === "de" ? "Kontokorrektur buchen" : "Добавить корректировку баланса"}
+        bodyClassName="space-y-4 px-5 py-4"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={() => setBalanceAdjustmentOpen(false)}
+              disabled={balanceAdjustmentBusy}
+            >
+              {lang === "de" ? "Abbrechen" : "Отмена"}
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              className="h-8 rounded-lg"
+              disabled={
+                balanceAdjustmentBusy ||
+                Number(balanceAdjustmentForm.amount.replace(",", ".")) <= 0 ||
+                !balanceAdjustmentForm.reason.trim()
+              }
+            >
+              {balanceAdjustmentBusy
+                ? lang === "de" ? "Wird gebucht…" : "Сохранение…"
+                : lang === "de" ? "Buchen" : "Провести"}
+            </Button>
+          </>
+        }
+      >
+        {balanceAdjustmentError ? (
+          <Banner tone="error" withIcon>
+            {balanceAdjustmentError}
+          </Banner>
+        ) : null}
+
+        <Banner tone="warning" withIcon>
+          {lang === "de"
+            ? "Nur für Beträge verwenden, die nicht bereits durch Rechnung, Zahlung, Rückzahlung oder Gutschrift gebucht sind. Eine falsche Buchung wird storniert und bleibt nachvollziehbar."
+            : "Используйте только для сумм, которые ещё не отражены счётом, оплатой, возвратом или кредит-нотой. Ошибочная запись сторнируется и остаётся в истории."}
+        </Banner>
+
+        <FormSection title={lang === "de" ? "Buchung" : "Операция"}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label={lang === "de" ? "Richtung" : "Направление"} htmlFor="balance-adjustment-direction">
+              <NativeComboboxSelect
+                id="balance-adjustment-direction"
+                value={balanceAdjustmentForm.direction}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({
+                    ...current,
+                    direction: event.target.value as BalanceAdjustmentForm["direction"],
+                  }))
+                }
+                className={selectClass}
+                disabled={balanceAdjustmentBusy}
+              >
+                <option value="debit">{lang === "de" ? "Soll" : "Дебет"}</option>
+                <option value="credit">{lang === "de" ? "Haben" : "Кредит"}</option>
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={lang === "de" ? "Kategorie" : "Категория"} htmlFor="balance-adjustment-category">
+              <NativeComboboxSelect
+                id="balance-adjustment-category"
+                value={balanceAdjustmentForm.category}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({
+                    ...current,
+                    category: event.target.value as BalanceAdjustmentForm["category"],
+                  }))
+                }
+                className={selectClass}
+                disabled={balanceAdjustmentBusy}
+              >
+                {(["opening_balance", "fee", "goodwill", "correction", "other"] as const).map((category) => (
+                  <option key={category} value={category}>
+                    {balanceAdjustmentCategoryLabel(category, lang)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+            <Field label={lang === "de" ? "Betrag" : "Сумма"} htmlFor="balance-adjustment-amount">
+              <Input
+                id="balance-adjustment-amount"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={balanceAdjustmentForm.amount}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({ ...current, amount: event.target.value }))
+                }
+                className={inputClass}
+                disabled={balanceAdjustmentBusy}
+                required
+              />
+            </Field>
+            <Field label={lang === "de" ? "Währung" : "Валюта"} htmlFor="balance-adjustment-currency">
+              <Input
+                id="balance-adjustment-currency"
+                value={balanceAdjustmentForm.currency}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({
+                    ...current,
+                    currency: event.target.value.toUpperCase().slice(0, 3),
+                  }))
+                }
+                className={inputClass}
+                disabled={balanceAdjustmentBusy || Boolean(balanceAdjustmentForm.orderId)}
+                maxLength={3}
+                required
+              />
+            </Field>
+            <Field label={lang === "de" ? "Buchungsdatum" : "Дата операции"} htmlFor="balance-adjustment-date">
+              <Input
+                id="balance-adjustment-date"
+                type="date"
+                value={balanceAdjustmentForm.effectiveOn}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({ ...current, effectiveOn: event.target.value }))
+                }
+                className={inputClass}
+                disabled={balanceAdjustmentBusy}
+                required
+              />
+            </Field>
+            <Field label={lang === "de" ? "Auftrag (optional)" : "Заказ (необязательно)"} htmlFor="balance-adjustment-order">
+              <NativeComboboxSelect
+                id="balance-adjustment-order"
+                value={balanceAdjustmentForm.orderId || "__none__"}
+                onChange={(event) => {
+                  const orderId = event.target.value === "__none__" ? "" : event.target.value;
+                  const orderCurrency = patientOrders.find((order) => order.id === orderId)?.currency;
+                  setBalanceAdjustmentForm((current) => ({
+                    ...current,
+                    orderId,
+                    currency: orderCurrency?.toUpperCase() || current.currency,
+                  }));
+                }}
+                className={selectClass}
+                disabled={balanceAdjustmentBusy}
+              >
+                <option value="__none__">{lang === "de" ? "Ohne Auftrag" : "Без заказа"}</option>
+                {patientOrders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {order.order_number}{order.currency ? ` · ${order.currency}` : ""}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </Field>
+          </div>
+        </FormSection>
+
+        <FormSection title={lang === "de" ? "Begründung" : "Основание"}>
+          <div className="space-y-3">
+            <Field label={lang === "de" ? "Grund" : "Причина"} htmlFor="balance-adjustment-reason">
+              <Input
+                id="balance-adjustment-reason"
+                value={balanceAdjustmentForm.reason}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({ ...current, reason: event.target.value }))
+                }
+                className={inputClass}
+                disabled={balanceAdjustmentBusy}
+                required
+              />
+            </Field>
+            <Field label={lang === "de" ? "Interne Notiz (optional)" : "Внутренняя заметка (необязательно)"} htmlFor="balance-adjustment-note">
+              <textarea
+                id="balance-adjustment-note"
+                value={balanceAdjustmentForm.note}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({ ...current, note: event.target.value }))
+                }
+                className={textareaClass}
+                rows={3}
+                disabled={balanceAdjustmentBusy}
+              />
+            </Field>
+            <label className="flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2.5 text-sm text-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded border-border"
+                checked={balanceAdjustmentForm.portalVisible}
+                onChange={(event) =>
+                  setBalanceAdjustmentForm((current) => ({
+                    ...current,
+                    portalVisible: event.target.checked,
+                  }))
+                }
+                disabled={balanceAdjustmentBusy}
+              />
+              <span>
+                <span className="block font-medium">
+                  {lang === "de" ? "Begründung im Patientenportal anzeigen" : "Показывать причину в портале пациента"}
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  {lang === "de"
+                    ? "Betrag und Datum sind für einen korrekten Saldo immer sichtbar. Diese Option zeigt zusätzlich die Begründung; die interne Notiz bleibt verborgen."
+                    : "Сумма и дата всегда видны для правильного сальдо. Эта опция дополнительно показывает причину; внутренняя заметка остаётся скрытой."}
+                </span>
+              </span>
+            </label>
+          </div>
+        </FormSection>
+      </PatientSheetScaffold>
 
 
       <PatientSheetScaffold

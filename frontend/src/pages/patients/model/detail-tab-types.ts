@@ -264,6 +264,8 @@ export type PatientAccountMovement = {
     | "payment_reversal"
     | "refund"
     | "refund_reversal"
+    | "balance_adjustment"
+    | "balance_adjustment_reversal"
     | "external_receivable"
     | "external_allocation"
     | "external_allocation_reversal";
@@ -278,6 +280,33 @@ export type PatientAccountMovement = {
   credit: string;
   balance_after: string;
   currency: string;
+};
+
+export type PatientBalanceAdjustment = {
+  id: string;
+  patient_id: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  transaction_type: "adjustment" | "reversal";
+  reverses_adjustment_id?: string | null;
+  reversed_by_adjustment_id?: string | null;
+  is_reversed: boolean;
+  direction: "debit" | "credit";
+  category: "opening_balance" | "fee" | "goodwill" | "correction" | "other";
+  amount: string;
+  currency: string;
+  effective_on: string;
+  reason: string;
+  note?: string | null;
+  portal_visible: boolean;
+  created_by: string;
+  created_by_name: string;
+  created_by_role: string;
+  created_at: string;
+};
+
+export type PatientBalanceAdjustmentResponse = {
+  items: PatientBalanceAdjustment[];
 };
 
 export type PatientAccountStatement = {
