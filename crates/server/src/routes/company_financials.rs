@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use axum::{
     Json, Router,
@@ -44,6 +44,21 @@ fn can_read_company_financials(role: Role) -> bool {
 
 fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
+}
+
+#[derive(Default)]
+struct ProviderPositionAccumulator {
+    provider_id: Option<Uuid>,
+    provider_name: Option<String>,
+    invoice_total_gross: Decimal,
+    company_paid_gross: Decimal,
+    payable_remaining_gross: Decimal,
+    expected_remaining_gross: Decimal,
+    invoice_count: i64,
+    open_invoice_count: i64,
+    partial_invoice_count: i64,
+    settled_invoice_count: i64,
+    latest_payment_on: Option<NaiveDate>,
 }
 
 fn parse_date(value: Option<&str>, field: &str) -> Result<Option<NaiveDate>, String> {
@@ -408,20 +423,63 @@ async fn get_company_financial_position(
     let mut provider_payables = Decimal::ZERO;
     let mut expected_provider_costs = Decimal::ZERO;
     let mut provider_liabilities = Vec::with_capacity(provider_rows.len());
+    let mut provider_position_map = HashMap::<Option<Uuid>, ProviderPositionAccumulator>::new();
     for row in provider_rows {
         let status = row.try_get::<String, _>("status").unwrap_or_default();
-        let amount = row
+        let amount_gross = row
+            .try_get::<Decimal, _>("amount_gross")
+            .unwrap_or(Decimal::ZERO);
+        let company_paid_gross = row
+            .try_get::<Decimal, _>("company_paid_gross")
+            .unwrap_or(Decimal::ZERO);
+        let remaining_gross = row
             .try_get::<Decimal, _>("remaining_provider_liability_gross")
             .unwrap_or(Decimal::ZERO);
-        let liability_kind = if amount <= Decimal::ZERO {
+        let settlement_status = row
+            .try_get::<String, _>("settlement_status")
+            .unwrap_or_default();
+        let latest_payment_on = row
+            .try_get::<Option<NaiveDate>, _>("latest_payment_on")
+            .unwrap_or_default();
+        let provider_id = row
+            .try_get::<Option<Uuid>, _>("provider_id")
+            .unwrap_or_default();
+        let provider_name = row
+            .try_get::<Option<String>, _>("provider_name")
+            .unwrap_or_default();
+        let liability_kind = if remaining_gross <= Decimal::ZERO {
             "settled"
         } else if status == "expected" {
-            expected_provider_costs += amount;
+            expected_provider_costs += remaining_gross;
             "expected"
         } else {
-            provider_payables += amount;
+            provider_payables += remaining_gross;
             "payable"
         };
+        let position = provider_position_map
+            .entry(provider_id)
+            .or_insert_with(|| ProviderPositionAccumulator {
+                provider_id,
+                provider_name: provider_name.clone(),
+                ..ProviderPositionAccumulator::default()
+            });
+        position.invoice_total_gross += amount_gross;
+        position.company_paid_gross += company_paid_gross;
+        position.invoice_count += 1;
+        if liability_kind == "payable" {
+            position.payable_remaining_gross += remaining_gross;
+            position.open_invoice_count += 1;
+        } else if liability_kind == "expected" {
+            position.expected_remaining_gross += remaining_gross;
+        } else {
+            position.settled_invoice_count += 1;
+        }
+        if settlement_status == "partial" {
+            position.partial_invoice_count += 1;
+        }
+        if latest_payment_on > position.latest_payment_on {
+            position.latest_payment_on = latest_payment_on;
+        }
         let patient_name = [
             row.try_get::<Option<String>, _>("first_name")
                 .unwrap_or_default(),
@@ -440,21 +498,52 @@ async fn get_company_financial_position(
             "status": status,
             "paid_by": row.try_get::<String, _>("paid_by").unwrap_or_default(),
             "liability_kind": liability_kind,
-            "amount_gross": decimal_to_string(row.try_get::<Decimal, _>("amount_gross").unwrap_or(Decimal::ZERO)),
-            "company_paid_gross": decimal_to_string(row.try_get::<Decimal, _>("company_paid_gross").unwrap_or(Decimal::ZERO)),
-            "remaining_gross": decimal_to_string(amount),
-            "settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),
-            "latest_payment_on": row.try_get::<Option<NaiveDate>, _>("latest_payment_on").unwrap_or_default().map(|value| value.to_string()),
+            "amount_gross": decimal_to_string(amount_gross),
+            "company_paid_gross": decimal_to_string(company_paid_gross),
+            "remaining_gross": decimal_to_string(remaining_gross),
+            "settlement_status": settlement_status,
+            "latest_payment_on": latest_payment_on.map(|value| value.to_string()),
             "payment_count": row.try_get::<i64, _>("payment_count").unwrap_or(0),
             "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
             "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
             "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
             "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
             "patient_name": patient_name,
-            "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
-            "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+            "provider_id": provider_id,
+            "provider_name": provider_name,
         }));
     }
+    let mut provider_positions = provider_position_map
+        .into_values()
+        .map(|position| {
+            json!({
+                "provider_id": position.provider_id,
+                "provider_name": position.provider_name,
+                "invoice_total_gross": decimal_to_string(position.invoice_total_gross),
+                "company_paid_gross": decimal_to_string(position.company_paid_gross),
+                "payable_remaining_gross": decimal_to_string(position.payable_remaining_gross),
+                "expected_remaining_gross": decimal_to_string(position.expected_remaining_gross),
+                "invoice_count": position.invoice_count,
+                "open_invoice_count": position.open_invoice_count,
+                "partial_invoice_count": position.partial_invoice_count,
+                "settled_invoice_count": position.settled_invoice_count,
+                "latest_payment_on": position.latest_payment_on.map(|value| value.to_string()),
+            })
+        })
+        .collect::<Vec<_>>();
+    provider_positions.sort_by(|left, right| {
+        let left_value = left
+            .get("payable_remaining_gross")
+            .and_then(Value::as_str)
+            .and_then(|value| Decimal::from_str(value).ok())
+            .unwrap_or(Decimal::ZERO);
+        let right_value = right
+            .get("payable_remaining_gross")
+            .and_then(Value::as_str)
+            .and_then(|value| Decimal::from_str(value).ok())
+            .unwrap_or(Decimal::ZERO);
+        right_value.cmp(&left_value)
+    });
 
     let cash_summary = match sqlx::query(
         r#"WITH movements AS (
@@ -639,6 +728,7 @@ async fn get_company_financial_position(
             "net_cash_flow": decimal_to_string(net_cash_flow),
         },
         "patient_positions": patient_positions,
+        "provider_positions": provider_positions,
         "provider_liabilities": provider_liabilities,
         "cash_movements": cash_movements,
         "cash_movement_count": cash_movement_count,

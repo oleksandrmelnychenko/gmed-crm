@@ -337,6 +337,16 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     assert_eq!(result["summary"]["net_cash_flow"], "50");
     assert_eq!(result["patient_positions"].as_array().unwrap().len(), 2);
     assert_eq!(result["provider_liabilities"].as_array().unwrap().len(), 2);
+    assert_eq!(result["provider_positions"].as_array().unwrap().len(), 1);
+    let provider_position = &result["provider_positions"][0];
+    assert!(provider_position["provider_id"].is_null());
+    assert_eq!(provider_position["invoice_total_gross"], "40");
+    assert_eq!(provider_position["company_paid_gross"], "0");
+    assert_eq!(provider_position["payable_remaining_gross"], "25");
+    assert_eq!(provider_position["expected_remaining_gross"], "15");
+    assert_eq!(provider_position["invoice_count"], 2);
+    assert_eq!(provider_position["open_invoice_count"], 1);
+    assert_eq!(provider_position["settled_invoice_count"], 0);
     assert!(result["available_currencies"]
         .as_array()
         .unwrap()

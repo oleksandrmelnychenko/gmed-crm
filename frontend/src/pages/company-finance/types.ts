@@ -59,6 +59,20 @@ export type CompanyProviderLiability = {
   provider_name: string | null;
 };
 
+export type CompanyProviderPosition = {
+  provider_id: string | null;
+  provider_name: string | null;
+  invoice_total_gross: string;
+  company_paid_gross: string;
+  payable_remaining_gross: string;
+  expected_remaining_gross: string;
+  invoice_count: number;
+  open_invoice_count: number;
+  partial_invoice_count: number;
+  settled_invoice_count: number;
+  latest_payment_on: string | null;
+};
+
 export type CompanyProviderPaymentTransaction = {
   id: string;
   external_invoice_id: string;
@@ -187,6 +201,7 @@ export type CompanyFinancialPosition = {
   period: { from: string; to: string };
   summary: CompanyFinancialSummary;
   patient_positions: CompanyPatientPosition[];
+  provider_positions: CompanyProviderPosition[];
   provider_liabilities: CompanyProviderLiability[];
   cash_movements: CompanyCashMovement[];
   cash_movement_count: number;
