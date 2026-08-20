@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   CalendarDays,
   CalendarClock,
   CalendarCheck2,
@@ -13,6 +15,7 @@ import {
   Navigation,
   Phone,
   Pencil,
+  Route,
   Star,
 } from "lucide-react";
 
@@ -25,6 +28,8 @@ import { cn } from "@/lib/utils";
 
 import {
   buildConciergeAgenda,
+  buildConciergeRouteStops,
+  buildGoogleMapsRoutePlan,
   conciergeProviderAddress,
   conciergeProviderTaxonomyLabel,
   conciergeServiceDisplayTitle,
@@ -42,6 +47,7 @@ import {
   type ConciergeAgendaItem,
   type ConciergeProvider,
   type ConciergeProviderCategory,
+  type ConciergeRouteStop,
   type ConciergeService,
   type ConciergeTask,
 } from "./model";
@@ -74,10 +80,10 @@ const copy = {
     service: "Service",
     route: "Route",
     location: "Standort",
-    routeUnavailable: "Keine Anbieteradresse hinterlegt",
+    routeUnavailable: "Adresse des Partners oder Leistungserbringers fehlt",
     destinations: "Serviceziele",
     partners: "Empfohlene Partner",
-    partnerSubtitle: "Aktive nicht-medizinische Anbieter nach Kategorie und Bewertung.",
+    partnerSubtitle: "Aktive nicht-medizinische Partner und Leistungserbringer nach Kategorie und Bewertung.",
     providerSearch: "Partner oder Ort suchen",
     all: "Alle",
     restaurants: "Restaurants",
@@ -85,7 +91,7 @@ const copy = {
     hotels: "Hotels",
     other: "Weitere",
     noPartners: "Keine passenden Partner gefunden.",
-    noDestinations: "Für die aktuellen Services sind noch keine Anbieteradressen hinterlegt.",
+    noDestinations: "Für die aktuellen Services sind noch keine Partner- oder Ausführungsadressen hinterlegt.",
     rating: "Bewertung",
     openServices: "aktive Services",
     details: "Profil",
@@ -93,6 +99,21 @@ const copy = {
     openMap: "Karte",
     directions: "Route öffnen",
     book: "Partner buchen",
+    routePlanner: "Tagesroute",
+    routePlannerSubtitle: "Services, Aufgaben und Termine mit operativer Adresse in einer Route öffnen.",
+    routeDate: "Datum",
+    selectAll: "Alle auswählen",
+    clearSelection: "Auswahl leeren",
+    noRouteStops: "Für dieses Datum gibt es keine aktiven Services, Aufgaben oder Termine.",
+    missingAddress: "Adresse fehlt",
+    routeSelected: "{selected} von {total} Stopps ausgewählt",
+    routeSegment: "Route {current} von {total} öffnen",
+    routeOpen: "Route in Google Maps öffnen",
+    splitRoute: "Die Route wurde wegen der Google-Maps-Limits in {count} Abschnitte geteilt.",
+    omittedStops: "{count} Einträge können wegen fehlender oder zu langer Adressen nicht geöffnet werden.",
+    duplicateStops: "{count} doppelte Adressen werden nur einmal angefahren.",
+    moveEarlier: "Früher anfahren",
+    moveLater: "Später anfahren",
   },
   ru: {
     tasks: "Мои задачи",
@@ -121,10 +142,10 @@ const copy = {
     service: "Услуга",
     route: "Маршрут",
     location: "Место",
-    routeUnavailable: "Адрес поставщика не указан",
+    routeUnavailable: "Адрес партнёра или исполнителя не указан",
     destinations: "Адреса услуг",
     partners: "Рекомендованные партнёры",
-    partnerSubtitle: "Активные немедицинские поставщики по категории и рейтингу.",
+    partnerSubtitle: "Активные немедицинские партнёры и исполнители по категории и рейтингу.",
     providerSearch: "Поиск партнёра или города",
     all: "Все",
     restaurants: "Рестораны",
@@ -132,7 +153,7 @@ const copy = {
     hotels: "Отели",
     other: "Другие",
     noPartners: "Подходящие партнёры не найдены.",
-    noDestinations: "Для текущих услуг ещё не указаны адреса поставщиков.",
+    noDestinations: "Для текущих услуг ещё не указаны адреса партнёров или исполнителей.",
     rating: "Оценка",
     openServices: "активных услуг",
     details: "Профиль",
@@ -140,6 +161,21 @@ const copy = {
     openMap: "Карта",
     directions: "Открыть маршрут",
     book: "Забронировать",
+    routePlanner: "Маршрут на день",
+    routePlannerSubtitle: "Откройте услуги, задачи и события с рабочими адресами одним маршрутом.",
+    routeDate: "Дата",
+    selectAll: "Выбрать все",
+    clearSelection: "Снять выбор",
+    noRouteStops: "На эту дату нет активных услуг, задач или событий.",
+    missingAddress: "Адрес не указан",
+    routeSelected: "Выбрано остановок: {selected} из {total}",
+    routeSegment: "Открыть маршрут {current} из {total}",
+    routeOpen: "Открыть маршрут в Google Maps",
+    splitRoute: "Из-за ограничений Google Maps маршрут разделён на {count} частей.",
+    omittedStops: "Невозможно открыть записи без адреса или со слишком длинным адресом: {count}.",
+    duplicateStops: "Повторяющиеся адреса ({count}) включены в маршрут один раз.",
+    moveEarlier: "Переместить выше",
+    moveLater: "Переместить ниже",
   },
 } as const;
 
@@ -162,6 +198,13 @@ function dayHeading(value: string, lang: Lang) {
     month: "long",
     year: "numeric",
   }).format(date);
+}
+
+function localDateInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function taskStatusLabel(status: string, lang: Lang) {
@@ -387,11 +430,13 @@ export function ConciergeAgendaView({
 
 export function ConciergeMapView({
   services,
+  tasks,
   providers,
   lang,
   onBookProvider,
 }: {
   services: ConciergeService[];
+  tasks: ConciergeTask[];
   providers: ConciergeProvider[];
   lang: Lang;
   onBookProvider: (provider: ConciergeProvider) => void;
@@ -399,7 +444,52 @@ export function ConciergeMapView({
   const labels = copy[lang];
   const [category, setCategory] = useState<ConciergeProviderCategory>("all");
   const [providerQuery, setProviderQuery] = useState("");
+  const [routeDate, setRouteDate] = useState(() => localDateInputValue(new Date()));
+  const [routeOrder, setRouteOrder] = useState<string[]>([]);
+  const [selectedRouteStopIds, setSelectedRouteStopIds] = useState<Set<string>>(() => new Set());
+  const knownRouteStopIdsRef = useRef<Set<string>>(new Set());
   const providersById = useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
+  const routeStops = useMemo(
+    () => buildConciergeRouteStops(services, tasks, providersById, routeDate, lang),
+    [lang, providersById, routeDate, services, tasks],
+  );
+  useEffect(() => {
+    const availableIds = new Set(routeStops.map((stop) => stop.id));
+    const newRoutableIds = routeStops
+      .filter((stop) => stop.address && !knownRouteStopIdsRef.current.has(stop.id))
+      .map((stop) => stop.id);
+    setRouteOrder((current) => [
+      ...current.filter((id) => availableIds.has(id)),
+      ...routeStops.map((stop) => stop.id).filter((id) => !current.includes(id)),
+    ]);
+    setSelectedRouteStopIds((current) => {
+      const next = new Set([...current].filter((id) => availableIds.has(id)));
+      newRoutableIds.forEach((id) => next.add(id));
+      return next;
+    });
+    knownRouteStopIdsRef.current = availableIds;
+  }, [routeStops]);
+  const routeStopsById = useMemo(
+    () => new Map(routeStops.map((stop) => [stop.id, stop])),
+    [routeStops],
+  );
+  const orderedRouteStops = useMemo(
+    () => routeOrder.flatMap((id) => {
+      const stop = routeStopsById.get(id);
+      return stop ? [stop] : [];
+    }),
+    [routeOrder, routeStopsById],
+  );
+  const selectedRouteStops = useMemo(
+    () => orderedRouteStops.filter((stop) => selectedRouteStopIds.has(stop.id)),
+    [orderedRouteStops, selectedRouteStopIds],
+  );
+  const routePlan = useMemo(
+    () => buildGoogleMapsRoutePlan(selectedRouteStops),
+    [selectedRouteStops],
+  );
+  const routableStops = routeStops.filter((stop) => Boolean(stop.address));
+  const missingAddressCount = routeStops.length - routableStops.length;
   const destinations = useMemo(() => {
     return services.flatMap((service) => {
       if (!service.provider_id) return [];
@@ -415,8 +505,160 @@ export function ConciergeMapView({
   );
   const categories: ConciergeProviderCategory[] = ["all", "restaurants", "drivers", "hotels", "other"];
 
+  function selectRouteDate(value: string) {
+    knownRouteStopIdsRef.current = new Set();
+    setRouteOrder([]);
+    setSelectedRouteStopIds(new Set());
+    setRouteDate(value);
+  }
+
+  function toggleRouteStop(stop: ConciergeRouteStop) {
+    if (!stop.address) return;
+    setSelectedRouteStopIds((current) => {
+      const next = new Set(current);
+      if (next.has(stop.id)) next.delete(stop.id);
+      else next.add(stop.id);
+      return next;
+    });
+  }
+
+  function moveRouteStop(stopId: string, direction: -1 | 1) {
+    setRouteOrder((current) => {
+      const index = current.indexOf(stopId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   return (
     <div className="space-y-4">
+      <section className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.routePlanner}>
+        <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Route className="size-4 text-primary" />
+              <h2 className="text-sm font-semibold">{labels.routePlanner}</h2>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{labels.routePlannerSubtitle}</p>
+          </div>
+          <label className="grid shrink-0 gap-1 text-xs font-medium text-muted-foreground">
+            {labels.routeDate}
+            <Input
+              type="date"
+              className="h-8 min-w-40 bg-field text-xs"
+              value={routeDate}
+              onChange={(event) => selectRouteDate(event.target.value)}
+            />
+          </label>
+        </div>
+
+        {routeStops.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">{labels.noRouteStops}</p>
+        ) : (
+          <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_18rem]">
+            <div className="min-w-0 border-b border-border/70 lg:border-b-0 lg:border-r">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3 py-2">
+                <p className="text-xs text-muted-foreground">
+                  {labels.routeSelected
+                    .replace("{selected}", String(selectedRouteStops.length))
+                    .replace("{total}", String(routableStops.length))}
+                </p>
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => setSelectedRouteStopIds(new Set(routableStops.map((stop) => stop.id)))}
+                  >
+                    {labels.selectAll}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[11px]"
+                    onClick={() => setSelectedRouteStopIds(new Set())}
+                  >
+                    {labels.clearSelection}
+                  </Button>
+                </div>
+              </div>
+              <ol className="divide-y divide-border/60">
+                {orderedRouteStops.map((stop, index) => (
+                  <li key={stop.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={selectedRouteStopIds.has(stop.id)}
+                      disabled={!stop.address}
+                      aria-label={`${stop.title}: ${stop.address || labels.missingAddress}`}
+                      onChange={() => toggleRouteStop(stop)}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <time className="font-mono text-[11px] text-muted-foreground" dateTime={stop.scheduledAt}>
+                          {new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.scheduledAt))}
+                        </time>
+                        <Badge variant="outline" className="rounded-full text-[10px]">{labels[stop.kind]}</Badge>
+                      </div>
+                      <p className="mt-1 truncate text-sm font-medium">{stop.title}</p>
+                      <p className={cn("mt-0.5 truncate text-xs", stop.address ? "text-muted-foreground" : "text-amber-700")}>
+                        {stop.address || labels.missingAddress}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <Button type="button" size="icon-sm" variant="ghost" disabled={index === 0} aria-label={labels.moveEarlier} onClick={() => moveRouteStop(stop.id, -1)}>
+                        <ArrowUp />
+                      </Button>
+                      <Button type="button" size="icon-sm" variant="ghost" disabled={index === orderedRouteStops.length - 1} aria-label={labels.moveLater} onClick={() => moveRouteStop(stop.id, 1)}>
+                        <ArrowDown />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <aside className="space-y-3 p-3">
+              {routePlan.segments.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border px-3 py-8 text-center text-xs text-muted-foreground">{labels.clearSelection}</p>
+              ) : (
+                <div className="grid gap-2">
+                  {routePlan.segments.map((segment, index) => (
+                    <Button
+                      key={`${segment.stopIds[0]}:${index}`}
+                      nativeButton={false}
+                      render={<a href={segment.url} target="_blank" rel="noreferrer" />}
+                      className="w-full justify-start"
+                    >
+                      <Navigation />
+                      {routePlan.segments.length === 1
+                        ? labels.routeOpen
+                        : labels.routeSegment
+                            .replace("{current}", String(index + 1))
+                            .replace("{total}", String(routePlan.segments.length))}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {routePlan.segments.length > 1 ? (
+                <p className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs leading-5 text-sky-800">{labels.splitRoute.replace("{count}", String(routePlan.segments.length))}</p>
+              ) : null}
+              {missingAddressCount + routePlan.tooLongStopIds.length > 0 ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs leading-5 text-amber-800">{labels.omittedStops.replace("{count}", String(missingAddressCount + routePlan.tooLongStopIds.length))}</p>
+              ) : null}
+              {routePlan.duplicateAddressStopIds.length > 0 ? (
+                <p className="rounded-lg border border-border bg-muted/30 p-2.5 text-xs leading-5 text-muted-foreground">{labels.duplicateStops.replace("{count}", String(routePlan.duplicateAddressStopIds.length))}</p>
+              ) : null}
+            </aside>
+          </div>
+        )}
+      </section>
+
       <section className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.destinations}>
         <div className="flex items-center gap-2 border-b border-border/70 px-4 py-3">
           <MapPin className="size-4 text-primary" />

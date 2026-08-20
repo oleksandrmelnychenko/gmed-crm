@@ -99,6 +99,9 @@ export type Leistung = {
   unit_price_snapshot?: unknown;
   currency_snapshot?: string | null;
   vat_rate_snapshot?: unknown;
+  planned_partner_cost_net?: unknown;
+  planned_partner_cost_vat?: unknown;
+  planned_partner_cost_gross?: unknown;
   billing_status?: LeistungBillingStatus | null;
   invoiced_quantity?: unknown;
   invoice_references?: Array<{
@@ -117,6 +120,7 @@ export type Leistung = {
 export type ExternalInvoice = {
   id: string;
   provider_id: string | null;
+  order_leistung_id?: string | null;
   provider_name: string | null;
   provider_taxonomy_node_id?: string | null;
   provider_taxonomy_node_code?: string | null;
@@ -203,6 +207,7 @@ export type OrderDetail = {
   signed_agency?: boolean | null;
   total_estimated: unknown;
   total_actual: unknown;
+  currency: string;
   leistungen: Leistung[];
   external_invoices?: ExternalInvoice[];
   process_gates?: OrderProcessGates | null;
@@ -212,6 +217,81 @@ export type OrderDetail = {
   lifecycle?: OrderLifecycle | null;
   created_at: string;
   updated_at: string;
+};
+
+export type OrderEconomicsAmounts = {
+  revenue_net: string;
+  revenue_vat: string;
+  revenue_gross: string;
+  partner_cost_net: string | null;
+  partner_cost_vat: string | null;
+  partner_cost_gross: string | null;
+  margin_net: string | null;
+};
+
+export type OrderServiceEconomics = {
+  order_leistung_id: string;
+  name: string;
+  description: string;
+  currency: string;
+  currency_matches_order: boolean;
+  calculation_valid: boolean;
+  planned_revenue_net: string | null;
+  planned_revenue_vat: string | null;
+  planned_revenue_gross: string | null;
+  planned_partner_cost_net: string | null;
+  planned_partner_cost_vat: string | null;
+  planned_partner_cost_gross: string | null;
+  actual_revenue_net: string;
+  actual_revenue_vat: string;
+  actual_revenue_gross: string;
+  actual_partner_cost_net: string | null;
+  actual_partner_cost_vat: string | null;
+  actual_partner_cost_gross: string | null;
+  partner_paid_gross: string | null;
+  partner_unpaid_gross: string | null;
+  margin_net: string | null;
+};
+
+export type OrderEconomics = {
+  order_id: string;
+  currency: string;
+  economics_valid: boolean;
+  margin_visible: boolean;
+  planned: OrderEconomicsAmounts;
+  actual: {
+    recognized_revenue_net: string;
+    recognized_revenue_vat: string;
+    recognized_revenue_gross: string;
+    credited_net: string;
+    credited_vat: string;
+    credited_gross: string;
+    invoice_settled_gross: string;
+    invoice_outstanding_gross: string;
+    patient_cash_received_gross: string;
+    patient_cash_refunded_gross: string;
+    patient_cash_collected_gross: string;
+    partner_cost_net: string | null;
+    partner_cost_vat: string | null;
+    partner_cost_gross: string | null;
+    paid_to_partner_gross: string | null;
+    unpaid_to_partner_gross: string | null;
+    paid_directly_by_patient_gross: string;
+    unbilled_patient_receivable_gross: string;
+    margin_net: string | null;
+    margin_percent: string | null;
+  };
+  unassigned_external_cost_gross: string | null;
+  warnings: Array<
+    | "external_invoice_currency_mismatch"
+    | "external_invoice_amount_mismatch"
+    | "order_service_currency_mismatch"
+    | "order_service_amount_mismatch"
+    | "unassigned_external_costs"
+    | "unbilled_patient_receivable"
+    | "unassigned_invoice_revenue"
+  >;
+  services: OrderServiceEconomics[];
 };
 
 export type OrderProcessGates = {
@@ -644,6 +724,9 @@ export type LeistungFormState = {
   quantity: string;
   unitPrice: string;
   vatRate: string;
+  plannedPartnerCostNet: string;
+  plannedPartnerCostVat: string;
+  plannedPartnerCostGross: string;
   providerId: string;
   doctorId: string;
   externalDocumentId: string;
@@ -664,6 +747,7 @@ export type SupportingDocumentOption = {
 
 export type ExternalInvoiceFormState = {
   providerId: string;
+  orderLeistungId: string;
   externalInvoiceNumber: string;
   invoiceDate: string;
   dueDate: string;
@@ -684,4 +768,5 @@ export type OrdersPermissions = {
   canAddLeistung: boolean;
   canApproveLeistung: boolean;
   canManageExternalInvoices: boolean;
+  canManageEconomics: boolean;
 };

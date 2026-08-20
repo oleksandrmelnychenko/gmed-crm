@@ -8,6 +8,7 @@ import type {
   ExternalInvoiceAllocationWorkspace,
   OrderDebtQueueItem,
   OrderDetail,
+  OrderEconomics,
   OrderSummary,
   PassportComplianceStatus,
   PatientAssignmentOption,
@@ -291,6 +292,30 @@ export type CreatedOrderLeistung = {
 
 export function createOrderLeistung(orderId: string, payload: JsonPayload) {
   return postJson<CreatedOrderLeistung>(`/orders/${orderId}/leistungen`, payload);
+}
+
+export function updateOrderLeistungPlannedCost(
+  orderId: string,
+  leistungId: string,
+  payload: {
+    request_id: string;
+    amount_net: string;
+    amount_vat: string;
+    amount_gross: string;
+    reason: string;
+  },
+) {
+  return postJson<{
+    change_id: string;
+    amount_net: string;
+    amount_vat: string;
+    amount_gross: string;
+    idempotent_replay: boolean;
+  }>(`/orders/${orderId}/leistungen/${leistungId}/planned-cost`, payload);
+}
+
+export function fetchOrderEconomics(orderId: string) {
+  return apiFetch<OrderEconomics>(`/orders/${orderId}/economics`);
 }
 
 export function syncLeadWizardOrderLeistungen(

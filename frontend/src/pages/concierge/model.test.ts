@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildConciergeAgenda,
+  buildConciergeRouteStops,
+  buildGoogleMapsRoutePlan,
   conciergeServiceColumn,
   conciergeWorkspaceStats,
   conciergeProviderAddress,
@@ -307,6 +309,66 @@ describe("concierge workspace model", () => {
       "destination=Leopoldstr.%201%2C%20M%C3%BCnchen%2C%20Deutschland",
     );
     expect(googleMapsDirectionsUrl("")).toBeNull();
+  });
+
+  it("builds chronological route stops from active services, tasks and events only", () => {
+    const selectedProvider = provider();
+    const stops = buildConciergeRouteStops(
+      [
+        service({ id: "later-service", starts_at: "2026-08-19T11:00:00.000Z" }),
+        service({ id: "done-service", status: "completed", starts_at: "2026-08-19T07:00:00.000Z" }),
+        service({ id: "other-day", starts_at: "2026-08-20T08:00:00.000Z" }),
+      ],
+      [
+        task({ id: "early-task", due_at: "2026-08-19T08:00:00.000Z", location: "Terminal 1" }),
+        task({ id: "event", kind: "event", starts_at: "2026-08-19T09:00:00.000Z", location: "Hotel Mitte" }),
+        task({ id: "cancelled", status: "cancelled", due_at: "2026-08-19T06:00:00.000Z" }),
+      ],
+      new Map([[selectedProvider.id, selectedProvider]]),
+      "2026-08-19",
+    );
+
+    expect(stops.map((stop) => stop.id)).toEqual([
+      "task:early-task",
+      "event:event",
+      "service:later-service",
+    ]);
+    expect(stops[2].address).toBe("Leopoldstr. 1, München, Deutschland");
+    expect(stops.every((stop) => !("patientName" in stop))).toBe(true);
+  });
+
+  it("deduplicates route addresses and reports missing or oversized stops", () => {
+    const plan = buildGoogleMapsRoutePlan([
+      { id: "a", kind: "service", title: "Transfer", scheduledAt: "2026-08-19T08:00:00Z", address: "Terminal 1, München" },
+      { id: "b", kind: "task", title: "Fahrer treffen", scheduledAt: "2026-08-19T09:00:00Z", address: " terminal 1,   MÜNCHEN " },
+      { id: "missing", kind: "event", title: "Übergabe", scheduledAt: "2026-08-19T10:00:00Z", address: null },
+      { id: "long", kind: "service", title: "Lang", scheduledAt: "2026-08-19T11:00:00Z", address: "x".repeat(500) },
+    ], 9, 300);
+
+    expect(plan.segments).toHaveLength(1);
+    expect(plan.segments[0].stopIds).toEqual(["a"]);
+    expect(plan.duplicateAddressStopIds).toEqual(["b"]);
+    expect(plan.missingAddressStopIds).toEqual(["missing"]);
+    expect(plan.tooLongStopIds).toEqual(["long"]);
+  });
+
+  it("splits long daily routes into ordered Google Maps segments", () => {
+    const stops = ["A", "B", "C", "D", "E"].map((address, index) => ({
+      id: address.toLocaleLowerCase(),
+      kind: "task" as const,
+      title: address,
+      scheduledAt: `2026-08-19T${String(index + 8).padStart(2, "0")}:00:00Z`,
+      address: `${address} Straße 1, Berlin`,
+    }));
+    const plan = buildGoogleMapsRoutePlan(stops, 2);
+
+    expect(plan.segments.map((segment) => segment.stopIds)).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+      ["e"],
+    ]);
+    expect(plan.segments[1].url).toContain("origin=B+Stra%C3%9Fe+1%2C+Berlin");
+    expect(plan.segments.every((segment) => segment.url.length <= 1_900)).toBe(true);
   });
 
   it("creates safe partner call and email actions", () => {

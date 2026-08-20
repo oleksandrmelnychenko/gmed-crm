@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LoaderCircle, RefreshCw } from "lucide-react";
+import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
@@ -27,12 +28,20 @@ const REALTIME_EVENTS = [
 
 const copy = {
   de: {
+    title: "Aufgabenmanager",
+    subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
+    newTask: "Aufgabe / Termin",
+    refresh: "Aktualisieren",
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
     updateFailed: "Die Aufgabe konnte nicht aktualisiert werden.",
     retry: "Erneut laden",
   },
   ru: {
+    title: "Менеджер задач",
+    subtitle: "Распределение задач, календарь событий и контроль сроков",
+    newTask: "Задача / событие",
+    refresh: "Обновить",
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
     updateFailed: "Не удалось обновить задачу.",
@@ -230,6 +239,21 @@ export function ConciergeTaskManagerPage() {
 
   return (
     <div className="space-y-3" data-testid="concierge-task-manager-page">
+      <PageHeader
+        title={labels.title}
+        description={labels.subtitle}
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
+              <Plus />{labels.newTask}
+            </Button>
+            <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={requestRefresh}>
+              <RefreshCw />{labels.refresh}
+            </Button>
+          </div>
+        )}
+      />
+
       {error ? (
         <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
           <span>{error}</span>
@@ -246,7 +270,6 @@ export function ConciergeTaskManagerPage() {
         now={now}
         canManageTeam={user?.role === "ceo"}
         updatingTaskId={updatingTaskId}
-        onCreate={openCreateTask}
         onEdit={openEditTask}
         onOpen={openTaskDetail}
         onStatusChange={(task, status) => void changeTaskStatus(task, status)}

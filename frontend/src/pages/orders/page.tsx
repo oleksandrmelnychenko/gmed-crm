@@ -115,6 +115,7 @@ import {
   createWorkflowChecklistItem,
   fetchOrderDebtQueue,
   fetchOrderDirectory,
+  fetchOrderEconomics,
   fetchOrderWorkspace,
   fetchOrders,
   fetchPatientOrderRecheck,
@@ -127,6 +128,7 @@ import {
   updateOrderStatus,
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
+  updateOrderLeistungPlannedCost,
 } from "./data/order-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
@@ -147,6 +149,7 @@ import {
   blankOrderProcessGateForm,
   blankWorkflowChecklistForm,
   formatCurrency,
+  formatOptionalCurrency,
   formatDate,
   formatDateOnly,
   formatDateTime,
@@ -176,6 +179,7 @@ import type {
   LeistungFormState,
   OrderDebtQueueItem,
   OrderDetail,
+  OrderEconomics,
   OrderExecutionFormState,
   OrderFollowupFormState,
   OrderPlanningFormState,
@@ -215,6 +219,7 @@ const ORDER_REALTIME_EVENTS = [
   "order.external_invoice_allocation_created",
   "order.external_invoice_allocation_reversed",
   "order.leistung_added",
+  "order.leistung_planned_cost_updated",
   "order.leistung_approved",
   "invoice.created",
   "invoice.status_changed",
@@ -739,6 +744,13 @@ function useOrdersPageContent() {
   ) => formatEnumLabel(value, labels, t);
   const formatMoney = (value: unknown, currency = "EUR") =>
     formatCurrency(value, currency, locale);
+  const formatOptionalMoney = (value: unknown, currency = "EUR") =>
+    formatOptionalCurrency(
+      value,
+      currency,
+      locale,
+      lang === "de" ? "Nicht berechenbar" : "Нельзя рассчитать",
+    );
   const formatDateLabel = (value: string | null | undefined) =>
     formatDate(value, locale, l("orders_nicht_festgelegt"));
   const formatDateTimeLabel = (value: string | null | undefined) =>
@@ -1062,6 +1074,20 @@ function useOrdersPageContent() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
   const [externalInvoiceAllocationId, setExternalInvoiceAllocationId] = useState<string | null>(null);
+  const [orderEconomics, setOrderEconomics] = useState<OrderEconomics | null>(null);
+  const [orderEconomicsLoading, setOrderEconomicsLoading] = useState(false);
+  const [orderEconomicsError, setOrderEconomicsError] = useState<string | null>(null);
+  const [plannedCostEditor, setPlannedCostEditor] = useState<{
+    leistungId: string;
+    serviceName: string;
+    amountNet: string;
+    amountVat: string;
+    amountGross: string;
+    reason: string;
+    requestId: string;
+  } | null>(null);
+  const [plannedCostSaving, setPlannedCostSaving] = useState(false);
+  const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [agencyServicesLoaded, setAgencyServicesLoaded] = useState(false);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
@@ -1698,7 +1724,12 @@ function useOrdersPageContent() {
 
   function resetExternalInvoiceDialog(open: boolean) {
     setExternalInvoiceOpen(open);
-    if (!open) {
+    if (open) {
+      setExternalInvoiceForm({
+        ...blankExternalInvoiceForm(),
+        currency: orderDetail?.currency || "EUR",
+      });
+    } else {
       setExternalInvoiceError(null);
       setExternalInvoiceForm(blankExternalInvoiceForm());
       setExternalInvoiceSaving(false);
@@ -2232,6 +2263,8 @@ function useOrdersPageContent() {
   useEffect(() => {
     if (!selectedOrderId) {
       resetSelectedOrderWorkspaceData();
+      setOrderEconomics(null);
+      setOrderEconomicsError(null);
       return;
     }
 
@@ -2267,6 +2300,31 @@ function useOrdersPageContent() {
     selectedOrderId,
     startOrderDetailLoad,
   ]);
+
+  useEffect(() => {
+    if (!selectedOrderId) return;
+    const currentOrderId = selectedOrderId;
+    let cancelled = false;
+    setOrderEconomicsLoading(true);
+    setOrderEconomicsError(null);
+    void fetchOrderEconomics(currentOrderId)
+      .then((value) => {
+        if (!cancelled) setOrderEconomics(value);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setOrderEconomics(null);
+        setOrderEconomicsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setOrderEconomicsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadNonce, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -2668,6 +2726,15 @@ function useOrdersPageContent() {
     const quantity = Number(leistungForm.quantity.replace(",", "."));
     const unitPrice = Number(leistungForm.unitPrice.replace(",", "."));
     const vatRate = Number(leistungForm.vatRate.replace(",", "."));
+    const plannedCostNet = Number(
+      (leistungForm.plannedPartnerCostNet || "0").replace(",", "."),
+    );
+    const plannedCostVat = Number(
+      (leistungForm.plannedPartnerCostVat || "0").replace(",", "."),
+    );
+    const plannedCostGross = Number(
+      (leistungForm.plannedPartnerCostGross || "0").replace(",", "."),
+    );
 
     if (!leistungForm.description.trim()) {
       setLeistungError(l("orders_error_description_required"));
@@ -2685,6 +2752,19 @@ function useOrdersPageContent() {
       setLeistungError(l("orders_error_vat_numeric"));
       return;
     }
+    if (
+      !Number.isFinite(plannedCostNet) || plannedCostNet < 0 ||
+      !Number.isFinite(plannedCostVat) || plannedCostVat < 0 ||
+      !Number.isFinite(plannedCostGross) || plannedCostGross < 0 ||
+      Math.abs(plannedCostNet + plannedCostVat - plannedCostGross) > 0.005
+    ) {
+      setLeistungError(
+        lang === "de"
+          ? "Geplante Partnerkosten: Bruttobetrag muss Nettobetrag plus Mehrwertsteuer entsprechen."
+          : "Плановая стоимость партнёра: сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
 
     setLeistungSaving(true);
     setLeistungError(null);
@@ -2695,6 +2775,9 @@ function useOrdersPageContent() {
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
+        planned_partner_cost_net: plannedCostNet,
+        planned_partner_cost_vat: plannedCostVat,
+        planned_partner_cost_gross: plannedCostGross,
         is_cost_passthrough: leistungForm.isCostPassthrough,
         provider_id: optString(leistungForm.providerId),
         doctor_id: optString(leistungForm.doctorId),
@@ -2709,6 +2792,56 @@ function useOrdersPageContent() {
       );
     } finally {
       setLeistungSaving(false);
+    }
+  }
+
+  async function handlePlannedCostSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedOrderId || !plannedCostEditor) return;
+    const net = Number(plannedCostEditor.amountNet.replace(",", "."));
+    const vat = Number(plannedCostEditor.amountVat.replace(",", "."));
+    const gross = Number(plannedCostEditor.amountGross.replace(",", "."));
+    if (
+      !Number.isFinite(net) || net < 0 ||
+      !Number.isFinite(vat) || vat < 0 ||
+      !Number.isFinite(gross) || gross < 0 ||
+      Math.abs(net + vat - gross) > 0.005
+    ) {
+      setPlannedCostError(
+        lang === "de"
+          ? "Bruttobetrag muss dem Nettobetrag zuzüglich Mehrwertsteuer entsprechen."
+          : "Сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
+    if (!plannedCostEditor.reason.trim()) {
+      setPlannedCostError(
+        lang === "de"
+          ? "Bitte geben Sie einen Grund für die Änderung an."
+          : "Укажите причину изменения.",
+      );
+      return;
+    }
+    setPlannedCostSaving(true);
+    setPlannedCostError(null);
+    try {
+      await updateOrderLeistungPlannedCost(
+        selectedOrderId,
+        plannedCostEditor.leistungId,
+        {
+          request_id: plannedCostEditor.requestId,
+          amount_net: net.toFixed(2),
+          amount_vat: vat.toFixed(2),
+          amount_gross: gross.toFixed(2),
+          reason: plannedCostEditor.reason.trim(),
+        },
+      );
+      setPlannedCostEditor(null);
+      triggerReload();
+    } catch (error) {
+      setPlannedCostError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPlannedCostSaving(false);
     }
   }
 
@@ -2807,18 +2940,29 @@ function useOrdersPageContent() {
       setExternalInvoiceError(l("orders_error_vat_amount_numeric"));
       return;
     }
+    const normalizedNet = externalInvoiceForm.amountNet.trim() ? amountNet : 0;
+    const normalizedVat = externalInvoiceForm.amountVat.trim() ? amountVat : 0;
+    if (Math.abs(normalizedNet + normalizedVat - amountGross) > 0.005) {
+      setExternalInvoiceError(
+        lang === "de"
+          ? "Bruttobetrag muss dem Nettobetrag zuzüglich Mehrwertsteuer entsprechen."
+          : "Сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
 
     setExternalInvoiceSaving(true);
     setExternalInvoiceError(null);
     try {
       await createExternalInvoice(selectedOrderId, {
         provider_id: optString(externalInvoiceForm.providerId),
+        order_leistung_id: optString(externalInvoiceForm.orderLeistungId),
         external_invoice_number:
           externalInvoiceForm.externalInvoiceNumber.trim(),
         invoice_date: optString(externalInvoiceForm.invoiceDate),
         due_date: optString(externalInvoiceForm.dueDate),
-        amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
-        amount_vat: externalInvoiceForm.amountVat.trim() ? amountVat : 0,
+        amount_net: normalizedNet,
+        amount_vat: normalizedVat,
         amount_gross: amountGross,
         currency: optString(externalInvoiceForm.currency) ?? "EUR",
         status: externalInvoiceForm.status,
@@ -2880,6 +3024,25 @@ function useOrdersPageContent() {
           ? error.message
           : l("orders_error_update_external_invoice"),
       );
+    } finally {
+      setExternalInvoiceUpdatingId(null);
+    }
+  }
+
+  async function handleExternalInvoiceServiceChange(
+    externalInvoiceId: string,
+    orderLeistungId: string,
+  ) {
+    if (!selectedOrderId) return;
+    setExternalInvoiceUpdatingId(externalInvoiceId);
+    setExternalInvoiceError(null);
+    try {
+      await updateExternalInvoice(selectedOrderId, externalInvoiceId, orderLeistungId
+        ? { order_leistung_id: orderLeistungId }
+        : { clear_order_leistung: true });
+      triggerReload();
+    } catch (error) {
+      setExternalInvoiceError(error instanceof Error ? error.message : String(error));
     } finally {
       setExternalInvoiceUpdatingId(null);
     }
@@ -3776,6 +3939,175 @@ function useOrdersPageContent() {
 
                 {shouldRenderOrderSection("overview") ? (
                   <>
+                    <SectionCard
+                      title={lang === "de" ? "Wirtschaftlichkeit des Auftrags" : "Экономика заказа"}
+                      description={
+                        lang === "de"
+                          ? "Plan, tatsächliche Abrechnung, Zahlungen und Partnerkosten in der Auftragswährung."
+                          : "План, фактическое выставление счетов, оплаты и затраты на партнёров в валюте заказа."
+                      }
+                    >
+                      {orderEconomicsLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <LoaderCircle className="size-4 animate-spin" />
+                          {t.common_loading}
+                        </div>
+                      ) : orderEconomicsError ? (
+                        <Banner tone="error" withIcon>{orderEconomicsError}</Banner>
+                      ) : orderEconomics ? (
+                        <div className="space-y-4">
+                          {orderEconomics.warnings.length > 0 ? (
+                            <Banner tone="warning" withIcon>
+                              <div className="space-y-1">
+                                {orderEconomics.warnings.map((warning) => (
+                                  <div key={warning}>
+                                    {warning === "external_invoice_currency_mismatch"
+                                      ? lang === "de"
+                                        ? "Mindestens eine Partnerrechnung hat eine andere Währung. Die Marge wird deshalb nicht berechnet."
+                                        : "Хотя бы один счёт партнёра имеет другую валюту. Поэтому маржа не рассчитывается."
+                                      : warning === "order_service_currency_mismatch"
+                                        ? lang === "de"
+                                          ? "Mindestens eine Leistung hat eine andere Währung als der Auftrag. Planwerte und Marge werden nicht berechnet."
+                                          : "Хотя бы одна услуга имеет другую валюту, чем заказ. Плановые суммы и маржа не рассчитываются."
+                                      : warning === "order_service_amount_mismatch"
+                                        ? lang === "de"
+                                          ? "Mindestens eine Leistung enthält einen nicht unterstützten Betrag. Planwerte und Marge werden nicht berechnet."
+                                          : "Хотя бы одна услуга содержит неподдерживаемую сумму. Плановые значения и маржа не рассчитываются."
+                                      : warning === "external_invoice_amount_mismatch"
+                                        ? lang === "de"
+                                          ? "Bei mindestens einer Partnerrechnung stimmen Nettobetrag, Mehrwertsteuer und Bruttobetrag nicht überein."
+                                          : "Хотя бы в одном счёте партнёра сумма без налога, налог и сумма с налогом не совпадают."
+                                        : warning === "unassigned_external_costs"
+                                          ? lang === "de"
+                                            ? `Partnerkosten ohne Leistungszuordnung: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
+                                            : `Затраты на партнёров без привязки к услуге: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
+                                          : warning === "unbilled_patient_receivable"
+                                            ? lang === "de"
+                                              ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
+                                              : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
+                                            : lang === "de"
+                                              ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet."
+                                              : "Часть выставленного дохода не связана с услугой заказа."}
+                                  </div>
+                                ))}
+                              </div>
+                            </Banner>
+                          ) : null}
+
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {lang === "de" ? "Plan" : "План"}
+                              </h3>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <MiniMetric
+                                  label={lang === "de" ? "Geplanter Erlös ohne Mehrwertsteuer" : "Плановый доход без налога"}
+                                  value={formatMoney(orderEconomics.planned.revenue_net, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Geplanter Erlös mit Mehrwertsteuer" : "Плановый доход с налогом"}
+                                  value={formatMoney(orderEconomics.planned.revenue_gross, orderEconomics.currency)}
+                                />
+                                {orderEconomics.margin_visible ? (
+                                  <>
+                                    <MiniMetric
+                                      label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёров без налога"}
+                                      value={formatOptionalMoney(orderEconomics.planned.partner_cost_net, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Geplante Marge ohne Mehrwertsteuer" : "Плановая маржа без налога"}
+                                      value={formatOptionalMoney(orderEconomics.planned.margin_net, orderEconomics.currency)}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {lang === "de" ? "Tatsächlicher Stand" : "Фактическое состояние"}
+                              </h3>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <MiniMetric
+                                  label={lang === "de" ? "Abgerechneter Erlös ohne Mehrwertsteuer" : "Выставленный доход без налога"}
+                                  value={formatMoney(orderEconomics.actual.recognized_revenue_net, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Vom Patienten tatsächlich erhalten" : "Фактически получено от пациента"}
+                                  value={formatMoney(orderEconomics.actual.patient_cash_collected_gross, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Noch vom Patienten zu zahlen" : "Осталось оплатить пациенту"}
+                                  value={formatMoney(orderEconomics.actual.invoice_outstanding_gross, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Direkt vom Patienten an Partner bezahlt" : "Оплачено пациентом напрямую партнёру"}
+                                  value={formatMoney(orderEconomics.actual.paid_directly_by_patient_gross, orderEconomics.currency)}
+                                />
+                                {orderEconomics.margin_visible ? (
+                                  <>
+                                    <MiniMetric
+                                      label={lang === "de" ? "Tatsächliche Partnerkosten ohne Mehrwertsteuer" : "Фактические затраты на партнёров без налога"}
+                                      value={formatOptionalMoney(orderEconomics.actual.partner_cost_net, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "An Partner bezahlt" : "Оплачено партнёрам"}
+                                      value={formatOptionalMoney(orderEconomics.actual.paid_to_partner_gross, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
+                                      value={formatOptionalMoney(orderEconomics.actual.unpaid_to_partner_gross, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Tatsächliche Marge ohne Mehrwertsteuer" : "Фактическая маржа без налога"}
+                                      value={orderEconomics.economics_valid
+                                        ? `${formatMoney(orderEconomics.actual.margin_net, orderEconomics.currency)} (${formatNumber(orderEconomics.actual.margin_percent, locale)}%)`
+                                        : lang === "de" ? "Nicht berechenbar" : "Нельзя рассчитать"}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto rounded-xl border border-border/70">
+                            <table className="w-full min-w-[760px] text-left text-xs">
+                              <thead className="bg-muted/40 text-muted-foreground">
+                                <tr>
+                                  <th className="px-3 py-2.5 font-medium">{lang === "de" ? "Leistung" : "Услуга"}</th>
+                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplanter Erlös" : "Плановый доход"}</th>
+                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Abgerechneter Erlös" : "Выставленный доход"}</th>
+                                  {orderEconomics.margin_visible ? (
+                                    <>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}</th>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Tatsächliche Partnerkosten" : "Фактические затраты на партнёра"}</th>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Marge ohne Mehrwertsteuer" : "Маржа без налога"}</th>
+                                    </>
+                                  ) : null}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border/70">
+                                {orderEconomics.services.map((service) => (
+                                  <tr key={service.order_leistung_id}>
+                                    <td className="max-w-[300px] px-3 py-2.5 font-medium text-foreground">{service.name}</td>
+                                    <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_revenue_net, orderEconomics.currency)}</td>
+                                    <td className="px-3 py-2.5 text-right">{formatMoney(service.actual_revenue_net, orderEconomics.currency)}</td>
+                                    {orderEconomics.margin_visible ? (
+                                      <>
+                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_partner_cost_net, orderEconomics.currency)}</td>
+                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.actual_partner_cost_net, orderEconomics.currency)}</td>
+                                        <td className="px-3 py-2.5 text-right font-semibold">{formatOptionalMoney(service.margin_net, orderEconomics.currency)}</td>
+                                      </>
+                                    ) : null}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : null}
+                    </SectionCard>
+
                     <section className="rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
                         {titleWithDot(lang === "de" ? "Auftrag" : "Заказ")}
@@ -6131,6 +6463,28 @@ function useOrdersPageContent() {
                                     <div className="mt-1 text-xl font-semibold leading-none text-foreground">
                                       {formatMoney(lineTotal, leistung.currency)}
                                     </div>
+                                    {permissions.canManageEconomics ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-4 h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                        onClick={() => {
+                                          setPlannedCostError(null);
+                                          setPlannedCostEditor({
+                                            leistungId: leistung.id,
+                                            serviceName: normalizeLeistungDescription(leistung.description),
+                                            amountNet: String(leistung.planned_partner_cost_net ?? "0"),
+                                            amountVat: String(leistung.planned_partner_cost_vat ?? "0"),
+                                            amountGross: String(leistung.planned_partner_cost_gross ?? "0"),
+                                            reason: "",
+                                            requestId: crypto.randomUUID(),
+                                          });
+                                        }}
+                                      >
+                                        {lang === "de" ? "Geplante Partnerkosten bearbeiten" : "Изменить плановые затраты на партнёра"}
+                                      </Button>
+                                    ) : null}
                                     {permissions.canApproveLeistung &&
                                     leistung.status === "delivered" ? (
                                       <Button
@@ -6178,6 +6532,13 @@ function useOrdersPageContent() {
                                     label={l("orders_mwst")}
                                     value={`${formatNumber(leistung.vat_rate, locale)}%`}
                                   />
+                                  {permissions.canManageEconomics ? <MiniMetric
+                                    label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}
+                                    value={formatMoney(
+                                      leistung.planned_partner_cost_gross,
+                                      leistung.currency,
+                                    )}
+                                  /> : null}
                                   <MiniMetric
                                     label={l("orders_erbracht")}
                                     value={formatDateTimeLabel(
@@ -6300,7 +6661,7 @@ function useOrdersPageContent() {
                           value={formatMoney(externalInvoiceMetrics.allocated)}
                         />
                         <MiniMetric
-                          label={lang === "de" ? "Offen beim Anbieter" : "Долг поставщику"}
+                          label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
                           value={formatMoney(externalInvoiceMetrics.liability)}
                         />
                       </div>
@@ -6334,6 +6695,9 @@ function useOrdersPageContent() {
                             const taxonomyLabel = providerTaxonomyLabel(
                               invoice,
                               lang,
+                            );
+                            const linkedService = orderDetail.leistungen.find(
+                              (leistung) => leistung.id === invoice.order_leistung_id,
                             );
                             const providerValue = invoice.provider_id ? (
                               <button
@@ -6410,6 +6774,13 @@ function useOrdersPageContent() {
                                               {taxonomyLabel}
                                             </Badge>
                                           ) : null}
+                                          <Badge variant="outline" className="rounded-full">
+                                            {linkedService
+                                              ? `${lang === "de" ? "Leistung" : "Услуга"}: ${normalizeLeistungDescription(linkedService.description)}`
+                                              : lang === "de"
+                                                ? "Keine Leistung zugeordnet"
+                                                : "Услуга не привязана"}
+                                          </Badge>
                                         </div>
                                         <p className="mt-2 max-w-2xl text-xs leading-snug text-muted-foreground">
                                           {t.orders_external_invoice_date}:{" "}
@@ -6426,6 +6797,27 @@ function useOrdersPageContent() {
                                     <div className="space-y-3">
                                       {permissions.canManageExternalInvoices ? (
                                         <div className="flex flex-col gap-2">
+                                          <NativeComboboxSelect
+                                            value={invoice.order_leistung_id ?? ""}
+                                            onChange={(event) =>
+                                              void handleExternalInvoiceServiceChange(
+                                                invoice.id,
+                                                event.target.value,
+                                              )
+                                            }
+                                            className={selectClassName}
+                                            disabled={invoiceUpdating}
+                                            aria-label={lang === "de" ? "Zugeordnete Leistung" : "Связанная услуга"}
+                                          >
+                                            <option value="">
+                                              {lang === "de" ? "Keine Leistung zugeordnet" : "Услуга не привязана"}
+                                            </option>
+                                            {orderDetail.leistungen.map((leistung) => (
+                                              <option key={leistung.id} value={leistung.id}>
+                                                {normalizeLeistungDescription(leistung.description)}
+                                              </option>
+                                            ))}
+                                          </NativeComboboxSelect>
                                           {(numberFromUnknown(invoice.patient_receivable_gross) ?? 0) > 0 ? (
                                             <Button
                                               type="button"
@@ -6604,7 +6996,7 @@ function useOrdersPageContent() {
                                   </div>
                                   <div className="border-t border-border px-4 py-3 xl:border-l xl:border-t-0">
                                     <div className="text-xs text-muted-foreground">
-                                      {lang === "de" ? "Verbindlichkeit" : "Долг поставщику"}
+                                      {lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
                                     </div>
                                     <div className="mt-1 text-sm font-semibold text-foreground">
                                       {formatMoney(
@@ -6854,6 +7246,73 @@ function useOrdersPageContent() {
         </SheetContent>
       </Sheet>
 
+      <Sheet
+        open={plannedCostEditor != null}
+        onOpenChange={(open) => {
+          if (!open && !plannedCostSaving) {
+            setPlannedCostEditor(null);
+            setPlannedCostError(null);
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[620px]">
+          {plannedCostEditor ? (
+            <form onSubmit={handlePlannedCostSave} className="flex h-full min-h-0 flex-col">
+              <AdminSheetScaffold
+                title={lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}
+                description={plannedCostEditor.serviceName}
+                footer={
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={lang === "de" ? "Änderung speichern" : "Сохранить изменение"}
+                    submittingLabel={lang === "de" ? "Wird gespeichert" : "Сохранение"}
+                    submitting={plannedCostSaving}
+                    submitDisabled={plannedCostSaving}
+                    onCancel={() => setPlannedCostEditor(null)}
+                  />
+                }
+                headerClassName="px-4 py-3"
+                bodyClassName="min-h-0 space-y-4 px-5 py-4"
+              >
+                {plannedCostError ? <Banner tone="error" withIcon>{plannedCostError}</Banner> : null}
+                <OrderSheetSection title={lang === "de" ? "Kostenplanung" : "Планирование затрат"}>
+                  <div className="grid gap-3">
+                    <Field label={lang === "de" ? "Betrag ohne Mehrwertsteuer" : "Сумма без налога"}>
+                      <Input
+                        value={plannedCostEditor.amountNet}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountNet: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Mehrwertsteuer" : "Налог на добавленную стоимость"}>
+                      <Input
+                        value={plannedCostEditor.amountVat}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountVat: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Betrag mit Mehrwertsteuer" : "Сумма с налогом"}>
+                      <Input
+                        value={plannedCostEditor.amountGross}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountGross: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Grund der Änderung" : "Причина изменения"}>
+                      <textarea
+                        value={plannedCostEditor.reason}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, reason: event.target.value }) : current)}
+                        className={textareaClassName}
+                      />
+                    </Field>
+                  </div>
+                </OrderSheetSection>
+              </AdminSheetScaffold>
+            </form>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
       <Sheet open={externalInvoiceOpen} onOpenChange={resetExternalInvoiceDialog}>
         <SheetContent
           side="right"
@@ -6924,6 +7383,30 @@ function useOrdersPageContent() {
                       }
                     />
                   </div>
+                  <Field
+                    label={lang === "de" ? "Zugeordnete Leistung" : "Связанная услуга"}
+                    className="md:col-span-2"
+                  >
+                    <NativeComboboxSelect
+                      value={externalInvoiceForm.orderLeistungId}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          orderLeistungId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">
+                        {lang === "de" ? "Noch keiner Leistung zugeordnet" : "Пока не связана с услугой"}
+                      </option>
+                      {(orderDetail?.leistungen ?? []).map((leistung) => (
+                        <option key={leistung.id} value={leistung.id}>
+                          {normalizeLeistungDescription(leistung.description)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
                   <Field label={t.orders_external_invoice_date}>
                     <Input
                       type="date"
@@ -7769,6 +8252,44 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
+                {permissions.canManageEconomics ? <>
+                <Field label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostNet}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostNet: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={lang === "de" ? "Mehrwertsteuer auf geplante Partnerkosten" : "Налог на плановые затраты партнёра"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostVat}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostVat: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostGross}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostGross: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                </> : null}
               </div>
             </OrderSheetSection>
 

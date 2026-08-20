@@ -1346,6 +1346,12 @@ async fn get_patient_financial_summary(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     let include_pass_through = query.include_pass_through.unwrap_or(true);
+    if !include_pass_through {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Pass-through positions cannot yet be excluded symmetrically from revenue and cost",
+        );
+    }
 
     let invoice_rows = match sqlx::query(
         r#"SELECT id, order_id, invoice_number, status, issued_at, due_date,
@@ -1391,7 +1397,8 @@ async fn get_patient_financial_summary(
                   line_items
            FROM invoices
            WHERE patient_id = $1
-             AND status <> 'cancelled'
+             AND invoice_type <> 'advance'
+             AND status IN ('sent', 'partially_paid', 'paid', 'overdue')
              AND ($2::date IS NULL OR issued_at::date >= $2)
              AND ($3::date IS NULL OR issued_at::date <= $3)
              AND ($4::uuid IS NULL OR order_id = $4)
@@ -1442,8 +1449,10 @@ async fn get_patient_financial_summary(
 
     let external_receivable_row = match sqlx::query(
         r#"SELECT COALESCE(SUM(
-                  CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
-                      external.patient_receivable_gross - COALESCE((
+                  CASE WHEN UPPER(external.currency) = $6
+                             AND UPPER(receivable_order.currency) = $6
+                       THEN CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
+                       external.patient_receivable_gross - COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
                           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
@@ -1452,10 +1461,14 @@ async fn get_patient_financial_summary(
                             AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
                             AND patient_invoice.status NOT IN ('draft', 'cancelled')
                       ), 0),
-                      0
-                  ) END
-               ), 0) AS patient_receivable_gross
+                       0
+                   ) END ELSE 0 END
+               ), 0) AS patient_receivable_gross,
+               COUNT(*) FILTER (
+                   WHERE UPPER(external.currency) <> UPPER(receivable_order.currency)
+               ) AS currency_mismatch_count
            FROM external_invoices external
+           JOIN orders receivable_order ON receivable_order.id = external.order_id
            JOIN external_invoice_receivable_balances balance
              ON balance.external_invoice_id = external.id
            WHERE external.patient_id = $1
@@ -1470,7 +1483,10 @@ async fn get_patient_financial_summary(
                       AND package.package_id = $5
                       AND package.order_id = external.order_id
              ))
-             AND external.currency = $6"#,
+             AND (
+                 UPPER(external.currency) = $6
+                 OR UPPER(receivable_order.currency) = $6
+             )"#,
     )
     .bind(patient_id)
     .bind(from)
@@ -1492,42 +1508,75 @@ async fn get_patient_financial_summary(
     };
 
     let expense_row = match sqlx::query(
-        r#"SELECT COALESCE(SUM(amount_net), 0) AS expenses_net,
-                  COALESCE(SUM(amount_vat), 0) AS expenses_vat,
-                  COALESCE(SUM(amount_gross), 0) AS expenses_gross
-           FROM accounting_entries
-           WHERE patient_id = $1
-             AND direction = 'expense'
-             AND ($2::date IS NULL OR entry_date >= $2)
-             AND ($3::date IS NULL OR entry_date <= $3)
-             AND ($4::uuid IS NULL OR order_id = $4)
+        r#"SELECT COALESCE(SUM(external.amount_net) FILTER (
+                      WHERE UPPER(external.currency) = $6
+                        AND UPPER(patient_order.currency) = $6
+                        AND external.amount_net >= 0
+                        AND external.amount_vat >= 0
+                        AND external.amount_gross >= 0
+                        AND external.amount_net + external.amount_vat = external.amount_gross
+                  ), 0) AS expenses_net,
+                  COALESCE(SUM(external.amount_vat) FILTER (
+                      WHERE UPPER(external.currency) = $6
+                        AND UPPER(patient_order.currency) = $6
+                        AND external.amount_net >= 0
+                        AND external.amount_vat >= 0
+                        AND external.amount_gross >= 0
+                        AND external.amount_net + external.amount_vat = external.amount_gross
+                  ), 0) AS expenses_vat,
+                  COALESCE(SUM(external.amount_gross) FILTER (
+                      WHERE UPPER(external.currency) = $6
+                        AND UPPER(patient_order.currency) = $6
+                        AND external.amount_net >= 0
+                        AND external.amount_vat >= 0
+                        AND external.amount_gross >= 0
+                        AND external.amount_net + external.amount_vat = external.amount_gross
+                  ), 0) AS expenses_gross,
+                  COUNT(*) FILTER (
+                      WHERE external.amount_net < 0
+                         OR external.amount_vat < 0
+                         OR external.amount_gross < 0
+                         OR external.amount_net + external.amount_vat <> external.amount_gross
+                   ) AS invalid_expense_count,
+                   COUNT(*) FILTER (
+                       WHERE UPPER(external.currency) <> UPPER(patient_order.currency)
+                   ) AS currency_mismatch_count
+           FROM external_invoices external
+           JOIN orders patient_order ON patient_order.id = external.order_id
+           WHERE external.patient_id = $1
+             AND external.status <> 'cancelled'
+             AND external.paid_by <> 'patient'
+             AND (external.service_delivered OR external.status IN ('approved', 'paid'))
+             AND ($2::date IS NULL OR COALESCE(external.invoice_date, external.received_at::date, external.created_at::date) >= $2)
+             AND ($3::date IS NULL OR COALESCE(external.invoice_date, external.received_at::date, external.created_at::date) <= $3)
+             AND ($4::uuid IS NULL OR external.order_id = $4)
              AND ($5::uuid IS NULL OR EXISTS (
                     SELECT 1
                     FROM patient_service_packages psp
-                    WHERE psp.patient_id = accounting_entries.patient_id
+                    WHERE psp.patient_id = external.patient_id
                       AND psp.package_id = $5
                       AND (
-                            psp.order_id = accounting_entries.order_id
+                            psp.order_id = external.order_id
                             OR EXISTS (
                                 SELECT 1
                                 FROM service_package_consumptions spc
                                 WHERE spc.patient_service_package_id = psp.id
                                   AND (
-                                        spc.order_id = accounting_entries.order_id
-                                        OR spc.invoice_id = accounting_entries.source_invoice_id
+                                        spc.order_id = external.order_id
                                   )
                             )
                       )
              ))
-             AND ($6::boolean = true OR category <> 'cost_passthrough_revenue')
-             AND currency = $7"#,
+             AND (
+                 UPPER(external.currency) = $6
+                 OR UPPER(patient_order.currency) = $6
+             )"#,
     )
     .bind(patient_id)
     .bind(from)
     .bind(to)
     .bind(query.order_id)
     .bind(query.package_id)
-    .bind(include_pass_through)
     .bind(&currency)
     .fetch_one(&state.db)
     .await
@@ -1650,6 +1699,9 @@ async fn get_patient_financial_summary(
     let external_receivable_gross = external_receivable_row
         .try_get::<Decimal, _>("patient_receivable_gross")
         .unwrap_or(Decimal::ZERO);
+    let receivable_currency_mismatch_count = external_receivable_row
+        .try_get::<i64, _>("currency_mismatch_count")
+        .unwrap_or_default();
     let reconciliation_required =
         revenue_gross > Decimal::ZERO && external_receivable_gross > Decimal::ZERO;
 
@@ -1662,6 +1714,15 @@ async fn get_patient_financial_summary(
     let expenses_gross = expense_row
         .try_get::<Decimal, _>("expenses_gross")
         .unwrap_or(Decimal::ZERO);
+    let invalid_expense_count = expense_row
+        .try_get::<i64, _>("invalid_expense_count")
+        .unwrap_or_default();
+    let expense_currency_mismatch_count = expense_row
+        .try_get::<i64, _>("currency_mismatch_count")
+        .unwrap_or_default();
+    let expense_economics_valid = invalid_expense_count == 0
+        && expense_currency_mismatch_count == 0
+        && receivable_currency_mismatch_count == 0;
     let margin_net = revenue_net - expenses_net;
     let margin_percent = if revenue_net > Decimal::ZERO {
         (margin_net / revenue_net * Decimal::new(100, 0)).round_dp(2)
@@ -1669,6 +1730,18 @@ async fn get_patient_financial_summary(
         Decimal::ZERO
     };
     let margin_allowed = can_read_profit_margin(auth.role);
+    let mut issues = Vec::new();
+    if reconciliation_required {
+        issues.push("invoice_and_external_receivable_reconciliation_required");
+    }
+    if !expense_economics_valid {
+        if invalid_expense_count > 0 {
+            issues.push("external_invoice_amount_mismatch");
+        }
+        if expense_currency_mismatch_count > 0 || receivable_currency_mismatch_count > 0 {
+            issues.push("external_invoice_currency_mismatch");
+        }
+    }
 
     let service_breakdown = service_breakdown
         .into_iter()
@@ -1700,20 +1773,17 @@ async fn get_patient_financial_summary(
         "external_receivable_gross": decimal_to_string(external_receivable_gross),
         "open_balance": decimal_to_string(open_balance),
         "overdue_amount": decimal_to_string(overdue_amount),
-        "expenses_net": if margin_allowed { serde_json::json!(decimal_to_string(expenses_net)) } else { Value::Null },
-        "expenses_vat": if margin_allowed { serde_json::json!(decimal_to_string(expenses_vat)) } else { Value::Null },
-        "expenses_gross": if margin_allowed { serde_json::json!(decimal_to_string(expenses_gross)) } else { Value::Null },
-        "margin_net": if margin_allowed { serde_json::json!(decimal_to_string(margin_net)) } else { Value::Null },
-        "margin_percent": if margin_allowed { serde_json::json!(decimal_to_string(margin_percent)) } else { Value::Null },
+        "expenses_net": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(expenses_net)) } else { Value::Null },
+        "expenses_vat": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(expenses_vat)) } else { Value::Null },
+        "expenses_gross": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(expenses_gross)) } else { Value::Null },
+        "margin_net": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(margin_net)) } else { Value::Null },
+        "margin_percent": if margin_allowed && expense_economics_valid { serde_json::json!(decimal_to_string(margin_percent)) } else { Value::Null },
         "margin_visible": margin_allowed,
+        "economics_valid": expense_economics_valid,
         "reconciliation_required": reconciliation_required,
         "breakdown_by_order": order_breakdown,
         "breakdown_by_service_type": service_breakdown,
-        "issues": if reconciliation_required {
-            serde_json::json!(["invoice_and_external_receivable_reconciliation_required"])
-        } else {
-            serde_json::json!([])
-        },
+        "issues": issues,
     }))
     .into_response()
 }

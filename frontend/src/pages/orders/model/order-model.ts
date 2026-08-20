@@ -103,6 +103,7 @@ export function orderPermissions(role?: string): OrdersPermissions {
         canAddLeistung: true,
         canApproveLeistung: true,
         canManageExternalInvoices: true,
+        canManageEconomics: role === "ceo",
       };
     case "billing":
       return {
@@ -112,6 +113,7 @@ export function orderPermissions(role?: string): OrdersPermissions {
         canAddLeistung: false,
         canApproveLeistung: false,
         canManageExternalInvoices: true,
+        canManageEconomics: true,
       };
     default:
       return {
@@ -121,6 +123,7 @@ export function orderPermissions(role?: string): OrdersPermissions {
         canAddLeistung: false,
         canApproveLeistung: false,
         canManageExternalInvoices: false,
+        canManageEconomics: false,
       };
   }
 }
@@ -136,6 +139,9 @@ export function blankLeistungForm(): LeistungFormState {
     quantity: "1",
     unitPrice: "",
     vatRate: "19",
+    plannedPartnerCostNet: "",
+    plannedPartnerCostVat: "",
+    plannedPartnerCostGross: "",
     providerId: "",
     doctorId: "",
     externalDocumentId: "",
@@ -147,6 +153,7 @@ export function blankLeistungForm(): LeistungFormState {
 export function blankExternalInvoiceForm(): ExternalInvoiceFormState {
   return {
     providerId: "",
+    orderLeistungId: "",
     externalInvoiceNumber: "",
     invoiceDate: "",
     dueDate: "",
@@ -370,6 +377,17 @@ export function formatCurrency(value: unknown, currency = "EUR", _locale = "de-D
   const parsed = numberFromUnknown(value);
   // Unparseable values still render in the unified money style, never "0 EUR".
   return formatMoneyAmount(parsed ?? 0, currency);
+}
+
+export function formatOptionalCurrency(
+  value: unknown,
+  currency = "EUR",
+  locale = "de-DE",
+  unavailableLabel = "—",
+) {
+  return numberFromUnknown(value) == null
+    ? unavailableLabel
+    : formatCurrency(value, currency, locale);
 }
 
 export function formatDateTime(

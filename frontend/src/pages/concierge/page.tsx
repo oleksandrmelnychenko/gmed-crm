@@ -109,6 +109,8 @@ const text = {
     calendar: "Kalender",
     map: "Karte",
     taskManager: "Aufgaben",
+    taskManagerTitle: "Aufgabenmanager",
+    taskManagerSubtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
     active: "Aktive Services",
     today: "Heute geplant",
     overdue: "Überfällig",
@@ -155,6 +157,8 @@ const text = {
     calendar: "Календарь",
     map: "Карта",
     taskManager: "Задачи",
+    taskManagerTitle: "Менеджер задач",
+    taskManagerSubtitle: "Распределение задач, календарь событий и контроль сроков",
     active: "Активные услуги",
     today: "Запланировано сегодня",
     overdue: "Просрочено",
@@ -881,11 +885,11 @@ export function ConciergeWorkspacePage() {
   return (
     <div className="space-y-4" data-testid="concierge-workspace">
       <PageHeader
-        title={labels.title}
-        description={labels.subtitle}
+        title={viewMode === "tasks" ? labels.taskManagerTitle : labels.title}
+        description={viewMode === "tasks" ? labels.taskManagerSubtitle : labels.subtitle}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {user?.role === "concierge" && viewMode !== "tasks" ? (
+            {viewMode === "tasks" || user?.role === "concierge" ? (
               <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
                 <Plus />{labels.newTask}
               </Button>
@@ -952,7 +956,6 @@ export function ConciergeWorkspacePage() {
           now={now}
           canManageTeam={user?.role === "ceo"}
           updatingTaskId={updatingTaskId}
-          onCreate={openCreateTask}
           onEdit={openEditTask}
           onOpen={openTaskDetail}
           onStatusChange={(task, status) => void changeTaskStatus(task, status)}
@@ -966,7 +969,13 @@ export function ConciergeWorkspacePage() {
           lang={lang}
         />
       ) : viewMode === "map" ? (
-        <ConciergeMapView services={visibleServices} providers={providers} lang={lang} onBookProvider={openProviderBooking} />
+        <ConciergeMapView
+          services={services}
+          tasks={tasks}
+          providers={providers}
+          lang={lang}
+          onBookProvider={openProviderBooking}
+        />
       ) : (
         <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0">

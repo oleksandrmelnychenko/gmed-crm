@@ -9,7 +9,6 @@ import {
   ListChecks,
   MessageSquareText,
   Pencil,
-  Plus,
   Search,
   UsersRound,
 } from "lucide-react";
@@ -242,7 +241,6 @@ export function ConciergeTaskManager({
   now,
   canManageTeam,
   updatingTaskId,
-  onCreate,
   onEdit,
   onOpen,
   onStatusChange,
@@ -253,7 +251,6 @@ export function ConciergeTaskManager({
   now: Date;
   canManageTeam: boolean;
   updatingTaskId: string | null;
-  onCreate: () => void;
   onEdit: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
@@ -296,18 +293,10 @@ export function ConciergeTaskManager({
 
   return (
     <section className="space-y-3" aria-label={labels.title}>
-      <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card p-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">{labels.title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{labels.subtitle}</p>
-        </div>
-        <Button type="button" className="h-9 rounded-lg" onClick={onCreate}><Plus />{labels.newTask}</Button>
-      </div>
-
       <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg border bg-card p-3"><p className="text-[11px] text-muted-foreground">{labels.active}</p><p className="mt-1 font-mono text-xl font-semibold">{active}</p></div>
-        <div className="rounded-lg border bg-card p-3"><p className="text-[11px] text-muted-foreground">{labels.dueToday}</p><p className="mt-1 font-mono text-xl font-semibold">{scheduledToday}</p></div>
-        <div className="rounded-lg border bg-card p-3"><p className="text-[11px] text-muted-foreground">{labels.overdue}</p><p className={cn("mt-1 font-mono text-xl font-semibold", overdue > 0 && "text-rose-600")}>{overdue}</p></div>
+        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-sky-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.active}</p><p className="mt-1 font-mono text-lg font-semibold">{active}</p></div>
+        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-amber-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.dueToday}</p><p className="mt-1 font-mono text-lg font-semibold">{scheduledToday}</p></div>
+        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-rose-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.overdue}</p><p className={cn("mt-1 font-mono text-lg font-semibold", overdue > 0 && "text-rose-600")}>{overdue}</p></div>
       </div>
 
       {canManageTeam ? (
@@ -324,18 +313,17 @@ export function ConciergeTaskManager({
         </div>
       ) : null}
 
-      <div className="space-y-2 rounded-lg border border-border/70 bg-card p-2 shadow-sm">
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
-          <div className="relative xl:col-span-2"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 pl-8 text-xs" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
-          {canManageTeam ? <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select> : null}
-          <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
-          <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
-          <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
-          <select className="h-8 rounded-md border border-input bg-background px-2 text-xs" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
-        </div>
-        <div className="flex justify-center gap-1 rounded-md bg-muted p-1">
-          {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "secondary" : "ghost"} className="h-8 text-xs" onClick={() => setView(value)}><Icon />{label}</Button>)}
-        </div>
+      <div className="relative z-20 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
+        <div className="relative min-w-[240px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 rounded-md bg-field pl-8 text-xs" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
+        {canManageTeam ? <select className="h-8 w-[145px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select> : null}
+        <select className="h-8 w-[130px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
+        <select className="h-8 w-[140px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
+        <select className="h-8 w-[145px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
+        <select className="h-8 w-[125px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
+      </div>
+
+      <div className="mx-auto flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
+        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} className="h-8 rounded-md px-3 text-xs" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
       {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}

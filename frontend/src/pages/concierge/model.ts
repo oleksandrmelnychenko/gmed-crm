@@ -245,6 +245,26 @@ export type ConciergeAgendaItem = {
   address: string | null;
 };
 
+export type ConciergeRouteStop = {
+  id: string;
+  kind: "service" | "task" | "event";
+  title: string;
+  scheduledAt: string;
+  address: string | null;
+};
+
+export type ConciergeRouteSegment = {
+  url: string;
+  stopIds: string[];
+};
+
+export type ConciergeRoutePlan = {
+  segments: ConciergeRouteSegment[];
+  missingAddressStopIds: string[];
+  duplicateAddressStopIds: string[];
+  tooLongStopIds: string[];
+};
+
 export type ConciergeProviderCategory = "all" | "restaurants" | "drivers" | "hotels" | "other";
 
 export const CONCIERGE_BOARD_COLUMNS = [
@@ -528,6 +548,94 @@ export function googleMapsDirectionsUrl(address: string): string | null {
     : null;
 }
 
+const GOOGLE_MAPS_ROUTE_MAX_STOPS = 9;
+const GOOGLE_MAPS_ROUTE_MAX_URL_LENGTH = 1_900;
+
+function normalizedRouteAddress(address: string) {
+  return address.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+function googleMapsRouteUrl(addresses: string[], origin?: string): string | null {
+  if (addresses.length === 0) return null;
+  const params = new URLSearchParams({
+    api: "1",
+    destination: addresses.at(-1) ?? "",
+    travelmode: "driving",
+  });
+  if (origin) params.set("origin", origin);
+  if (addresses.length > 1) params.set("waypoints", addresses.slice(0, -1).join("|"));
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+export function buildGoogleMapsRoutePlan(
+  stops: ConciergeRouteStop[],
+  maxStops = GOOGLE_MAPS_ROUTE_MAX_STOPS,
+  maxUrlLength = GOOGLE_MAPS_ROUTE_MAX_URL_LENGTH,
+): ConciergeRoutePlan {
+  const missingAddressStopIds: string[] = [];
+  const duplicateAddressStopIds: string[] = [];
+  const tooLongStopIds: string[] = [];
+  const seenAddresses = new Set<string>();
+  const routable: Array<{ id: string; address: string }> = [];
+
+  for (const stop of stops) {
+    const address = stop.address?.trim() ?? "";
+    if (!address) {
+      missingAddressStopIds.push(stop.id);
+      continue;
+    }
+    const key = normalizedRouteAddress(address);
+    if (seenAddresses.has(key)) {
+      duplicateAddressStopIds.push(stop.id);
+      continue;
+    }
+    seenAddresses.add(key);
+    routable.push({ id: stop.id, address });
+  }
+
+  const safeMaxStops = Math.max(1, Math.min(GOOGLE_MAPS_ROUTE_MAX_STOPS, maxStops));
+  const safeMaxUrlLength = Math.max(256, maxUrlLength);
+  const segments: ConciergeRouteSegment[] = [];
+  let index = 0;
+  let previousDestination: string | undefined;
+
+  while (index < routable.length) {
+    const segmentStops: Array<{ id: string; address: string }> = [];
+    while (index < routable.length && segmentStops.length < safeMaxStops) {
+      const candidate = [...segmentStops, routable[index]];
+      const candidateUrl = googleMapsRouteUrl(
+        candidate.map((stop) => stop.address),
+        previousDestination,
+      );
+      if (!candidateUrl || candidateUrl.length > safeMaxUrlLength) {
+        if (segmentStops.length === 0) {
+          tooLongStopIds.push(routable[index].id);
+          index += 1;
+        }
+        break;
+      }
+      segmentStops.push(routable[index]);
+      index += 1;
+    }
+
+    if (segmentStops.length === 0) continue;
+    const url = googleMapsRouteUrl(
+      segmentStops.map((stop) => stop.address),
+      previousDestination,
+    );
+    if (!url) continue;
+    segments.push({ url, stopIds: segmentStops.map((stop) => stop.id) });
+    previousDestination = segmentStops.at(-1)?.address;
+  }
+
+  return {
+    segments,
+    missingAddressStopIds,
+    duplicateAddressStopIds,
+    tooLongStopIds,
+  };
+}
+
 export function conciergePartnerPhoneUrl(phone: string | null | undefined): string | null {
   const normalized = phone?.trim().replace(/[^\d+*#,;]/g, "") ?? "";
   return normalized ? `tel:${normalized}` : null;
@@ -615,6 +723,58 @@ export function conciergeServiceRouteAddress(
 ): string | null {
   const serviceAddress = service.service_address?.trim();
   return serviceAddress || conciergeProviderAddress(provider);
+}
+
+function localDateKey(value: string): string | null {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function buildConciergeRouteStops(
+  services: ConciergeService[],
+  tasks: ConciergeTask[],
+  providersById: Map<string, ConciergeProvider>,
+  dateKey: string,
+  lang: "de" | "ru" = "de",
+): ConciergeRouteStop[] {
+  const stops: ConciergeRouteStop[] = [];
+  for (const service of services) {
+    if (
+      !service.starts_at ||
+      localDateKey(service.starts_at) !== dateKey ||
+      ["completed", "cancelled"].includes(service.status)
+    ) continue;
+    stops.push({
+      id: `service:${service.id}`,
+      kind: "service",
+      title: conciergeServiceDisplayTitle(service, lang),
+      scheduledAt: service.starts_at,
+      address: conciergeServiceRouteAddress(
+        service,
+        service.provider_id ? providersById.get(service.provider_id) : null,
+      ) || null,
+    });
+  }
+  for (const task of tasks) {
+    const scheduledAt = task.kind === "event" ? task.starts_at : task.due_at;
+    if (!scheduledAt || localDateKey(scheduledAt) !== dateKey || !isConciergeTaskActive(task)) {
+      continue;
+    }
+    stops.push({
+      id: `${task.kind}:${task.id}`,
+      kind: task.kind,
+      title: conciergeTaskDisplayTitle(task, lang),
+      scheduledAt,
+      address: task.location?.trim() || null,
+    });
+  }
+  return stops.sort((left, right) =>
+    left.scheduledAt.localeCompare(right.scheduledAt) || left.id.localeCompare(right.id),
+  );
 }
 
 export function buildConciergeAgenda(
