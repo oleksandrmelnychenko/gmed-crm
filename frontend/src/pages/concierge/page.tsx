@@ -14,6 +14,7 @@ import {
   KeyRound,
   MessageSquareText,
   Plus,
+  ReceiptText,
   RefreshCw,
   Search,
   UserRound,
@@ -77,6 +78,19 @@ import {
   ConciergeMapView,
   ConciergeTaskQueue,
 } from "./workspace-views";
+import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
+import {
+  downloadConciergeExpenseReceipt,
+  getConciergeExpenseContext,
+  getConciergeExpenses,
+  uploadConciergeExpense,
+} from "./expense-receipt-api";
+import type {
+  ConciergeExpenseContext,
+  ConciergeExpenseItem,
+  ConciergeExpenseMutationResponse,
+  ConciergeExpenseSubmitInput,
+} from "./expense-receipt-model";
 
 const REALTIME_EVENTS = [
   "concierge_service.created",
@@ -88,6 +102,10 @@ const REALTIME_EVENTS = [
   "concierge_service.cost_estimate_applied",
   "concierge_service.booking_requested",
   "concierge_service.booking_confirmed",
+  "concierge_expense.submitted",
+  "concierge_expense.posted",
+  "concierge_expense.rejected",
+  "concierge_expense.reversed",
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
   "concierge_operational_item.reminder_sent",
@@ -144,6 +162,7 @@ const text = {
     cancelled: "Storniert",
     key: "Schlüssel",
     partner: "Partner",
+    expenseReceipt: "Ausgabe / Beleg",
   },
   ru: {
     title: "Рабочее пространство консьержа",
@@ -192,6 +211,7 @@ const text = {
     cancelled: "Отменено",
     key: "Ключ",
     partner: "Партнёр",
+    expenseReceipt: "Расход / документ",
   },
 } as const;
 
@@ -258,6 +278,7 @@ function ServiceCard({
   onAdvance,
   onOpenKey,
   onOpenPartner,
+  onOpenExpense,
   compact = false,
 }: {
   service: ConciergeService;
@@ -268,6 +289,7 @@ function ServiceCard({
   onAdvance: (service: ConciergeService) => void;
   onOpenKey: (service: ConciergeService) => void;
   onOpenPartner?: (service: ConciergeService) => void;
+  onOpenExpense: (service: ConciergeService) => void;
   compact?: boolean;
 }) {
   const nextStatus = nextConciergeServiceStatus(service.status);
@@ -377,6 +399,16 @@ function ServiceCard({
             {labels.partner}
           </Button>
         ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-full rounded-md text-xs sm:w-auto"
+          onClick={() => onOpenExpense(service)}
+        >
+          <ReceiptText />
+          {labels.expenseReceipt}
+        </Button>
         {nextStatus ? (
           <Button
             type="button"
@@ -477,6 +509,14 @@ export function ConciergeWorkspacePage() {
   const [bookingProviderId, setBookingProviderId] = useState<string | null>(null);
   const [bookingError, setBookingError] = useState("");
   const [submittingBooking, setSubmittingBooking] = useState(false);
+  const [expenseServiceId, setExpenseServiceId] = useState<string | null>(null);
+  const [expenseContext, setExpenseContext] = useState<ConciergeExpenseContext | null>(null);
+  const [expenseItems, setExpenseItems] = useState<ConciergeExpenseItem[]>([]);
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseError, setExpenseError] = useState("");
+  const [submittingExpense, setSubmittingExpense] = useState(false);
+  const [expenseProgress, setExpenseProgress] = useState(0);
+  const expenseLoadSequenceRef = useRef(0);
   const now = useMemo(() => new Date(), [version, services, tasks]);
 
   const requestRefresh = useCallback(() => {
@@ -487,7 +527,20 @@ export function ConciergeWorkspacePage() {
     setVersion((current) => current + 1);
   }, []);
 
-  useDebouncedRealtimeSubscription(REALTIME_EVENTS, requestRefresh, 250);
+  const handleRealtimeRefresh = useCallback(() => {
+    requestRefresh();
+    if (!expenseServiceId) return;
+    const loadSequence = expenseLoadSequenceRef.current;
+    void getConciergeExpenses(expenseServiceId)
+      .then((history) => {
+        if (expenseLoadSequenceRef.current === loadSequence) setExpenseItems(history.items);
+      })
+      .catch(() => {
+        // The regular workspace refresh remains authoritative if expense history is unavailable.
+      });
+  }, [expenseServiceId, requestRefresh]);
+
+  useDebouncedRealtimeSubscription(REALTIME_EVENTS, handleRealtimeRefresh, 250);
 
   useEffect(() => {
     let cancelled = false;
@@ -577,6 +630,76 @@ export function ConciergeWorkspacePage() {
     () => providers.find((provider) => provider.id === bookingProviderId) ?? null,
     [bookingProviderId, providers],
   );
+  const expenseService = useMemo(
+    () => services.find((service) => service.id === expenseServiceId) ?? null,
+    [expenseServiceId, services],
+  );
+
+  async function openExpenseReceipt(service: ConciergeService) {
+    const loadSequence = expenseLoadSequenceRef.current + 1;
+    expenseLoadSequenceRef.current = loadSequence;
+    setExpenseServiceId(service.id);
+    setExpenseContext(null);
+    setExpenseItems([]);
+    setExpenseError("");
+    setExpenseProgress(0);
+    setExpenseLoading(true);
+    try {
+      const [context, history] = await Promise.all([
+        getConciergeExpenseContext(service.id),
+        getConciergeExpenses(service.id),
+      ]);
+      if (expenseLoadSequenceRef.current !== loadSequence) return;
+      setExpenseContext(context);
+      setExpenseItems(history.items);
+    } catch (loadError) {
+      if (expenseLoadSequenceRef.current !== loadSequence) return;
+      setExpenseError(loadError instanceof Error ? loadError.message : labels.loadFailed);
+    } finally {
+      if (expenseLoadSequenceRef.current === loadSequence) setExpenseLoading(false);
+    }
+  }
+
+  async function submitExpense(input: ConciergeExpenseSubmitInput): Promise<ConciergeExpenseMutationResponse> {
+    if (!expenseService || submittingExpense) throw new Error(labels.updateFailed);
+    setSubmittingExpense(true);
+    setExpenseError("");
+    setExpenseProgress(0);
+    try {
+      const response = await uploadConciergeExpense(
+        expenseService.id,
+        input,
+        setExpenseProgress,
+      );
+      setExpenseItems((current) => {
+        const withoutSubmitted = current.filter((item) => item.id !== response.item.id);
+        return [response.item, ...withoutSubmitted];
+      });
+      clearApiCache(`/concierge-services/${expenseService.id}/expenses`);
+      requestRefresh();
+      return response;
+    } catch (submitError) {
+      setExpenseError(submitError instanceof Error ? submitError.message : labels.updateFailed);
+      throw submitError;
+    } finally {
+      setSubmittingExpense(false);
+    }
+  }
+
+  async function downloadExpenseReceipt(item: ConciergeExpenseItem) {
+    if (!expenseService) return;
+    setExpenseError("");
+    try {
+      await downloadConciergeExpenseReceipt(
+        expenseService.id,
+        item.id,
+        item.receipt.original_filename,
+      );
+    } catch (downloadError) {
+      setExpenseError(downloadError instanceof Error ? downloadError.message : labels.loadFailed);
+      throw downloadError;
+    }
+  }
 
   function openProviderBooking(provider: ConciergeProvider) {
     setBookingProviderId(provider.id);
@@ -1011,6 +1134,7 @@ export function ConciergeWorkspacePage() {
                               now={now}
                               onAdvance={advanceService}
                               onOpenKey={openKeyHandover}
+                              onOpenExpense={(item) => void openExpenseReceipt(item)}
                               onOpenPartner={
                                 service.provider_id && providersById.has(service.provider_id)
                                   ? openPartnerInteraction
@@ -1036,6 +1160,7 @@ export function ConciergeWorkspacePage() {
                     now={now}
                     onAdvance={advanceService}
                     onOpenKey={openKeyHandover}
+                    onOpenExpense={(item) => void openExpenseReceipt(item)}
                     onOpenPartner={
                       service.provider_id && providersById.has(service.provider_id)
                         ? openPartnerInteraction
@@ -1097,6 +1222,28 @@ export function ConciergeWorkspacePage() {
           if (!open) setBookingProviderId(null);
         }}
         onSave={saveProviderBooking}
+      />
+      <ConciergeExpenseReceiptDialog
+        service={expenseService}
+        lang={lang}
+        open={Boolean(expenseServiceId)}
+        context={expenseContext}
+        expenses={expenseItems}
+        loading={expenseLoading}
+        error={expenseError}
+        submitting={submittingExpense}
+        progress={expenseProgress}
+        onOpenChange={(open) => {
+          if (open) return;
+          expenseLoadSequenceRef.current += 1;
+          setExpenseServiceId(null);
+          setExpenseContext(null);
+          setExpenseItems([]);
+          setExpenseError("");
+          setExpenseProgress(0);
+        }}
+        onSubmit={submitExpense}
+        onDownload={downloadExpenseReceipt}
       />
       <ConciergeTaskEventDialog
         item={editingTask}

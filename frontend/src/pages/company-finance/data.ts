@@ -1,4 +1,9 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiFetchFile, downloadApiFile } from "@/lib/api";
+
+import {
+  conciergeExpenseQueueCompleteness,
+  mergeConciergeExpenseQueue,
+} from "./concierge-expense-review-model";
 
 import type {
   CompanyFinancialFilters,
@@ -8,6 +13,12 @@ import type {
   CompanyProviderFinancialSummary,
   CompanyProviderSettlement,
   CompanyProviderStatement,
+  CompanyConciergeExpenseContext,
+  CompanyConciergeExpenseListResponse,
+  CompanyConciergeExpenseMutationResponse,
+  CompanyConciergeExpensePostPayload,
+  CompanyConciergeExpenseQueuePayload,
+  CompanyConciergeServiceSummary,
 } from "./types";
 
 export function buildCompanyFinancialPositionPath(filters: CompanyFinancialFilters) {
@@ -175,4 +186,97 @@ export function buildCompanyProviderStatementPath(
     currency: filters.currency || "EUR",
   });
   return `/company-provider-statements/${providerId}?${params.toString()}`;
+}
+
+const EXPENSE_QUEUE_CONCURRENCY = 6;
+
+export async function fetchCompanyConciergeExpenseQueue(
+  forceFresh = false,
+): Promise<CompanyConciergeExpenseQueuePayload> {
+  const services = await apiFetch<CompanyConciergeServiceSummary[]>("/concierge-services", {
+    forceFresh,
+  });
+  const sources: Array<{
+    service: CompanyConciergeServiceSummary;
+    items: CompanyConciergeExpenseListResponse["items"];
+  }> = [];
+  let failedServiceCount = 0;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < services.length) {
+      const index = cursor;
+      cursor += 1;
+      const service = services[index];
+      try {
+        const response = await apiFetch<CompanyConciergeExpenseListResponse>(
+          `/concierge-services/${service.id}/expenses`,
+          { forceFresh },
+        );
+        sources.push({ service, items: response.items });
+      } catch {
+        failedServiceCount += 1;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(EXPENSE_QUEUE_CONCURRENCY, services.length) },
+      () => worker(),
+    ),
+  );
+  const completeness = conciergeExpenseQueueCompleteness(services.length, failedServiceCount);
+  return {
+    rows: mergeConciergeExpenseQueue(sources),
+    service_count: services.length,
+    failed_service_count: failedServiceCount,
+    ...completeness,
+  };
+}
+
+export function fetchCompanyConciergeExpenseContext(serviceId: string) {
+  return apiFetch<CompanyConciergeExpenseContext>(
+    `/concierge-services/${serviceId}/expense-context`,
+    { forceFresh: true },
+  );
+}
+
+export function postCompanyConciergeExpense(
+  serviceId: string,
+  expenseId: string,
+  payload: CompanyConciergeExpensePostPayload,
+) {
+  return apiFetch<CompanyConciergeExpenseMutationResponse>(
+    `/concierge-services/${serviceId}/expenses/${expenseId}/post`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function rejectCompanyConciergeExpense(
+  serviceId: string,
+  expenseId: string,
+  payload: { request_id: string; reason: string },
+) {
+  return apiFetch<CompanyConciergeExpenseMutationResponse>(
+    `/concierge-services/${serviceId}/expenses/${expenseId}/reject`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function fetchCompanyConciergeExpenseReceipt(serviceId: string, expenseId: string) {
+  return apiFetchFile(
+    `/concierge-services/${serviceId}/expenses/${expenseId}/receipt`,
+  );
+}
+
+export function downloadCompanyConciergeExpenseReceipt(
+  serviceId: string,
+  expenseId: string,
+  fallbackFilename: string,
+) {
+  return downloadApiFile(
+    `/concierge-services/${serviceId}/expenses/${expenseId}/receipt`,
+    fallbackFilename,
+  );
 }

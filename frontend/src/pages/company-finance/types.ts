@@ -257,3 +257,150 @@ export type CompanyFinancialFilters = {
   movement: "all" | CompanyCashMovementKind;
   search: string;
 };
+
+export type CompanyConciergeExpenseStatus =
+  | "pending_review"
+  | "posted"
+  | "rejected"
+  | "reversed";
+
+export type CompanyConciergeExpensePaidBy = "patient" | "agency" | "unpaid";
+
+export type CompanyConciergeServiceSummary = {
+  id: string;
+  patient_id: string;
+  patient_name: string;
+  patient_pid: string;
+  title: string;
+  status: string;
+  currency: string;
+  provider_id: string | null;
+  provider_name: string | null;
+};
+
+export type CompanyConciergeExpenseActor = {
+  id: string | null;
+  display_name: string | null;
+};
+
+export type CompanyConciergeExpenseHistoryEvent = {
+  action: "submitted" | "posted" | "rejected" | "reversed";
+  actor: CompanyConciergeExpenseActor;
+  reason: string | null;
+  created_at: string | null;
+};
+
+export type CompanyConciergeExpenseItem = {
+  id: string;
+  concierge_service_id: string;
+  patient_id: string;
+  order_id: string | null;
+  order_number: string | null;
+  order_leistung_id: string | null;
+  order_leistung_name: string | null;
+  vendor: string;
+  expense_date: string;
+  amount_net: string;
+  amount_vat: string;
+  amount_gross: string;
+  currency: string;
+  paid_by: CompanyConciergeExpensePaidBy;
+  service_delivered: boolean;
+  note: string | null;
+  status: CompanyConciergeExpenseStatus;
+  submitted_by: CompanyConciergeExpenseActor;
+  submitted_at: string | null;
+  receipt: {
+    document_id: string;
+    original_filename: string | null;
+    mime_type: string | null;
+    file_size: number | null;
+    download_url: string;
+  };
+  external_invoice: {
+    id: string;
+    status: string | null;
+    paid_by: string | null;
+    service_delivered: boolean | null;
+    provider_payment_transaction_id: string | null;
+    settlement_status: string | null;
+  } | null;
+  balance_consequence: {
+    posting_pending: boolean;
+    patient_receivable_gross: string;
+    company_paid_gross: string;
+    provider_liability_gross: string;
+    intended_patient_receivable_gross: string;
+    intended_company_paid_gross: string;
+    intended_provider_liability_gross: string;
+  };
+  history: CompanyConciergeExpenseHistoryEvent[];
+};
+
+export type CompanyConciergeExpenseReviewRow = CompanyConciergeExpenseItem & {
+  service: CompanyConciergeServiceSummary;
+};
+
+export type CompanyConciergeExpenseOrderService = {
+  id: string;
+  name: string;
+  description: string | null;
+  provider_id: string | null;
+};
+
+export type CompanyConciergeExpenseOrder = {
+  id: string;
+  order_number: string;
+  currency: string;
+  status: string;
+  leistungen: CompanyConciergeExpenseOrderService[];
+};
+
+export type CompanyConciergeExpenseContext = {
+  patient: {
+    id: string;
+    display_name: string;
+    pid: string;
+  };
+  service: {
+    id: string;
+    title: string;
+    currency: string;
+    provider_id: string | null;
+  };
+  mapped_order: CompanyConciergeExpenseOrder | null;
+  eligible_orders: CompanyConciergeExpenseOrder[];
+};
+
+export type CompanyConciergeExpensePaymentMethod =
+  | "bank_transfer"
+  | "cash"
+  | "card"
+  | "other";
+
+export type CompanyConciergeExpensePostPayload = {
+  request_id: string;
+  order_id: string;
+  order_leistung_id: string | null;
+  financial_account_id: string | null;
+  paid_on: string | null;
+  payment_method: CompanyConciergeExpensePaymentMethod | null;
+  payment_reference: string | null;
+};
+
+export type CompanyConciergeExpenseMutationResponse = {
+  item: CompanyConciergeExpenseItem;
+  idempotent_replay: boolean;
+};
+
+export type CompanyConciergeExpenseListResponse = {
+  items: CompanyConciergeExpenseItem[];
+};
+
+export type CompanyConciergeExpenseQueuePayload = {
+  rows: CompanyConciergeExpenseReviewRow[];
+  service_count: number;
+  failed_service_count: number;
+  service_list_truncated: boolean;
+  complete: boolean;
+};

@@ -10179,6 +10179,18 @@ fn can_view_document_row(
     row: &sqlx::postgres::PgRow,
     assignment_set: &HashSet<Uuid>,
 ) -> bool {
+    let is_concierge_expense_receipt = row
+        .try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default()
+        .as_deref()
+        == Some("concierge_expense_receipt");
+    if is_concierge_expense_receipt {
+        let uploaded_by = row
+            .try_get::<Option<Uuid>, _>("uploaded_by")
+            .unwrap_or_default();
+        return matches!(auth.role, Role::Ceo | Role::Billing)
+            || (auth.role == Role::Concierge && uploaded_by == Some(auth.user_id));
+    }
     let visibility = row
         .try_get::<String, _>("visibility")
         .unwrap_or_else(|_| "internal".to_string());
@@ -10692,6 +10704,66 @@ pub(crate) async fn persist_document_file(
     }
 
     Ok((document_id, file_size, original_filename, storage_key))
+}
+
+/// Store only the private upload blob. Callers that need the
+/// document row to participate in a larger business transaction insert that
+/// row through their own SQL transaction and remove this blob if the
+/// transaction fails.
+pub(crate) async fn store_document_blob(
+    data: &[u8],
+    original_filename: &str,
+) -> Result<(i64, String, String), axum::response::Response> {
+    let original_filename = if original_filename.trim().is_empty() {
+        "document.bin".to_string()
+    } else {
+        original_filename.trim().to_string()
+    };
+    let compact_filename = compact_storage_filename(&original_filename, 96);
+    let storage_key = format!("{}_{}", Uuid::new_v4(), compact_filename);
+    let file_size = data.len() as i64;
+
+    if let Err(error) = tokio::fs::create_dir_all(FsPath::new(UPLOAD_DIR)).await {
+        tracing::error!(error = %error, "create document upload directory");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+    }
+    let path = FsPath::new(UPLOAD_DIR).join(&storage_key);
+    if let Err(error) = tokio::fs::write(&path, data).await {
+        tracing::error!(error = %error, "write document file");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Err(error) =
+            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await
+        {
+            tracing::error!(error = %error, path = %path.display(), "restrict document file permissions");
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+        }
+    }
+
+    Ok((file_size, storage_key, original_filename))
+}
+
+pub(crate) async fn remove_document_blob(storage_key: &str) {
+    let storage_key = storage_key.trim();
+    if storage_key.is_empty()
+        || storage_key.contains('/')
+        || storage_key.contains('\\')
+        || storage_key.contains("..")
+    {
+        tracing::warn!(storage_key, "refusing to remove unsafe document storage key");
+        return;
+    }
+    let path = FsPath::new(UPLOAD_DIR).join(storage_key);
+    if let Err(error) = tokio::fs::remove_file(&path).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(error = %error, path = %path.display(), "remove orphaned document blob");
+    }
 }
 
 async fn stage_document_file_delete(
@@ -17962,7 +18034,13 @@ async fn get_document(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let receipt_access = match concierge_expense_receipt_access(&state, &auth, id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if receipt_access == Some(false)
+        || (receipt_access.is_none() && !can_view_document_row(&auth, &row, &assignment_set))
+    {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -19028,6 +19106,34 @@ fn document_attachment_response(
     }
 }
 
+async fn concierge_expense_receipt_access(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+) -> Result<Option<bool>, axum::response::Response> {
+    let assigned_concierge_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        r#"SELECT service.assigned_concierge_id
+           FROM concierge_expense_submissions submission
+           JOIN concierge_services service ON service.id = submission.concierge_service_id
+           WHERE submission.receipt_document_id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, document_id = %document_id, "validate Concierge receipt document access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document access",
+        )
+    })?;
+
+    Ok(assigned_concierge_id.map(|assigned| {
+        matches!(auth.role, Role::Ceo | Role::Billing)
+            || (auth.role == Role::Concierge && assigned == Some(auth.user_id))
+    }))
+}
+
 async fn download_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -19056,7 +19162,13 @@ async fn download_document(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let receipt_access = match concierge_expense_receipt_access(&state, &auth, id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if receipt_access == Some(false)
+        || (receipt_access.is_none() && !can_view_document_row(&auth, &row, &assignment_set))
+    {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

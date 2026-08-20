@@ -21,6 +21,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
+import { ConciergeExpenseReviewPanel } from "./concierge-expense-review-panel";
 import { ProviderSettlementDialog } from "./provider-settlement-dialog";
 import { ProviderStatementDialog } from "./provider-statement-dialog";
 import {
@@ -83,6 +84,7 @@ const textByLanguage = {
     providers: "Поставщики",
     cash: "Движение денег",
     financialAccounts: "Счета GMED",
+    conciergeExpenses: "Расходы Concierge",
     financialAccount: "Счет GMED",
     unassignedAccount: "Не распределено",
     assignmentFailed: "Не удалось изменить счет денежной операции.",
@@ -163,6 +165,7 @@ const textByLanguage = {
     providers: "Leistungserbringer",
     cash: "Geldbewegungen",
     financialAccounts: "GMED-Konten",
+    conciergeExpenses: "Concierge-Auslagen",
     financialAccount: "GMED-Konto",
     unassignedAccount: "Nicht zugeordnet",
     assignmentFailed: "Das Konto der Geldbewegung konnte nicht geändert werden.",
@@ -298,6 +301,7 @@ export function CompanyFinancePage() {
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [assignmentBusyId, setAssignmentBusyId] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
+  const [conciergeExpensePendingCount, setConciergeExpensePendingCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -720,6 +724,7 @@ export function CompanyFinancePage() {
             {([
               ["patients", text.patients, position.patient_positions.length],
               ["providers", text.providers, position.provider_positions.length],
+              ["concierge-expenses", text.conciergeExpenses, conciergeExpensePendingCount],
               ["accounts", text.financialAccounts, accounts.items.length],
               ["cash", text.cash, position.cash_movement_count],
             ] as const).map(([value, label, count]) => (
@@ -833,6 +838,15 @@ export function CompanyFinancePage() {
               locale={locale}
               money={money}
               onChanged={() => setReloadToken((current) => current + 1)}
+            />
+          </TabsContent>
+
+          <TabsContent value="concierge-expenses">
+            <ConciergeExpenseReviewPanel
+              accounts={accounts.items}
+              locale={locale}
+              onChanged={() => setReloadToken((current) => current + 1)}
+              onPendingCountChange={setConciergeExpensePendingCount}
             />
           </TabsContent>
 
