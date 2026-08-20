@@ -171,6 +171,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "main", labelKey: "nav_concierge_workspace" },
   },
   {
+    id: "task-manager",
+    match: "exact",
+    path: "/task-manager",
+    roles: ROLES_CONCIERGE_WORKSPACE,
+    nav: { section: "main", labelKey: "nav_task_manager", after: "concierge" },
+  },
+  {
     id: "admin/access",
     match: "prefix",
     path: "/admin/access",

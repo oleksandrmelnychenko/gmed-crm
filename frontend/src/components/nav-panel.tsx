@@ -65,6 +65,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   dashboard: LayoutDashboard,
   notifications: BellRing,
   concierge: ConciergeBell,
+  "task-manager": ClipboardList,
   chat: MessagesSquare,
   feedback: MessageCircleHeart,
   reports: ChartSpline,

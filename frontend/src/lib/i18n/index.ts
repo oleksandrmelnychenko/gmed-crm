@@ -27,6 +27,7 @@ export interface Translations
 
   nav_dashboard: string;
   nav_concierge_workspace: string;
+  nav_task_manager: string;
   nav_main: string;
   nav_documents: string;
   nav_specializations: string;

@@ -34,6 +34,7 @@ describe("first-release staff RBAC", () => {
       "/documents/document-1",
       "/specializations",
       "/concierge",
+      "/task-manager",
       "/services",
       "/appointments",
       "/employees",
@@ -57,6 +58,7 @@ describe("first-release staff RBAC", () => {
       "/providers/provider-1",
       "/documents",
       "/concierge",
+      "/task-manager",
       "/services",
       "/appointments",
       "/employees",
@@ -115,6 +117,7 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/appointments");
     expect(concierge).toContain("/employees");
     expect(concierge).toContain("/concierge");
+    expect(concierge).toContain("/task-manager");
     expect(concierge).not.toContain("/feedback");
     expect(concierge).not.toContain("/reports");
 
@@ -123,6 +126,7 @@ describe("first-release staff RBAC", () => {
     expect(billing).toContain("/company-finance");
     expect(billing).toContain("/finance-catalog");
     expect(billing).not.toContain("/concierge");
+    expect(billing).not.toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual(["/"]);

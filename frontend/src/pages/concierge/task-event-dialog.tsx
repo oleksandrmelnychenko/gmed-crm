@@ -144,6 +144,7 @@ export function ConciergeTaskEventDialog({
   assignees,
   currentUserId,
   canAssign,
+  showServiceLink = true,
   lang,
   open,
   submitting,
@@ -156,6 +157,7 @@ export function ConciergeTaskEventDialog({
   assignees: ConciergeAssignee[];
   currentUserId: string | null;
   canAssign: boolean;
+  showServiceLink?: boolean;
   lang: Lang;
   open: boolean;
   submitting: boolean;
@@ -209,7 +211,11 @@ export function ConciergeTaskEventDialog({
         kind,
         title: title.trim(),
         note: note.trim() || null,
-        concierge_service_id: serviceId || null,
+        concierge_service_id: showServiceLink
+          ? serviceId || null
+          : item && assigneeId !== item.assigned_to
+            ? null
+            : item?.concierge_service_id ?? null,
         due_at: kind === "task" ? toIso(dueAt) : null,
         starts_at: kind === "event" ? toIso(startsAt) : null,
         ends_at: kind === "event" ? toIso(endsAt) : null,
@@ -252,14 +258,17 @@ export function ConciergeTaskEventDialog({
               </ConciergeDialogSection>
 
               <div className="space-y-4">
-                <ConciergeDialogSection title={labels.assignmentSection} icon={Link2}>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                    <ConciergeField label={labels.linkedService}>
-                      <select className={selectClass} value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
-                        <option value="">{labels.noService}</option>
-                        {sortedServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)}</option>)}
-                      </select>
-                    </ConciergeField>
+                {showServiceLink || canAssign ? (
+                  <ConciergeDialogSection title={labels.assignmentSection} icon={Link2}>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                      {showServiceLink ? (
+                        <ConciergeField label={labels.linkedService}>
+                          <select className={selectClass} value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
+                            <option value="">{labels.noService}</option>
+                            {sortedServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)}</option>)}
+                          </select>
+                        </ConciergeField>
+                      ) : null}
                     {canAssign ? (
                       <ConciergeField label={labels.assignee}>
                         <select className={selectClass} value={assigneeId} required onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
@@ -268,8 +277,9 @@ export function ConciergeTaskEventDialog({
                         </select>
                       </ConciergeField>
                     ) : null}
-                  </div>
-                </ConciergeDialogSection>
+                    </div>
+                  </ConciergeDialogSection>
+                ) : null}
 
                 <ConciergeDialogSection title={labels.planningSection} icon={Bell}>
                   <div className="grid gap-3 sm:grid-cols-2">

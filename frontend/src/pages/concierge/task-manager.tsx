@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -75,6 +75,7 @@ const copy = {
     edit: "Bearbeiten",
     moveTo: "Status ändern",
     unplanned: "Ohne Termin",
+    more: "weitere",
   },
   ru: {
     title: "Менеджер задач",
@@ -116,6 +117,7 @@ const copy = {
     edit: "Изменить",
     moveTo: "Изменить статус",
     unplanned: "Без даты",
+    more: "ещё",
   },
 } as const;
 
@@ -260,12 +262,14 @@ export function ConciergeTaskManager({
   const [view, setView] = useState<TaskView>("board");
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
+  const [clock, setClock] = useState(() => Date.now());
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", timing: "all" });
-  const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, now)), [filters, now, tasks]);
-  const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, now), [assignees, now, tasks]);
+  const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
+  const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
+  const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
   const active = tasks.filter((task) => !["completed", "cancelled"].includes(task.status)).length;
-  const overdue = tasks.filter((task) => isConciergeTaskOverdue(task, now)).length;
-  const scheduledToday = tasks.filter((task) => conciergeTaskScheduledAt(task) && dateKey(conciergeTaskScheduledAt(task) as Date) === dateKey(now)).length;
+  const overdue = tasks.filter((task) => isConciergeTaskOverdue(task, effectiveNow)).length;
+  const scheduledToday = tasks.filter((task) => conciergeTaskScheduledAt(task) && dateKey(conciergeTaskScheduledAt(task) as Date) === dateKey(effectiveNow)).length;
   const days = useMemo(() => calendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
   const tasksByDay = useMemo(() => {
     const result = new Map<string, ConciergeTask[]>();
@@ -277,6 +281,11 @@ export function ConciergeTaskManager({
     });
     return result;
   }, [filtered]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function shiftCalendar(direction: number) {
     const next = new Date(focusDate);
@@ -329,20 +338,20 @@ export function ConciergeTaskManager({
         </div>
       </div>
 
-      {filtered.length === 0 ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}
+      {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}
 
       {filtered.length > 0 && view === "board" ? (
         <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
           {statuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={now} updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={now} compact updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div> : null}
 
-      {filtered.length > 0 && view === "calendar" ? (
+      {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
             <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
@@ -350,13 +359,31 @@ export function ConciergeTaskManager({
             <div className="flex gap-1">{(["day", "week", "month"] as const).map((scale) => <Button key={scale} type="button" size="sm" variant={calendarScale === scale ? "secondary" : "ghost"} className="h-8 text-xs" onClick={() => setCalendarScale(scale)}>{labels[scale]}</Button>)}</div>
           </div>
           <div className="overflow-x-auto">
-          <div className={cn("grid", calendarScale === "day" ? "grid-cols-1" : "min-w-[700px] grid-cols-7")}>
-            {days.map((day) => {
-              const rows = tasksByDay.get(dateKey(day)) ?? [];
-              const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
-              return <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5", outsideMonth && "bg-muted/30 text-muted-foreground")}><div className={cn("mb-1 text-xs font-medium", dateKey(day) === dateKey(now) && "text-primary")}>{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { weekday: calendarScale === "month" ? undefined : "short", day: "2-digit", month: calendarScale === "day" ? "long" : undefined }).format(day)}</div><div className="space-y-1">{rows.slice(0, calendarScale === "month" ? 3 : 12).map((task) => <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>)}</div></div>;
-            })}
-          </div>
+            <div className={cn("grid", calendarScale === "day" ? "grid-cols-1" : "min-w-[700px] grid-cols-7")}>
+              {days.map((day) => {
+                const rows = tasksByDay.get(dateKey(day)) ?? [];
+                const visibleLimit = calendarScale === "month" ? 3 : 12;
+                const hiddenCount = Math.max(0, rows.length - visibleLimit);
+                const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
+                return (
+                  <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5", outsideMonth && "bg-muted/30 text-muted-foreground")}>
+                    <div className={cn("mb-1 text-xs font-medium", dateKey(day) === dateKey(effectiveNow) && "text-primary")}>
+                      {new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { weekday: calendarScale === "month" ? undefined : "short", day: "2-digit", month: calendarScale === "day" ? "long" : undefined }).format(day)}
+                    </div>
+                    <div className="space-y-1">
+                      {rows.slice(0, visibleLimit).map((task) => (
+                        <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
+                      ))}
+                      {hiddenCount > 0 ? (
+                        <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" onClick={() => setView("list")}>
+                          +{hiddenCount} {labels.more}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       ) : null}

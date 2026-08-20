@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
@@ -91,6 +91,9 @@ const REALTIME_EVENTS = [
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
   "concierge_operational_item.reminder_sent",
+  "concierge_operational_item.comment_added",
+  "concierge_operational_item.checklist_item_added",
+  "concierge_operational_item.checklist_item_toggled",
 ] as const;
 
 const text = {
@@ -455,6 +458,7 @@ export function ConciergeWorkspacePage() {
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
+  const createTaskRequestIdRef = useRef<string | null>(null);
   const [keyServiceId, setKeyServiceId] = useState<string | null>(null);
   const [keyEvents, setKeyEvents] = useState<ConciergeKeyEvent[]>([]);
   const [loadingKeyEvents, setLoadingKeyEvents] = useState(false);
@@ -761,6 +765,7 @@ export function ConciergeWorkspacePage() {
       const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${task.id}/update`, {
         method: "POST",
         body: JSON.stringify({
+          expected_updated_at: task.updated_at,
           kind: task.kind,
           title: task.title,
           note: task.note,
@@ -793,6 +798,7 @@ export function ConciergeWorkspacePage() {
   function openCreateTask() {
     setTaskError("");
     setEditingTask(null);
+    createTaskRequestIdRef.current = crypto.randomUUID();
     setTaskDialogOpen(true);
   }
 
@@ -827,14 +833,23 @@ export function ConciergeWorkspacePage() {
     setError("");
     try {
       const { status, ...fields } = input;
+      const createRequestId = createTaskRequestIdRef.current ?? crypto.randomUUID();
+      if (!editingTask) createTaskRequestIdRef.current = createRequestId;
       const saved = editingTask
         ? await apiFetch<ConciergeTask>(`/concierge-operational-items/${editingTask.id}/update`, {
             method: "POST",
-            body: JSON.stringify({ ...fields, status }),
+            body: JSON.stringify({
+              ...fields,
+              status,
+              expected_updated_at: editingTask.updated_at,
+            }),
           })
         : await apiFetch<ConciergeTask>("/concierge-operational-items", {
             method: "POST",
-            body: JSON.stringify(fields),
+            body: JSON.stringify({
+              ...fields,
+              request_id: createRequestId,
+            }),
           });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => {
@@ -845,6 +860,7 @@ export function ConciergeWorkspacePage() {
       });
       setTaskDialogOpen(false);
       setEditingTask(null);
+      createTaskRequestIdRef.current = null;
     } catch (saveError) {
       setTaskError(saveError instanceof Error ? saveError.message : labels.taskUpdateFailed);
       throw saveError;
@@ -1085,7 +1101,10 @@ export function ConciergeWorkspacePage() {
         error={taskError}
         onOpenChange={(open) => {
           setTaskDialogOpen(open);
-          if (!open) setEditingTask(null);
+          if (!open) {
+            setEditingTask(null);
+            createTaskRequestIdRef.current = null;
+          }
         }}
         onSave={saveTask}
       />

@@ -140,6 +140,7 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
         path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Confirm the driver",
             "note": "Call before pickup",
@@ -166,6 +167,7 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
         path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "event",
             "title": "Key pickup",
             "starts_at": "2026-08-20T10:00:00Z",
@@ -188,6 +190,7 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
 
     let update_path = format!("{path}/{task_id}/update");
     let update_body = json!({
+        "expected_updated_at": task["updated_at"],
         "kind": "task",
         "title": "Driver confirmed",
         "note": "Pickup point agreed",
@@ -207,10 +210,17 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
 
     let (status, updated) =
-        json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body)).await;
+        json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body.clone())).await;
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(updated["status"], "completed");
     assert!(updated["completed_at"].is_string());
+
+    let (status, stale_update) =
+        json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale_update}");
+    let (status, current) = json_request(&ctx.app, "GET", &update_path.replace("/update", ""), &bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["item"]["status"], "completed");
 
     let (status, generic) = json_request(
         &ctx.app,
@@ -234,6 +244,143 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
 }
 
 #[tokio::test]
+async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("create-idem-{tag}")).await;
+    let other_id = seed_user(&ctx.pool, "concierge", &format!("create-other-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("create-idem-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("create-idem-{tag}")).await;
+    let service_id = seed_service(
+        &ctx.pool,
+        patient_id,
+        provider_id,
+        concierge_id,
+        ctx.admin_id,
+        "Idempotent driver coordination",
+    )
+    .await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let path = "/api/v1/concierge-operational-items";
+    let request_id = Uuid::new_v4();
+    let body = json!({
+        "request_id": request_id,
+        "kind": "task",
+        "title": "Create exactly once",
+        "note": "Stable normalized payload",
+        "concierge_service_id": service_id,
+        "due_at": "2026-08-20T09:00:00Z",
+        "priority": "high"
+    });
+
+    let (first_status, first) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(body.clone())).await;
+    assert_eq!(first_status, StatusCode::CREATED, "{first}");
+    let (replay_status, replay) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(body.clone())).await;
+    assert_eq!(replay_status, StatusCode::OK, "{replay}");
+    assert_eq!(first["id"], replay["id"]);
+
+    let mut drifted = body.clone();
+    drifted["title"] = json!("Different task");
+    let (drift_status, drift) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(drifted)).await;
+    assert_eq!(drift_status, StatusCode::CONFLICT, "{drift}");
+
+    let concurrent_request_id = Uuid::new_v4();
+    let concurrent_body = json!({
+        "request_id": concurrent_request_id,
+        "kind": "event",
+        "title": "Concurrent create",
+        "starts_at": "2026-08-20T10:00:00Z",
+        "ends_at": "2026-08-20T10:30:00Z",
+        "location": "Main entrance"
+    });
+    let (concurrent_first, concurrent_second) = tokio::join!(
+        json_request(
+            &ctx.app,
+            "POST",
+            path,
+            &bearer,
+            Some(concurrent_body.clone()),
+        ),
+        json_request(&ctx.app, "POST", path, &bearer, Some(concurrent_body)),
+    );
+    assert!(
+        (concurrent_first.0 == StatusCode::CREATED
+            && concurrent_second.0 == StatusCode::OK)
+            || (concurrent_first.0 == StatusCode::OK
+                && concurrent_second.0 == StatusCode::CREATED),
+        "first={:?} {} second={:?} {}",
+        concurrent_first.0,
+        concurrent_first.1,
+        concurrent_second.0,
+        concurrent_second.1,
+    );
+    assert_eq!(concurrent_first.1["id"], concurrent_second.1["id"]);
+
+    sqlx::query("UPDATE concierge_services SET assigned_concierge_id = $2 WHERE id = $1")
+        .bind(service_id)
+        .bind(other_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(concierge_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (mutable_replay_status, mutable_replay) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(body.clone())).await;
+    assert_eq!(mutable_replay_status, StatusCode::OK, "{mutable_replay}");
+    assert_eq!(first["id"], mutable_replay["id"]);
+
+    let first_task_id = Uuid::parse_str(first["id"].as_str().expect("first task id")).unwrap();
+    sqlx::query("UPDATE tasks SET assigned_to = $2, updated_at = now() WHERE id = $1")
+        .bind(first_task_id)
+        .bind(other_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (revoked_replay_status, revoked_replay) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(body)).await;
+    assert_eq!(revoked_replay_status, StatusCode::FORBIDDEN, "{revoked_replay}");
+    assert!(revoked_replay.get("note").is_none(), "{revoked_replay}");
+
+    let request_rows: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM concierge_operational_item_create_requests
+           WHERE request_id IN ($1, $2)"#,
+    )
+    .bind(request_id)
+    .bind(concurrent_request_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(request_rows, 2);
+    let created_task_rows: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM tasks
+           WHERE id IN ($1, $2) AND task_scope = 'concierge_operational'"#,
+    )
+    .bind(first_task_id)
+    .bind(
+        Uuid::parse_str(
+            concurrent_first.1["id"]
+                .as_str()
+                .expect("concurrent task id"),
+        )
+        .unwrap(),
+    )
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(created_task_rows, 2);
+}
+
+#[tokio::test]
 async fn operational_item_api_rejects_clinical_payload_and_medical_service_links() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
@@ -254,12 +401,26 @@ async fn operational_item_api_rejects_clinical_payload_and_medical_service_links
     let bearer = auth_header_for(concierge_id, "concierge");
     let path = "/api/v1/concierge-operational-items";
 
+    let (status, missing_request_id) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "kind": "task",
+            "title": "Missing idempotency key"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_request_id}");
+
     let (status, unknown_field) = json_request(
         &ctx.app,
         "POST",
         path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Unsafe task",
             "patient_id": patient_id
@@ -274,6 +435,7 @@ async fn operational_item_api_rejects_clinical_payload_and_medical_service_links
         path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Unsafe linked service",
             "concierge_service_id": service_id
@@ -302,6 +464,7 @@ async fn patient_manager_cannot_access_concierge_operational_items() {
         path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Must stay forbidden"
         })),
@@ -329,6 +492,7 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
         path,
         &ceo_bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Confirm restaurant booking",
             "note": "Operational details only",
@@ -465,6 +629,7 @@ async fn reassignment_serializes_detail_and_child_mutations_before_revoking_old_
     let old_concierge_id = seed_user(&ctx.pool, "concierge", &format!("race-old-{tag}")).await;
     let new_concierge_id = seed_user(&ctx.pool, "concierge", &format!("race-new-{tag}")).await;
     let old_bearer = auth_header_for(old_concierge_id, "concierge");
+    let new_bearer = auth_header_for(new_concierge_id, "concierge");
     let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
     let base_path = "/api/v1/concierge-operational-items";
 
@@ -474,6 +639,7 @@ async fn reassignment_serializes_detail_and_child_mutations_before_revoking_old_
         base_path,
         &ceo_bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Serialize reassignment",
             "assigned_to": old_concierge_id,
@@ -582,6 +748,34 @@ async fn reassignment_serializes_detail_and_child_mutations_before_revoking_old_
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_toggle}");
 
+    let (status, new_owner_comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments"),
+        &new_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "body": "Only the current assignee receives this update"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{new_owner_comment}");
+    let realtime_recipients: (Vec<Uuid>, Vec<String>) = sqlx::query_as(
+        r#"SELECT target_user_ids, role_names
+           FROM realtime_events
+           WHERE event_type = 'concierge_operational_item.comment_added'
+             AND entity_id = $1
+           ORDER BY seq DESC
+           LIMIT 1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(realtime_recipients.0.contains(&new_concierge_id));
+    assert!(!realtime_recipients.0.contains(&old_concierge_id));
+    assert_eq!(realtime_recipients.1, vec!["ceo".to_string()]);
+
     let comment_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM concierge_operational_task_comments WHERE task_id = $1",
     )
@@ -589,7 +783,7 @@ async fn reassignment_serializes_detail_and_child_mutations_before_revoking_old_
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(comment_count, 0);
+    assert_eq!(comment_count, 1);
     let checklist_state: (i64, bool) = sqlx::query_as(
         r#"SELECT count(*) OVER (), is_completed
            FROM concierge_operational_task_checklist_items
@@ -617,6 +811,7 @@ async fn concurrent_checklist_toggle_with_same_request_id_replays_as_two_success
         base_path,
         &bearer,
         Some(json!({
+            "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Concurrent toggle",
             "priority": "normal"

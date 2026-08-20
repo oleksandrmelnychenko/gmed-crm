@@ -7,6 +7,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -53,6 +54,7 @@ struct ListItemsQuery {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateItemRequest {
+    request_id: Uuid,
     kind: String,
     title: String,
     note: Option<String>,
@@ -69,6 +71,7 @@ struct CreateItemRequest {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UpdateItemRequest {
+    expected_updated_at: String,
     kind: String,
     title: String,
     note: Option<String>,
@@ -237,7 +240,7 @@ async fn create_item(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
-    let assigned_to = match resolve_assignee(&state, &auth, body.assigned_to).await {
+    let assigned_to = match requested_assignee(&auth, body.assigned_to) {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -256,11 +259,7 @@ async fn create_item(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) = validate_service_assignment(&state, service_id, assigned_to).await
-    {
-        return response;
-    }
+    let payload_fingerprint = create_item_payload_fingerprint(assigned_to, &fields);
 
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -269,6 +268,76 @@ async fn create_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if let Err(error) = sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+    )
+    .bind(body.request_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, request_id = %body.request_id, "lock concierge operational create request");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let replay = match sqlx::query(
+        r#"SELECT create_request.actor_id, create_request.task_id,
+                  create_request.payload_fingerprint, task.assigned_to
+           FROM concierge_operational_item_create_requests create_request
+           JOIN tasks task ON task.id = create_request.task_id
+           WHERE create_request.request_id = $1
+           FOR SHARE OF task"#,
+    )
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, request_id = %body.request_id, "load concierge operational create replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(replay) = replay {
+        if replay.try_get::<Uuid, _>("actor_id").ok() != Some(auth.user_id)
+            || replay.try_get::<String, _>("payload_fingerprint").ok().as_deref()
+                != Some(payload_fingerprint.as_str())
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
+        }
+        let replayed_item_id = replay
+            .try_get::<Uuid, _>("task_id")
+            .unwrap_or_else(|_| Uuid::nil());
+        if auth.role == Role::Concierge
+            && replay.try_get::<Uuid, _>("assigned_to").ok() != Some(auth.user_id)
+        {
+            return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
+        let replayed_item = match load_item_in_transaction(&mut tx, replayed_item_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+            Err(response) => return response,
+        };
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, request_id = %body.request_id, "commit concierge operational create replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return Json(replayed_item).into_response();
+    }
+    if let Err(response) = validate_active_concierge_in_transaction(&mut tx, assigned_to).await {
+        return response;
+    }
+    if let Some(service_id) = fields.concierge_service_id
+        && let Err(response) = validate_service_assignment_in_transaction(
+            &mut tx,
+            service_id,
+            assigned_to,
+        )
+        .await
+    {
+        return response;
+    }
     let item_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO tasks (
                title, description, assigned_to, assigned_by, due_date, priority,
@@ -301,11 +370,12 @@ async fn create_item(
 
     if let Err(error) = sqlx::query(
         r#"INSERT INTO concierge_operational_task_events (
-               task_id, event_type, actor_id, payload
-           ) VALUES ($1, 'created', $2, $3)"#,
+               task_id, event_type, actor_id, request_id, payload
+           ) VALUES ($1, 'created', $2, $3, $4)"#,
     )
     .bind(item_id)
     .bind(auth.user_id)
+    .bind(body.request_id)
     .bind(serde_json::json!({
         "assigned_to": assigned_to,
         "kind": fields.kind.as_str(),
@@ -317,6 +387,21 @@ async fn create_item(
     .await
     {
         tracing::error!(error = %error, item_id = %item_id, "record concierge task creation history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_item_create_requests (
+               request_id, actor_id, task_id, payload_fingerprint
+           ) VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(body.request_id)
+    .bind(auth.user_id)
+    .bind(item_id)
+    .bind(&payload_fingerprint)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, request_id = %body.request_id, item_id = %item_id, "persist concierge operational create request");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Err(error) = tx.commit().await {
@@ -365,6 +450,19 @@ async fn update_item(
     if !is_valid_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
+    let expected_updated_at = match parse_datetime(
+        Some(&body.expected_updated_at),
+        "Invalid expected_updated_at (RFC3339)",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "expected_updated_at is required",
+            );
+        }
+        Err(response) => return response,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -374,7 +472,7 @@ async fn update_item(
         }
     };
     let existing = match sqlx::query(
-        r#"SELECT assigned_to, status, reminder_at
+        r#"SELECT assigned_to, status, reminder_at, updated_at
            FROM tasks
            WHERE id = $1 AND task_scope = 'concierge_operational'
            FOR UPDATE"#,
@@ -401,6 +499,12 @@ async fn update_item(
         .unwrap_or_default();
     if auth.role == Role::Concierge && existing_assignee != auth.user_id {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if existing.try_get::<DateTime<Utc>, _>("updated_at").ok() != Some(expected_updated_at) {
+        return err(
+            StatusCode::CONFLICT,
+            "Operational item was changed by another user",
+        );
     }
     let requested_assignee = body.assigned_to.or(Some(existing_assignee));
     let assigned_to = match resolve_assignee(&state, &auth, requested_assignee).await {
@@ -661,9 +765,10 @@ async fn add_comment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(response) = lock_item_access(&mut tx, &auth, item_id, true).await {
-        return response;
-    }
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let inserted_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_operational_task_comments (
                task_id, body, created_by, request_id
@@ -684,6 +789,7 @@ async fn add_comment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let inserted = inserted_id.is_some();
     let comment_id = if let Some(value) = inserted_id {
         if let Err(error) = sqlx::query(
             r#"INSERT INTO concierge_operational_task_events (
@@ -735,6 +841,17 @@ async fn add_comment(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task comment");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if inserted {
+        publish_operational_child_event(
+            &state,
+            &auth,
+            "concierge_operational_item.comment_added",
+            item_id,
+            assigned_to,
+            serde_json::json!({ "comment_id": comment_id }),
+        )
+        .await;
+    }
     Json(comment).into_response()
 }
 
@@ -758,9 +875,10 @@ async fn add_checklist_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(response) = lock_item_access(&mut tx, &auth, item_id, true).await {
-        return response;
-    }
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let inserted_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_operational_task_checklist_items (
                task_id, label, position, created_by, request_id
@@ -785,6 +903,7 @@ async fn add_checklist_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    let inserted = inserted_id.is_some();
     let checklist_id = if let Some(value) = inserted_id {
         if let Err(error) = sqlx::query(
             r#"INSERT INTO concierge_operational_task_events (
@@ -836,6 +955,17 @@ async fn add_checklist_item(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist item");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if inserted {
+        publish_operational_child_event(
+            &state,
+            &auth,
+            "concierge_operational_item.checklist_item_added",
+            item_id,
+            assigned_to,
+            serde_json::json!({ "checklist_id": checklist_id }),
+        )
+        .await;
+    }
     Json(checklist_item).into_response()
 }
 
@@ -855,9 +985,10 @@ async fn toggle_checklist_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(response) = lock_item_access(&mut tx, &auth, item_id, true).await {
-        return response;
-    }
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let replay = match sqlx::query(
         r#"SELECT event_type, payload
            FROM concierge_operational_task_events
@@ -947,6 +1078,18 @@ async fn toggle_checklist_item(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist toggle");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.checklist_item_toggled",
+        item_id,
+        assigned_to,
+        serde_json::json!({
+            "checklist_id": checklist_id,
+            "completed": body.completed,
+        }),
+    )
+    .await;
     Json(checklist_item).into_response()
 }
 
@@ -1054,22 +1197,7 @@ async fn resolve_assignee(
     auth: &AuthUser,
     requested: Option<Uuid>,
 ) -> Result<Uuid, axum::response::Response> {
-    let assigned_to = if auth.role == Role::Concierge {
-        if requested.is_some_and(|value| value != auth.user_id) {
-            return Err(err(
-                StatusCode::FORBIDDEN,
-                "Concierge can only manage own items",
-            ));
-        }
-        auth.user_id
-    } else {
-        requested.ok_or_else(|| {
-            err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "assigned_to is required for this role",
-            )
-        })?
-    };
+    let assigned_to = requested_assignee(auth, requested)?;
 
     let is_active_concierge = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role = 'concierge')",
@@ -1088,6 +1216,87 @@ async fn resolve_assignee(
         ));
     }
     Ok(assigned_to)
+}
+
+#[allow(clippy::result_large_err)]
+fn requested_assignee(
+    auth: &AuthUser,
+    requested: Option<Uuid>,
+) -> Result<Uuid, axum::response::Response> {
+    let assigned_to = if auth.role == Role::Concierge {
+        if requested.is_some_and(|value| value != auth.user_id) {
+            return Err(err(
+                StatusCode::FORBIDDEN,
+                "Concierge can only manage own items",
+            ));
+        }
+        auth.user_id
+    } else {
+        requested.ok_or_else(|| {
+            err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "assigned_to is required for this role",
+            )
+        })?
+    };
+    Ok(assigned_to)
+}
+
+async fn validate_active_concierge_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    assigned_to: Uuid,
+) -> Result<(), axum::response::Response> {
+    let is_active_concierge = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role = 'concierge')",
+    )
+    .bind(assigned_to)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, assigned_to = %assigned_to, "validate operational item assignee");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if !is_active_concierge {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "assigned_to must reference an active Concierge",
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_service_assignment_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    service_id: Uuid,
+    assigned_to: Uuid,
+) -> Result<(), axum::response::Response> {
+    let is_safe_assignment = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM concierge_services cs
+               LEFT JOIN providers p ON p.id = cs.provider_id
+               LEFT JOIN appointments a ON a.id = cs.appointment_id
+               WHERE cs.id = $1
+                 AND cs.assigned_concierge_id = $2
+                 AND (cs.provider_id IS NULL OR p.provider_type = 'non_medical')
+                 AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
+           )"#,
+    )
+    .bind(service_id)
+    .bind(assigned_to)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "validate operational service link");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if !is_safe_assignment {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "concierge_service_id must reference an assigned non-medical service",
+        ));
+    }
+    Ok(())
 }
 
 async fn validate_service_assignment(
@@ -1200,6 +1409,29 @@ fn validate_item_fields(
     })
 }
 
+fn create_item_payload_fingerprint(
+    assigned_to: Uuid,
+    fields: &ValidatedItemFields,
+) -> String {
+    let payload = serde_json::json!({
+        "assigned_to": assigned_to,
+        "kind": fields.kind,
+        "title": fields.title,
+        "note": fields.note,
+        "concierge_service_id": fields.concierge_service_id,
+        "due_at": fields.due_at.as_ref().map(DateTime::to_rfc3339),
+        "starts_at": fields.starts_at.as_ref().map(DateTime::to_rfc3339),
+        "ends_at": fields.ends_at.as_ref().map(DateTime::to_rfc3339),
+        "location": fields.location,
+        "priority": fields.priority,
+        "reminder_at": fields.reminder_at.as_ref().map(DateTime::to_rfc3339),
+    });
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(payload.to_string().as_bytes())),
+    )
+}
+
 #[allow(clippy::result_large_err)]
 fn normalize_text(
     value: Option<&str>,
@@ -1290,6 +1522,31 @@ fn format_datetime(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> 
         .map(|value| value.to_rfc3339())
 }
 
+async fn publish_operational_child_event(
+    state: &AppState,
+    auth: &AuthUser,
+    event_type: &str,
+    item_id: Uuid,
+    assigned_to: Uuid,
+    mut payload: serde_json::Value,
+) {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "assigned_to".to_owned(),
+            serde_json::Value::String(assigned_to.to_string()),
+        );
+    }
+    crate::realtime::publish_concierge_operational_task_event(
+        state,
+        Some(auth.user_id),
+        event_type,
+        item_id,
+        assigned_to,
+        payload,
+    )
+    .await;
+}
+
 async fn publish_operational_event(
     state: &AppState,
     auth: &AuthUser,
@@ -1299,11 +1556,12 @@ async fn publish_operational_event(
     fields: &ValidatedItemFields,
     status: &str,
 ) {
-    crate::realtime::publish_task_event(
+    crate::realtime::publish_concierge_operational_task_event(
         state,
         Some(auth.user_id),
         event_type,
         item_id,
+        assigned_to,
         serde_json::json!({
             "assigned_to": assigned_to,
             "kind": fields.kind.as_str(),
@@ -1413,11 +1671,12 @@ pub async fn run_concierge_task_reminder_scheduler_once(state: &AppState) -> i64
                 }),
             )
             .await;
-            crate::realtime::publish_task_event(
+            crate::realtime::publish_concierge_operational_task_event(
                 state,
                 None,
                 "concierge_operational_item.reminder_sent",
                 task_id,
+                user_id,
                 serde_json::json!({
                     "assigned_to": user_id,
                 }),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   Check,
@@ -18,6 +18,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -48,6 +49,18 @@ const copy = {
     reminder: "Erinnerung",
     due: "Termin",
     assignee: "Zuständig",
+    note: "Operative Notiz",
+    location: "Ort oder Adresse",
+    status: "Status",
+    priority: "Priorität",
+    open: "Offen",
+    in_progress: "In Arbeit",
+    completed: "Erledigt",
+    cancelled: "Storniert",
+    low: "Niedrig",
+    normal: "Normal",
+    high: "Hoch",
+    urgent: "Dringend",
     created: "Aufgabe angelegt",
     updated: "Aufgabe aktualisiert",
     status_changed: "Status geändert",
@@ -74,6 +87,18 @@ const copy = {
     reminder: "Напоминание",
     due: "Срок",
     assignee: "Исполнитель",
+    note: "Операционная заметка",
+    location: "Место или адрес",
+    status: "Статус",
+    priority: "Приоритет",
+    open: "Открыта",
+    in_progress: "В работе",
+    completed: "Выполнена",
+    cancelled: "Отменена",
+    low: "Низкий",
+    normal: "Обычный",
+    high: "Высокий",
+    urgent: "Срочный",
     created: "Задача создана",
     updated: "Задача изменена",
     status_changed: "Статус изменён",
@@ -85,6 +110,12 @@ const copy = {
     checklist_item_toggled: "Пункт чек-листа изменён",
   },
 } as const;
+
+const CHILD_REALTIME_EVENTS = [
+  "concierge_operational_item.comment_added",
+  "concierge_operational_item.checklist_item_added",
+  "concierge_operational_item.checklist_item_toggled",
+] as const;
 
 function dateTime(value: string | null, lang: Lang) {
   if (!value) return "—";
@@ -116,6 +147,9 @@ export function ConciergeTaskDetailDialog({
   const [comment, setComment] = useState("");
   const [checklistLabel, setChecklistLabel] = useState("");
   const [busy, setBusy] = useState(false);
+  const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
+  const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
+  const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!taskId) return;
@@ -131,25 +165,47 @@ export function ConciergeTaskDetailDialog({
     }
   }, [labels.loading, taskId]);
 
+  const refreshFromRealtime = useCallback((event: { entity_id: string }) => {
+    if (open && taskId && event.entity_id === taskId) void load();
+  }, [load, open, taskId]);
+
+  useDebouncedRealtimeSubscription(CHILD_REALTIME_EVENTS, refreshFromRealtime, 250);
+
   useEffect(() => {
     if (!open) return;
     setDetail(null);
     setComment("");
     setChecklistLabel("");
+    commentRequestRef.current = null;
+    checklistRequestRef.current = null;
+    toggleRequestRef.current = null;
     void load();
   }, [load, open]);
 
   async function addComment() {
     if (!taskId || !comment.trim() || busy) return;
+    const body = comment.trim();
+    const requestId = commentRequestRef.current?.body === body
+      ? commentRequestRef.current.requestId
+      : crypto.randomUUID();
+    commentRequestRef.current = { body, requestId };
     setBusy(true);
     setError("");
     try {
       const row = await apiFetch<ConciergeTaskComment>(`/concierge-operational-items/${taskId}/comments`, {
         method: "POST",
-        body: JSON.stringify({ request_id: crypto.randomUUID(), body: comment.trim() }),
+        body: JSON.stringify({ request_id: requestId, body }),
       });
-      setDetail((current) => current ? { ...current, comments: [...current.comments, row], item: { ...current.item, comment_count: current.item.comment_count + 1 } } : current);
+      setDetail((current) => {
+        if (!current || current.comments.some((entry) => entry.id === row.id)) return current;
+        return {
+          ...current,
+          comments: [...current.comments, row],
+          item: { ...current.item, comment_count: current.item.comment_count + 1 },
+        };
+      });
       setComment("");
+      commentRequestRef.current = null;
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
@@ -161,15 +217,28 @@ export function ConciergeTaskDetailDialog({
 
   async function addChecklistItem() {
     if (!taskId || !checklistLabel.trim() || busy) return;
+    const label = checklistLabel.trim();
+    const requestId = checklistRequestRef.current?.label === label
+      ? checklistRequestRef.current.requestId
+      : crypto.randomUUID();
+    checklistRequestRef.current = { label, requestId };
     setBusy(true);
     setError("");
     try {
       const row = await apiFetch<ConciergeTaskChecklistItem>(`/concierge-operational-items/${taskId}/checklist`, {
         method: "POST",
-        body: JSON.stringify({ request_id: crypto.randomUUID(), label: checklistLabel.trim() }),
+        body: JSON.stringify({ request_id: requestId, label }),
       });
-      setDetail((current) => current ? { ...current, checklist: [...current.checklist, row], item: { ...current.item, checklist_total: current.item.checklist_total + 1 } } : current);
+      setDetail((current) => {
+        if (!current || current.checklist.some((entry) => entry.id === row.id)) return current;
+        return {
+          ...current,
+          checklist: [...current.checklist, row],
+          item: { ...current.item, checklist_total: current.item.checklist_total + 1 },
+        };
+      });
       setChecklistLabel("");
+      checklistRequestRef.current = null;
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
@@ -181,21 +250,32 @@ export function ConciergeTaskDetailDialog({
 
   async function toggleChecklist(item: ConciergeTaskChecklistItem) {
     if (!taskId || busy) return;
+    const completed = !item.is_completed;
+    const payloadKey = `${item.id}:${completed}`;
+    const requestId = toggleRequestRef.current?.payloadKey === payloadKey
+      ? toggleRequestRef.current.requestId
+      : crypto.randomUUID();
+    toggleRequestRef.current = { payloadKey, requestId };
     setBusy(true);
     setError("");
     try {
       const row = await apiFetch<ConciergeTaskChecklistItem>(`/concierge-operational-items/${taskId}/checklist/${item.id}/toggle`, {
         method: "POST",
-        body: JSON.stringify({ request_id: crypto.randomUUID(), completed: !item.is_completed }),
+        body: JSON.stringify({ request_id: requestId, completed }),
       });
-      setDetail((current) => current ? {
-        ...current,
-        checklist: current.checklist.map((entry) => entry.id === row.id ? row : entry),
-        item: {
-          ...current.item,
-          checklist_completed: current.item.checklist_completed + (row.is_completed ? 1 : -1),
-        },
-      } : current);
+      setDetail((current) => {
+        if (!current) return current;
+        const checklist = current.checklist.map((entry) => entry.id === row.id ? row : entry);
+        return {
+          ...current,
+          checklist,
+          item: {
+            ...current.item,
+            checklist_completed: checklist.filter((entry) => entry.is_completed).length,
+          },
+        };
+      });
+      toggleRequestRef.current = null;
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
@@ -224,6 +304,21 @@ export function ConciergeTaskDetailDialog({
                 <p className="rounded-md bg-background/70 p-2.5"><UserRound className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.assignee}: </span><strong>{detail.item.assigned_to_name}</strong></p>
                 <p className="rounded-md bg-background/70 p-2.5"><Clock3 className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.due}: </span><strong>{dateTime(detail.item.kind === "event" ? detail.item.starts_at : detail.item.due_at, lang)}</strong></p>
                 <p className="rounded-md bg-background/70 p-2.5"><CalendarClock className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.reminder}: </span><strong>{dateTime(detail.item.reminder_at, lang)}</strong></p>
+              </section>
+
+              <section className="grid gap-3 rounded-lg border border-border/70 bg-card p-3 text-sm sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="text-xs font-medium text-muted-foreground">{labels.note}</p>
+                  <p className="mt-1 whitespace-pre-wrap">{detail.item.note || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">{labels.location}</p>
+                  <p className="mt-1">{detail.item.location || "—"}</p>
+                </div>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Badge variant="outline">{labels.status}: {labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
+                  <Badge variant="outline">{labels.priority}: {labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>
+                </div>
               </section>
 
             <div className="grid gap-4 lg:grid-cols-2">
