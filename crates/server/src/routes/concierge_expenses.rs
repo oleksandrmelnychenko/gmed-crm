@@ -27,7 +27,9 @@ use crate::{
 };
 use gmed_domain::role::Role;
 
-const MAX_MONEY: Decimal = Decimal::new(999_999_999_999, 2);
+fn max_money() -> Decimal {
+    Decimal::new(999_999_999_999, 2)
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -139,13 +141,13 @@ fn err(status: StatusCode, message: &str) -> Response {
 fn hash_json(value: &Value) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.to_string().as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn hash_bytes(value: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn clean_text(value: Option<String>, max: usize) -> Option<String> {
@@ -162,7 +164,7 @@ fn parse_money(value: &str, field: &'static str) -> Result<Decimal, Response> {
             &format!("{field} must be a decimal amount"),
         )
     })?;
-    if parsed.scale() > 2 || parsed < Decimal::ZERO || parsed > MAX_MONEY {
+    if parsed.scale() > 2 || parsed < Decimal::ZERO || parsed > max_money() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             &format!("{field} must be a non-negative amount with at most two decimals"),
