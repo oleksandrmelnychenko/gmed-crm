@@ -276,7 +276,12 @@ export function CompanyFinancePage() {
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const [filters, setFilters] = useState<CompanyFinancialFilters>(initialFilters);
   const [activeTab, setActiveTab] = useState(
-    () => new URL(window.location.href).searchParams.has("provider_invoice") ? "providers" : "patients",
+    () => {
+      const params = new URL(window.location.href).searchParams;
+      return params.has("provider_invoice") || params.has("provider")
+        ? "providers"
+        : "patients";
+    },
   );
   const [patientSide, setPatientSide] = useState<PatientSideFilter>("all");
   const [providerFilter, setProviderFilter] = useState<ProviderSettlementFilter>("open");
@@ -340,6 +345,26 @@ export function CompanyFinancePage() {
       setSelectedProviderLiability(requested);
     }
   }, [position, selectedProviderLiability]);
+
+  useEffect(() => {
+    if (!position) return;
+    const url = new URL(window.location.href);
+    const requestedProviderId = url.searchParams.get("provider");
+    if (!requestedProviderId) return;
+    const shouldOpenStatement = url.searchParams.get("statement") === "1";
+    const requestedProvider = position.provider_positions.find(
+      (item) => item.provider_id === requestedProviderId,
+    );
+    url.searchParams.delete("provider");
+    url.searchParams.delete("statement");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    setActiveTab("providers");
+    setProviderView("providers");
+    setSelectedProviderId(requestedProviderId);
+    if (shouldOpenStatement && requestedProvider) {
+      setStatementProvider(requestedProvider);
+    }
+  }, [position]);
 
   const currency = position?.currency || filters.currency || "EUR";
   const money = (value: string | null | undefined) => formatMoney(value, currency, locale);

@@ -73,6 +73,12 @@ export type CompanyProviderPosition = {
   latest_payment_on: string | null;
 };
 
+export type CompanyProviderFinancialSummary = CompanyProviderPosition & {
+  provider_id: string;
+  provider_name: string;
+  currency: string;
+};
+
 export type CompanyProviderPaymentTransaction = {
   id: string;
   external_invoice_id: string;

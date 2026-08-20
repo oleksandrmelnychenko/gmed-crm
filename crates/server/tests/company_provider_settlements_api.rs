@@ -271,6 +271,27 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     let statement_path = format!(
         "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from=2020-01-01&to=2099-12-31"
     );
+    let summary_path = format!(
+        "/api/v1/company-provider-statements/{provider_id}/summary?currency=EUR"
+    );
+    let (financial_summary_status, financial_summary) =
+        request_json(&ctx.app, Method::GET, &summary_path, &billing, None).await;
+    assert_eq!(
+        financial_summary_status,
+        StatusCode::OK,
+        "provider financial summary: {financial_summary:?}"
+    );
+    assert_eq!(financial_summary["provider_id"], provider_id.to_string());
+    assert_eq!(financial_summary["currency"], "EUR");
+    assert_eq!(financial_summary["invoice_total_gross"], "100");
+    assert_eq!(financial_summary["company_paid_gross"], "40");
+    assert_eq!(financial_summary["payable_remaining_gross"], "60");
+    assert_eq!(financial_summary["expected_remaining_gross"], "0");
+    assert_eq!(financial_summary["invoice_count"], 1);
+    assert_eq!(financial_summary["open_invoice_count"], 1);
+    assert_eq!(financial_summary["partial_invoice_count"], 1);
+    assert_eq!(financial_summary["settled_invoice_count"], 0);
+
     let (statement_status, statement) =
         request_json(&ctx.app, Method::GET, &statement_path, &billing, None).await;
     assert_eq!(statement_status, StatusCode::OK, "statement: {statement:?}");
@@ -305,6 +326,9 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     let (statement_forbidden, _) =
         request_json(&ctx.app, Method::GET, &statement_path, &sales, None).await;
     assert_eq!(statement_forbidden, StatusCode::FORBIDDEN);
+    let (summary_forbidden, _) =
+        request_json(&ctx.app, Method::GET, &summary_path, &sales, None).await;
+    assert_eq!(summary_forbidden, StatusCode::FORBIDDEN);
 
     let external = sqlx::query("SELECT status, paid_by FROM external_invoices WHERE id = $1")
         .bind(external_invoice_id)

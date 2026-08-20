@@ -33,6 +33,10 @@ pub fn router() -> Router<AppState> {
             "/company-provider-statements/{provider_id}",
             get(get_provider_statement),
         )
+        .route(
+            "/company-provider-statements/{provider_id}/summary",
+            get(get_provider_financial_summary),
+        )
 }
 
 #[derive(Deserialize)]
@@ -57,6 +61,11 @@ struct ReverseProviderPaymentRequest {
 struct ProviderStatementQuery {
     from: Option<String>,
     to: Option<String>,
+    currency: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProviderFinancialSummaryQuery {
     currency: Option<String>,
 }
 
@@ -537,6 +546,122 @@ async fn get_provider_statement(
         },
         "movements": movements,
         "generated_at": Utc::now().to_rfc3339(),
+    }))
+    .into_response()
+}
+
+async fn get_provider_financial_summary(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+    Query(query): Query<ProviderFinancialSummaryQuery>,
+) -> axum::response::Response {
+    if !can_manage_provider_settlements(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let currency = query
+        .currency
+        .as_deref()
+        .unwrap_or("EUR")
+        .trim()
+        .to_uppercase();
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_uppercase())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid currency; expected a three-letter ISO code",
+        );
+    }
+
+    let provider_name = match sqlx::query_scalar::<_, String>(
+        "SELECT name FROM providers WHERE id = $1",
+    )
+    .bind(provider_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(name)) => name,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Provider not found"),
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %provider_id, "load provider financial summary provider");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider financial summary",
+            );
+        }
+    };
+
+    let summary = match sqlx::query(
+        r#"SELECT COUNT(*)::bigint AS invoice_count,
+                  COALESCE(SUM(external.amount_gross), 0) AS invoice_total_gross,
+                  COALESCE(SUM(settlement.company_paid_gross), 0) AS company_paid_gross,
+                  COALESCE(SUM(
+                      CASE
+                          WHEN settlement.remaining_provider_liability_gross > 0
+                           AND external.status <> 'expected'
+                              THEN settlement.remaining_provider_liability_gross
+                          ELSE 0
+                      END
+                  ), 0) AS payable_remaining_gross,
+                  COALESCE(SUM(
+                      CASE
+                          WHEN settlement.remaining_provider_liability_gross > 0
+                           AND external.status = 'expected'
+                              THEN settlement.remaining_provider_liability_gross
+                          ELSE 0
+                      END
+                  ), 0) AS expected_remaining_gross,
+                  COUNT(*) FILTER (
+                      WHERE settlement.remaining_provider_liability_gross > 0
+                        AND external.status <> 'expected'
+                  )::bigint AS open_invoice_count,
+                  COUNT(*) FILTER (
+                      WHERE settlement.settlement_status = 'partial'
+                  )::bigint AS partial_invoice_count,
+                  COUNT(*) FILTER (
+                      WHERE settlement.remaining_provider_liability_gross <= 0
+                  )::bigint AS settled_invoice_count,
+                  MAX(settlement.latest_payment_on) AS latest_payment_on
+           FROM external_invoices external
+           JOIN external_invoice_provider_settlement_balances settlement
+             ON settlement.external_invoice_id = external.id
+           WHERE external.provider_id = $1
+             AND external.status <> 'cancelled'
+             AND external.amount_gross > 0
+             AND UPPER(external.currency) = $2"#,
+    )
+    .bind(provider_id)
+    .bind(&currency)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %provider_id, currency = %currency, "load provider financial summary");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider financial summary",
+            );
+        }
+    };
+
+    Json(json!({
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "currency": currency,
+        "invoice_total_gross": decimal_to_string(summary.try_get::<Decimal, _>("invoice_total_gross").unwrap_or(Decimal::ZERO)),
+        "company_paid_gross": decimal_to_string(summary.try_get::<Decimal, _>("company_paid_gross").unwrap_or(Decimal::ZERO)),
+        "payable_remaining_gross": decimal_to_string(summary.try_get::<Decimal, _>("payable_remaining_gross").unwrap_or(Decimal::ZERO)),
+        "expected_remaining_gross": decimal_to_string(summary.try_get::<Decimal, _>("expected_remaining_gross").unwrap_or(Decimal::ZERO)),
+        "invoice_count": summary.try_get::<i64, _>("invoice_count").unwrap_or(0),
+        "open_invoice_count": summary.try_get::<i64, _>("open_invoice_count").unwrap_or(0),
+        "partial_invoice_count": summary.try_get::<i64, _>("partial_invoice_count").unwrap_or(0),
+        "settled_invoice_count": summary.try_get::<i64, _>("settled_invoice_count").unwrap_or(0),
+        "latest_payment_on": summary.try_get::<Option<NaiveDate>, _>("latest_payment_on").unwrap_or_default().map(|value| value.to_string()),
     }))
     .into_response()
 }

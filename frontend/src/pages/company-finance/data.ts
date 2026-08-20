@@ -5,6 +5,7 @@ import type {
   CompanyFinancialAccountsPayload,
   CompanyFinancialPosition,
   CompanyProviderPaymentTransaction,
+  CompanyProviderFinancialSummary,
   CompanyProviderSettlement,
   CompanyProviderStatement,
 } from "./types";
@@ -143,6 +144,25 @@ export function fetchCompanyProviderStatement(
     buildCompanyProviderStatementPath(providerId, filters),
     { forceFresh },
   );
+}
+
+export function fetchCompanyProviderFinancialSummary(
+  providerId: string,
+  currency = "EUR",
+  forceFresh = false,
+) {
+  return apiFetch<CompanyProviderFinancialSummary>(
+    buildCompanyProviderFinancialSummaryPath(providerId, currency),
+    { forceFresh },
+  );
+}
+
+export function buildCompanyProviderFinancialSummaryPath(
+  providerId: string,
+  currency = "EUR",
+) {
+  const params = new URLSearchParams({ currency: currency || "EUR" });
+  return `/company-provider-statements/${providerId}/summary?${params.toString()}`;
 }
 
 export function buildCompanyProviderStatementPath(

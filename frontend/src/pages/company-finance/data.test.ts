@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCompanyFinancialPositionPath,
+  buildCompanyProviderFinancialSummaryPath,
   buildCompanyProviderStatementPath,
 } from "./data";
 
@@ -35,6 +36,12 @@ describe("company financial position filters", () => {
       currency: "EUR",
     })).toBe(
       "/company-provider-statements/provider-42?from=2026-03-01&to=2026-03-31&currency=EUR",
+    );
+  });
+
+  it("builds a currency scoped provider financial summary path", () => {
+    expect(buildCompanyProviderFinancialSummaryPath("provider-42", "USD")).toBe(
+      "/company-provider-statements/provider-42/summary?currency=USD",
     );
   });
 });
