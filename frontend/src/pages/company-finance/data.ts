@@ -6,6 +6,7 @@ import type {
   CompanyFinancialPosition,
   CompanyProviderPaymentTransaction,
   CompanyProviderSettlement,
+  CompanyProviderStatement,
 } from "./types";
 
 export function buildCompanyFinancialPositionPath(filters: CompanyFinancialFilters) {
@@ -131,4 +132,27 @@ export function reverseCompanyProviderPayment(
     `/company-provider-liabilities/${externalInvoiceId}/settlements/${paymentId}/reversal`,
     payload,
   );
+}
+
+export function fetchCompanyProviderStatement(
+  providerId: string,
+  filters: Pick<CompanyFinancialFilters, "from" | "to" | "currency">,
+  forceFresh = false,
+) {
+  return apiFetch<CompanyProviderStatement>(
+    buildCompanyProviderStatementPath(providerId, filters),
+    { forceFresh },
+  );
+}
+
+export function buildCompanyProviderStatementPath(
+  providerId: string,
+  filters: Pick<CompanyFinancialFilters, "from" | "to" | "currency">,
+) {
+  const params = new URLSearchParams({
+    from: filters.from,
+    to: filters.to,
+    currency: filters.currency || "EUR",
+  });
+  return `/company-provider-statements/${providerId}?${params.toString()}`;
 }

@@ -106,6 +106,41 @@ export type CompanyProviderSettlement = {
   transactions: CompanyProviderPaymentTransaction[];
 };
 
+export type CompanyProviderStatementMovement = {
+  id: string;
+  movement_date: string;
+  movement_type: "invoice" | "payment" | "reversal";
+  external_invoice_id: string;
+  external_invoice_number: string;
+  amount_charged: string;
+  amount_paid: string;
+  running_balance: string;
+  order_id: string;
+  order_number: string;
+  patient_id: string;
+  patient_pid: string;
+  patient_name: string;
+  financial_account_name: string | null;
+  reference: string | null;
+};
+
+export type CompanyProviderStatement = {
+  provider_id: string;
+  provider_name: string;
+  currency: string;
+  period: { from: string; to: string };
+  summary: {
+    opening_balance: string;
+    charged_gross: string;
+    paid_gross: string;
+    reversed_gross: string;
+    expected_gross: string;
+    closing_balance: string;
+  };
+  movements: CompanyProviderStatementMovement[];
+  generated_at: string;
+};
+
 export type CompanyCashMovement = {
   id: string;
   entry_date: string;

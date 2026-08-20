@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
 import { ProviderSettlementDialog } from "./provider-settlement-dialog";
+import { ProviderStatementDialog } from "./provider-statement-dialog";
 import {
   assignAccountingEntryFinancialAccount,
   fetchCompanyFinancialAccounts,
@@ -116,6 +117,7 @@ const textByLanguage = {
     partialDocuments: "Частично оплаченных",
     settledDocuments: "Оплаченных счетов",
     latestPayment: "Последняя выплата",
+    providerStatement: "Взаиморасчеты",
     originalAmount: "Сумма счета",
     companyPaid: "Выплачено компанией",
     remainingAmount: "Осталось выплатить",
@@ -195,6 +197,7 @@ const textByLanguage = {
     partialDocuments: "Teilweise bezahlte Rechnungen",
     settledDocuments: "Bezahlte Rechnungen",
     latestPayment: "Letzte Auszahlung",
+    providerStatement: "Kontenabstimmung",
     originalAmount: "Rechnungsbetrag",
     companyPaid: "Vom Unternehmen bezahlt",
     remainingAmount: "Noch zu zahlen",
@@ -281,6 +284,8 @@ export function CompanyFinancePage() {
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [selectedProviderLiability, setSelectedProviderLiability] =
     useState<CompanyProviderLiability | null>(null);
+  const [statementProvider, setStatementProvider] =
+    useState<CompanyProviderPosition | null>(null);
   const [position, setPosition] = useState<CompanyFinancialPosition | null>(null);
   const [accounts, setAccounts] = useState<CompanyFinancialAccountsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -470,6 +475,7 @@ export function CompanyFinancePage() {
     { id: "partial_count", label: text.partialDocuments, accessor: (row) => row.partial_invoice_count, filterType: "number", sortable: true, width: 190 },
     { id: "settled_count", label: text.settledDocuments, accessor: (row) => row.settled_invoice_count, filterType: "number", sortable: true, width: 170 },
     { id: "latest_payment", label: text.latestPayment, accessor: (row) => row.latest_payment_on, filterType: "date", sortable: true, width: 160, render: (row) => formatDate(row.latest_payment_on, locale) },
+    { id: "statement", label: text.providerStatement, accessor: (row) => row.provider_id ?? "", width: 150, render: (row) => row.provider_id ? <Button type="button" size="xs" variant="outline" onClick={(event) => { event.stopPropagation(); setStatementProvider(row); }}>{text.providerStatement}</Button> : "—" },
   ], [locale, money, text]);
 
   const providerColumns = useMemo<ColumnDef<CompanyProviderLiability>[]>(() => [
@@ -808,6 +814,18 @@ export function CompanyFinancePage() {
         locale={locale}
         onClose={() => setSelectedProviderLiability(null)}
         onChanged={() => setReloadToken((current) => current + 1)}
+      />
+      <ProviderStatementDialog
+        provider={statementProvider}
+        filters={filters}
+        locale={locale}
+        onClose={() => setStatementProvider(null)}
+        onOpenInvoice={(externalInvoiceId) => {
+          const liability = position?.provider_liabilities.find((item) => item.id === externalInvoiceId);
+          if (!liability) return;
+          setStatementProvider(null);
+          setSelectedProviderLiability(liability);
+        }}
       />
     </div>
   );

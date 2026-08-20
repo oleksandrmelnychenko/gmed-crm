@@ -261,6 +261,51 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     assert_eq!(after_reversal["settlement_status"], "partial");
     assert_eq!(after_reversal["transactions"].as_array().unwrap().len(), 3);
 
+    let provider_id: Uuid = sqlx::query_scalar(
+        "SELECT provider_id FROM external_invoices WHERE id = $1",
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let statement_path = format!(
+        "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from=2020-01-01&to=2099-12-31"
+    );
+    let (statement_status, statement) =
+        request_json(&ctx.app, Method::GET, &statement_path, &billing, None).await;
+    assert_eq!(statement_status, StatusCode::OK, "statement: {statement:?}");
+    assert_eq!(statement["summary"]["opening_balance"], "0");
+    assert_eq!(statement["summary"]["charged_gross"], "100");
+    assert_eq!(statement["summary"]["paid_gross"], "100");
+    assert_eq!(statement["summary"]["reversed_gross"], "60");
+    assert_eq!(statement["summary"]["expected_gross"], "0");
+    assert_eq!(statement["summary"]["closing_balance"], "60");
+    let statement_movements = statement["movements"].as_array().unwrap();
+    assert_eq!(statement_movements.len(), 4);
+    assert_eq!(statement_movements[0]["movement_type"], "invoice");
+    assert_eq!(statement_movements[3]["movement_type"], "reversal");
+    assert_eq!(statement_movements[3]["running_balance"], "60");
+
+    let tomorrow = chrono::Utc::now()
+        .date_naive()
+        .succ_opt()
+        .expect("tomorrow");
+    let opening_path = format!(
+        "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from={tomorrow}&to=2099-12-31"
+    );
+    let (opening_status, opening_statement) =
+        request_json(&ctx.app, Method::GET, &opening_path, &billing, None).await;
+    assert_eq!(opening_status, StatusCode::OK);
+    assert_eq!(opening_statement["summary"]["opening_balance"], "60");
+    assert_eq!(opening_statement["summary"]["charged_gross"], "0");
+    assert_eq!(opening_statement["summary"]["paid_gross"], "0");
+    assert_eq!(opening_statement["summary"]["closing_balance"], "60");
+    assert!(opening_statement["movements"].as_array().unwrap().is_empty());
+
+    let (statement_forbidden, _) =
+        request_json(&ctx.app, Method::GET, &statement_path, &sales, None).await;
+    assert_eq!(statement_forbidden, StatusCode::FORBIDDEN);
+
     let external = sqlx::query("SELECT status, paid_by FROM external_invoices WHERE id = $1")
         .bind(external_invoice_id)
         .fetch_one(&ctx.pool)

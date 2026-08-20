@@ -2,12 +2,12 @@ use std::str::FromStr;
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -29,6 +29,10 @@ pub fn router() -> Router<AppState> {
             "/company-provider-liabilities/{external_invoice_id}/settlements/{payment_id}/reversal",
             post(reverse_provider_payment),
         )
+        .route(
+            "/company-provider-statements/{provider_id}",
+            get(get_provider_statement),
+        )
 }
 
 #[derive(Deserialize)]
@@ -47,6 +51,13 @@ struct ReverseProviderPaymentRequest {
     request_id: Uuid,
     paid_on: String,
     note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProviderStatementQuery {
+    from: Option<String>,
+    to: Option<String>,
+    currency: Option<String>,
 }
 
 struct PaymentInput {
@@ -280,6 +291,252 @@ async fn get_provider_settlement(
         "latest_payment_on": summary.try_get::<Option<NaiveDate>, _>("latest_payment_on").unwrap_or_default().map(|value| value.to_string()),
         "payment_count": summary.try_get::<i64, _>("payment_count").unwrap_or(0),
         "transactions": payment_rows.iter().map(payment_row_payload).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+async fn get_provider_statement(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(provider_id): Path<Uuid>,
+    Query(query): Query<ProviderStatementQuery>,
+) -> axum::response::Response {
+    if !can_manage_provider_settlements(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let today = Utc::now().date_naive();
+    let default_from = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
+    let from = match query.from.as_deref() {
+        Some(value) => match parse_date(value, "from") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+        },
+        None => default_from,
+    };
+    let to = match query.to.as_deref() {
+        Some(value) => match parse_date(value, "to") {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+        },
+        None => today,
+    };
+    if from > to {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "from cannot be later than to",
+        );
+    }
+    let currency = query
+        .currency
+        .as_deref()
+        .unwrap_or("EUR")
+        .trim()
+        .to_uppercase();
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_uppercase())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid currency; expected a three-letter ISO code",
+        );
+    }
+
+    let provider_name = match sqlx::query_scalar::<_, String>(
+        "SELECT name FROM providers WHERE id = $1",
+    )
+    .bind(provider_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(name)) => name,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Provider not found"),
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %provider_id, "load provider statement provider");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider statement",
+            );
+        }
+    };
+
+    let movement_rows = match sqlx::query(
+        r#"WITH statement_movements AS (
+               SELECT external.id AS movement_id,
+                      COALESCE(external.invoice_date, external.created_at::date) AS movement_date,
+                      'invoice'::text AS movement_type,
+                      external.id AS external_invoice_id,
+                      external.external_invoice_number,
+                      external.amount_gross AS amount_charged,
+                      0::numeric AS amount_paid,
+                      orders.id AS order_id, orders.order_number,
+                      patient.id AS patient_id, patient.patient_id AS patient_pid,
+                      concat_ws(' ', patient.first_name, patient.last_name) AS patient_name,
+                      NULL::text AS financial_account_name,
+                      NULL::text AS reference
+               FROM external_invoices external
+               JOIN orders ON orders.id = external.order_id
+               JOIN patients patient ON patient.id = external.patient_id
+               WHERE external.provider_id = $1
+                 AND UPPER(external.currency) = $2
+                 AND external.status NOT IN ('cancelled', 'expected')
+                 AND external.paid_by <> 'patient'
+
+               UNION ALL
+
+               SELECT payment_tx.id AS movement_id,
+                      payment_tx.paid_on AS movement_date,
+                      payment_tx.transaction_type AS movement_type,
+                      external.id AS external_invoice_id,
+                      external.external_invoice_number,
+                      CASE WHEN payment_tx.transaction_type = 'reversal'
+                           THEN payment_tx.amount_gross ELSE 0 END AS amount_charged,
+                      CASE WHEN payment_tx.transaction_type = 'payment'
+                           THEN payment_tx.amount_gross ELSE 0 END AS amount_paid,
+                      orders.id AS order_id, orders.order_number,
+                      patient.id AS patient_id, patient.patient_id AS patient_pid,
+                      concat_ws(' ', patient.first_name, patient.last_name) AS patient_name,
+                      account.name AS financial_account_name,
+                      payment_tx.reference
+               FROM external_invoice_provider_payment_transactions payment_tx
+               JOIN external_invoices external
+                 ON external.id = payment_tx.external_invoice_id
+               JOIN orders ON orders.id = external.order_id
+               JOIN patients patient ON patient.id = external.patient_id
+               JOIN company_financial_accounts account
+                 ON account.id = payment_tx.financial_account_id
+               WHERE external.provider_id = $1
+                 AND UPPER(payment_tx.currency) = $2
+           )
+           SELECT movement_id, movement_date, movement_type,
+                  external_invoice_id, external_invoice_number,
+                  amount_charged, amount_paid,
+                  order_id, order_number, patient_id, patient_pid, patient_name,
+                  financial_account_name, reference
+           FROM statement_movements
+           WHERE movement_date <= $3
+           ORDER BY movement_date,
+                    CASE movement_type
+                        WHEN 'invoice' THEN 0
+                        WHEN 'payment' THEN 1
+                        ELSE 2
+                    END,
+                    movement_id"#,
+    )
+    .bind(provider_id)
+    .bind(&currency)
+    .bind(to)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %provider_id, currency = %currency, "load provider statement movements");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider statement",
+            );
+        }
+    };
+
+    let expected_gross = match sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(external.amount_gross), 0)
+           FROM external_invoices external
+           WHERE external.provider_id = $1
+             AND UPPER(external.currency) = $2
+             AND external.status = 'expected'
+             AND external.paid_by <> 'patient'
+             AND COALESCE(external.invoice_date, external.created_at::date) <= $3"#,
+    )
+    .bind(provider_id)
+    .bind(&currency)
+    .bind(to)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %provider_id, currency = %currency, "load provider statement expected costs");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider statement",
+            );
+        }
+    };
+
+    let mut opening_balance = Decimal::ZERO;
+    let mut running_balance = Decimal::ZERO;
+    let mut charged_gross = Decimal::ZERO;
+    let mut paid_gross = Decimal::ZERO;
+    let mut reversed_gross = Decimal::ZERO;
+    let mut movements = Vec::new();
+    for row in movement_rows {
+        let movement_date = row
+            .try_get::<NaiveDate, _>("movement_date")
+            .unwrap_or(today);
+        let movement_type = row
+            .try_get::<String, _>("movement_type")
+            .unwrap_or_default();
+        let amount_charged = row
+            .try_get::<Decimal, _>("amount_charged")
+            .unwrap_or(Decimal::ZERO);
+        let amount_paid = row
+            .try_get::<Decimal, _>("amount_paid")
+            .unwrap_or(Decimal::ZERO);
+        if movement_date < from {
+            opening_balance += amount_charged - amount_paid;
+            continue;
+        }
+        if movements.is_empty() {
+            running_balance = opening_balance;
+        }
+        running_balance += amount_charged - amount_paid;
+        if movement_type == "invoice" {
+            charged_gross += amount_charged;
+        } else if movement_type == "payment" {
+            paid_gross += amount_paid;
+        } else if movement_type == "reversal" {
+            reversed_gross += amount_charged;
+        }
+        movements.push(json!({
+            "id": row.try_get::<Uuid, _>("movement_id").unwrap_or_default(),
+            "movement_date": movement_date.to_string(),
+            "movement_type": movement_type,
+            "external_invoice_id": row.try_get::<Uuid, _>("external_invoice_id").unwrap_or_default(),
+            "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+            "amount_charged": decimal_to_string(amount_charged),
+            "amount_paid": decimal_to_string(amount_paid),
+            "running_balance": decimal_to_string(running_balance),
+            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
+            "patient_name": row.try_get::<String, _>("patient_name").unwrap_or_default(),
+            "financial_account_name": row.try_get::<Option<String>, _>("financial_account_name").unwrap_or_default(),
+            "reference": row.try_get::<Option<String>, _>("reference").unwrap_or_default(),
+        }));
+    }
+    if movements.is_empty() {
+        running_balance = opening_balance;
+    }
+
+    Json(json!({
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "currency": currency,
+        "period": { "from": from.to_string(), "to": to.to_string() },
+        "summary": {
+            "opening_balance": decimal_to_string(opening_balance),
+            "charged_gross": decimal_to_string(charged_gross),
+            "paid_gross": decimal_to_string(paid_gross),
+            "reversed_gross": decimal_to_string(reversed_gross),
+            "expected_gross": decimal_to_string(expected_gross),
+            "closing_balance": decimal_to_string(running_balance),
+        },
+        "movements": movements,
+        "generated_at": Utc::now().to_rfc3339(),
     }))
     .into_response()
 }
