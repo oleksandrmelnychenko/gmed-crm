@@ -397,10 +397,17 @@ export type CompanyConciergeExpenseListResponse = {
   items: CompanyConciergeExpenseItem[];
 };
 
+export type CompanyConciergeExpenseReviewQueuePage = {
+  items: CompanyConciergeExpenseReviewRow[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
+};
+
 export type CompanyConciergeExpenseQueuePayload = {
   rows: CompanyConciergeExpenseReviewRow[];
-  service_count: number;
-  failed_service_count: number;
-  service_list_truncated: boolean;
+  total_count: number;
+  loaded_count: number;
   complete: boolean;
 };

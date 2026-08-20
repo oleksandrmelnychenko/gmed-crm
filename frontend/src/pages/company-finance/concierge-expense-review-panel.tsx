@@ -86,7 +86,7 @@ const textByLanguage = {
     title: "Расходы Concierge",
     subtitle: "Проверка чеков и отражение подтвержденных расходов в финансовом учете.",
     refresh: "Обновить",
-    search: "Пациент, услуга, поставщик или заказ",
+    search: "Пациент, услуга, партнёр или заказ",
     all: "Все",
     pending: "Ожидают проверки",
     posted: "Проведены",
@@ -94,7 +94,7 @@ const textByLanguage = {
     reversed: "Сторнированы",
     patient: "Пациент",
     service: "Услуга",
-    vendor: "Поставщик",
+    vendor: "Партнёр или исполнитель",
     expenseDate: "Дата расхода",
     submittedAt: "Передано",
     amount: "Сумма",
@@ -106,9 +106,8 @@ const textByLanguage = {
     loading: "Загрузка расходов Concierge…",
     empty: "Расходов для выбранного фильтра нет.",
     incompleteTitle: "Очередь загружена не полностью",
-    incomplete: (failed: number, total: number) =>
-      `Не удалось проверить ${failed} из ${total} сервисов. Проведение и отклонение заблокированы до полного обновления.`,
-    truncated: "Backend вернул максимальные 200 сервисов, поэтому более старые расходы могут отсутствовать. Проведение и отклонение заблокированы.",
+    incomplete: (loaded: number, total: number) =>
+      `Загружено ${loaded} из ${total} расходов. Проведение и отклонение заблокированы до полного обновления.`,
     detailTitle: "Проверка расхода",
     detailDescription: "Сверьте чек, назначение заказа и финансовые последствия до проведения.",
     contextLoading: "Загрузка финансового контекста…",
@@ -186,7 +185,7 @@ const textByLanguage = {
     title: "Concierge-Auslagen",
     subtitle: "Belege prüfen und bestätigte Auslagen in die Finanzbuchhaltung übernehmen.",
     refresh: "Aktualisieren",
-    search: "Patient, Leistung, Anbieter oder Auftrag",
+    search: "Patient, Leistung, Partner oder Auftrag",
     all: "Alle",
     pending: "Zur Prüfung",
     posted: "Gebucht",
@@ -194,7 +193,7 @@ const textByLanguage = {
     reversed: "Storniert",
     patient: "Patient",
     service: "Leistung",
-    vendor: "Anbieter",
+    vendor: "Partner oder Leistungserbringer",
     expenseDate: "Auslagendatum",
     submittedAt: "Eingereicht",
     amount: "Betrag",
@@ -206,9 +205,8 @@ const textByLanguage = {
     loading: "Concierge-Auslagen werden geladen…",
     empty: "Keine Auslagen für den gewählten Filter.",
     incompleteTitle: "Prüfliste unvollständig geladen",
-    incomplete: (failed: number, total: number) =>
-      `${failed} von ${total} Services konnten nicht geprüft werden. Buchen und Ablehnen bleiben bis zur vollständigen Aktualisierung gesperrt.`,
-    truncated: "Das Backend hat die maximale Anzahl von 200 Services geliefert. Ältere Auslagen können fehlen; Buchen und Ablehnen bleiben gesperrt.",
+    incomplete: (loaded: number, total: number) =>
+      `${loaded} von ${total} Auslagen wurden geladen. Buchen und Ablehnen bleiben bis zur vollständigen Aktualisierung gesperrt.`,
     detailTitle: "Auslage prüfen",
     detailDescription: "Beleg, Auftragszuordnung und finanzielle Auswirkungen vor der Buchung abgleichen.",
     contextLoading: "Finanzkontext wird geladen…",
@@ -712,9 +710,7 @@ export function ConciergeExpenseReviewPanel({
       {queue && !queue.complete ? (
         <ShellBanner tone="error" withIcon>
           <span className="font-medium">{text.incompleteTitle}.</span>{" "}
-          {queue.service_list_truncated
-            ? text.truncated
-            : text.incomplete(queue.failed_service_count, queue.service_count)}
+          {text.incomplete(queue.loaded_count, queue.total_count)}
         </ShellBanner>
       ) : null}
 

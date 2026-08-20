@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Extension, Multipart, Path, State},
+    extract::{DefaultBodyLimit, Extension, Multipart, Path, Query, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -33,6 +33,7 @@ fn max_money() -> Decimal {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/concierge-expenses", get(list_expense_review_queue))
         .route(
             "/concierge-services/{service_id}/expense-context",
             get(get_expense_context),
@@ -109,6 +110,12 @@ struct ReverseExpenseRequest {
     request_id: Uuid,
     reason: String,
     reversed_on: NaiveDate,
+}
+
+#[derive(Deserialize)]
+struct ExpenseReviewQueueQuery {
+    page: Option<i64>,
+    page_size: Option<i64>,
 }
 
 struct LockedExpense {
@@ -1132,6 +1139,137 @@ async fn expense_mutation_response(
         Ok(None) => err(StatusCode::NOT_FOUND, "Expense not found"),
         Err(response) => response,
     }
+}
+
+async fn list_expense_review_queue(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ExpenseReviewQueueQuery>,
+) -> Response {
+    if let Err(response) = require_finance(&auth) {
+        return response;
+    }
+
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(100);
+    if page < 1 || !(1..=100).contains(&page_size) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "page must be at least 1 and page_size must be between 1 and 100",
+        );
+    }
+    let offset = page.saturating_sub(1).saturating_mul(page_size);
+
+    let total = match sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM concierge_expense_submissions",
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, "count Concierge expense review queue");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load expense review queue",
+            );
+        }
+    };
+
+    let rows = match sqlx::query(
+        r#"SELECT submission.id AS expense_id,
+                  submission.concierge_service_id,
+                  service.patient_id,
+                  trim(concat_ws(' ', patient.first_name, patient.last_name)) AS patient_name,
+                  patient.patient_id AS patient_pid,
+                  service.title,
+                  service.status AS service_status,
+                  UPPER(service.currency) AS service_currency,
+                  service.provider_id,
+                  provider.name AS provider_name
+           FROM concierge_expense_submissions submission
+           JOIN concierge_services service ON service.id = submission.concierge_service_id
+           JOIN patients patient ON patient.id = service.patient_id
+           LEFT JOIN providers provider ON provider.id = service.provider_id
+           LEFT JOIN LATERAL (
+               SELECT event.id, event.action
+               FROM concierge_expense_review_events event
+               WHERE event.expense_id = submission.id
+                 AND event.action IN ('posted', 'rejected')
+               ORDER BY event.created_at DESC, event.id DESC
+               LIMIT 1
+           ) initial ON true
+           LEFT JOIN LATERAL (
+               SELECT event.id
+               FROM concierge_expense_review_events event
+               WHERE event.reverses_event_id = initial.id
+                 AND event.action = 'reversed'
+               ORDER BY event.created_at DESC, event.id DESC
+               LIMIT 1
+           ) reversal ON true
+           ORDER BY CASE
+                        WHEN reversal.id IS NOT NULL THEN 3
+                        WHEN initial.action = 'posted' THEN 1
+                        WHEN initial.action = 'rejected' THEN 2
+                        ELSE 0
+                    END,
+                    submission.created_at DESC,
+                    submission.id DESC
+           LIMIT $1 OFFSET $2"#,
+    )
+    .bind(page_size)
+    .bind(offset)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, page, page_size, "load Concierge expense review queue page");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load expense review queue",
+            );
+        }
+    };
+
+    let loaded_count = rows.len() as i64;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let expense_id = row.try_get::<Uuid, _>("expense_id").unwrap_or_default();
+        let service_id = row
+            .try_get::<Uuid, _>("concierge_service_id")
+            .unwrap_or_default();
+        let service = json!({
+            "id": service_id,
+            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            "patient_name": row.try_get::<String, _>("patient_name").unwrap_or_default(),
+            "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
+            "title": row.try_get::<String, _>("title").unwrap_or_default(),
+            "status": row.try_get::<String, _>("service_status").unwrap_or_default(),
+            "currency": row.try_get::<String, _>("service_currency").unwrap_or_else(|_| "EUR".to_string()),
+            "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+            "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        });
+        match load_expense_item(&state, service_id, expense_id).await {
+            Ok(Some(mut item)) => {
+                if let Some(object) = item.as_object_mut() {
+                    object.insert("service".to_string(), service);
+                }
+                items.push(item);
+            }
+            Ok(None) => {}
+            Err(response) => return response,
+        }
+    }
+
+    Json(json!({
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_more": offset.saturating_add(loaded_count) < total,
+    }))
+    .into_response()
 }
 
 async fn list_expenses(

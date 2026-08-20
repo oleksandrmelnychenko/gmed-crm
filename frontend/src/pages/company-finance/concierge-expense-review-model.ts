@@ -5,14 +5,8 @@ import type {
   CompanyConciergeExpensePaymentMethod,
   CompanyConciergeExpenseReviewRow,
   CompanyConciergeExpenseStatus,
-  CompanyConciergeServiceSummary,
   CompanyFinancialAccount,
 } from "./types";
-
-export type ExpenseQueueSource = {
-  service: CompanyConciergeServiceSummary;
-  items: CompanyConciergeExpenseItem[];
-};
 
 export type ExpenseReviewFilter = CompanyConciergeExpenseStatus | "all";
 
@@ -42,34 +36,6 @@ export type StableRequestIdEntry = {
   fingerprint: string;
   requestId: string;
 };
-
-const statusRank: Record<CompanyConciergeExpenseStatus, number> = {
-  pending_review: 0,
-  posted: 1,
-  rejected: 2,
-  reversed: 3,
-};
-
-export function conciergeExpenseQueueCompleteness(
-  serviceCount: number,
-  failedServiceCount: number,
-) {
-  const serviceListTruncated = serviceCount >= 200;
-  return {
-    service_list_truncated: serviceListTruncated,
-    complete: failedServiceCount === 0 && !serviceListTruncated,
-  };
-}
-
-export function mergeConciergeExpenseQueue(sources: ExpenseQueueSource[]) {
-  return sources
-    .flatMap(({ service, items }) => items.map((item) => ({ ...item, service })))
-    .sort((left, right) => {
-      const byStatus = statusRank[left.status] - statusRank[right.status];
-      if (byStatus !== 0) return byStatus;
-      return (right.submitted_at ?? "").localeCompare(left.submitted_at ?? "");
-    });
-}
 
 export function filterConciergeExpenseQueue(
   rows: CompanyConciergeExpenseReviewRow[],

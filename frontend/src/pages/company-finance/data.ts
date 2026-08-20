@@ -1,10 +1,5 @@
 import { apiFetch, apiFetchFile, downloadApiFile } from "@/lib/api";
 
-import {
-  conciergeExpenseQueueCompleteness,
-  mergeConciergeExpenseQueue,
-} from "./concierge-expense-review-model";
-
 import type {
   CompanyFinancialFilters,
   CompanyFinancialAccountsPayload,
@@ -14,11 +9,10 @@ import type {
   CompanyProviderSettlement,
   CompanyProviderStatement,
   CompanyConciergeExpenseContext,
-  CompanyConciergeExpenseListResponse,
   CompanyConciergeExpenseMutationResponse,
   CompanyConciergeExpensePostPayload,
   CompanyConciergeExpenseQueuePayload,
-  CompanyConciergeServiceSummary,
+  CompanyConciergeExpenseReviewQueuePage,
 } from "./types";
 
 export function buildCompanyFinancialPositionPath(filters: CompanyFinancialFilters) {
@@ -188,50 +182,36 @@ export function buildCompanyProviderStatementPath(
   return `/company-provider-statements/${providerId}?${params.toString()}`;
 }
 
-const EXPENSE_QUEUE_CONCURRENCY = 6;
+const EXPENSE_QUEUE_PAGE_SIZE = 100;
 
 export async function fetchCompanyConciergeExpenseQueue(
   forceFresh = false,
 ): Promise<CompanyConciergeExpenseQueuePayload> {
-  const services = await apiFetch<CompanyConciergeServiceSummary[]>("/concierge-services", {
-    forceFresh,
-  });
-  const sources: Array<{
-    service: CompanyConciergeServiceSummary;
-    items: CompanyConciergeExpenseListResponse["items"];
-  }> = [];
-  let failedServiceCount = 0;
-  let cursor = 0;
-
-  async function worker() {
-    while (cursor < services.length) {
-      const index = cursor;
-      cursor += 1;
-      const service = services[index];
-      try {
-        const response = await apiFetch<CompanyConciergeExpenseListResponse>(
-          `/concierge-services/${service.id}/expenses`,
-          { forceFresh },
-        );
-        sources.push({ service, items: response.items });
-      } catch {
-        failedServiceCount += 1;
-      }
+  const rows = [] as CompanyConciergeExpenseReviewQueuePage["items"];
+  let page = 1;
+  let totalCount = 0;
+  let hasMore = true;
+  while (hasMore) {
+    const response = await apiFetch<CompanyConciergeExpenseReviewQueuePage>(
+      `/concierge-expenses?page=${page}&page_size=${EXPENSE_QUEUE_PAGE_SIZE}`,
+      { forceFresh },
+    );
+    if (response.page !== page || response.page_size !== EXPENSE_QUEUE_PAGE_SIZE) {
+      throw new Error("Expense review queue returned an invalid page");
     }
+    if (response.has_more && response.items.length === 0) {
+      throw new Error("Expense review queue pagination did not advance");
+    }
+    rows.push(...response.items);
+    totalCount = response.total;
+    hasMore = response.has_more;
+    page += 1;
   }
-
-  await Promise.all(
-    Array.from(
-      { length: Math.min(EXPENSE_QUEUE_CONCURRENCY, services.length) },
-      () => worker(),
-    ),
-  );
-  const completeness = conciergeExpenseQueueCompleteness(services.length, failedServiceCount);
   return {
-    rows: mergeConciergeExpenseQueue(sources),
-    service_count: services.length,
-    failed_service_count: failedServiceCount,
-    ...completeness,
+    rows,
+    total_count: totalCount,
+    loaded_count: rows.length,
+    complete: rows.length === totalCount,
   };
 }
 

@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildExpensePostPayload,
-  conciergeExpenseQueueCompleteness,
   eligibleExpenseOrderServices,
   filterConciergeExpenseQueue,
-  mergeConciergeExpenseQueue,
   resolveStableRequestId,
   validateExpensePostForm,
   validateExpenseRejection,
@@ -119,26 +117,16 @@ const account: CompanyFinancialAccount = {
 };
 
 describe("Concierge expense finance review model", () => {
-  it("sorts pending submissions first and filters by patient or vendor", () => {
+  it("filters the server-provided review queue by status, patient, or vendor", () => {
     const posted = expense({ id: "posted", status: "posted", submitted_at: "2026-08-20T10:00:00Z" });
     const pending = expense({ id: "pending", status: "pending_review" });
-    const rows = mergeConciergeExpenseQueue([{ service, items: [posted, pending] }]);
+    const rows = [
+      { ...pending, service },
+      { ...posted, service },
+    ];
 
-    expect(rows.map((row) => row.id)).toEqual(["pending", "posted"]);
     expect(filterConciergeExpenseQueue(rows, "pending_review", "anna")).toHaveLength(1);
     expect(filterConciergeExpenseQueue(rows, "all", "fahrdienst")).toHaveLength(2);
-  });
-
-  it("blocks decisions for partial failures and for the backend 200-service cap", () => {
-    expect(conciergeExpenseQueueCompleteness(25, 0)).toEqual({
-      service_list_truncated: false,
-      complete: true,
-    });
-    expect(conciergeExpenseQueueCompleteness(25, 1).complete).toBe(false);
-    expect(conciergeExpenseQueueCompleteness(200, 0)).toEqual({
-      service_list_truncated: true,
-      complete: false,
-    });
   });
 
   it("keeps order and service choices currency- and provider-safe", () => {

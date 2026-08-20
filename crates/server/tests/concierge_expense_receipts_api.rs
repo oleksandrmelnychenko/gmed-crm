@@ -1166,3 +1166,92 @@ async fn receipt_upload_limit_accepts_camera_size_and_rejects_above_twenty_five_
     .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
 }
+
+#[tokio::test]
+async fn finance_review_queue_is_global_paginated_and_finance_only() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("queue-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("queue-{tag}")).await;
+    let concierge = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = Utc::now().date_naive() - Duration::days(1);
+
+    for index in 0..2 {
+        let fixture_tag = format!("{tag}-{index}");
+        let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
+            seed_financial_fixture(
+                &context.pool,
+                context.admin_id,
+                concierge_id,
+                &fixture_tag,
+            )
+            .await;
+        let (status, submitted) = submit_fixture_expense(
+            &context.app,
+            &concierge,
+            service_id,
+            Uuid::new_v4(),
+            "unpaid",
+            true,
+            expense_date,
+            &format!("queue-{index}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{submitted}");
+    }
+
+    let (status, first_page) = json_request(
+        &context.app,
+        "GET",
+        "/api/v1/concierge-expenses?page=1&page_size=1",
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first_page}");
+    assert_eq!(first_page["page"], 1);
+    assert_eq!(first_page["page_size"], 1);
+    assert_eq!(first_page["total"], 2);
+    assert_eq!(first_page["has_more"], true);
+    assert_eq!(first_page["items"].as_array().map(Vec::len), Some(1));
+    assert!(first_page["items"][0]["service"]["patient_name"].is_string());
+    assert!(first_page["items"][0]["service"]["patient_pid"].is_string());
+    assert!(first_page["items"][0]["service"]["title"].is_string());
+
+    let (status, second_page) = json_request(
+        &context.app,
+        "GET",
+        "/api/v1/concierge-expenses?page=2&page_size=1",
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_page}");
+    assert_eq!(second_page["total"], 2);
+    assert_eq!(second_page["has_more"], false);
+    assert_eq!(second_page["items"].as_array().map(Vec::len), Some(1));
+    assert_ne!(first_page["items"][0]["id"], second_page["items"][0]["id"]);
+
+    let (status, forbidden) = json_request(
+        &context.app,
+        "GET",
+        "/api/v1/concierge-expenses?page=1&page_size=100",
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let (status, invalid_page) = json_request(
+        &context.app,
+        "GET",
+        "/api/v1/concierge-expenses?page=0&page_size=101",
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_page}");
+}
