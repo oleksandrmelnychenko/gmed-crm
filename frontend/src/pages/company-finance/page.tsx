@@ -716,11 +716,24 @@ export function CompanyFinancePage() {
 
       {position && accounts ? (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
-          <TabsList className="mx-auto h-auto max-w-full flex-wrap border border-border bg-card p-1">
-            <TabsTrigger className="h-8 rounded-md px-3" value="patients">{text.patients} · {position.patient_positions.length}</TabsTrigger>
-            <TabsTrigger className="h-8 rounded-md px-3" value="providers">{text.providers} · {position.provider_positions.length}</TabsTrigger>
-            <TabsTrigger className="h-8 rounded-md px-3" value="accounts">{text.financialAccounts} · {accounts.items.length}</TabsTrigger>
-            <TabsTrigger className="h-8 rounded-md px-3" value="cash">{text.cash} · {position.cash_movement_count}</TabsTrigger>
+          <TabsList className="mx-auto h-auto max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
+            {([
+              ["patients", text.patients, position.patient_positions.length],
+              ["providers", text.providers, position.provider_positions.length],
+              ["accounts", text.financialAccounts, accounts.items.length],
+              ["cash", text.cash, position.cash_movement_count],
+            ] as const).map(([value, label, count]) => (
+              <TabsTrigger
+                key={value}
+                className="h-8 rounded-md px-3 text-xs data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-sm data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground"
+                value={value}
+              >
+                <span>{label}</span>
+                <span data-count className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+                  {count}
+                </span>
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           <TabsContent value="patients">

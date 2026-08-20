@@ -6261,23 +6261,23 @@ function ProviderOverviewSection({
   const l = (key: string) => t.uiText[key] ?? key;
   const financialText = lang === "de"
     ? {
-        title: "Unternehmenssaldo beim Anbieter",
-        payable: "Noch zu zahlen",
-        paid: "Vom Unternehmen bezahlt",
-        expected: "Erwartete Kosten",
-        invoices: "Anbieterrechnungen",
-        open: "Kontenabgleich öffnen",
-        loading: "Saldo wird berechnet…",
+        title: "Finanzübersicht mit Partner / Leistungserbringer",
+        payable: "Noch an Partner / Leistungserbringer zu zahlen",
+        paid: "Bereits vom Unternehmen bezahlt",
+        expected: "Erwartete, noch nicht freigegebene Kosten",
+        invoices: "Rechnungen des Partners / Leistungserbringers",
+        open: "Zahlungen und offene Beträge anzeigen",
+        loading: "Finanzübersicht wird berechnet…",
         unavailable: "Finanzdaten sind derzeit nicht verfügbar",
       }
     : {
-        title: "Баланс компании с поставщиком",
-        payable: "Осталось выплатить",
-        paid: "Оплачено компанией",
-        expected: "Ожидаемые расходы",
-        invoices: "Счета поставщика",
-        open: "Открыть взаиморасчёты",
-        loading: "Баланс рассчитывается…",
+        title: "Взаиморасчёты с партнёром / исполнителем",
+        payable: "Осталось выплатить партнёру / исполнителю",
+        paid: "Уже оплачено компанией",
+        expected: "Ожидаемые расходы, ещё не подтверждённые",
+        invoices: "Счета партнёра / исполнителя",
+        open: "Показать выплаты и открытые суммы",
+        loading: "Финансовые данные рассчитываются…",
         unavailable: "Финансовые данные сейчас недоступны",
       };
 
