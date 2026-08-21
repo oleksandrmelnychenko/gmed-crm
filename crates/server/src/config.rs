@@ -6,6 +6,7 @@ pub struct Config {
     pub database_url: String,
     pub listen_addr: SocketAddr,
     pub jwt_secret: String,
+    /// Comma-separated exact web/native origins allowed to call the API.
     pub cors_origin: String,
     pub message_key_registry: KeyRegistry,
     /// Salt used to pseudonymise peer IPs before they reach `audit_log`.
