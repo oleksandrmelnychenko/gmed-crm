@@ -2138,8 +2138,10 @@ async fn list_patients(
                         lifecycle_status: r
                             .try_get("lifecycle_status")
                             .unwrap_or_else(|_| "active".to_string()),
-                        account_balance: include_financial_balance
-                            .then(|| r.try_get("account_balance").unwrap_or_else(|_| "0".to_string())),
+                        account_balance: include_financial_balance.then(|| {
+                            r.try_get("account_balance")
+                                .unwrap_or_else(|_| "0".to_string())
+                        }),
                         account_balance_currency: include_financial_balance
                             .then(|| "EUR".to_string()),
                         account_balance_side: include_financial_balance.then(|| {
