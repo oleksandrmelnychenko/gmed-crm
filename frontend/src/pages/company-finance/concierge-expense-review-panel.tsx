@@ -121,6 +121,12 @@ const textByLanguage = {
       `Загружено ${loaded} из ${total} расходов. Проведение, отклонение и отмена заблокированы до полного обновления.`,
     detailTitle: "Проверка расхода",
     detailDescription: "Сверьте чек, назначение заказа и финансовые последствия до проведения.",
+    postedDetailTitle: "Проведенный расход",
+    postedDetailDescription: "Расход отражён в финансовом учёте. Проверьте документ, назначение и историю операции.",
+    rejectedDetailTitle: "Отклоненный расход",
+    rejectedDetailDescription: "Расход не был проведён. Проверьте чек, причину отклонения и историю операции.",
+    reversedDetailTitle: "Сторнированный расход",
+    reversedDetailDescription: "Проведение отменено. Проверьте чек, восстановленные балансы и историю сторнирования.",
     contextLoading: "Загрузка финансового контекста…",
     contextFailed: "Не удалось загрузить финансовый контекст. Решение заблокировано.",
     receipt: "Чек",
@@ -230,6 +236,12 @@ const textByLanguage = {
       `${loaded} von ${total} Auslagen wurden geladen. Buchen, Ablehnen und Stornieren bleiben bis zur vollständigen Aktualisierung gesperrt.`,
     detailTitle: "Auslage prüfen",
     detailDescription: "Beleg, Auftragszuordnung und finanzielle Auswirkungen vor der Buchung abgleichen.",
+    postedDetailTitle: "Gebuchte Auslage",
+    postedDetailDescription: "Die Auslage wurde verbucht. Dokument, Zuordnung und Vorgangshistorie prüfen.",
+    rejectedDetailTitle: "Abgelehnte Auslage",
+    rejectedDetailDescription: "Die Auslage wurde nicht verbucht. Beleg, Ablehnungsgrund und Vorgangshistorie prüfen.",
+    reversedDetailTitle: "Stornierte Auslage",
+    reversedDetailDescription: "Die Buchung wurde storniert. Beleg, zurückgesetzte Salden und Stornohistorie prüfen.",
     contextLoading: "Finanzkontext wird geladen…",
     contextFailed: "Der Finanzkontext konnte nicht geladen werden. Die Entscheidung ist gesperrt.",
     receipt: "Beleg",
@@ -449,11 +461,19 @@ export function ConciergeExpenseReviewPanel({
       className={cn(
         row.status === "pending_review" && "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300",
         row.status === "posted" && "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300",
+        row.status === "reversed" && "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-500/10 dark:text-slate-300",
       )}
     >
       {statusLabel(row.status)}
     </Badge>
   ), [statusLabel]);
+
+  const selectedDetailCopy = selected ? ({
+    pending_review: { title: text.detailTitle, description: text.detailDescription },
+    posted: { title: text.postedDetailTitle, description: text.postedDetailDescription },
+    rejected: { title: text.rejectedDetailTitle, description: text.rejectedDetailDescription },
+    reversed: { title: text.reversedDetailTitle, description: text.reversedDetailDescription },
+  } as const)[selected.status] : null;
 
   const columns = useMemo<ColumnDef<CompanyConciergeExpenseReviewRow>[]>(() => [
     {
@@ -911,15 +931,31 @@ export function ConciergeExpenseReviewPanel({
       )}
 
       <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) closeExpense(); }}>
-        <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden p-0 sm:w-[min(96vw,72rem)]">
+        <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[min(96vw,72rem)] sm:max-w-[72rem]">
           {selected ? (
             <>
-              <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <DialogTitle>{text.detailTitle}</DialogTitle>
-                  {statusBadge(selected)}
+              <DialogHeader className="border-b border-border bg-muted/20 px-4 py-4 pr-14 sm:px-5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className={cn(
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg border",
+                    selected.status === "pending_review" && "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-500/10 dark:text-amber-300",
+                    selected.status === "posted" && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300",
+                    selected.status === "rejected" && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-500/10 dark:text-rose-300",
+                    selected.status === "reversed" && "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-500/10 dark:text-slate-300",
+                  )}>
+                    {selected.status === "pending_review" ? <ReceiptText className="size-5" /> : null}
+                    {selected.status === "posted" ? <CheckCircle2 className="size-5" /> : null}
+                    {selected.status === "rejected" ? <XCircle className="size-5" /> : null}
+                    {selected.status === "reversed" ? <Undo2 className="size-5" /> : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <DialogTitle>{selectedDetailCopy?.title}</DialogTitle>
+                      {statusBadge(selected)}
+                    </div>
+                    <DialogDescription className="mt-1 max-w-3xl">{selectedDetailCopy?.description}</DialogDescription>
+                  </div>
                 </div>
-                <DialogDescription>{text.detailDescription}</DialogDescription>
               </DialogHeader>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
