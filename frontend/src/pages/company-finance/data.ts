@@ -11,6 +11,7 @@ import type {
   CompanyConciergeExpenseContext,
   CompanyConciergeExpenseMutationResponse,
   CompanyConciergeExpensePostPayload,
+  CompanyConciergeExpenseReversePayload,
   CompanyConciergeExpenseQueuePayload,
   CompanyConciergeExpenseReviewQueuePage,
 } from "./types";
@@ -240,6 +241,17 @@ export function rejectCompanyConciergeExpense(
 ) {
   return apiFetch<CompanyConciergeExpenseMutationResponse>(
     `/concierge-services/${serviceId}/expenses/${expenseId}/reject`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function reverseCompanyConciergeExpense(
+  serviceId: string,
+  expenseId: string,
+  payload: CompanyConciergeExpenseReversePayload,
+) {
+  return apiFetch<CompanyConciergeExpenseMutationResponse>(
+    `/concierge-services/${serviceId}/expenses/${expenseId}/reverse`,
     { method: "POST", body: JSON.stringify(payload) },
   );
 }

@@ -388,6 +388,12 @@ export type CompanyConciergeExpensePostPayload = {
   payment_reference: string | null;
 };
 
+export type CompanyConciergeExpenseReversePayload = {
+  request_id: string;
+  reason: string;
+  reversed_on: string;
+};
+
 export type CompanyConciergeExpenseMutationResponse = {
   item: CompanyConciergeExpenseItem;
   idempotent_replay: boolean;

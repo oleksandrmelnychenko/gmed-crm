@@ -12,6 +12,7 @@ import {
   Loader2,
   ReceiptText,
   RefreshCw,
+  Undo2,
   XCircle,
 } from "lucide-react";
 
@@ -53,6 +54,7 @@ import {
   fetchCompanyConciergeExpenseReceipt,
   postCompanyConciergeExpense,
   rejectCompanyConciergeExpense,
+  reverseCompanyConciergeExpense,
 } from "./data";
 import type {
   CompanyConciergeExpenseContext,
@@ -116,7 +118,7 @@ const textByLanguage = {
     empty: "Расходов для выбранного фильтра нет.",
     incompleteTitle: "Очередь загружена не полностью",
     incomplete: (loaded: number, total: number) =>
-      `Загружено ${loaded} из ${total} расходов. Проведение и отклонение заблокированы до полного обновления.`,
+      `Загружено ${loaded} из ${total} расходов. Проведение, отклонение и отмена заблокированы до полного обновления.`,
     detailTitle: "Проверка расхода",
     detailDescription: "Сверьте чек, назначение заказа и финансовые последствия до проведения.",
     contextLoading: "Загрузка финансового контекста…",
@@ -156,6 +158,14 @@ const textByLanguage = {
     rejectReasonRequired: "Укажите причину отклонения (не более 2000 символов).",
     rejectPlaceholder: "Что необходимо исправить",
     reject: "Отклонить",
+    reverseTitle: "Отменить проведение",
+    reverseDescription: "Отмена вернёт баланс пациента, расход GMED и расчёт с партнёром в исходное состояние. Операция останется в истории.",
+    reverseDate: "Дата отмены",
+    reverseReason: "Причина отмены",
+    reverseReasonRequired: "Укажите причину отмены (не более 2000 символов).",
+    reverseDateInvalid: "Дата отмены должна быть между датой расхода и сегодняшним днем.",
+    reversePlaceholder: "Почему финансовое проведение необходимо отменить",
+    reverse: "Отменить проведение",
     decisionBlocked: "Финансовое решение доступно только после полной загрузки очереди и контекста.",
     balance: "Финансовые последствия",
     patientReceivable: "К оплате пациентом",
@@ -174,8 +184,10 @@ const textByLanguage = {
     downloadFailed: "Не удалось скачать чек.",
     postFailed: "Не удалось провести расход.",
     rejectFailed: "Не удалось отклонить расход.",
+    reverseFailed: "Не удалось отменить проведение расхода.",
     approvedSuccess: "Расход проведен.",
     rejectedSuccess: "Расход отклонен.",
+    reversedSuccess: "Проведение расхода отменено, балансы пересчитаны.",
     validation: {
       order_required: "Выберите заказ.",
       order_invalid: "Выбранный заказ недоступен или имеет другую валюту.",
@@ -215,7 +227,7 @@ const textByLanguage = {
     empty: "Keine Auslagen für den gewählten Filter.",
     incompleteTitle: "Prüfliste unvollständig geladen",
     incomplete: (loaded: number, total: number) =>
-      `${loaded} von ${total} Auslagen wurden geladen. Buchen und Ablehnen bleiben bis zur vollständigen Aktualisierung gesperrt.`,
+      `${loaded} von ${total} Auslagen wurden geladen. Buchen, Ablehnen und Stornieren bleiben bis zur vollständigen Aktualisierung gesperrt.`,
     detailTitle: "Auslage prüfen",
     detailDescription: "Beleg, Auftragszuordnung und finanzielle Auswirkungen vor der Buchung abgleichen.",
     contextLoading: "Finanzkontext wird geladen…",
@@ -255,6 +267,14 @@ const textByLanguage = {
     rejectReasonRequired: "Bitte einen Ablehnungsgrund mit höchstens 2000 Zeichen angeben.",
     rejectPlaceholder: "Was muss korrigiert werden?",
     reject: "Ablehnen",
+    reverseTitle: "Buchung stornieren",
+    reverseDescription: "Die Stornierung setzt Patientensaldo, GMED-Auslage und Partnerabrechnung zurück. Der Vorgang bleibt in der Historie erhalten.",
+    reverseDate: "Stornodatum",
+    reverseReason: "Stornogrund",
+    reverseReasonRequired: "Bitte einen Stornogrund mit höchstens 2000 Zeichen angeben.",
+    reverseDateInvalid: "Das Stornodatum muss zwischen Auslagendatum und heute liegen.",
+    reversePlaceholder: "Warum muss diese Finanzbuchung storniert werden?",
+    reverse: "Buchung stornieren",
     decisionBlocked: "Eine Finanzentscheidung ist erst nach vollständigem Laden von Prüfliste und Kontext möglich.",
     balance: "Finanzielle Auswirkungen",
     patientReceivable: "Patientenforderung",
@@ -273,8 +293,10 @@ const textByLanguage = {
     downloadFailed: "Der Beleg konnte nicht heruntergeladen werden.",
     postFailed: "Die Auslage konnte nicht gebucht werden.",
     rejectFailed: "Die Auslage konnte nicht abgelehnt werden.",
+    reverseFailed: "Die Buchung der Auslage konnte nicht storniert werden.",
     approvedSuccess: "Die Auslage wurde gebucht.",
     rejectedSuccess: "Die Auslage wurde abgelehnt.",
+    reversedSuccess: "Die Auslagenbuchung wurde storniert und die Salden wurden neu berechnet.",
     validation: {
       order_required: "Bitte einen Auftrag auswählen.",
       order_invalid: "Der Auftrag ist nicht verfügbar oder hat eine andere Währung.",
@@ -341,7 +363,9 @@ export function ConciergeExpenseReviewPanel({
   const [contextError, setContextError] = useState<string | null>(null);
   const [form, setForm] = useState<ExpensePostForm>(emptyForm);
   const [rejectReason, setRejectReason] = useState("");
-  const [mutationBusy, setMutationBusy] = useState<"post" | "reject" | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reversedOn, setReversedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [mutationBusy, setMutationBusy] = useState<"post" | "reject" | "reverse" | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -525,6 +549,8 @@ export function ConciergeExpenseReviewPanel({
     setMutationError(null);
     setSuccessMessage(null);
     setRejectReason("");
+    setReverseReason("");
+    setReversedOn(new Date().toISOString().slice(0, 10));
     setReceiptError(null);
     const defaultAccount = accounts.find((account) => (
       account.is_active && account.currency.toLocaleUpperCase() === row.currency.toLocaleUpperCase()
@@ -699,6 +725,45 @@ export function ConciergeExpenseReviewPanel({
     }
   }
 
+  async function reverseExpense() {
+    if (!selected || !queue?.complete || loading || selected.status !== "posted") return;
+    const reason = reverseReason.trim();
+    if (!validateExpenseRejection(reason)) {
+      setMutationError(text.reverseReasonRequired);
+      return;
+    }
+    if (!reversedOn || reversedOn < selected.expense_date || reversedOn > new Date().toISOString().slice(0, 10)) {
+      setMutationError(text.reverseDateInvalid);
+      return;
+    }
+    const requestId = resolveStableRequestId(
+      requestIdsRef.current,
+      `reverse:${selected.id}`,
+      { reason, reversed_on: reversedOn },
+      createRequestId,
+    );
+    setMutationBusy("reverse");
+    setMutationError(null);
+    setSuccessMessage(null);
+    try {
+      const response = await reverseCompanyConciergeExpense(
+        selected.concierge_service_id,
+        selected.id,
+        { request_id: requestId, reason, reversed_on: reversedOn },
+      );
+      requestIdsRef.current.delete(`reverse:${selected.id}`);
+      setReverseReason("");
+      setReversedOn(new Date().toISOString().slice(0, 10));
+      replaceReviewedItem({ ...response.item, service: selected.service });
+      setSuccessMessage(text.reversedSuccess);
+      onChanged();
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : text.reverseFailed);
+    } finally {
+      setMutationBusy(null);
+    }
+  }
+
   const availableOrders = selected && context ? eligibleExpenseOrders(selected, context) : [];
   const availableOrderServices = selected && context
     ? eligibleExpenseOrderServices(selected, context, form.orderId)
@@ -706,13 +771,14 @@ export function ConciergeExpenseReviewPanel({
   const availableAccounts = selected ? accounts.filter((account) => (
     account.is_active && account.currency.toLocaleUpperCase() === selected.currency.toLocaleUpperCase()
   )) : [];
+  const today = new Date().toISOString().slice(0, 10);
   const postValidation: ExpensePostValidationError[] = selected && context
     ? validateExpensePostForm(
       selected,
       context,
       accounts,
       form,
-      new Date().toISOString().slice(0, 10),
+      today,
     )
     : [];
   const decisionReady = Boolean(
@@ -723,6 +789,15 @@ export function ConciergeExpenseReviewPanel({
     && !loading
     && !contextLoading
     && !contextError,
+  );
+  const reverseReady = Boolean(
+    selected
+    && selected.status === "posted"
+    && queue?.complete
+    && !loading
+    && validateExpenseRejection(reverseReason)
+    && reversedOn >= selected.expense_date
+    && reversedOn <= today,
   );
 
   return (
@@ -1033,6 +1108,55 @@ export function ConciergeExpenseReviewPanel({
                           <div><span className="block text-muted-foreground">{text.settlementStatus}</span>{selected.external_invoice.settlement_status || "—"}</div>
                         </div>
                         {selected.order_id ? <StaffLink to={`/orders/${selected.order_id}`} className="mt-3 inline-block text-xs font-medium text-primary hover:underline">{text.order}: {selected.order_number || selected.order_id}</StaffLink> : null}
+                      </section>
+                    ) : null}
+
+                    {selected.status === "posted" ? (
+                      <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                        <h3 className="flex items-center gap-2 text-sm font-semibold">
+                          <Undo2 className="size-4 text-destructive" />
+                          {text.reverseTitle}
+                        </h3>
+                        <p className="mt-1 text-xs text-muted-foreground">{text.reverseDescription}</p>
+                        {!queue?.complete ? <div className="mt-3"><ShellBanner tone="error">{text.decisionBlocked}</ShellBanner></div> : null}
+                        <div className="mt-3 grid gap-3">
+                          <label className="block text-xs font-medium">
+                            {text.reverseDate} <span className="text-destructive">*</span>
+                            <Input
+                              type="date"
+                              className="mt-1 h-9 bg-field text-xs"
+                              min={selected.expense_date}
+                              max={today}
+                              value={reversedOn}
+                              disabled={mutationBusy !== null}
+                              onChange={(event) => setReversedOn(event.target.value)}
+                            />
+                          </label>
+                          <label className="block text-xs font-medium">
+                            {text.reverseReason} <span className="text-destructive">*</span>
+                            <textarea
+                              className="mt-1 min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                              maxLength={2000}
+                              placeholder={text.reversePlaceholder}
+                              value={reverseReason}
+                              disabled={mutationBusy !== null}
+                              onChange={(event) => setReverseReason(event.target.value)}
+                            />
+                          </label>
+                          {reversedOn && (reversedOn < selected.expense_date || reversedOn > today) ? (
+                            <ShellBanner tone="warning">{text.reverseDateInvalid}</ShellBanner>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            className="w-full"
+                            disabled={!reverseReady || mutationBusy !== null}
+                            onClick={() => void reverseExpense()}
+                          >
+                            {mutationBusy === "reverse" ? <Loader2 className="size-4 animate-spin" /> : <Undo2 className="size-4" />}
+                            {text.reverse}
+                          </Button>
+                        </div>
                       </section>
                     ) : null}
 
