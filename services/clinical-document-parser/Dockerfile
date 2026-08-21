@@ -6,11 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FLAGS_use_mkldnn=0
 
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
        tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
        tesseract-ocr-rus tesseract-ocr-ukr \
        fonts-dejavu-core \
        libgl1 libglib2.0-0 libgomp1 \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' util-linux)" ge '2.41.5-0+deb13u1' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
