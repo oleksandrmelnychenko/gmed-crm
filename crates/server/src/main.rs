@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use gmed_server::{audit, build_app, config, settings, state, telemetry};
 
@@ -69,19 +69,27 @@ async fn main() {
     spawn_lead_purger(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
 
-    let cors_origin = match cfg.cors_origin.parse::<http::HeaderValue>() {
-        Ok(v) => v,
-        Err(e) => {
+    let cors_origins = cfg
+        .cors_origin
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::parse::<http::HeaderValue>)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or_else(|error| {
             tracing::error!(
-                error = %e,
+                %error,
                 value = %cfg.cors_origin,
-                "CORS_ORIGIN is not a valid HTTP header value"
+                "CORS_ORIGIN contains an invalid HTTP origin"
             );
             std::process::exit(1);
-        }
-    };
+        });
+    if cors_origins.is_empty() {
+        tracing::error!("CORS_ORIGIN must contain at least one allowed origin");
+        std::process::exit(1);
+    }
     let cors = CorsLayer::new()
-        .allow_origin(cors_origin)
+        .allow_origin(AllowOrigin::list(cors_origins))
         .allow_methods([
             http::Method::GET,
             http::Method::POST,

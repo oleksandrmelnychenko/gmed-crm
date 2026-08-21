@@ -25,7 +25,7 @@ services:
       MESSAGE_ENCRYPTION_KEYS: "${GMED_MESSAGE_ENCRYPTION_KEYS:?Set GMED_MESSAGE_ENCRYPTION_KEYS in your environment or release env file}"
       MESSAGE_ENCRYPTION_KEY_ACTIVE: "${GMED_MESSAGE_ENCRYPTION_KEY_ACTIVE:-v1}"
       AUDIT_IP_SALT: "${GMED_AUDIT_IP_SALT:-}"
-      CORS_ORIGIN: "${GMED_CORS_ORIGIN:-http://localhost:8080}"
+      CORS_ORIGIN: "${GMED_CORS_ORIGIN:-http://localhost:8080,https://localhost,capacitor://localhost}"
       LEAD_INTAKE_TOKEN: "${GMED_LEAD_INTAKE_TOKEN:-}"
       RUST_LOG: "${GMED_RUST_LOG:-info,gmed_server=debug}"
       LOG_FORMAT: "${GMED_LOG_FORMAT:-json}"
