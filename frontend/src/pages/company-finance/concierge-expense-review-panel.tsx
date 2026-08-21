@@ -386,6 +386,10 @@ export function ConciergeExpenseReviewPanel({
 
   useEffect(() => {
     void loadQueue(true);
+    const timer = window.setInterval(() => {
+      void loadQueue(true);
+    }, 20_000);
+    return () => window.clearInterval(timer);
   }, [loadQueue]);
 
   useDebouncedRealtimeSubscription(EXPENSE_REALTIME_EVENTS, () => {
