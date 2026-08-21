@@ -214,6 +214,7 @@ fn pdf_receipt(tag: &str) -> Vec<u8> {
     format!("%PDF-1.4\n% GMED receipt {tag}\n%%EOF\n").into_bytes()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn submit_fixture_expense(
     app: &axum::Router,
     bearer: &str,

@@ -10344,7 +10344,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         Some(json!({
             "name": format!("Dr Roundtrip {tag}"),
             "first_name": "Roundtrip",
-            "last_name": format!("{tag}"),
+            "last_name": tag.to_string(),
             "title": "Prof.",
             "role_code": "chefarzt",
             "gender": "female",
@@ -10392,7 +10392,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         Some(json!({
             "name": format!("Dr Target {tag}"),
             "first_name": "Target",
-            "last_name": format!("{tag}"),
+            "last_name": tag.to_string(),
             "title": "Dr. med.",
             "gender": "male",
             "languages": ["de"],

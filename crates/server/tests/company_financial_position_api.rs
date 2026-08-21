@@ -34,7 +34,7 @@ async fn request_json(app: &axum::Router, path: &str, bearer: &str) -> (StatusCo
         .unwrap();
     (
         status,
-        serde_json::from_slice(&bytes).unwrap_or_else(|_| json!(null)),
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
     )
 }
 

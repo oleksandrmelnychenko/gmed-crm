@@ -84,6 +84,7 @@ async fn seed_provider(pool: &PgPool, tag: &str, suffix: &str) -> Uuid {
     .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_invoice(
     pool: &PgPool,
     order_id: Uuid,

@@ -8,6 +8,7 @@ REPO_DIR="${REPO_DIR:-/home/gmed/gmed-crm}"
 POSTGRES_IMAGE="${TEST_DATABASE_IMAGE:-postgres:16-alpine}"
 RUST_IMAGE="${RUST_TEST_IMAGE:-rust:slim-bookworm}"
 TEST_THREADS="${RUST_TEST_THREADS:-2}"
+SOURCE_OVERLAY="${TEST_SOURCE_OVERLAY:-}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 POSTGRES_NAME="gmed-rust-test-postgres-${PPID}-${STAMP}"
 POSTGRES_ID=""
@@ -22,6 +23,15 @@ trap cleanup EXIT INT TERM
 if [[ ! -f "$REPO_DIR/Cargo.toml" ]]; then
   echo "ERROR: Rust workspace not found at $REPO_DIR" >&2
   exit 1
+fi
+
+OVERLAY_MOUNT=()
+if [[ -n "$SOURCE_OVERLAY" ]]; then
+  if [[ ! -d "$SOURCE_OVERLAY" ]]; then
+    echo "ERROR: test source overlay not found at $SOURCE_OVERLAY" >&2
+    exit 1
+  fi
+  OVERLAY_MOUNT=(-v "$SOURCE_OVERLAY:/overlay:ro")
 fi
 
 POSTGRES_ID="$(docker run -d --rm \
@@ -60,6 +70,7 @@ docker run --rm \
   -e TEST_DATABASE_MAX_CONNECTIONS=4 \
   -e "TEST_DATABASE_ADMIN_URL=postgres://postgres:postgres@127.0.0.1:${POSTGRES_PORT}/postgres" \
   -v "$REPO_DIR:/source:ro" \
+  "${OVERLAY_MOUNT[@]}" \
   --mount type=volume,destination=/app,volume-nocopy \
   -v gmed-rust-test-cargo-registry:/usr/local/cargo/registry \
   -v gmed-rust-test-cargo-git:/usr/local/cargo/git \
@@ -69,6 +80,9 @@ docker run --rm \
   bash -c '
     set -euo pipefail
     cp -a /source/. /app/
+    if [[ -d /overlay ]]; then
+      cp -a /overlay/. /app/
+    fi
     apt-get update -qq
     apt-get install -y --no-install-recommends \
       ca-certificates libssl-dev pkg-config \

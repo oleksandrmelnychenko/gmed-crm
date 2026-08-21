@@ -5481,7 +5481,7 @@ async fn confirmed_appointment_auto_sends_only_flagged_provider_template_once_to
                 "is_active": true,
                 "auto_send_on_confirmed_appointment": auto_send,
                 "supported_languages": ["de"],
-                "body_de": format!("Hallo {{patient_name}}, bitte erscheinen Sie zu {{appointment_title}} am {{appointment_date}}.")
+                "body_de": "Hallo {patient_name}, bitte erscheinen Sie zu {appointment_title} am {appointment_date}.".to_string()
             })),
         )
         .await;
