@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -14,7 +14,6 @@ import {
 import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/toast";
 import type { Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
@@ -35,7 +34,6 @@ import {
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
 import {
-  createRepeatPatientIntake,
   fetchPatientRelations,
 } from "../../data/patient-detail-mutations";
 import { patientRelationTypeLabel } from "../../model/detail-model";
@@ -454,7 +452,6 @@ type PatientProfileTabProps = {
     canEditPatientProfile: boolean;
     canExportPatientCompliance: boolean;
     canOpenComplianceWorkspace: boolean;
-    canOpenLeadWizard: boolean;
     canViewContracts: boolean;
     canViewDocuments: boolean;
     canViewInvoices: boolean;
@@ -518,14 +515,11 @@ function usePatientProfileTabContent({
     canEditPatientProfile,
     canExportPatientCompliance,
     canOpenComplianceWorkspace,
-    canOpenLeadWizard,
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
-  const [repeatIntakeBusy, setRepeatIntakeBusy] = useState(false);
-  const repeatIntakeRequestIdRef = useRef<string | null>(null);
 
   function handleLegalStatusSheetOpenChange(open: boolean) {
     if (open) void loadPatientLegalStatusSheet();
@@ -535,27 +529,6 @@ function usePatientProfileTabContent({
   function handleNotesSheetOpenChange(open: boolean) {
     if (open) void loadPatientNotesSheet();
     onNotesSheetOpenChange(open);
-  }
-
-  async function handleCreateRepeatIntake() {
-    if (!id || repeatIntakeBusy) return;
-    const requestId = repeatIntakeRequestIdRef.current ?? crypto.randomUUID();
-    repeatIntakeRequestIdRef.current = requestId;
-    setRepeatIntakeBusy(true);
-    try {
-      const created = await createRepeatPatientIntake(id, requestId);
-      repeatIntakeRequestIdRef.current = null;
-      toast.success(l("patients_repeat_intake_created"));
-      staffGo(`/leads?lead=${encodeURIComponent(created.id)}&view=wizard`);
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : l("patients_repeat_intake_create_failed"),
-      );
-    } finally {
-      setRepeatIntakeBusy(false);
-    }
   }
 
   const leadOrigin = createPatientLeadOrigin(detail);
@@ -1094,15 +1067,6 @@ function usePatientProfileTabContent({
               title={t.orders_create_title}
               description={t.orders_create_description}
               onClick={() => staffGo(`/orders?create=1&patient=${encodeURIComponent(id)}`)}
-            />
-          ) : null}
-          {canOpenLeadWizard && id ? (
-            <ProfileActionCard
-              title={l("patients_open_the_intake_wizard_again")}
-              description={l("patients_continue_with_the_existing_patient_data_and_create_another_order")}
-              disabled={repeatIntakeBusy}
-              busy={repeatIntakeBusy}
-              onClick={() => void handleCreateRepeatIntake()}
             />
           ) : null}
           {canExportPatientCompliance ? (

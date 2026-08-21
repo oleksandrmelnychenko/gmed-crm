@@ -14,6 +14,9 @@ export type PatientSummary = {
   email?: string | null;
   insurance_provider?: string | null;
   insurance_type?: string | null;
+  account_balance?: string | null;
+  account_balance_currency?: string | null;
+  account_balance_side?: "debit" | "credit" | "settled" | "reconciliation_required";
   is_active: boolean;
   lifecycle_status?: "prospective" | "active" | "inactive" | "deleted";
   created_at: string;
@@ -145,6 +148,7 @@ export type PatientPermissions = {
   canFilterLifecycle: boolean;
   canViewAssignments: boolean;
   canManageAssignments: boolean;
+  canViewFinancialBalance: boolean;
 };
 
 export const DEFAULT_PATIENT_FILTERS: PatientFilters = {
@@ -206,6 +210,9 @@ export function patientPermissions(role?: string): PatientPermissions {
     ].includes(role ?? ""),
     canManageAssignments:
       role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",
+    canViewFinancialBalance: ["ceo", "ceo_assistant", "patient_manager", "billing"].includes(
+      role ?? "",
+    ),
   };
 }
 

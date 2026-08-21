@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   FileUp,
   History,
   LoaderCircle,
+  RefreshCcw,
   SquarePen,
 } from "lucide-react";
 
@@ -18,6 +19,7 @@ import { StatusActionPill } from "@/components/status-action-pill";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { toast } from "@/components/ui/toast";
 import {
   Tabs,
   TabsList,
@@ -58,6 +60,7 @@ import {
   type ClinicalDocumentImportStatus,
   type ClinicalDocumentImportSummary,
 } from "../../data/clinical-document-import";
+import { createRepeatPatientIntake } from "../../data/patient-detail-mutations";
 import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
@@ -558,6 +561,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImportsError, setClinicalImportsError] = useState(false);
   const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
   const [accountStatementLoading, setAccountStatementLoading] = useState(false);
+  const [repeatIntakeBusy, setRepeatIntakeBusy] = useState(false);
+  const repeatIntakeRequestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!id || !canViewInvoices) {
@@ -646,6 +651,27 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     handleTabChange(nextTab);
   }
 
+  async function handleCreateRepeatIntake() {
+    if (!id || repeatIntakeBusy) return;
+    const requestId = repeatIntakeRequestIdRef.current ?? crypto.randomUUID();
+    repeatIntakeRequestIdRef.current = requestId;
+    setRepeatIntakeBusy(true);
+    try {
+      const created = await createRepeatPatientIntake(id, requestId);
+      repeatIntakeRequestIdRef.current = null;
+      toast.success(l("patients_repeat_intake_created"));
+      staffGo(`/leads?lead=${encodeURIComponent(created.id)}&view=wizard`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : l("patients_repeat_intake_create_failed"),
+      );
+    } finally {
+      setRepeatIntakeBusy(false);
+    }
+  }
+
   function openClinicalDocumentImport() {
     preloadPatientWorkspaceTab("clinical");
     if (activeTab !== "clinical") handleTabChange("clinical");
@@ -707,7 +733,18 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {t.invoices_workspace_balance}
             </span>
-            <span className="flex items-center gap-1 text-sm font-semibold tabular-nums text-foreground transition-colors group-hover:text-primary">
+            <span
+              className={cn(
+                "flex items-center gap-1 text-sm font-semibold tabular-nums transition-colors",
+                balance?.side === "debit"
+                  ? "text-red-600 group-hover:text-red-700"
+                  : balance?.side === "credit"
+                    ? "text-emerald-600 group-hover:text-emerald-700"
+                    : balance?.needsReconciliation
+                      ? "text-amber-700 group-hover:text-amber-800"
+                      : "text-foreground group-hover:text-primary",
+              )}
+            >
               {balanceValue}
               {balance?.needsReconciliation ? (
                 <AlertTriangle className="size-3.5 text-amber-600" aria-hidden="true" />
@@ -731,6 +768,23 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 </option>
               ))}
             </NativeComboboxSelect>
+        ) : null}
+        {canOpenLeadWizard && id ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-9 rounded-lg gap-1.5 px-3.5 whitespace-nowrap"
+            disabled={repeatIntakeBusy}
+            onClick={() => void handleCreateRepeatIntake()}
+          >
+            {repeatIntakeBusy ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="size-3.5" />
+            )}
+            {l("patients_open_the_intake_wizard_again")}
+          </Button>
         ) : null}
         {canEditPatientProfile ? (
           <Button size="sm" className="h-9 rounded-lg gap-1.5 px-3.5" onClick={onOpenProfileEditor}>
@@ -886,7 +940,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 canEditPatientProfile,
                 canExportPatientCompliance,
                 canOpenComplianceWorkspace,
-                canOpenLeadWizard,
                 canViewContracts,
                 canViewDocuments,
                 canViewInvoices,
