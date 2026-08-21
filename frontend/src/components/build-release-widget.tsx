@@ -38,13 +38,13 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
   const channelLabel = release.channel === "development" ? "DEV" : "PROD";
   const text = lang === "de"
     ? {
-        button: "Build",
+        button: "Neu",
         dialog: "Build-Inhalt",
         close: "Build-Informationen schließen",
         date: "Erstellt",
       }
     : {
-        button: "Билд",
+        button: "Новое",
         dialog: "Состав сборки",
         close: "Закрыть информацию о билде",
         date: "Собрано",
@@ -152,19 +152,14 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
 
           <div className="max-h-[min(540px,calc(100vh-150px))] divide-y divide-border overflow-y-auto overscroll-contain">
             {release.notes.map((note) => (
-              <article key={note.commit} className="flex gap-3 px-4 py-3.5">
+              <article key={`${note.commit}-${note.title.ru}`} className="flex gap-3 px-4 py-3.5">
                 <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-card text-[var(--brand)]">
                   <Check aria-hidden="true" className="size-3.5" />
                 </span>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <h3 className="text-[12.5px] font-semibold leading-5">
-                      {localizeReleaseText(note.title, lang)}
-                    </h3>
-                    <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[9.5px] leading-none text-muted-foreground">
-                      {note.commit}
-                    </span>
-                  </div>
+                  <h3 className="text-[12.5px] font-semibold leading-5">
+                    {localizeReleaseText(note.title, lang)}
+                  </h3>
                   <p className="mt-0.5 text-[11.5px] leading-[18px] text-muted-foreground">
                     {localizeReleaseText(note.description, lang)}
                   </p>

@@ -24,69 +24,124 @@ type ReleaseEnvironment = {
 
 const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
   {
-    commit: "c20292f",
+    commit: "448f24b",
     title: {
-      ru: "Роли и рабочие кабинеты",
-      de: "Rollen und Arbeitsbereiche",
+      ru: "Рабочее место Concierge",
+      de: "Concierge-Arbeitsbereich",
     },
     description: {
-      ru: "Разделены кабинеты CEO, консьержа и бухгалтера. Для каждой роли настроены собственные разделы, показатели и рабочие приоритеты.",
-      de: "Die Arbeitsbereiche für CEO, Concierge und Buchhaltung wurden getrennt. Jede Rolle hat eigene Bereiche, Kennzahlen und Prioritäten.",
+      ru: "Сервисные запросы, события и следующие действия собраны в одном адаптивном рабочем месте. Доступны доска, список, календарь и карта без медицинской информации.",
+      de: "Serviceanfragen, Termine und nächste Schritte sind in einem responsiven Arbeitsbereich gebündelt. Verfügbar sind Board, Liste, Kalender und Karte ohne medizinische Daten.",
     },
   },
   {
-    commit: "f60226c",
+    commit: "8dd1554",
     title: {
-      ru: "Список сотрудников",
-      de: "Mitarbeiterverzeichnis",
+      ru: "Менеджер задач",
+      de: "Aufgabenmanager",
     },
     description: {
-      ru: "Исправлена загрузка списка сотрудников и связанных с ними ролей. Данные корректно отображаются после входа в систему.",
-      de: "Das Laden des Mitarbeiterverzeichnisses und der zugehörigen Rollen wurde korrigiert. Die Daten erscheinen nach der Anmeldung korrekt.",
+      ru: "Добавлены задачи и события с ответственными, сроками, приоритетами, чек-листами, комментариями и историей. Изменения обновляются для участников автоматически.",
+      de: "Aufgaben und Ereignisse enthalten Zuständigkeiten, Fristen, Prioritäten, Checklisten, Kommentare und Verlauf. Änderungen werden für Beteiligte automatisch aktualisiert.",
     },
   },
   {
-    commit: "11b037b",
+    commit: "3d4d50e",
     title: {
-      ru: "Доступ к документам пациента",
-      de: "Zugriff auf Patientendokumente",
+      ru: "Маршруты и адреса",
+      de: "Routen und Adressen",
     },
     description: {
-      ru: "Уточнены проверки прав на просмотр, скачивание и обработку медицинских документов для каждой роли.",
-      de: "Die Berechtigungsprüfungen für Ansicht, Download und Verarbeitung medizinischer Dokumente wurden je Rolle präzisiert.",
+      ru: "Задачи и сервисные события объединяются в дневной маршрут. Можно выбрать остановки, изменить их порядок и открыть готовый маршрут с несколькими адресами в Google Maps.",
+      de: "Aufgaben und Serviceereignisse werden zu einer Tagesroute verbunden. Stopps lassen sich auswählen, sortieren und als Route mit mehreren Adressen in Google Maps öffnen.",
     },
   },
   {
-    commit: "cd63d60",
+    commit: "1d68325",
     title: {
-      ru: "Клиническая карта пациента",
-      de: "Klinische Patientenakte",
+      ru: "Партнёры, бронирования и ключи",
+      de: "Partner, Buchungen und Schlüssel",
     },
     description: {
-      ru: "Диагнозы, анамнез, обследования и специализации приведены к единой логике отображения и редактирования с учётом роли сотрудника.",
-      de: "Diagnosen, Anamnese, Untersuchungen und Fachrichtungen folgen nun einer einheitlichen Anzeige- und Bearbeitungslogik je Mitarbeiterrolle.",
+      ru: "Concierge может подобрать ресторан, водителя, гостиницу или другого исполнителя, зафиксировать контакт и бронирование. Передача и возврат ключей сохраняются с ответственным и полной историей.",
+      de: "Concierge kann Restaurant, Fahrer, Hotel oder andere Leistungserbringer auswählen sowie Kontakt und Buchung dokumentieren. Schlüsselübergabe und Rückgabe werden mit Zuständigkeit und Verlauf gespeichert.",
     },
   },
   {
-    commit: "5bffe15",
+    commit: "30a5203",
     title: {
-      ru: "Предпросмотр документов",
-      de: "Dokumentvorschau",
+      ru: "Расходы и чеки Concierge",
+      de: "Concierge-Auslagen und Belege",
     },
     description: {
-      ru: "Клик по документу открывает предпросмотр. Скачивание вынесено в отдельное действие, чтобы файл не загружался автоматически.",
-      de: "Ein Klick auf ein Dokument öffnet die Vorschau. Der Download ist eine separate Aktion und startet nicht mehr automatisch.",
+      ru: "К сервису можно приложить фотографию или файл чека за гостиницу, транспорт и другие расходы, указать сумму, налог, плательщика и дату. До проверки бухгалтером запись не меняет баланс.",
+      de: "Zu einem Service können Foto oder Datei eines Belegs für Hotel, Transport und weitere Auslagen mit Betrag, Steuer, Zahler und Datum erfasst werden. Vor Prüfung durch die Buchhaltung ändert sich kein Saldo.",
     },
   },
   {
-    commit: "9b6b7ed",
+    commit: "5deda33",
     title: {
-      ru: "Стабильность распознавания документов",
-      de: "Stabile Dokumenterkennung",
+      ru: "Проверка расходов бухгалтером",
+      de: "Prüfung durch die Buchhaltung",
     },
     description: {
-      ru: "Зафиксированы версии компонентов распознавания, чтобы результат обработки документов не менялся после обновления внешних образов.",
-      de: "Die Versionen der Erkennungskomponenten wurden fixiert, damit sich Verarbeitungsergebnisse nach externen Image-Updates nicht unerwartet ändern.",
+      ru: "В финансах компании появилась очередь чеков Concierge. Руководитель или бухгалтер видит документ, связывает расход с заказом и услугой, затем подтверждает, отклоняет или отменяет проведение.",
+      de: "In den Unternehmensfinanzen gibt es eine Prüfliste für Concierge-Belege. Geschäftsführung oder Buchhaltung sieht den Beleg, ordnet ihn Auftrag und Leistung zu und kann ihn buchen, ablehnen oder stornieren.",
+    },
+  },
+  {
+    commit: "60869f9",
+    title: {
+      ru: "Баланс компании",
+      de: "Unternehmenssaldo",
+    },
+    description: {
+      ru: "Добавлены денежные счета компании, внутренние переводы и единый обзор поступлений, выплат, открытых обязательств и доступных средств с фильтрами по периоду и валюте.",
+      de: "Unternehmenskonten, interne Umbuchungen und eine Gesamtübersicht über Einnahmen, Auszahlungen, offene Verpflichtungen und verfügbare Mittel mit Zeitraum- und Währungsfiltern wurden ergänzt.",
+    },
+  },
+  {
+    commit: "b0d06ed",
+    title: {
+      ru: "Баланс пациента и взаиморасчёты",
+      de: "Patientensaldo und Abrechnung",
+    },
+    description: {
+      ru: "Счета, частичные оплаты, предоплаты, возвраты, корректировки и кредитовые документы объединены в проверяемую историю. Система отдельно показывает задолженность пациента и его переплату.",
+      de: "Rechnungen, Teilzahlungen, Vorauszahlungen, Erstattungen, Korrekturen und Gutschriften sind in einem prüfbaren Verlauf zusammengeführt. Patientenschuld und Guthaben werden getrennt ausgewiesen.",
+    },
+  },
+  {
+    commit: "3ce7678",
+    title: {
+      ru: "Расчёты с партнёрами и исполнителями",
+      de: "Abrechnung mit Partnern und Leistungserbringern",
+    },
+    description: {
+      ru: "Для партнёров и исполнителей доступны выписки, начисления, произведённые выплаты и остаток к выплате. Расход пациента и обязательство компании учитываются без двойного начисления.",
+      de: "Für Partner und Leistungserbringer stehen Kontoauszüge, Belastungen, geleistete Zahlungen und offene Beträge bereit. Patientenforderung und Unternehmensverpflichtung werden ohne Doppelzählung erfasst.",
+    },
+  },
+  {
+    commit: "3d4d50e",
+    title: {
+      ru: "Экономика заказа",
+      de: "Auftragswirtschaftlichkeit",
+    },
+    description: {
+      ru: "По заказу видны плановые и фактические расходы, поступления от пациента, неоплаченные суммы и финансовый результат. Суммы разделены по услугам и валютам.",
+      de: "Pro Auftrag werden geplante und tatsächliche Kosten, Patienteneingänge, offene Beträge und Ergebnis dargestellt. Beträge sind nach Leistungen und Währungen getrennt.",
+    },
+  },
+  {
+    commit: "f0391d5",
+    title: {
+      ru: "Уведомления и автоматическое обновление",
+      de: "Benachrichtigungen und automatische Aktualisierung",
+    },
+    description: {
+      ru: "Бухгалтер получает уведомление о новом чеке с переходом прямо к проверке. Concierge получает решение по расходу, а очереди и рабочие экраны обновляются автоматически.",
+      de: "Die Buchhaltung erhält bei einem neuen Beleg eine Benachrichtigung mit direktem Link zur Prüfung. Concierge erhält die Entscheidung; Listen und Arbeitsbereiche aktualisieren sich automatisch.",
     },
   },
 ];
@@ -135,8 +190,8 @@ export function resolveCustomerRelease(environment: ReleaseEnvironment): Custome
     builtAt: environment.buildTimestamp?.trim() || "2026-08-11T20:20:00+03:00",
     title: isDevelopment
       ? {
-          ru: "Изменения в DEV-сборке",
-          de: "Änderungen im DEV-Build",
+          ru: "Новое: от Concierge до бухгалтерии",
+          de: "Neu: vom Concierge bis zur Buchhaltung",
         }
       : {
           ru: "Изменения в PROD-сборке",
