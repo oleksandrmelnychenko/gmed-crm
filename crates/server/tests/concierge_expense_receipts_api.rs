@@ -178,7 +178,13 @@ async fn seed_financial_fixture(
     .fetch_one(pool)
     .await
     .unwrap();
-    (patient_id, provider_id, service_id, order_id, order_leistung_id)
+    (
+        patient_id,
+        provider_id,
+        service_id,
+        order_id,
+        order_leistung_id,
+    )
 }
 
 fn submission_fields(
@@ -237,8 +243,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     };
     let tag = Uuid::new_v4().simple().to_string();
     let concierge_id = seed_user(&context.pool, "concierge", &format!("owner-{tag}")).await;
-    let other_concierge_id =
-        seed_user(&context.pool, "concierge", &format!("other-{tag}")).await;
+    let other_concierge_id = seed_user(&context.pool, "concierge", &format!("other-{tag}")).await;
     let billing_id = seed_user(&context.pool, "billing", &format!("review-{tag}")).await;
     let (patient_id, provider_id, service_id, order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
@@ -270,7 +275,11 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
         .execute(&context.pool)
         .await
         .unwrap();
-    assert_eq!(deleted.rows_affected(), 1, "unlinked invoice delete must not be suppressed");
+    assert_eq!(
+        deleted.rows_affected(),
+        1,
+        "unlinked invoice delete must not be suppressed"
+    );
 
     let (status, private_context) = json_request(
         &context.app,
@@ -283,7 +292,10 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     assert_eq!(status, StatusCode::OK, "{private_context}");
     assert_eq!(private_context["service"]["id"], service_id.to_string());
     assert!(private_context["mapped_order"].is_null());
-    assert_eq!(private_context["eligible_orders"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        private_context["eligible_orders"].as_array().unwrap().len(),
+        0
+    );
 
     let mut oversized_money_fields =
         submission_fields(Uuid::new_v4(), "patient", true, expense_date);
@@ -304,7 +316,11 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
         &pdf_receipt(&format!("oversized-{tag}")),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{oversized_money}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{oversized_money}"
+    );
 
     let (status, created) = submit_fixture_expense(
         &context.app,
@@ -320,8 +336,14 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(created["item"]["status"], "pending_review");
     assert!(created["item"]["order_id"].is_null());
-    assert_eq!(created["item"]["balance_consequence"]["patient_receivable_gross"], "0");
-    assert_eq!(created["item"]["balance_consequence"]["intended_patient_receivable_gross"], "119.00");
+    assert_eq!(
+        created["item"]["balance_consequence"]["patient_receivable_gross"],
+        "0"
+    );
+    assert_eq!(
+        created["item"]["balance_consequence"]["intended_patient_receivable_gross"],
+        "119.00"
+    );
     let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
     for user_id in [context.admin_id, billing_id] {
         let notification_count: i64 = sqlx::query_scalar(
@@ -336,7 +358,10 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
         .fetch_one(&context.pool)
         .await
         .unwrap();
-        assert_eq!(notification_count, 1, "finance must receive one review notification");
+        assert_eq!(
+            notification_count, 1,
+            "finance must receive one review notification"
+        );
     }
     for user_id in [concierge_id, other_concierge_id] {
         let notification_count: i64 = sqlx::query_scalar(
@@ -350,14 +375,13 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
         .fetch_one(&context.pool)
         .await
         .unwrap();
-        assert_eq!(notification_count, 0, "submission notification must stay finance-only");
+        assert_eq!(
+            notification_count, 0,
+            "submission notification must stay finance-only"
+        );
     }
-    let receipt_document_id = Uuid::parse_str(
-        created["item"]["receipt"]["document_id"]
-            .as_str()
-            .unwrap(),
-    )
-    .unwrap();
+    let receipt_document_id =
+        Uuid::parse_str(created["item"]["receipt"]["document_id"].as_str().unwrap()).unwrap();
     sqlx::query(
         r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
            VALUES ($1, $2, $3)"#,
@@ -390,7 +414,10 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     .fetch_one(&context.pool)
     .await
     .unwrap();
-    assert_eq!(external_count, 0, "pending review must not create financial state");
+    assert_eq!(
+        external_count, 0,
+        "pending review must not create financial state"
+    );
 
     let (status, replay) = submit_fixture_expense(
         &context.app,
@@ -417,7 +444,10 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     .fetch_one(&context.pool)
     .await
     .unwrap();
-    assert_eq!(replay_notification_count, 1, "idempotent replay must not notify twice");
+    assert_eq!(
+        replay_notification_count, 1,
+        "idempotent replay must not notify twice"
+    );
 
     let (status, duplicate_receipt) = submit_fixture_expense(
         &context.app,
@@ -480,10 +510,8 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "{mismatch_submission}");
-        let mismatch_expense_id = Uuid::parse_str(
-            mismatch_submission["item"]["id"].as_str().unwrap(),
-        )
-        .unwrap();
+        let mismatch_expense_id =
+            Uuid::parse_str(mismatch_submission["item"]["id"].as_str().unwrap()).unwrap();
         let mismatch_external_id: Uuid = sqlx::query_scalar(
             r#"INSERT INTO external_invoices (
                    order_id, patient_id, provider_id, external_invoice_number,
@@ -578,9 +606,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         let (status, posted) = json_request(
             &context.app,
             "POST",
-            &format!(
-                "/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"
-            ),
+            &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"),
             &finance,
             Some(json!({
                 "request_id": post_request_id,
@@ -598,19 +624,23 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         assert_eq!(posted["item"]["service_delivered"], delivered);
         assert_eq!(
             posted["item"]["balance_consequence"]["patient_receivable_gross"],
-            if expected_receivable == Decimal::ZERO { "0" } else { "119.00" }
+            if expected_receivable == Decimal::ZERO {
+                "0"
+            } else {
+                "119.00"
+            }
         );
         assert_eq!(
             posted["item"]["balance_consequence"]["provider_liability_gross"],
-            if expected_liability == Decimal::ZERO { "0" } else { "119.00" }
+            if expected_liability == Decimal::ZERO {
+                "0"
+            } else {
+                "119.00"
+            }
         );
 
-        let external_invoice_id = Uuid::parse_str(
-            posted["item"]["external_invoice"]["id"]
-                .as_str()
-                .unwrap(),
-        )
-        .unwrap();
+        let external_invoice_id =
+            Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
         let external = sqlx::query(
             r#"SELECT invoice_date, paid_at::date AS paid_on, paid_by,
                       service_delivered, patient_receivable_gross,
@@ -621,11 +651,29 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         .fetch_one(&context.pool)
         .await
         .unwrap();
-        assert_eq!(external.try_get::<chrono::NaiveDate, _>("invoice_date").unwrap(), expense_date);
+        assert_eq!(
+            external
+                .try_get::<chrono::NaiveDate, _>("invoice_date")
+                .unwrap(),
+            expense_date
+        );
         assert_eq!(external.try_get::<String, _>("paid_by").unwrap(), paid_by);
-        assert_eq!(external.try_get::<bool, _>("service_delivered").unwrap(), delivered);
-        assert_eq!(external.try_get::<Decimal, _>("patient_receivable_gross").unwrap(), expected_receivable);
-        assert_eq!(external.try_get::<Decimal, _>("provider_liability_gross").unwrap(), expected_liability);
+        assert_eq!(
+            external.try_get::<bool, _>("service_delivered").unwrap(),
+            delivered
+        );
+        assert_eq!(
+            external
+                .try_get::<Decimal, _>("patient_receivable_gross")
+                .unwrap(),
+            expected_receivable
+        );
+        assert_eq!(
+            external
+                .try_get::<Decimal, _>("provider_liability_gross")
+                .unwrap(),
+            expected_liability
+        );
 
         let payment_count: i64 = sqlx::query_scalar(
             r#"SELECT count(*) FROM external_invoice_provider_payment_transactions
@@ -648,7 +696,12 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         if paid_by == "agency" {
             assert_eq!(payment_count, 1);
             assert_eq!(accounting_gross, Decimal::new(119, 0));
-            assert_eq!(external.try_get::<Option<chrono::NaiveDate>, _>("paid_on").unwrap(), Some(paid_on));
+            assert_eq!(
+                external
+                    .try_get::<Option<chrono::NaiveDate>, _>("paid_on")
+                    .unwrap(),
+                Some(paid_on)
+            );
             let journal_paid_on: chrono::NaiveDate = sqlx::query_scalar(
                 r#"SELECT paid_on FROM external_invoice_provider_payment_transactions
                    WHERE external_invoice_id = $1 AND transaction_type = 'payment'"#,
@@ -676,9 +729,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         let (status, replay) = json_request(
             &context.app,
             "POST",
-            &format!(
-                "/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"
-            ),
+            &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"),
             &finance,
             Some(json!({
                 "request_id": post_request_id,
@@ -735,13 +786,11 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 "119.00"
             );
             assert!(
-                sqlx::query(
-                    "UPDATE external_invoices SET service_delivered = false WHERE id = $1"
-                )
-                .bind(external_invoice_id)
-                .execute(&context.pool)
-                .await
-                .is_err(),
+                sqlx::query("UPDATE external_invoices SET service_delivered = false WHERE id = $1")
+                    .bind(external_invoice_id)
+                    .execute(&context.pool)
+                    .await
+                    .is_err(),
                 "posted delivery state must not move backwards"
             );
         }
@@ -751,9 +800,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             let (status, provider_payment) = json_request(
                 &context.app,
                 "POST",
-                &format!(
-                    "/api/v1/company-provider-liabilities/{external_invoice_id}/settlements"
-                ),
+                &format!("/api/v1/company-provider-liabilities/{external_invoice_id}/settlements"),
                 &finance,
                 Some(json!({
                     "request_id": provider_payment_request_id,
@@ -766,17 +813,13 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             )
             .await;
             assert_eq!(status, StatusCode::OK, "{provider_payment}");
-            let payment_id = Uuid::parse_str(
-                provider_payment["transaction"]["id"].as_str().unwrap(),
-            )
-            .unwrap();
+            let payment_id =
+                Uuid::parse_str(provider_payment["transaction"]["id"].as_str().unwrap()).unwrap();
 
             let (status, blocked_reverse) = json_request(
                 &context.app,
                 "POST",
-                &format!(
-                    "/api/v1/concierge-services/{service_id}/expenses/{expense_id}/reverse"
-                ),
+                &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/reverse"),
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
@@ -846,9 +889,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             let (status, expense_reversal) = json_request(
                 &context.app,
                 "POST",
-                &format!(
-                    "/api/v1/concierge-services/{service_id}/expenses/{expense_id}/reverse"
-                ),
+                &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/reverse"),
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
@@ -911,9 +952,8 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     assert_eq!(status, StatusCode::CREATED, "{rejected_submission}");
     let rejected_id = Uuid::parse_str(rejected_submission["item"]["id"].as_str().unwrap()).unwrap();
     let reject_request_id = Uuid::new_v4();
-    let reject_path = format!(
-        "/api/v1/concierge-services/{service_id}/expenses/{rejected_id}/reject"
-    );
+    let reject_path =
+        format!("/api/v1/concierge-services/{service_id}/expenses/{rejected_id}/reject");
     let (status, rejected) = json_request(
         &context.app,
         "POST",
@@ -953,9 +993,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     let (status, cannot_post_rejected) = json_request(
         &context.app,
         "POST",
-        &format!(
-            "/api/v1/concierge-services/{service_id}/expenses/{rejected_id}/post"
-        ),
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{rejected_id}/post"),
         &billing,
         Some(json!({
             "request_id": Uuid::new_v4(),
@@ -997,7 +1035,8 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{posted}");
-    let external_id = Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
+    let external_id =
+        Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
     assert!(
         sqlx::query("DELETE FROM external_invoices WHERE id = $1")
             .bind(external_id)
@@ -1096,7 +1135,10 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     .await;
     assert_eq!(status, StatusCode::OK, "{reversed}");
     assert_eq!(reversed["item"]["status"], "reversed");
-    assert_eq!(reversed["item"]["balance_consequence"]["patient_receivable_gross"], "0");
+    assert_eq!(
+        reversed["item"]["balance_consequence"]["patient_receivable_gross"],
+        "0"
+    );
     let external_status: String =
         sqlx::query_scalar("SELECT status FROM external_invoices WHERE id = $1")
             .bind(external_id)
@@ -1240,13 +1282,8 @@ async fn finance_review_queue_is_global_paginated_and_finance_only() {
     for index in 0..2 {
         let fixture_tag = format!("{tag}-{index}");
         let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
-            seed_financial_fixture(
-                &context.pool,
-                context.admin_id,
-                concierge_id,
-                &fixture_tag,
-            )
-            .await;
+            seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &fixture_tag)
+                .await;
         let (status, submitted) = submit_fixture_expense(
             &context.app,
             &concierge,

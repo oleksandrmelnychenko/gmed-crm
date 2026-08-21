@@ -268,7 +268,10 @@ async fn get_provider_settlement(
         Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "load provider settlement summary");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load provider settlement");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider settlement",
+            );
         }
     };
 
@@ -283,7 +286,10 @@ async fn get_provider_settlement(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "load provider settlement history");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load provider settlement");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load provider settlement",
+            );
         }
     };
 
@@ -698,7 +704,10 @@ async fn create_provider_payment(
         (_, Err(message), _, _) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if input.paid_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Payment date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payment date cannot be in the future",
+        );
     }
 
     let mut transaction = match state.db.begin().await {
@@ -708,7 +717,9 @@ async fn create_provider_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match load_external_invoice_for_update(&mut transaction, external_invoice_id).await {
+    let context = match load_external_invoice_for_update(&mut transaction, external_invoice_id)
+        .await
+    {
         Ok(Some(context)) => context,
         Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
         Err(error) => {
@@ -739,20 +750,29 @@ async fn create_provider_payment(
             .try_get::<Option<String>, _>("reference")
             .ok()
             .flatten();
-        let replay_note = replay
-            .try_get::<Option<String>, _>("note")
+        let replay_note = replay.try_get::<Option<String>, _>("note").ok().flatten();
+        let matches = replay
+            .try_get::<String, _>("transaction_type")
             .ok()
-            .flatten();
-        let matches = replay.try_get::<String, _>("transaction_type").ok().as_deref() == Some("payment")
-            && replay.try_get::<Uuid, _>("financial_account_id").ok() == Some(body.financial_account_id)
+            .as_deref()
+            == Some("payment")
+            && replay.try_get::<Uuid, _>("financial_account_id").ok()
+                == Some(body.financial_account_id)
             && replay.try_get::<Decimal, _>("amount_gross").ok() == Some(input.amount_gross)
             && replay.try_get::<NaiveDate, _>("paid_on").ok() == Some(input.paid_on)
-            && replay.try_get::<String, _>("payment_method").ok().as_deref() == Some(input.payment_method.as_str())
+            && replay
+                .try_get::<String, _>("payment_method")
+                .ok()
+                .as_deref()
+                == Some(input.payment_method.as_str())
             && replay_reference.as_deref() == input.reference.as_deref()
             && replay_note.as_deref() == input.note.as_deref()
             && replay.try_get::<Uuid, _>("created_by").ok() == Some(auth.user_id);
         if !matches {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         let payment_id = replay.try_get::<Uuid, _>("id").unwrap_or_default();
         let payment = match load_payment_in_transaction(&mut transaction, payment_id).await {
@@ -771,10 +791,16 @@ async fn create_provider_payment(
     }
 
     if context.status == "cancelled" || context.paid_by == "patient" {
-        return err(StatusCode::CONFLICT, "External invoice is not payable by the company");
+        return err(
+            StatusCode::CONFLICT,
+            "External invoice is not payable by the company",
+        );
     }
     if !matches!(context.status.as_str(), "approved" | "overdue") {
-        return err(StatusCode::CONFLICT, "External invoice is not approved for payment");
+        return err(
+            StatusCode::CONFLICT,
+            "External invoice is not approved for payment",
+        );
     }
     let account = match sqlx::query(
         r#"SELECT currency, opening_balance_on, is_active
@@ -794,7 +820,10 @@ async fn create_provider_payment(
         }
     };
     if account.try_get::<String, _>("currency").unwrap_or_default() != context.currency {
-        return err(StatusCode::CONFLICT, "Financial account currency does not match");
+        return err(
+            StatusCode::CONFLICT,
+            "Financial account currency does not match",
+        );
     }
     if !account.try_get::<bool, _>("is_active").unwrap_or(false) {
         return err(StatusCode::CONFLICT, "Financial account is inactive");
@@ -803,7 +832,10 @@ async fn create_provider_payment(
         .try_get::<NaiveDate, _>("opening_balance_on")
         .unwrap_or(input.paid_on);
     if input.paid_on < opening_on {
-        return err(StatusCode::CONFLICT, "Payment date precedes the account opening balance");
+        return err(
+            StatusCode::CONFLICT,
+            "Payment date precedes the account opening balance",
+        );
     }
 
     let already_paid = match current_company_paid(&mut transaction, external_invoice_id).await {
@@ -814,7 +846,10 @@ async fn create_provider_payment(
         }
     };
     if already_paid + input.amount_gross > context.amount_gross {
-        return err(StatusCode::CONFLICT, "Provider payment exceeds the outstanding amount");
+        return err(
+            StatusCode::CONFLICT,
+            "Provider payment exceeds the outstanding amount",
+        );
     }
 
     let payment_id = Uuid::new_v4();
@@ -866,7 +901,10 @@ async fn create_provider_payment(
     .bind(context.order_id)
     .bind(context.patient_id)
     .bind(input.paid_on)
-    .bind(format!("Provider payment {}", context.external_invoice_number))
+    .bind(format!(
+        "Provider payment {}",
+        context.external_invoice_number
+    ))
     .bind(amount_net)
     .bind(amount_vat)
     .bind(input.amount_gross)
@@ -918,7 +956,10 @@ async fn create_provider_payment(
     };
     if let Err(error) = update_result {
         tracing::error!(error = %error, payment_id = %payment_id, "update external invoice provider settlement");
-        return err(StatusCode::CONFLICT, "Provider payment status update was rejected");
+        return err(
+            StatusCode::CONFLICT,
+            "Provider payment status update was rejected",
+        );
     }
 
     let payment = match load_payment_in_transaction(&mut transaction, payment_id).await {
@@ -965,7 +1006,10 @@ async fn reverse_provider_payment(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if paid_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot be in the future",
+        );
     }
     let note = match clean_optional(body.note.as_deref(), 1_000) {
         Ok(value) => value,
@@ -979,14 +1023,15 @@ async fn reverse_provider_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match load_external_invoice_for_update(&mut transaction, external_invoice_id).await {
-        Ok(Some(context)) => context,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
-        Err(error) => {
-            tracing::error!(error = %error, "lock provider payment reversal invoice");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
+    let context =
+        match load_external_invoice_for_update(&mut transaction, external_invoice_id).await {
+            Ok(Some(context)) => context,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "External invoice not found"),
+            Err(error) => {
+                tracing::error!(error = %error, "lock provider payment reversal invoice");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
 
     let replay = match sqlx::query(
         r#"SELECT id, reverses_transaction_id, transaction_type, paid_on, note, created_by
@@ -1005,17 +1050,25 @@ async fn reverse_provider_payment(
         }
     };
     if let Some(replay) = replay {
-        let replay_note = replay
-            .try_get::<Option<String>, _>("note")
+        let replay_note = replay.try_get::<Option<String>, _>("note").ok().flatten();
+        let matches = replay
+            .try_get::<String, _>("transaction_type")
             .ok()
-            .flatten();
-        let matches = replay.try_get::<String, _>("transaction_type").ok().as_deref() == Some("reversal")
-            && replay.try_get::<Option<Uuid>, _>("reverses_transaction_id").ok().flatten() == Some(payment_id)
+            .as_deref()
+            == Some("reversal")
+            && replay
+                .try_get::<Option<Uuid>, _>("reverses_transaction_id")
+                .ok()
+                .flatten()
+                == Some(payment_id)
             && replay.try_get::<NaiveDate, _>("paid_on").ok() == Some(paid_on)
             && replay_note.as_deref() == note.as_deref()
             && replay.try_get::<Uuid, _>("created_by").ok() == Some(auth.user_id);
         if !matches {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         let reversal_id = replay.try_get::<Uuid, _>("id").unwrap_or_default();
         let value = match load_payment_in_transaction(&mut transaction, reversal_id).await {
@@ -1056,7 +1109,10 @@ async fn reverse_provider_payment(
         .try_get::<NaiveDate, _>("paid_on")
         .unwrap_or(paid_on);
     if paid_on < original_paid_on {
-        return err(StatusCode::CONFLICT, "Reversal cannot precede the original payment");
+        return err(
+            StatusCode::CONFLICT,
+            "Reversal cannot precede the original payment",
+        );
     }
     let existing_reversal = match sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id
@@ -1074,7 +1130,10 @@ async fn reverse_provider_payment(
         }
     };
     if existing_reversal.is_some() {
-        return err(StatusCode::CONFLICT, "Provider payment was already reversed");
+        return err(
+            StatusCode::CONFLICT,
+            "Provider payment was already reversed",
+        );
     }
 
     let amount_gross = original
@@ -1113,7 +1172,10 @@ async fn reverse_provider_payment(
     .await
     {
         tracing::warn!(error = %error, payment_id = %payment_id, "insert provider payment reversal rejected");
-        return err(StatusCode::CONFLICT, "Provider payment reversal was rejected");
+        return err(
+            StatusCode::CONFLICT,
+            "Provider payment reversal was rejected",
+        );
     }
 
     let amount_vat = if context.amount_gross == Decimal::ZERO {
@@ -1139,7 +1201,10 @@ async fn reverse_provider_payment(
     .bind(context.order_id)
     .bind(context.patient_id)
     .bind(paid_on)
-    .bind(format!("Provider payment reversal {}", context.external_invoice_number))
+    .bind(format!(
+        "Provider payment reversal {}",
+        context.external_invoice_number
+    ))
     .bind(-amount_net)
     .bind(-amount_vat)
     .bind(-amount_gross)
@@ -1167,7 +1232,10 @@ async fn reverse_provider_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if context.status == "paid" && context.paid_by == "agency" && remaining_paid < context.amount_gross {
+    if context.status == "paid"
+        && context.paid_by == "agency"
+        && remaining_paid < context.amount_gross
+    {
         let restore_status = if context
             .due_date
             .is_some_and(|date| date < Utc::now().date_naive())
@@ -1189,7 +1257,10 @@ async fn reverse_provider_payment(
         .await
         {
             tracing::error!(error = %error, reversal_id = %reversal_id, "restore external invoice after provider payment reversal");
-            return err(StatusCode::CONFLICT, "Provider payment reversal status update was rejected");
+            return err(
+                StatusCode::CONFLICT,
+                "Provider payment reversal status update was rejected",
+            );
         }
     }
 

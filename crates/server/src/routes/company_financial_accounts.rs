@@ -105,7 +105,11 @@ fn decimal_to_string(value: Decimal) -> String {
 
 fn parse_currency(value: &str) -> Result<String, &'static str> {
     let currency = value.trim().to_uppercase();
-    if currency.len() != 3 || !currency.chars().all(|character| character.is_ascii_uppercase()) {
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_uppercase())
+    {
         return Err("Invalid currency; expected a three-letter ISO code");
     }
     Ok(currency)
@@ -245,14 +249,20 @@ async fn list_company_financial_accounts(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, "load company financial account currencies");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load financial accounts",
+            );
         }
     };
     let currency = requested_currency.unwrap_or_else(|| {
         if available_currencies.iter().any(|value| value == "EUR") {
             "EUR".to_string()
         } else {
-            available_currencies.first().cloned().unwrap_or_else(|| "EUR".to_string())
+            available_currencies
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "EUR".to_string())
         }
     });
 
@@ -318,7 +328,10 @@ async fn list_company_financial_accounts(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, currency = %currency, "load company financial accounts");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load financial accounts",
+            );
         }
     };
 
@@ -343,7 +356,10 @@ async fn list_company_financial_accounts(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, currency = %currency, "load company account adjustments");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load financial accounts",
+            );
         }
     };
 
@@ -370,7 +386,10 @@ async fn list_company_financial_accounts(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, currency = %currency, "load company account transfers");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load financial accounts",
+            );
         }
     };
 
@@ -389,7 +408,10 @@ async fn list_company_financial_accounts(
         Ok(row) => row,
         Err(error) => {
             tracing::error!(error = %error, currency = %currency, "load unassigned company cash movements");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load financial accounts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load financial accounts",
+            );
         }
     };
 
@@ -439,7 +461,10 @@ async fn create_company_financial_account(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if opening_balance_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Opening balance date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Opening balance date cannot be in the future",
+        );
     }
     let requested_default = body.is_default.unwrap_or(false);
 
@@ -447,7 +472,10 @@ async fn create_company_financial_account(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin create company financial account");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create financial account",
+            );
         }
     };
     if let Err(error) = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -456,7 +484,10 @@ async fn create_company_financial_account(
         .await
     {
         tracing::error!(error = %error, currency = %currency, "lock company financial account currency");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create financial account");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create financial account",
+        );
     }
     let has_default = match sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM company_financial_accounts WHERE currency = $1 AND is_default)",
@@ -504,12 +535,18 @@ async fn create_company_financial_account(
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, "create company financial account rejected");
-            return err(StatusCode::CONFLICT, "Financial account already exists or is invalid");
+            return err(
+                StatusCode::CONFLICT,
+                "Financial account already exists or is invalid",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, "commit company financial account");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create financial account");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create financial account",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.create".to_string(),
@@ -549,7 +586,10 @@ async fn update_company_financial_account(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin update company financial account");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update financial account",
+            );
         }
     };
     let current = match sqlx::query(
@@ -578,7 +618,10 @@ async fn update_company_financial_account(
         );
     }
     if target_default && !target_active {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Default account must remain active");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Default account must remain active",
+        );
     }
     if target_default
         && let Err(error) = sqlx::query(
@@ -613,12 +656,18 @@ async fn update_company_financial_account(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Financial account not found"),
         Err(error) => {
             tracing::warn!(error = %error, account_id = %account_id, "update company financial account rejected");
-            return err(StatusCode::CONFLICT, "Financial account update conflicts with existing data");
+            return err(
+                StatusCode::CONFLICT,
+                "Financial account update conflicts with existing data",
+            );
         }
     }
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, account_id = %account_id, "commit company financial account update");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update financial account");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update financial account",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.update".to_string(),
@@ -641,7 +690,10 @@ async fn create_company_financial_account_adjustment(
     }
     let direction = body.direction.trim().to_lowercase();
     if !matches!(direction.as_str(), "inflow" | "outflow") {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment direction");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid adjustment direction",
+        );
     }
     let amount = match parse_amount(&body.amount, true) {
         Ok(value) => value,
@@ -652,7 +704,10 @@ async fn create_company_financial_account_adjustment(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if effective_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Adjustment date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Adjustment date cannot be in the future",
+        );
     }
     let reason = match clean_required(&body.reason, 500, "Adjustment reason is required") {
         Ok(value) => value,
@@ -666,7 +721,10 @@ async fn create_company_financial_account_adjustment(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin company account adjustment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record account adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record account adjustment",
+            );
         }
     };
     if let Err(error) = sqlx::query(
@@ -678,7 +736,10 @@ async fn create_company_financial_account_adjustment(
     .await
     {
         tracing::error!(error = %error, account_id = %account_id, "lock account adjustment request");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record account adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record account adjustment",
+        );
     }
     let replay = sqlx::query(
         r#"SELECT id, direction, amount, effective_on, reason, note
@@ -696,11 +757,13 @@ async fn create_company_financial_account_adjustment(
                 == Some(direction.as_str())
                 && row.try_get::<Decimal, _>("amount").ok() == Some(amount)
                 && row.try_get::<NaiveDate, _>("effective_on").ok() == Some(effective_on)
-                && row.try_get::<String, _>("reason").ok().as_deref()
-                    == Some(reason.as_str())
+                && row.try_get::<String, _>("reason").ok().as_deref() == Some(reason.as_str())
                 && row.try_get::<Option<String>, _>("note").ok().flatten() == note;
             if !exact {
-                return err(StatusCode::CONFLICT, "request_id was already used with different adjustment data");
+                return err(
+                    StatusCode::CONFLICT,
+                    "request_id was already used with different adjustment data",
+                );
             }
             return Json(json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -711,7 +774,10 @@ async fn create_company_financial_account_adjustment(
         Ok(None) => {}
         Err(error) => {
             tracing::error!(error = %error, account_id = %account_id, "load account adjustment replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record account adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record account adjustment",
+            );
         }
     }
     let adjustment_id = match sqlx::query_scalar::<_, Uuid>(
@@ -735,12 +801,18 @@ async fn create_company_financial_account_adjustment(
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, account_id = %account_id, "create company account adjustment rejected");
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Account adjustment is invalid");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Account adjustment is invalid",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, account_id = %account_id, "commit company account adjustment");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record account adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record account adjustment",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.adjustment.create".to_string(),
@@ -749,7 +821,11 @@ async fn create_company_financial_account_adjustment(
         Some(adjustment_id),
         json!({ "financial_account_id": account_id, "direction": direction, "amount": decimal_to_string(amount) }),
     ));
-    (StatusCode::CREATED, Json(json!({ "id": adjustment_id, "idempotent_replay": false }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(json!({ "id": adjustment_id, "idempotent_replay": false })),
+    )
+        .into_response()
 }
 
 async fn reverse_company_financial_account_adjustment(
@@ -766,7 +842,10 @@ async fn reverse_company_financial_account_adjustment(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if effective_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot be in the future",
+        );
     }
     let reason = match clean_required(&body.reason, 500, "Reversal reason is required") {
         Ok(value) => value,
@@ -780,7 +859,10 @@ async fn reverse_company_financial_account_adjustment(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin company account adjustment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse account adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse account adjustment",
+            );
         }
     };
     if let Err(error) = sqlx::query(
@@ -792,7 +874,10 @@ async fn reverse_company_financial_account_adjustment(
     .await
     {
         tracing::error!(error = %error, account_id = %account_id, "lock account adjustment reversal request");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse account adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse account adjustment",
+        );
     }
     let replay = match sqlx::query(
         r#"SELECT id, reverses_adjustment_id, effective_on, reason, note
@@ -808,18 +893,26 @@ async fn reverse_company_financial_account_adjustment(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, account_id = %account_id, "load account adjustment reversal replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse account adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse account adjustment",
+            );
         }
     };
     if let Some(row) = replay {
-        let exact = row.try_get::<Option<Uuid>, _>("reverses_adjustment_id").ok().flatten()
+        let exact = row
+            .try_get::<Option<Uuid>, _>("reverses_adjustment_id")
+            .ok()
+            .flatten()
             == Some(adjustment_id)
             && row.try_get::<NaiveDate, _>("effective_on").ok() == Some(effective_on)
-            && row.try_get::<String, _>("reason").ok().as_deref()
-                == Some(reason.as_str())
+            && row.try_get::<String, _>("reason").ok().as_deref() == Some(reason.as_str())
             && row.try_get::<Option<String>, _>("note").ok().flatten() == note;
         if !exact {
-            return err(StatusCode::CONFLICT, "request_id was already used with different reversal data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different reversal data",
+            );
         }
         return Json(json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -843,12 +936,23 @@ async fn reverse_company_financial_account_adjustment(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Account adjustment not found"),
         Err(error) => {
             tracing::error!(error = %error, adjustment_id = %adjustment_id, "load account adjustment for reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse account adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse account adjustment",
+            );
         }
     };
-    let original_direction = original.try_get::<String, _>("direction").unwrap_or_default();
-    let direction = if original_direction == "inflow" { "outflow" } else { "inflow" };
-    let amount = original.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO);
+    let original_direction = original
+        .try_get::<String, _>("direction")
+        .unwrap_or_default();
+    let direction = if original_direction == "inflow" {
+        "outflow"
+    } else {
+        "inflow"
+    };
+    let amount = original
+        .try_get::<Decimal, _>("amount")
+        .unwrap_or(Decimal::ZERO);
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO company_financial_account_adjustments (
                financial_account_id, transaction_type, request_id,
@@ -872,12 +976,18 @@ async fn reverse_company_financial_account_adjustment(
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, adjustment_id = %adjustment_id, "reverse company account adjustment rejected");
-            return err(StatusCode::CONFLICT, "Account adjustment cannot be reversed");
+            return err(
+                StatusCode::CONFLICT,
+                "Account adjustment cannot be reversed",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, reversal_id = %reversal_id, "commit company account adjustment reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse account adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse account adjustment",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.adjustment.reverse".to_string(),
@@ -902,7 +1012,10 @@ async fn assign_accounting_entry_financial_account(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin accounting entry account assignment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to assign financial account",
+            );
         }
     };
     let entry = match sqlx::query(
@@ -921,10 +1034,16 @@ async fn assign_accounting_entry_financial_account(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Accounting entry not found"),
         Err(error) => {
             tracing::error!(error = %error, entry_id = %entry_id, "load accounting entry for account assignment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to assign financial account",
+            );
         }
     };
-    let currency = entry.try_get::<String, _>("currency").unwrap_or_default().to_uppercase();
+    let currency = entry
+        .try_get::<String, _>("currency")
+        .unwrap_or_default()
+        .to_uppercase();
     let target = match sqlx::query(
         "SELECT currency, is_active FROM company_financial_accounts WHERE id = $1 FOR SHARE",
     )
@@ -936,15 +1055,23 @@ async fn assign_accounting_entry_financial_account(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Financial account not found"),
         Err(error) => {
             tracing::error!(error = %error, "load financial account for assignment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to assign financial account",
+            );
         }
     };
     if target.try_get::<String, _>("currency").unwrap_or_default() != currency
         || !target.try_get::<bool, _>("is_active").unwrap_or(false)
     {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Financial account must be active and use the movement currency");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Financial account must be active and use the movement currency",
+        );
     }
-    if entry.try_get::<Option<Uuid>, _>("financial_account_id").unwrap_or_default()
+    if entry
+        .try_get::<Option<Uuid>, _>("financial_account_id")
+        .unwrap_or_default()
         == Some(body.financial_account_id)
     {
         return Json(json!({ "updated_count": 0, "idempotent_replay": true })).into_response();
@@ -972,12 +1099,18 @@ async fn assign_accounting_entry_financial_account(
         Ok(result) => result.rows_affected(),
         Err(error) => {
             tracing::error!(error = %error, entry_id = %entry_id, "assign accounting entry financial account");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to assign financial account",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, entry_id = %entry_id, "commit accounting entry financial account assignment");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to assign financial account",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "accounting_entry.financial_account.assign".to_string(),

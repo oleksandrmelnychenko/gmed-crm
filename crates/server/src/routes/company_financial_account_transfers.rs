@@ -109,7 +109,10 @@ async fn create_company_financial_account_transfer(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if body.source_account_id == body.target_account_id {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Source and target accounts must differ");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source and target accounts must differ",
+        );
     }
     let amount = match parse_amount(&body.amount) {
         Ok(value) => value,
@@ -120,7 +123,10 @@ async fn create_company_financial_account_transfer(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if effective_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Transfer date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Transfer date cannot be in the future",
+        );
     }
     let reference = match clean_optional(body.reference.as_deref(), 120) {
         Ok(value) => value,
@@ -135,12 +141,18 @@ async fn create_company_financial_account_transfer(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin company account transfer");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record internal transfer",
+            );
         }
     };
     if let Err(error) = lock_request(&mut transaction, body.request_id).await {
         tracing::error!(error = %error, "lock company account transfer request");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record internal transfer");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record internal transfer",
+        );
     }
 
     let replay = match sqlx::query(
@@ -157,22 +169,26 @@ async fn create_company_financial_account_transfer(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "load company account transfer replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record internal transfer",
+            );
         }
     };
     if let Some(row) = replay {
         let exact = row.try_get::<String, _>("transaction_type").ok().as_deref()
             == Some("transfer")
-            && row.try_get::<Uuid, _>("source_account_id").ok()
-                == Some(body.source_account_id)
-            && row.try_get::<Uuid, _>("target_account_id").ok()
-                == Some(body.target_account_id)
+            && row.try_get::<Uuid, _>("source_account_id").ok() == Some(body.source_account_id)
+            && row.try_get::<Uuid, _>("target_account_id").ok() == Some(body.target_account_id)
             && row.try_get::<Decimal, _>("amount").ok() == Some(amount)
             && row.try_get::<NaiveDate, _>("effective_on").ok() == Some(effective_on)
             && row.try_get::<Option<String>, _>("reference").ok().flatten() == reference
             && row.try_get::<Option<String>, _>("note").ok().flatten() == note;
         if !exact {
-            return err(StatusCode::CONFLICT, "request_id was already used with different transfer data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different transfer data",
+            );
         }
         return Json(json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -196,7 +212,10 @@ async fn create_company_financial_account_transfer(
         Ok(rows) => rows,
         Err(error) => {
             tracing::error!(error = %error, "load internal transfer accounts");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record internal transfer",
+            );
         }
     };
     if accounts.len() != 2 {
@@ -220,15 +239,24 @@ async fn create_company_financial_account_transfer(
         .try_get::<NaiveDate, _>("opening_balance_on")
         .unwrap_or(effective_on);
     if source_currency != target_currency {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Internal transfers require matching currencies");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Internal transfers require matching currencies",
+        );
     }
     if !source.try_get::<bool, _>("is_active").unwrap_or(false)
         || !target.try_get::<bool, _>("is_active").unwrap_or(false)
     {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Internal transfer accounts must be active");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Internal transfer accounts must be active",
+        );
     }
     if effective_on < source_opening_on || effective_on < target_opening_on {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Transfer cannot precede an account opening date");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Transfer cannot precede an account opening date",
+        );
     }
 
     let transfer_id = match sqlx::query_scalar::<_, Uuid>(
@@ -254,12 +282,18 @@ async fn create_company_financial_account_transfer(
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, "create company account transfer rejected");
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Internal transfer is invalid");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Internal transfer is invalid",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, transfer_id = %transfer_id, "commit company account transfer");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record internal transfer");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record internal transfer",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.transfer.create".to_string(),
@@ -294,7 +328,10 @@ async fn reverse_company_financial_account_transfer(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
     if effective_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal date cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot be in the future",
+        );
     }
     let reference = match clean_required(
         &body.reference,
@@ -313,12 +350,18 @@ async fn reverse_company_financial_account_transfer(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin company account transfer reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse internal transfer",
+            );
         }
     };
     if let Err(error) = lock_request(&mut transaction, body.request_id).await {
         tracing::error!(error = %error, "lock company account transfer reversal request");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse internal transfer");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse internal transfer",
+        );
     }
 
     let replay = match sqlx::query(
@@ -335,20 +378,33 @@ async fn reverse_company_financial_account_transfer(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "load company account transfer reversal replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse internal transfer",
+            );
         }
     };
     if let Some(row) = replay {
         let exact = row.try_get::<String, _>("transaction_type").ok().as_deref()
             == Some("reversal")
-            && row.try_get::<Option<Uuid>, _>("reverses_transfer_id").ok().flatten()
+            && row
+                .try_get::<Option<Uuid>, _>("reverses_transfer_id")
+                .ok()
+                .flatten()
                 == Some(transfer_id)
             && row.try_get::<NaiveDate, _>("effective_on").ok() == Some(effective_on)
-            && row.try_get::<Option<String>, _>("reference").ok().flatten().as_deref()
+            && row
+                .try_get::<Option<String>, _>("reference")
+                .ok()
+                .flatten()
+                .as_deref()
                 == Some(reference.as_str())
             && row.try_get::<Option<String>, _>("note").ok().flatten() == note;
         if !exact {
-            return err(StatusCode::CONFLICT, "request_id was already used with different reversal data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different reversal data",
+            );
         }
         return Json(json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -372,14 +428,20 @@ async fn reverse_company_financial_account_transfer(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Internal transfer not found"),
         Err(error) => {
             tracing::error!(error = %error, transfer_id = %transfer_id, "load company account transfer");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse internal transfer");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse internal transfer",
+            );
         }
     };
     let original_effective_on = original
         .try_get::<NaiveDate, _>("effective_on")
         .unwrap_or(effective_on);
     if effective_on < original_effective_on {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal cannot precede the transfer date");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal cannot precede the transfer date",
+        );
     }
     let source_account_id = original
         .try_get::<Uuid, _>("source_account_id")
@@ -387,8 +449,12 @@ async fn reverse_company_financial_account_transfer(
     let target_account_id = original
         .try_get::<Uuid, _>("target_account_id")
         .unwrap_or_default();
-    let amount = original.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO);
-    let currency = original.try_get::<String, _>("currency").unwrap_or_default();
+    let amount = original
+        .try_get::<Decimal, _>("amount")
+        .unwrap_or(Decimal::ZERO);
+    let currency = original
+        .try_get::<String, _>("currency")
+        .unwrap_or_default();
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO company_financial_account_transfers (
                transaction_type, request_id, reverses_transfer_id,
@@ -418,7 +484,10 @@ async fn reverse_company_financial_account_transfer(
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, reversal_id = %reversal_id, "commit company account transfer reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse internal transfer");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse internal transfer",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "company_financial_account.transfer.reverse".to_string(),

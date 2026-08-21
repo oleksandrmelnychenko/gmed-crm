@@ -38,7 +38,11 @@ async fn request_json(
     } else {
         Body::empty()
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
@@ -55,7 +59,10 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
            VALUES ($1, 'test-password-hash', $2, $3)
            RETURNING id"#,
     )
-    .bind(format!("{tag}-{role}-{}@example.com", Uuid::new_v4().simple()))
+    .bind(format!(
+        "{tag}-{role}-{}@example.com",
+        Uuid::new_v4().simple()
+    ))
     .bind(format!("{role} {tag}"))
     .bind(role)
     .fetch_one(pool)
@@ -169,8 +176,7 @@ async fn balance_adjustments_are_append_only_idempotent_and_portal_safe() {
 
     let mut drift = adjustment_body.clone();
     drift["amount"] = json!("26.00");
-    let (drift_status, _) =
-        request_json(&app, Method::POST, &path, &admin, Some(drift)).await;
+    let (drift_status, _) = request_json(&app, Method::POST, &path, &admin, Some(drift)).await;
     assert_eq!(drift_status, StatusCode::CONFLICT);
 
     let (list_status, list) = request_json(&app, Method::GET, &path, &manager, None).await;
@@ -178,14 +184,15 @@ async fn balance_adjustments_are_append_only_idempotent_and_portal_safe() {
     assert_eq!(list["items"].as_array().unwrap().len(), 1);
     assert_eq!(list["items"][0]["note"], "internal-only note");
 
-    let statement_path = format!(
-        "/api/v1/patients/{patient_id}/account-statement?currency=EUR"
-    );
+    let statement_path = format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR");
     let (statement_status, statement) =
         request_json(&app, Method::GET, &statement_path, &manager, None).await;
     assert_eq!(statement_status, StatusCode::OK, "statement: {statement:?}");
     assert_eq!(statement["summary"]["closing_balance"], "25.5");
-    assert_eq!(statement["movements"][0]["description"], "Imported opening balance");
+    assert_eq!(
+        statement["movements"][0]["description"],
+        "Imported opening balance"
+    );
 
     let (portal_status, portal_statement) = request_json(
         &app,
@@ -195,16 +202,26 @@ async fn balance_adjustments_are_append_only_idempotent_and_portal_safe() {
         None,
     )
     .await;
-    assert_eq!(portal_status, StatusCode::OK, "portal: {portal_statement:?}");
+    assert_eq!(
+        portal_status,
+        StatusCode::OK,
+        "portal: {portal_statement:?}"
+    );
     assert_eq!(portal_statement["summary"]["closing_balance"], "25.5");
-    assert_eq!(portal_statement["movements"][0]["description"], "Account adjustment");
+    assert_eq!(
+        portal_statement["movements"][0]["description"],
+        "Account adjustment"
+    );
     assert!(!portal_statement.to_string().contains("internal-only note"));
-    assert!(!portal_statement.to_string().contains("Imported opening balance"));
+    assert!(
+        !portal_statement
+            .to_string()
+            .contains("Imported opening balance")
+    );
 
     let reversal_request_id = Uuid::new_v4();
-    let reversal_path = format!(
-        "/api/v1/patients/{patient_id}/balance-adjustments/{adjustment_id}/reversal"
-    );
+    let reversal_path =
+        format!("/api/v1/patients/{patient_id}/balance-adjustments/{adjustment_id}/reversal");
     let reversal_body = json!({
         "request_id": reversal_request_id,
         "reason": "Opening balance entered in error"
@@ -250,18 +267,22 @@ async fn balance_adjustments_are_append_only_idempotent_and_portal_safe() {
     assert_eq!(reversed_statement["summary"]["closing_balance"], "0");
     assert_eq!(reversed_statement["movements"].as_array().unwrap().len(), 2);
 
-    let update_result = sqlx::query(
-        "UPDATE patient_balance_adjustments SET amount = 30 WHERE id = $1",
-    )
-    .bind(adjustment_id)
-    .execute(&pool)
-    .await;
-    assert!(update_result.is_err(), "adjustment journal must be immutable");
+    let update_result =
+        sqlx::query("UPDATE patient_balance_adjustments SET amount = 30 WHERE id = $1")
+            .bind(adjustment_id)
+            .execute(&pool)
+            .await;
+    assert!(
+        update_result.is_err(),
+        "adjustment journal must be immutable"
+    );
 
     let delete_result = sqlx::query("DELETE FROM patient_balance_adjustments WHERE id = $1")
         .bind(adjustment_id)
         .execute(&pool)
         .await;
-    assert!(delete_result.is_err(), "adjustment journal must be append-only");
+    assert!(
+        delete_result.is_err(),
+        "adjustment journal must be append-only"
+    );
 }
-

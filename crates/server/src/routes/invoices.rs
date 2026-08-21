@@ -1025,11 +1025,12 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
 
     let already_accounted =
         total_accounted_external_invoice_gross(state, external_invoice_id).await?;
-    let target_gross = match provider_payment_journal_target_gross(state, external_invoice_id).await? {
-        Some(value) => value,
-        None if context.status == "paid" && context.paid_by == "agency" => context.amount_gross,
-        None => Decimal::ZERO,
-    };
+    let target_gross =
+        match provider_payment_journal_target_gross(state, external_invoice_id).await? {
+            Some(value) => value,
+            None if context.status == "paid" && context.paid_by == "agency" => context.amount_gross,
+            None => Decimal::ZERO,
+        };
     let delta_gross = round_accounting_money(target_gross - already_accounted);
     if delta_gross == Decimal::ZERO {
         return Ok(());
@@ -1266,12 +1267,11 @@ pub async fn run_auto_dunning_scheduler_once(
     let mut summary = AutoDunningRunSummary::default();
 
     for candidate in load_auto_dunning_candidates(state).await? {
-        let balance_due =
-            (candidate.total_gross
-                - candidate.credited_amount
-                - candidate.paid_amount
-                - candidate.prepayment_applied_amount)
-                .max(Decimal::ZERO);
+        let balance_due = (candidate.total_gross
+            - candidate.credited_amount
+            - candidate.paid_amount
+            - candidate.prepayment_applied_amount)
+            .max(Decimal::ZERO);
         if balance_due <= Decimal::ZERO || candidate.due_date >= today {
             continue;
         }
@@ -5807,11 +5807,17 @@ fn invoice_credit_note_row_payload(
         );
         map.insert(
             "created_by_name".to_string(),
-            serde_json::json!(row.try_get::<String, _>("created_by_name").unwrap_or_default()),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_name")
+                    .unwrap_or_default()
+            ),
         );
         map.insert(
             "created_by_role".to_string(),
-            serde_json::json!(row.try_get::<String, _>("created_by_role").unwrap_or_default()),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_role")
+                    .unwrap_or_default()
+            ),
         );
     }
     payload
@@ -5871,7 +5877,10 @@ async fn list_invoice_credit_notes(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit-note access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load credit notes");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load credit notes",
+            );
         }
     };
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
@@ -5881,7 +5890,10 @@ async fn list_invoice_credit_notes(
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice credit notes");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load credit notes")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load credit notes",
+            )
         }
     }
 }
@@ -5910,14 +5922,19 @@ async fn list_my_invoice_credit_notes(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "load portal credit-note access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load credit notes");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load credit notes",
+            );
         }
     };
     if invoice
         .try_get::<Uuid, _>("patient_id")
         .map(|value| value != patient_id)
         .unwrap_or(true)
-        || !invoice.try_get::<bool, _>("portal_visible").unwrap_or(false)
+        || !invoice
+            .try_get::<bool, _>("portal_visible")
+            .unwrap_or(false)
         || !invoice_is_patient_visible(&invoice.try_get::<String, _>("status").unwrap_or_default())
     {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
@@ -5929,7 +5946,10 @@ async fn list_my_invoice_credit_notes(
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list portal invoice credit notes");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load credit notes")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load credit notes",
+            )
         }
     }
 }
@@ -6161,8 +6181,7 @@ async fn create_invoice_payment(
             );
         }
     };
-    if current_cash_paid - current_cash_refunded + amount_gross
-        + context.prepayment_applied_amount
+    if current_cash_paid - current_cash_refunded + amount_gross + context.prepayment_applied_amount
         > context.total_gross - context.credited_amount
     {
         return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
@@ -6609,14 +6628,22 @@ async fn create_invoice_credit_note(
     }
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(value) if value.chars().count() <= 1000 => value,
-        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Credit-note reason is required"),
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Credit-note reason is required",
+            );
+        }
     };
     let issued_on = match parse_optional_date(Some(body.issued_on.as_str())) {
         Ok(Some(value)) if value <= Utc::now().date_naive() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid credit-note date"),
     };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid credit-note amount");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid credit-note amount",
+        );
     };
     let amount_gross = amount_gross.round_dp(2);
     let request_id = body.request_id;
@@ -6626,20 +6653,22 @@ async fn create_invoice_credit_note(
             "Credit-note amount must be greater than zero",
         );
     }
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM invoices WHERE id = $1",
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(patient_id)) => patient_id,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit-note access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
-        }
-    };
+    let patient_id =
+        match sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(patient_id)) => patient_id,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load credit-note access");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create credit note",
+                );
+            }
+        };
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
@@ -6648,7 +6677,10 @@ async fn create_invoice_credit_note(
         Ok(transaction) => transaction,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "begin credit-note transaction");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
     };
     let row = match sqlx::query(
@@ -6669,22 +6701,35 @@ async fn create_invoice_credit_note(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoice for credit note");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
     };
     let context = InvoicePaymentContext {
         invoice_id,
         order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
         patient_id,
-        invoice_number: row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
         invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
-        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO),
-        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO),
-        credited_amount: row.try_get::<Decimal, _>("credited_amount").unwrap_or(Decimal::ZERO),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        credited_amount: row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO),
         prepayment_applied_amount: row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO),
-        currency: row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
         line_items: row
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| serde_json::json!([])),
@@ -6721,7 +6766,10 @@ async fn create_invoice_credit_note(
         Ok(value) => value,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, request_id = %request_id, "load credit-note idempotency key");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
     };
     if let Some(existing) = existing_request {
@@ -6746,7 +6794,10 @@ async fn create_invoice_credit_note(
         let existing_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
         if let Err(e) = transaction.commit().await {
             tracing::error!(error = %e, invoice_id = %invoice_id, "finish credit-note idempotent replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
         return match load_invoice_detail(&state, invoice_id, &auth).await {
             Ok(Some(invoice)) => Json(serde_json::json!({
@@ -6762,11 +6813,7 @@ async fn create_invoice_credit_note(
     if context.credited_amount + amount_gross > context.total_gross {
         return err(StatusCode::CONFLICT, "Credit note exceeds invoice total");
     }
-    let amount_vat = proportional_share(
-        amount_gross,
-        context.total_vat,
-        context.total_gross,
-    );
+    let amount_vat = proportional_share(amount_gross, context.total_vat, context.total_gross);
     let amount_net = amount_gross - amount_vat;
     let sequence = match sqlx::query_scalar::<_, i64>(
         "SELECT nextval('invoice_credit_note_number_seq')",
@@ -6777,7 +6824,10 @@ async fn create_invoice_credit_note(
         Ok(value) => value,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "allocate credit-note number");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
     };
     let document_number = format!("CN-{}-{sequence:06}", issued_on.year());
@@ -6806,22 +6856,37 @@ async fn create_invoice_credit_note(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
-            return err(StatusCode::CONFLICT, "Credit note violates invoice balance rules");
+            return err(
+                StatusCode::CONFLICT,
+                "Credit note violates invoice balance rules",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice credit note");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create credit note",
+            );
         }
     };
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after credit note");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        );
     }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice credit note");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create credit note");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        );
     }
 
     write_invoice_audit(
@@ -6876,7 +6941,12 @@ async fn reverse_invoice_credit_note(
     }
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(value) if value.chars().count() <= 1000 => value,
-        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal reason is required"),
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Reversal reason is required",
+            );
+        }
     };
     let issued_on = match parse_optional_date(body.issued_on.as_deref()) {
         Ok(Some(value)) if value <= Utc::now().date_naive() => value,
@@ -6894,7 +6964,10 @@ async fn reverse_invoice_credit_note(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "load credit-note reversal access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
         }
     };
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
@@ -6905,7 +6978,10 @@ async fn reverse_invoice_credit_note(
         Ok(transaction) => transaction,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "begin credit-note reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
         }
     };
     let row = match sqlx::query(
@@ -6936,10 +7012,17 @@ async fn reverse_invoice_credit_note(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Credit note not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "lock credit note reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
         }
     };
-    if row.try_get::<String, _>("transaction_type").unwrap_or_default() != "credit_note" {
+    if row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default()
+        != "credit_note"
+    {
         return err(StatusCode::CONFLICT, "Only a credit note can be reversed");
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
@@ -6955,10 +7038,18 @@ async fn reverse_invoice_credit_note(
             "Reversal date cannot precede the credit-note date",
         );
     }
-    let amount_net = row.try_get::<Decimal, _>("amount_net").unwrap_or(Decimal::ZERO);
-    let amount_vat = row.try_get::<Decimal, _>("amount_vat").unwrap_or(Decimal::ZERO);
-    let amount_gross = row.try_get::<Decimal, _>("amount_gross").unwrap_or(Decimal::ZERO);
-    let currency = row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string());
+    let amount_net = row
+        .try_get::<Decimal, _>("amount_net")
+        .unwrap_or(Decimal::ZERO);
+    let amount_vat = row
+        .try_get::<Decimal, _>("amount_vat")
+        .unwrap_or(Decimal::ZERO);
+    let amount_gross = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let currency = row
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
     let sequence = match sqlx::query_scalar::<_, i64>(
         "SELECT nextval('invoice_credit_note_number_seq')",
     )
@@ -6968,7 +7059,10 @@ async fn reverse_invoice_credit_note(
         Ok(value) => value,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "allocate credit-note reversal number");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
         }
     };
     let document_number = format!("CNR-{}-{sequence:06}", issued_on.year());
@@ -6996,22 +7090,34 @@ async fn reverse_invoice_credit_note(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
             return err(StatusCode::CONFLICT, "Credit note was already reversed");
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "insert credit-note reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse credit note",
+            );
         }
     };
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after credit-note reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse credit note",
+        );
     }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit credit-note reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse credit note");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse credit note",
+        );
     }
 
     write_invoice_audit(
@@ -7092,11 +7198,17 @@ fn invoice_refund_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) -> 
         );
         map.insert(
             "created_by_name".to_string(),
-            serde_json::json!(row.try_get::<String, _>("created_by_name").unwrap_or_default()),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_name")
+                    .unwrap_or_default()
+            ),
         );
         map.insert(
             "created_by_role".to_string(),
-            serde_json::json!(row.try_get::<String, _>("created_by_role").unwrap_or_default()),
+            serde_json::json!(
+                row.try_get::<String, _>("created_by_role")
+                    .unwrap_or_default()
+            ),
         );
     }
     payload
@@ -7143,20 +7255,19 @@ async fn list_invoice_refunds(
     if !can_read_invoices(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    let patient_id = match sqlx::query_scalar::<_, Uuid>(
-        "SELECT patient_id FROM invoices WHERE id = $1",
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(patient_id)) => patient_id,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice refund access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds");
-        }
-    };
+    let patient_id =
+        match sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(patient_id)) => patient_id,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice refund access");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load refunds");
+            }
+        };
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
@@ -7200,7 +7311,9 @@ async fn list_my_invoice_refunds(
         .try_get::<Uuid, _>("patient_id")
         .map(|value| value != patient_id)
         .unwrap_or(true)
-        || !invoice.try_get::<bool, _>("portal_visible").unwrap_or(false)
+        || !invoice
+            .try_get::<bool, _>("portal_visible")
+            .unwrap_or(false)
         || !invoice_is_patient_visible(&invoice.try_get::<String, _>("status").unwrap_or_default())
     {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
@@ -7252,7 +7365,12 @@ async fn create_invoice_refund(
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(reason) => reason,
-        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Refund reason is required"),
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Refund reason is required",
+            );
+        }
     };
     let payment_reference = normalize_optional(body.payment_reference.as_deref());
     let note = normalize_optional(body.note.as_deref());
@@ -7307,11 +7425,19 @@ async fn create_invoice_refund(
         invoice_id,
         order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
         patient_id,
-        invoice_number: row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
         invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
-        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO),
-        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO),
-        credited_amount: row.try_get::<Decimal, _>("credited_amount").unwrap_or(Decimal::ZERO),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        credited_amount: row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO),
         prepayment_applied_amount: row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO),
@@ -7390,18 +7516,22 @@ async fn create_invoice_refund(
         };
     }
     if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
-        return err(StatusCode::CONFLICT, "Refunds require an active released invoice");
+        return err(
+            StatusCode::CONFLICT,
+            "Refunds require an active released invoice",
+        );
     }
-    let current_refundable = (
-        row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)
-            - (context.total_gross
-                - context.credited_amount
-                - context.prepayment_applied_amount)
-                .max(Decimal::ZERO)
-    )
+    let current_refundable = (row
+        .try_get::<Decimal, _>("paid_amount")
+        .unwrap_or(Decimal::ZERO)
+        - (context.total_gross - context.credited_amount - context.prepayment_applied_amount)
+            .max(Decimal::ZERO))
     .max(Decimal::ZERO);
     if amount_gross > current_refundable {
-        return err(StatusCode::CONFLICT, "Refund exceeds the refundable cash credit");
+        return err(
+            StatusCode::CONFLICT,
+            "Refund exceeds the refundable cash credit",
+        );
     }
 
     let refund_id = match sqlx::query_scalar::<_, Uuid>(
@@ -7426,9 +7556,15 @@ async fn create_invoice_refund(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
-            return err(StatusCode::CONFLICT, "Refund is no longer available; reload and try again");
+            return err(
+                StatusCode::CONFLICT,
+                "Refund is no longer available; reload and try again",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice refund");
@@ -7539,7 +7675,10 @@ async fn reverse_invoice_refund(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "load refund reversal access");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse refund",
+            );
         }
     };
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
@@ -7550,7 +7689,10 @@ async fn reverse_invoice_refund(
         Ok(transaction) => transaction,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "begin refund reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse refund",
+            );
         }
     };
     let row = match sqlx::query(
@@ -7581,10 +7723,17 @@ async fn reverse_invoice_refund(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Refund not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "lock refund reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse refund",
+            );
         }
     };
-    if row.try_get::<String, _>("transaction_type").unwrap_or_default() != "refund" {
+    if row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default()
+        != "refund"
+    {
         return err(StatusCode::CONFLICT, "Only a refund can be reversed");
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
@@ -7612,11 +7761,19 @@ async fn reverse_invoice_refund(
         invoice_id,
         order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
         patient_id,
-        invoice_number: row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
         invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
-        total_vat: row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO),
-        total_gross: row.try_get::<Decimal, _>("total_gross").unwrap_or(Decimal::ZERO),
-        credited_amount: row.try_get::<Decimal, _>("credited_amount").unwrap_or(Decimal::ZERO),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        credited_amount: row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO),
         prepayment_applied_amount: row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO),
@@ -7649,13 +7806,19 @@ async fn reverse_invoice_refund(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
             return err(StatusCode::CONFLICT, "Refund was already reversed");
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse refund",
+            );
         }
     };
     if let Err(e) = insert_invoice_refund_accounting_entries(
@@ -7672,15 +7835,24 @@ async fn reverse_invoice_refund(
     .await
     {
         tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund-reversal accounting entries");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse refund",
+        );
     }
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after refund reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse refund",
+        );
     }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit refund reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse refund");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse refund",
+        );
     }
 
     write_invoice_audit(
@@ -7941,10 +8113,7 @@ async fn create_dunning_event(
     }
 
     let balance_due =
-        (ctx.total_gross
-            - ctx.credited_amount
-            - ctx.paid_amount
-            - ctx.prepayment_applied_amount)
+        (ctx.total_gross - ctx.credited_amount - ctx.paid_amount - ctx.prepayment_applied_amount)
             .max(Decimal::ZERO);
     if balance_due <= Decimal::ZERO || matches!(ctx.status.as_str(), "paid" | "cancelled") {
         return err(
@@ -8467,7 +8636,10 @@ async fn update_invoice_status(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoice status update");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
         }
     };
     let locked_status = locked_invoice
@@ -8486,7 +8658,10 @@ async fn update_invoice_status(
         .try_get::<Decimal, _>("credited_amount")
         .unwrap_or(Decimal::ZERO);
     if locked_status == "cancelled" && requested_status != "cancelled" {
-        return err(StatusCode::CONFLICT, "Cancelled invoices cannot be reactivated");
+        return err(
+            StatusCode::CONFLICT,
+            "Cancelled invoices cannot be reactivated",
+        );
     }
     if let Some(requested_paid_amount) = requested_paid_amount
         && requested_paid_amount < locked_paid_amount
@@ -8653,8 +8828,7 @@ async fn update_invoice_status(
         legacy_payment_transaction_id = Some(payment_id);
     }
 
-    if requested_status == "cancelled" && locked_invoice_type == "advance"
-    {
+    if requested_status == "cancelled" && locked_invoice_type == "advance" {
         let allocation_exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
                 SELECT 1 FROM invoice_prepayment_allocations

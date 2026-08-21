@@ -982,10 +982,7 @@ async fn book_concierge_service_provider(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if ends_at
-        .as_ref()
-        .is_some_and(|value| value <= &starts_at)
-    {
+    if ends_at.as_ref().is_some_and(|value| value <= &starts_at) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "ends_at must be later than starts_at",
@@ -1141,7 +1138,10 @@ async fn book_concierge_service_provider(
             .as_str(),
         "billed" | "settled" | "waived"
     ) {
-        return err(StatusCode::CONFLICT, "Closed billing service cannot be booked");
+        return err(
+            StatusCode::CONFLICT,
+            "Closed billing service cannot be booked",
+        );
     }
     let current_provider_id = service
         .try_get::<Option<Uuid>, _>("provider_id")

@@ -324,7 +324,10 @@ async fn economics_uses_recognized_revenue_cash_journals_and_incurred_partner_co
     assert_eq!(economics["actual"]["partner_cost_net"], "40");
     assert_eq!(economics["actual"]["paid_to_partner_gross"], "0");
     assert_eq!(economics["actual"]["unpaid_to_partner_gross"], "47.6");
-    assert_eq!(economics["actual"]["paid_directly_by_patient_gross"], "11.9");
+    assert_eq!(
+        economics["actual"]["paid_directly_by_patient_gross"],
+        "11.9"
+    );
     assert_eq!(economics["actual"]["margin_net"], "40");
 
     let manager = auth_header(manager_id, "patient_manager");
@@ -354,13 +357,12 @@ async fn economics_uses_recognized_revenue_cash_journals_and_incurred_partner_co
     assert_eq!(summary["expenses_net"], "40");
     assert_eq!(summary["margin_net"], "40");
 
-    let external_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM external_invoices WHERE external_invoice_number = $1",
-    )
-    .bind(format!("EXT-{tag}-agency"))
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let external_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM external_invoices WHERE external_invoice_number = $1")
+            .bind(format!("EXT-{tag}-agency"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     let account_id: Uuid = sqlx::query_scalar(
         "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default LIMIT 1",
     )
@@ -771,9 +773,7 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
         .fetch_one(&mut *blocker)
         .await
         .unwrap();
-    let update_path = format!(
-        "/api/v1/orders/{order_id}/external-invoices/{external_id}/update"
-    );
+    let update_path = format!("/api/v1/orders/{order_id}/external-invoices/{external_id}/update");
     let first_update = tokio::spawn({
         let app = app.clone();
         let billing = billing.clone();
@@ -828,13 +828,14 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
         .execute(&pool)
         .await;
     assert!(provider_change.is_err());
-    let linked_service: Uuid = sqlx::query("SELECT order_leistung_id FROM external_invoices WHERE id = $1")
-        .bind(external_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
-        .try_get("order_leistung_id")
-        .unwrap();
+    let linked_service: Uuid =
+        sqlx::query("SELECT order_leistung_id FROM external_invoices WHERE id = $1")
+            .bind(external_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .try_get("order_leistung_id")
+            .unwrap();
     assert_eq!(linked_service, service_id);
 
     let lead_id: Uuid = sqlx::query_scalar(
@@ -928,14 +929,23 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
         })),
     )
     .await;
-    assert_eq!(usd_service_status, StatusCode::CREATED, "USD service: {usd_service_body:?}");
-    let usd_service_currency: String = sqlx::query_scalar(
-        "SELECT currency FROM order_leistungen WHERE id = $1",
-    )
-    .bind(usd_service_body["id"].as_str().unwrap().parse::<Uuid>().unwrap())
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    assert_eq!(
+        usd_service_status,
+        StatusCode::CREATED,
+        "USD service: {usd_service_body:?}"
+    );
+    let usd_service_currency: String =
+        sqlx::query_scalar("SELECT currency FROM order_leistungen WHERE id = $1")
+            .bind(
+                usd_service_body["id"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<Uuid>()
+                    .unwrap(),
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(usd_service_currency, "USD");
     let (oversized_service_status, oversized_service_body) = json_request(
         &app,
@@ -966,14 +976,17 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
         })),
     )
     .await;
-    assert_eq!(sync_status, StatusCode::CONFLICT, "sync response: {sync_body:?}");
-    let service_still_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM order_leistungen WHERE id = $1)",
-    )
-    .bind(service_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    assert_eq!(
+        sync_status,
+        StatusCode::CONFLICT,
+        "sync response: {sync_body:?}"
+    );
+    let service_still_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM order_leistungen WHERE id = $1)")
+            .bind(service_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(service_still_exists);
 
     sqlx::query(
@@ -1011,7 +1024,9 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
     assert_eq!(legacy_service_economics["economics_valid"], false);
     assert_eq!(legacy_service_economics["planned"]["revenue_net"], "100");
     assert!(legacy_service_economics["planned"]["margin_net"].is_null());
-    assert!(legacy_service_economics["warnings"]
-        .as_array()
-        .is_some_and(|warnings| warnings.contains(&json!("order_service_currency_mismatch"))));
+    assert!(
+        legacy_service_economics["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings.contains(&json!("order_service_currency_mismatch")))
+    );
 }

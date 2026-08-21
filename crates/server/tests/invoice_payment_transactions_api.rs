@@ -236,15 +236,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
     assert_eq!(status, StatusCode::FORBIDDEN, "manager response: {body:?}");
 
     let first_request_id = Uuid::new_v4();
-    let first = record_payment(
-        &app,
-        &billing,
-        invoice_id,
-        first_request_id,
-        40,
-        "BANK-001",
-    )
-    .await;
+    let first = record_payment(&app, &billing, invoice_id, first_request_id, 40, "BANK-001").await;
     let first_payment_id =
         Uuid::parse_str(first["payment_transaction_id"].as_str().unwrap()).unwrap();
     assert_eq!(first["invoice"]["paid_amount"], "40");
@@ -267,7 +259,10 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
     )
     .await;
     assert_eq!(replay_status, StatusCode::OK, "payment replay: {replay:?}");
-    assert_eq!(replay["payment_transaction_id"], first_payment_id.to_string());
+    assert_eq!(
+        replay["payment_transaction_id"],
+        first_payment_id.to_string()
+    );
     assert_eq!(replay["idempotent_replay"], true);
     let (drift_status, drift) = json_request(
         &app,
@@ -284,17 +279,13 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
         })),
     )
     .await;
-    assert_eq!(drift_status, StatusCode::CONFLICT, "payment drift: {drift:?}");
+    assert_eq!(
+        drift_status,
+        StatusCode::CONFLICT,
+        "payment drift: {drift:?}"
+    );
 
-    let second = record_payment(
-        &app,
-        &billing,
-        invoice_id,
-        Uuid::new_v4(),
-        79,
-        "BANK-002",
-    )
-    .await;
+    let second = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 79, "BANK-002").await;
     assert_eq!(second["invoice"]["paid_amount"], "119");
     assert_eq!(second["invoice"]["status"], "paid");
     assert_eq!(second["invoice"]["balance_due"], "0");
@@ -468,24 +459,9 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
     .await;
     let billing = auth_header_for(billing_id, "billing");
 
-    record_payment(
-        &app,
-        &billing,
-        advance_id,
-        Uuid::new_v4(),
-        60,
-        "ADVANCE",
-    )
-    .await;
-    let settlement_payment = record_payment(
-        &app,
-        &billing,
-        settlement_id,
-        Uuid::new_v4(),
-        59,
-        "CASH",
-    )
-    .await;
+    record_payment(&app, &billing, advance_id, Uuid::new_v4(), 60, "ADVANCE").await;
+    let settlement_payment =
+        record_payment(&app, &billing, settlement_id, Uuid::new_v4(), 59, "CASH").await;
     let settlement_payment_id = Uuid::parse_str(
         settlement_payment["payment_transaction_id"]
             .as_str()

@@ -10755,7 +10755,10 @@ pub(crate) async fn remove_document_blob(storage_key: &str) {
         || storage_key.contains('\\')
         || storage_key.contains("..")
     {
-        tracing::warn!(storage_key, "refusing to remove unsafe document storage key");
+        tracing::warn!(
+            storage_key,
+            "refusing to remove unsafe document storage key"
+        );
         return;
     }
     let path = FsPath::new(UPLOAD_DIR).join(storage_key);

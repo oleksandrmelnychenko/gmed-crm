@@ -268,12 +268,10 @@ async fn create_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    if let Err(error) = sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-    )
-    .bind(body.request_id)
-    .execute(&mut *tx)
-    .await
+    if let Err(error) = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(body.request_id)
+        .execute(&mut *tx)
+        .await
     {
         tracing::error!(error = %error, request_id = %body.request_id, "lock concierge operational create request");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -298,7 +296,10 @@ async fn create_item(
     };
     if let Some(replay) = replay {
         if replay.try_get::<Uuid, _>("actor_id").ok() != Some(auth.user_id)
-            || replay.try_get::<String, _>("payload_fingerprint").ok().as_deref()
+            || replay
+                .try_get::<String, _>("payload_fingerprint")
+                .ok()
+                .as_deref()
                 != Some(payload_fingerprint.as_str())
         {
             return err(
@@ -329,12 +330,8 @@ async fn create_item(
         return response;
     }
     if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) = validate_service_assignment_in_transaction(
-            &mut tx,
-            service_id,
-            assigned_to,
-        )
-        .await
+        && let Err(response) =
+            validate_service_assignment_in_transaction(&mut tx, service_id, assigned_to).await
     {
         return response;
     }
@@ -491,9 +488,7 @@ async fn update_item(
     let existing_assignee = existing
         .try_get::<Uuid, _>("assigned_to")
         .unwrap_or_else(|_| Uuid::nil());
-    let existing_status = existing
-        .try_get::<String, _>("status")
-        .unwrap_or_default();
+    let existing_status = existing.try_get::<String, _>("status").unwrap_or_default();
     let existing_reminder_at = existing
         .try_get::<Option<DateTime<Utc>>, _>("reminder_at")
         .unwrap_or_default();
@@ -756,7 +751,10 @@ async fn add_comment(
     }
     let comment_body = body.body.trim();
     if comment_body.is_empty() || comment_body.chars().count() > 4_000 {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Comment is required (max 4000)");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Comment is required (max 4000)",
+        );
     }
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -828,9 +826,14 @@ async fn add_comment(
         if existing.try_get::<String, _>("body").ok().as_deref() != Some(comment_body)
             || existing.try_get::<Uuid, _>("created_by").ok() != Some(auth.user_id)
         {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
-        existing.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil())
+        existing
+            .try_get::<Uuid, _>("id")
+            .unwrap_or_else(|_| Uuid::nil())
     };
     let comment = match load_comment_in_transaction(&mut tx, comment_id).await {
         Ok(Some(value)) => value,
@@ -866,7 +869,10 @@ async fn add_checklist_item(
     }
     let label = body.label.trim();
     if label.is_empty() || label.chars().count() > 500 {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Checklist label is required (max 500)");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Checklist label is required (max 500)",
+        );
     }
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -942,9 +948,14 @@ async fn add_checklist_item(
         if existing.try_get::<String, _>("label").ok().as_deref() != Some(label)
             || existing.try_get::<Uuid, _>("created_by").ok() != Some(auth.user_id)
         {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
-        existing.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil())
+        existing
+            .try_get::<Uuid, _>("id")
+            .unwrap_or_else(|_| Uuid::nil())
     };
     let checklist_item = match load_checklist_item_in_transaction(&mut tx, checklist_id).await {
         Ok(Some(value)) => value,
@@ -1006,16 +1017,22 @@ async fn toggle_checklist_item(
         }
     };
     if let Some(replay) = replay {
-        let event_type = replay.try_get::<String, _>("event_type").unwrap_or_default();
+        let event_type = replay
+            .try_get::<String, _>("event_type")
+            .unwrap_or_default();
         let checklist_id_text = checklist_id.to_string();
         let payload = replay
             .try_get::<serde_json::Value, _>("payload")
             .unwrap_or_else(|_| serde_json::json!({}));
         if event_type != "checklist_item_toggled"
-            || payload.get("checklist_id").and_then(|value| value.as_str()) != Some(checklist_id_text.as_str())
+            || payload.get("checklist_id").and_then(|value| value.as_str())
+                != Some(checklist_id_text.as_str())
             || payload.get("completed").and_then(|value| value.as_bool()) != Some(body.completed)
         {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         let checklist_item = match load_checklist_item_in_transaction(&mut tx, checklist_id).await {
             Ok(Some(value)) => value,
@@ -1409,10 +1426,7 @@ fn validate_item_fields(
     })
 }
 
-fn create_item_payload_fingerprint(
-    assigned_to: Uuid,
-    fields: &ValidatedItemFields,
-) -> String {
+fn create_item_payload_fingerprint(assigned_to: Uuid, fields: &ValidatedItemFields) -> String {
     let payload = serde_json::json!({
         "assigned_to": assigned_to,
         "kind": fields.kind,
@@ -1655,7 +1669,9 @@ pub async fn run_concierge_task_reminder_scheduler_once(state: &AppState) -> i64
         };
         for row in rows {
             let notification_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
-            let user_id = row.try_get::<Uuid, _>("user_id").unwrap_or_else(|_| Uuid::nil());
+            let user_id = row
+                .try_get::<Uuid, _>("user_id")
+                .unwrap_or_else(|_| Uuid::nil());
             if notification_id == Uuid::nil() || user_id == Uuid::nil() {
                 continue;
             }

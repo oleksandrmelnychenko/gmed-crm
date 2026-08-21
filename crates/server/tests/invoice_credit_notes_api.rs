@@ -154,7 +154,8 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     assert_eq!(created["invoice"]["credited_amount"], "40");
     assert_eq!(created["invoice"]["adjusted_total_gross"], "60");
     assert_eq!(created["invoice"]["balance_due"], "60");
-    let credit_id = Uuid::parse_str(created["credit_note_transaction_id"].as_str().unwrap()).unwrap();
+    let credit_id =
+        Uuid::parse_str(created["credit_note_transaction_id"].as_str().unwrap()).unwrap();
 
     let (status, replay) = request_json(
         &ctx.app,
@@ -216,14 +217,16 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     assert_eq!(portal_history["items"][0]["currency"], "USD");
     assert_eq!(portal_history["items"][0]["amount_gross"], "40");
 
-    let accounting_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM accounting_entries WHERE source_invoice_id = $1",
-    )
-    .bind(invoice_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
-    assert_eq!(accounting_count, 0, "unpaid credit notes are not cash-basis income");
+    let accounting_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounting_entries WHERE source_invoice_id = $1")
+            .bind(invoice_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        accounting_count, 0,
+        "unpaid credit notes are not cash-basis income"
+    );
 
     let (status, statement) = request_json(
         &ctx.app,
@@ -246,14 +249,15 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     .await;
     assert_eq!(status, StatusCode::OK, "{summary:?}");
     assert_eq!(summary["revenue_gross"], "60");
-    assert_eq!(summary["breakdown_by_service_type"][0]["revenue_gross"], "60");
+    assert_eq!(
+        summary["breakdown_by_service_type"][0]["revenue_gross"],
+        "60"
+    );
     let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
     let (status, before_credit) = request_json(
         &ctx.app,
         "GET",
-        &format!(
-            "/api/v1/patients/{patient_id}/account-statement?currency=USD&to={cutoff}"
-        ),
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=USD&to={cutoff}"),
         &ceo,
         None,
     )
@@ -292,9 +296,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     let (status, before_payment) = request_json(
         &ctx.app,
         "GET",
-        &format!(
-            "/api/v1/patients/{patient_id}/account-statement?currency=USD&to={cutoff}"
-        ),
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=USD&to={cutoff}"),
         &ceo,
         None,
     )
@@ -303,13 +305,12 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     assert_eq!(before_payment["summary"]["invoice_due"], "100");
     assert_eq!(before_payment["settlement"]["closing_balance"], "100");
 
-    let update_error = sqlx::query(
-        "UPDATE invoice_credit_note_transactions SET reason = 'mutated' WHERE id = $1",
-    )
-    .bind(credit_id)
-    .execute(&ctx.pool)
-    .await
-    .unwrap_err();
+    let update_error =
+        sqlx::query("UPDATE invoice_credit_note_transactions SET reason = 'mutated' WHERE id = $1")
+            .bind(credit_id)
+            .execute(&ctx.pool)
+            .await
+            .unwrap_err();
     assert!(update_error.to_string().contains("append-only"));
 }
 
@@ -417,7 +418,11 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
     .execute(&ctx.pool)
     .await
     .unwrap_err();
-    assert!(too_much.to_string().contains("adjusted patient invoice total"));
+    assert!(
+        too_much
+            .to_string()
+            .contains("adjusted patient invoice total")
+    );
 
     sqlx::query(
         r#"INSERT INTO external_invoice_patient_invoice_allocations (
@@ -453,9 +458,11 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
     .execute(&ctx.pool)
     .await
     .unwrap_err();
-    assert!(payer_change
-        .to_string()
-        .contains("cannot be lower than active allocations"));
+    assert!(
+        payer_change
+            .to_string()
+            .contains("cannot be lower than active allocations")
+    );
 }
 
 #[tokio::test]
@@ -464,8 +471,7 @@ async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
         return;
     };
     let tag = format!("credit-prepay-{}", Uuid::new_v4().simple());
-    let (patient_id, target_invoice_id) =
-        seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let (patient_id, target_invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
     let order_id: Uuid = sqlx::query_scalar("SELECT order_id FROM invoices WHERE id = $1")
         .bind(target_invoice_id)
         .fetch_one(&ctx.pool)
@@ -555,8 +561,7 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{payment:?}");
-    let payment_id =
-        Uuid::parse_str(payment["payment_transaction_id"].as_str().unwrap()).unwrap();
+    let payment_id = Uuid::parse_str(payment["payment_transaction_id"].as_str().unwrap()).unwrap();
 
     let (status, credit) = request_json(
         &ctx.app,
@@ -596,8 +601,7 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{refunded:?}");
-    let refund_id =
-        Uuid::parse_str(refunded["refund_transaction_id"].as_str().unwrap()).unwrap();
+    let refund_id = Uuid::parse_str(refunded["refund_transaction_id"].as_str().unwrap()).unwrap();
     assert_eq!(refunded["invoice"]["paid_amount"], "60");
     assert_eq!(refunded["invoice"]["balance_due"], "0");
     assert_eq!(refunded["invoice"]["credit_balance"], "0");
@@ -704,11 +708,13 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     assert_eq!(status, StatusCode::OK, "{statement:?}");
     assert_eq!(statement["summary"]["invoice_due"], "0");
     assert_eq!(statement["settlement"]["closing_balance"], "0");
-    assert!(statement["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|item| item["movement_type"] == "refund" && item["debit"] == "40"));
+    assert!(
+        statement["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["movement_type"] == "refund" && item["debit"] == "40")
+    );
 
     let accounting = sqlx::query(
         r#"SELECT COALESCE(SUM(amount), 0) AS amount,
@@ -748,12 +754,11 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
-    let immutable_error = sqlx::query(
-        "UPDATE invoice_refund_transactions SET reason = 'mutated' WHERE id = $1",
-    )
-    .bind(refund_id)
-    .execute(&ctx.pool)
-    .await
-    .unwrap_err();
+    let immutable_error =
+        sqlx::query("UPDATE invoice_refund_transactions SET reason = 'mutated' WHERE id = $1")
+            .bind(refund_id)
+            .execute(&ctx.pool)
+            .await
+            .unwrap_err();
     assert!(immutable_error.to_string().contains("append-only"));
 }

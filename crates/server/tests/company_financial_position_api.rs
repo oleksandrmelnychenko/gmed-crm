@@ -236,7 +236,10 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
         .unwrap();
     }
 
-    for (number, status, gross) in [("PAYABLE", "received", 25_i64), ("EXPECTED", "expected", 15_i64)] {
+    for (number, status, gross) in [
+        ("PAYABLE", "received", 25_i64),
+        ("EXPECTED", "expected", 15_i64),
+    ] {
         sqlx::query(
             r#"INSERT INTO external_invoices (
                    order_id, patient_id, external_invoice_number, invoice_date,
@@ -347,11 +350,13 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     assert_eq!(provider_position["invoice_count"], 2);
     assert_eq!(provider_position["open_invoice_count"], 1);
     assert_eq!(provider_position["settled_invoice_count"], 0);
-    assert!(result["available_currencies"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|value| value == "USD"));
+    assert!(
+        result["available_currencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "USD")
+    );
 
     let (outflow_status, outflows) = request_json(
         &ctx.app,
@@ -361,11 +366,13 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     .await;
     assert_eq!(outflow_status, StatusCode::OK, "outflows: {outflows:?}");
     assert_eq!(outflows["cash_movements"].as_array().unwrap().len(), 2);
-    assert!(outflows["cash_movements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|movement| movement["movement"] == "outflow"));
+    assert!(
+        outflows["cash_movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|movement| movement["movement"] == "outflow")
+    );
 
     let (search_status, search) = request_json(
         &ctx.app,

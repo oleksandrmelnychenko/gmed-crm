@@ -33,7 +33,11 @@ async fn request_json(
     } else {
         Body::empty()
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
@@ -119,7 +123,10 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     .unwrap();
 
     let mut entry_ids = Vec::new();
-    for (category, amount) in [("service_revenue", 20_i64), ("cost_passthrough_revenue", 10_i64)] {
+    for (category, amount) in [
+        ("service_revenue", 20_i64),
+        ("cost_passthrough_revenue", 10_i64),
+    ] {
         let entry_id: Uuid = sqlx::query_scalar(
             r#"INSERT INTO accounting_entries (
                    entry_kind, direction, category, source_invoice_id,
@@ -150,7 +157,11 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     let list_path = "/api/v1/company-financial-accounts?currency=EUR&include_inactive=true";
     let (initial_status, initial) =
         request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
-    assert_eq!(initial_status, StatusCode::OK, "initial accounts: {initial:?}");
+    assert_eq!(
+        initial_status,
+        StatusCode::OK,
+        "initial accounts: {initial:?}"
+    );
     let default_account = initial["items"]
         .as_array()
         .unwrap()
@@ -159,8 +170,7 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         .unwrap();
     assert_eq!(default_account["movement_balance"], "30");
 
-    let (forbidden_status, _) =
-        request_json(&ctx.app, Method::GET, list_path, &sales, None).await;
+    let (forbidden_status, _) = request_json(&ctx.app, Method::GET, list_path, &sales, None).await;
     assert_eq!(forbidden_status, StatusCode::FORBIDDEN);
 
     let (create_status, created) = request_json(
@@ -178,7 +188,11 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         })),
     )
     .await;
-    assert_eq!(create_status, StatusCode::CREATED, "create account: {created:?}");
+    assert_eq!(
+        create_status,
+        StatusCode::CREATED,
+        "create account: {created:?}"
+    );
     let cash_account_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
 
     let (usd_status, usd) = request_json(
@@ -225,9 +239,8 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     assert_eq!(assigned["updated_count"], 2);
 
     let request_id = Uuid::new_v4();
-    let adjustment_path = format!(
-        "/api/v1/company-financial-accounts/{cash_account_id}/adjustments"
-    );
+    let adjustment_path =
+        format!("/api/v1/company-financial-accounts/{cash_account_id}/adjustments");
     let adjustment_body = json!({
         "request_id": request_id,
         "direction": "outflow",
@@ -313,8 +326,7 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     assert_eq!(reverse_replay_status, StatusCode::OK);
     assert_eq!(reverse_replay["idempotent_replay"], true);
 
-    let (_, final_accounts) =
-        request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
+    let (_, final_accounts) = request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
     let cash_final = final_accounts["items"]
         .as_array()
         .unwrap()
@@ -323,11 +335,13 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         .unwrap();
     assert_eq!(cash_final["current_balance"], "130");
 
-    let update_result = sqlx::query(
-        "UPDATE company_financial_account_adjustments SET amount = 6 WHERE id = $1",
-    )
-    .bind(adjustment_id)
-    .execute(&ctx.pool)
-    .await;
-    assert!(update_result.is_err(), "account adjustments must be immutable");
+    let update_result =
+        sqlx::query("UPDATE company_financial_account_adjustments SET amount = 6 WHERE id = $1")
+            .bind(adjustment_id)
+            .execute(&ctx.pool)
+            .await;
+    assert!(
+        update_result.is_err(),
+        "account adjustments must be immutable"
+    );
 }

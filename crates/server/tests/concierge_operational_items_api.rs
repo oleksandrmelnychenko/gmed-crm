@@ -209,8 +209,14 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
 
-    let (status, updated) =
-        json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body.clone())).await;
+    let (status, updated) = json_request(
+        &ctx.app,
+        "POST",
+        &update_path,
+        &bearer,
+        Some(update_body.clone()),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(updated["status"], "completed");
     assert!(updated["completed_at"].is_string());
@@ -218,7 +224,14 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
     let (status, stale_update) =
         json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body)).await;
     assert_eq!(status, StatusCode::CONFLICT, "{stale_update}");
-    let (status, current) = json_request(&ctx.app, "GET", &update_path.replace("/update", ""), &bearer, None).await;
+    let (status, current) = json_request(
+        &ctx.app,
+        "GET",
+        &update_path.replace("/update", ""),
+        &bearer,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{current}");
     assert_eq!(current["item"]["status"], "completed");
 
@@ -285,8 +298,7 @@ async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency(
 
     let mut drifted = body.clone();
     drifted["title"] = json!("Different task");
-    let (drift_status, drift) =
-        json_request(&ctx.app, "POST", path, &bearer, Some(drifted)).await;
+    let (drift_status, drift) = json_request(&ctx.app, "POST", path, &bearer, Some(drifted)).await;
     assert_eq!(drift_status, StatusCode::CONFLICT, "{drift}");
 
     let concurrent_request_id = Uuid::new_v4();
@@ -309,10 +321,8 @@ async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency(
         json_request(&ctx.app, "POST", path, &bearer, Some(concurrent_body)),
     );
     assert!(
-        (concurrent_first.0 == StatusCode::CREATED
-            && concurrent_second.0 == StatusCode::OK)
-            || (concurrent_first.0 == StatusCode::OK
-                && concurrent_second.0 == StatusCode::CREATED),
+        (concurrent_first.0 == StatusCode::CREATED && concurrent_second.0 == StatusCode::OK)
+            || (concurrent_first.0 == StatusCode::OK && concurrent_second.0 == StatusCode::CREATED),
         "first={:?} {} second={:?} {}",
         concurrent_first.0,
         concurrent_first.1,
@@ -346,7 +356,11 @@ async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency(
         .unwrap();
     let (revoked_replay_status, revoked_replay) =
         json_request(&ctx.app, "POST", path, &bearer, Some(body)).await;
-    assert_eq!(revoked_replay_status, StatusCode::FORBIDDEN, "{revoked_replay}");
+    assert_eq!(
+        revoked_replay_status,
+        StatusCode::FORBIDDEN,
+        "{revoked_replay}"
+    );
     assert!(revoked_replay.get("note").is_none(), "{revoked_replay}");
 
     let request_rows: i64 = sqlx::query_scalar(
@@ -412,7 +426,11 @@ async fn operational_item_api_rejects_clinical_payload_and_medical_service_links
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_request_id}");
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{missing_request_id}"
+    );
 
     let (status, unknown_field) = json_request(
         &ctx.app,
@@ -474,7 +492,8 @@ async fn patient_manager_cannot_access_concierge_operational_items() {
 }
 
 #[tokio::test]
-async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_history_and_reminders() {
+async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_history_and_reminders()
+ {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
@@ -510,7 +529,8 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
     let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
 
     let detail_path = format!("{path}/{task_id}");
-    let (status, forbidden) = json_request(&ctx.app, "GET", &detail_path, &other_bearer, None).await;
+    let (status, forbidden) =
+        json_request(&ctx.app, "GET", &detail_path, &other_bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
 
     let comment_request_id = Uuid::new_v4();
@@ -583,13 +603,26 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
     assert_eq!(status, StatusCode::OK, "{replayed_toggle}");
     assert_eq!(toggled["updated_at"], replayed_toggle["updated_at"]);
 
-    let (status, detail) = json_request(&ctx.app, "GET", &detail_path, &concierge_bearer, None).await;
+    let (status, detail) =
+        json_request(&ctx.app, "GET", &detail_path, &concierge_bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{detail}");
     assert_eq!(detail["comments"].as_array().expect("comments").len(), 1);
     assert_eq!(detail["checklist"].as_array().expect("checklist").len(), 1);
     assert_eq!(detail["item"]["checklist_completed"], 1);
-    assert!(detail["history"].as_array().expect("history").iter().any(|event| event["event_type"] == "comment_added"));
-    assert!(detail["history"].as_array().expect("history").iter().any(|event| event["event_type"] == "checklist_item_toggled"));
+    assert!(
+        detail["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| event["event_type"] == "comment_added")
+    );
+    assert!(
+        detail["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| event["event_type"] == "checklist_item_toggled")
+    );
 
     let scheduler_state = AppState::new(
         ctx.pool.clone(),
@@ -849,13 +882,7 @@ async fn concurrent_checklist_toggle_with_same_request_id_replays_as_two_success
             &bearer,
             Some(toggle_body.clone()),
         ),
-        json_request(
-            &ctx.app,
-            "POST",
-            &toggle_path,
-            &bearer,
-            Some(toggle_body),
-        ),
+        json_request(&ctx.app, "POST", &toggle_path, &bearer, Some(toggle_body),),
     );
     assert_eq!(first.0, StatusCode::OK, "{}", first.1);
     assert_eq!(second.0, StatusCode::OK, "{}", second.1);

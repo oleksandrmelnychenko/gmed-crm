@@ -12,10 +12,10 @@ use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{access, audit};
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use crate::{access, audit};
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -1627,8 +1627,7 @@ async fn get_patient_financial_summary(
         let prepayment_applied = row
             .try_get::<Decimal, _>("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO);
-        let balance =
-            (total_gross - credited - paid - prepayment_applied).max(Decimal::ZERO);
+        let balance = (total_gross - credited - paid - prepayment_applied).max(Decimal::ZERO);
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let due_date = row
             .try_get::<Option<NaiveDate>, _>("due_date")
@@ -1653,18 +1652,15 @@ async fn get_patient_financial_summary(
             for item in items {
                 let original_gross =
                     value_to_decimal(item.get("line_gross").unwrap_or(&Value::Null));
-                let original_net =
-                    value_to_decimal(item.get("line_net").unwrap_or(&Value::Null));
+                let original_net = value_to_decimal(item.get("line_net").unwrap_or(&Value::Null));
                 let gross = if total_gross > Decimal::ZERO {
-                    (original_gross * (total_gross - credited).max(Decimal::ZERO)
-                        / total_gross)
+                    (original_gross * (total_gross - credited).max(Decimal::ZERO) / total_gross)
                         .round_dp(2)
                 } else {
                     Decimal::ZERO
                 };
                 let net = if total_net > Decimal::ZERO {
-                    (original_net * (total_net - credited_net).max(Decimal::ZERO)
-                        / total_net)
+                    (original_net * (total_net - credited_net).max(Decimal::ZERO) / total_net)
                         .round_dp(2)
                 } else {
                     Decimal::ZERO
@@ -1922,12 +1918,10 @@ async fn load_patient_balance_adjustments(
     patient_id: Uuid,
     query: &PatientFinancialQuery,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let from = parse_query_date(query.from.as_deref(), "from")
-        .map_err(sqlx::Error::Protocol)?;
-    let to = parse_query_date(query.to.as_deref(), "to")
-        .map_err(sqlx::Error::Protocol)?;
-    let currency = parse_query_currency(query.currency.as_deref())
-        .map_err(sqlx::Error::Protocol)?;
+    let from = parse_query_date(query.from.as_deref(), "from").map_err(sqlx::Error::Protocol)?;
+    let to = parse_query_date(query.to.as_deref(), "to").map_err(sqlx::Error::Protocol)?;
+    let currency =
+        parse_query_currency(query.currency.as_deref()).map_err(sqlx::Error::Protocol)?;
     let rows = sqlx::query(
         r#"SELECT adjustment.id, adjustment.patient_id, adjustment.order_id,
                   adjustment.transaction_type, adjustment.reverses_adjustment_id,
@@ -2011,14 +2005,20 @@ async fn create_patient_balance_adjustment(
     }
     let direction = body.direction.trim().to_lowercase();
     if !matches!(direction.as_str(), "debit" | "credit") {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment direction");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid adjustment direction",
+        );
     }
     let category = body.category.trim().to_lowercase();
     if !matches!(
         category.as_str(),
         "opening_balance" | "fee" | "goodwill" | "correction" | "other"
     ) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment category");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid adjustment category",
+        );
     }
     let amount = value_to_decimal(&body.amount).round_dp(2);
     if amount <= Decimal::ZERO {
@@ -2030,7 +2030,10 @@ async fn create_patient_balance_adjustment(
     let currency = match parse_query_currency(Some(body.currency.as_str())) {
         Ok(Some(currency)) => currency,
         Ok(None) | Err(_) => {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment currency");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid adjustment currency",
+            );
         }
     };
     let effective_on = match parse_query_date(Some(body.effective_on.as_str()), "effective_on") {
@@ -2039,7 +2042,12 @@ async fn create_patient_balance_adjustment(
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(reason) => reason,
-        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Adjustment reason is required"),
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Adjustment reason is required",
+            );
+        }
     };
     let note = normalize_optional(body.note.as_deref());
     let portal_visible = body.portal_visible.unwrap_or(true);
@@ -2048,7 +2056,10 @@ async fn create_patient_balance_adjustment(
         Ok(transaction) => transaction,
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "begin patient balance adjustment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record balance adjustment",
+            );
         }
     };
     match sqlx::query("SELECT id FROM patients WHERE id = $1 FOR UPDATE")
@@ -2060,7 +2071,10 @@ async fn create_patient_balance_adjustment(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "lock patient for balance adjustment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record balance adjustment",
+            );
         }
     }
     let existing = match sqlx::query(
@@ -2079,7 +2093,10 @@ async fn create_patient_balance_adjustment(
         Ok(row) => row,
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, request_id = %body.request_id, "load balance adjustment idempotency key");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record balance adjustment",
+            );
         }
     };
     if let Some(existing) = existing {
@@ -2128,7 +2145,10 @@ async fn create_patient_balance_adjustment(
         let adjustment_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
         if let Err(e) = transaction.commit().await {
             tracing::error!(error = %e, patient_id = %patient_id, "commit balance adjustment replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record balance adjustment",
+            );
         }
         return Json(serde_json::json!({
             "adjustment_id": adjustment_id,
@@ -2162,18 +2182,30 @@ async fn create_patient_balance_adjustment(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
-            return err(StatusCode::CONFLICT, "Balance adjustment is no longer valid; reload and try again");
+            return err(
+                StatusCode::CONFLICT,
+                "Balance adjustment is no longer valid; reload and try again",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "insert patient balance adjustment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record balance adjustment",
+            );
         }
     };
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, patient_id = %patient_id, "commit patient balance adjustment");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record balance adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record balance adjustment",
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -2221,7 +2253,12 @@ async fn reverse_patient_balance_adjustment(
     }
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(reason) => reason,
-        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Reversal reason is required"),
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Reversal reason is required",
+            );
+        }
     };
     let effective_on = match parse_query_date(body.effective_on.as_deref(), "effective_on") {
         Ok(Some(value)) if value <= Utc::now().date_naive() => value,
@@ -2233,7 +2270,10 @@ async fn reverse_patient_balance_adjustment(
         Ok(transaction) => transaction,
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "begin balance adjustment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
     };
     match sqlx::query("SELECT id FROM patients WHERE id = $1 FOR UPDATE")
@@ -2245,7 +2285,10 @@ async fn reverse_patient_balance_adjustment(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "lock patient for balance adjustment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
     }
     let existing_reversal = match sqlx::query(
@@ -2263,7 +2306,10 @@ async fn reverse_patient_balance_adjustment(
         Ok(row) => row,
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, request_id = %body.request_id, "load balance adjustment reversal idempotency key");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
     };
     if let Some(existing) = existing_reversal {
@@ -2290,7 +2336,10 @@ async fn reverse_patient_balance_adjustment(
         let reversal_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
         if let Err(e) = transaction.commit().await {
             tracing::error!(error = %e, patient_id = %patient_id, "commit balance adjustment reversal replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
         return Json(serde_json::json!({
             "reversal_id": reversal_id,
@@ -2322,14 +2371,27 @@ async fn reverse_patient_balance_adjustment(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Balance adjustment not found"),
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "lock balance adjustment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
     };
-    if row.try_get::<String, _>("transaction_type").unwrap_or_default() != "adjustment" {
-        return err(StatusCode::CONFLICT, "Only a balance adjustment can be reversed");
+    if row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default()
+        != "adjustment"
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Only a balance adjustment can be reversed",
+        );
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
-        return err(StatusCode::CONFLICT, "Balance adjustment was already reversed");
+        return err(
+            StatusCode::CONFLICT,
+            "Balance adjustment was already reversed",
+        );
     }
     let original_date = row
         .try_get::<NaiveDate, _>("effective_on")
@@ -2355,13 +2417,19 @@ async fn reverse_patient_balance_adjustment(
            RETURNING id"#,
     )
     .bind(patient_id)
-    .bind(row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default())
+    .bind(
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+    )
     .bind(body.request_id)
     .bind(adjustment_id)
     .bind(reversal_direction)
     .bind(row.try_get::<String, _>("category").unwrap_or_default())
     .bind(row.try_get::<Decimal, _>("amount").unwrap_or(Decimal::ZERO))
-    .bind(row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()))
+    .bind(
+        row.try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+    )
     .bind(effective_on)
     .bind(&reason)
     .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
@@ -2371,18 +2439,30 @@ async fn reverse_patient_balance_adjustment(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_error))
-            if matches!(db_error.code().as_deref(), Some("23505" | "23514" | "P0001")) =>
+            if matches!(
+                db_error.code().as_deref(),
+                Some("23505" | "23514" | "P0001")
+            ) =>
         {
-            return err(StatusCode::CONFLICT, "Balance adjustment was already reversed");
+            return err(
+                StatusCode::CONFLICT,
+                "Balance adjustment was already reversed",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "insert balance adjustment reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse balance adjustment",
+            );
         }
     };
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, patient_id = %patient_id, adjustment_id = %adjustment_id, "commit balance adjustment reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse balance adjustment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse balance adjustment",
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(

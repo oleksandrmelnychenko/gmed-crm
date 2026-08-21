@@ -35,7 +35,11 @@ async fn request_json(
     } else {
         Body::empty()
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
@@ -95,7 +99,11 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
 
     let (initial_status, initial) =
         request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
-    assert_eq!(initial_status, StatusCode::OK, "initial accounts: {initial:?}");
+    assert_eq!(
+        initial_status,
+        StatusCode::OK,
+        "initial accounts: {initial:?}"
+    );
     let source_account_id = Uuid::parse_str(
         initial["items"]
             .as_array()
@@ -193,7 +201,11 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
         Some(transfer_body.clone()),
     )
     .await;
-    assert_eq!(transfer_status, StatusCode::CREATED, "transfer: {transfer:?}");
+    assert_eq!(
+        transfer_status,
+        StatusCode::CREATED,
+        "transfer: {transfer:?}"
+    );
     let transfer_id = Uuid::parse_str(transfer["id"].as_str().unwrap()).unwrap();
 
     let (replay_status, replay) = request_json(
@@ -222,13 +234,26 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
 
     let (_, after) = request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
     assert_eq!(total_balance(&after), total_before);
-    assert_eq!(account_balance(&after, source_account_id), source_before - Decimal::from(30));
-    assert_eq!(account_balance(&after, target_account_id), target_before + Decimal::from(30));
-    assert_eq!(after["transfers"].as_array().unwrap().iter().filter(|row| row["id"] == transfer_id.to_string()).count(), 1);
-
-    let reversal_path = format!(
-        "/api/v1/company-financial-account-transfers/{transfer_id}/reversal"
+    assert_eq!(
+        account_balance(&after, source_account_id),
+        source_before - Decimal::from(30)
     );
+    assert_eq!(
+        account_balance(&after, target_account_id),
+        target_before + Decimal::from(30)
+    );
+    assert_eq!(
+        after["transfers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["id"] == transfer_id.to_string())
+            .count(),
+        1
+    );
+
+    let reversal_path =
+        format!("/api/v1/company-financial-account-transfers/{transfer_id}/reversal");
     let reversal_body = json!({
         "request_id": Uuid::new_v4(),
         "effective_on": chrono::Utc::now().date_naive().to_string(),
@@ -255,17 +280,21 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
     assert_eq!(reverse_replay_status, StatusCode::OK);
     assert_eq!(reverse_replay["idempotent_replay"], true);
 
-    let (_, final_accounts) =
-        request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
+    let (_, final_accounts) = request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
     assert_eq!(total_balance(&final_accounts), total_before);
-    assert_eq!(account_balance(&final_accounts, source_account_id), source_before);
-    assert_eq!(account_balance(&final_accounts, target_account_id), target_before);
+    assert_eq!(
+        account_balance(&final_accounts, source_account_id),
+        source_before
+    );
+    assert_eq!(
+        account_balance(&final_accounts, target_account_id),
+        target_before
+    );
 
-    let immutable = sqlx::query(
-        "UPDATE company_financial_account_transfers SET amount = 31 WHERE id = $1",
-    )
-    .bind(transfer_id)
-    .execute(&ctx.pool)
-    .await;
+    let immutable =
+        sqlx::query("UPDATE company_financial_account_transfers SET amount = 31 WHERE id = $1")
+            .bind(transfer_id)
+            .execute(&ctx.pool)
+            .await;
     assert!(immutable.is_err(), "internal transfers must be append-only");
 }

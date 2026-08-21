@@ -77,7 +77,11 @@ fn parse_currency(value: Option<&str>) -> Result<Option<String>, String> {
         return Ok(None);
     };
     let currency = value.to_uppercase();
-    if currency.len() != 3 || !currency.chars().all(|character| character.is_ascii_uppercase()) {
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_uppercase())
+    {
         return Err("Invalid currency; expected a three-letter ISO code".to_string());
     }
     Ok(Some(currency))
@@ -318,12 +322,9 @@ async fn get_company_financial_position(
         let manual_balance = row
             .try_get::<Decimal, _>("manual_balance")
             .unwrap_or(Decimal::ZERO);
-        let released_invoice_count = row
-            .try_get::<i64, _>("released_invoice_count")
-            .unwrap_or(0);
+        let released_invoice_count = row.try_get::<i64, _>("released_invoice_count").unwrap_or(0);
         let calculated_balance =
-            (invoice_due + external_receivable + manual_balance - available_prepayment)
-                .round_dp(2);
+            (invoice_due + external_receivable + manual_balance - available_prepayment).round_dp(2);
         let reconciliation_required =
             external_receivable > Decimal::ZERO && released_invoice_count > 0;
         if calculated_balance > Decimal::ZERO {
@@ -456,13 +457,13 @@ async fn get_company_financial_position(
             provider_payables += remaining_gross;
             "payable"
         };
-        let position = provider_position_map
-            .entry(provider_id)
-            .or_insert_with(|| ProviderPositionAccumulator {
+        let position = provider_position_map.entry(provider_id).or_insert_with(|| {
+            ProviderPositionAccumulator {
                 provider_id,
                 provider_name: provider_name.clone(),
                 ..ProviderPositionAccumulator::default()
-            });
+            }
+        });
         position.invoice_total_gross += amount_gross;
         position.company_paid_gross += company_paid_gross;
         position.invoice_count += 1;

@@ -34,7 +34,11 @@ async fn request_json(
     } else {
         Body::empty()
     };
-    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(builder.body(body).unwrap())
+        .await
+        .unwrap();
     let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
@@ -59,12 +63,7 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
     .unwrap()
 }
 
-async fn seed_external_invoice(
-    pool: &PgPool,
-    admin_id: Uuid,
-    tag: &str,
-    suffix: &str,
-) -> Uuid {
+async fn seed_external_invoice(pool: &PgPool, admin_id: Uuid, tag: &str, suffix: &str) -> Uuid {
     let patient_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO patients (
                patient_id, first_name, last_name, birth_date, gender, created_by
@@ -134,11 +133,8 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    let external_invoice_id =
-        seed_external_invoice(&ctx.pool, ctx.admin_id, &tag, "main").await;
-    let path = format!(
-        "/api/v1/company-provider-liabilities/{external_invoice_id}/settlements"
-    );
+    let external_invoice_id = seed_external_invoice(&ctx.pool, ctx.admin_id, &tag, "main").await;
+    let path = format!("/api/v1/company-provider-liabilities/{external_invoice_id}/settlements");
 
     let (forbidden, _) = request_json(&ctx.app, Method::GET, &path, &sales, None).await;
     assert_eq!(forbidden, StatusCode::FORBIDDEN);
@@ -254,26 +250,23 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     assert_eq!(reversal_replay_status, StatusCode::OK);
     assert_eq!(reversal_replay["idempotent_replay"], true);
 
-    let (_, after_reversal) =
-        request_json(&ctx.app, Method::GET, &path, &billing, None).await;
+    let (_, after_reversal) = request_json(&ctx.app, Method::GET, &path, &billing, None).await;
     assert_eq!(after_reversal["company_paid_gross"], "40");
     assert_eq!(after_reversal["remaining_provider_liability_gross"], "60");
     assert_eq!(after_reversal["settlement_status"], "partial");
     assert_eq!(after_reversal["transactions"].as_array().unwrap().len(), 3);
 
-    let provider_id: Uuid = sqlx::query_scalar(
-        "SELECT provider_id FROM external_invoices WHERE id = $1",
-    )
-    .bind(external_invoice_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let provider_id: Uuid =
+        sqlx::query_scalar("SELECT provider_id FROM external_invoices WHERE id = $1")
+            .bind(external_invoice_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     let statement_path = format!(
         "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from=2020-01-01&to=2099-12-31"
     );
-    let summary_path = format!(
-        "/api/v1/company-provider-statements/{provider_id}/summary?currency=EUR"
-    );
+    let summary_path =
+        format!("/api/v1/company-provider-statements/{provider_id}/summary?currency=EUR");
     let (financial_summary_status, financial_summary) =
         request_json(&ctx.app, Method::GET, &summary_path, &billing, None).await;
     assert_eq!(
@@ -321,7 +314,12 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     assert_eq!(opening_statement["summary"]["charged_gross"], "0");
     assert_eq!(opening_statement["summary"]["paid_gross"], "0");
     assert_eq!(opening_statement["summary"]["closing_balance"], "60");
-    assert!(opening_statement["movements"].as_array().unwrap().is_empty());
+    assert!(
+        opening_statement["movements"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let (statement_forbidden, _) =
         request_json(&ctx.app, Method::GET, &statement_path, &sales, None).await;
@@ -340,9 +338,8 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
 
     let concurrent_invoice_id =
         seed_external_invoice(&ctx.pool, ctx.admin_id, &tag, "concurrent").await;
-    let concurrent_path = format!(
-        "/api/v1/company-provider-liabilities/{concurrent_invoice_id}/settlements"
-    );
+    let concurrent_path =
+        format!("/api/v1/company-provider-liabilities/{concurrent_invoice_id}/settlements");
     let payment_body = |request_id| {
         json!({
             "request_id": request_id,
@@ -369,7 +366,13 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
         ),
     );
     let statuses = [left.0, right.0];
-    assert_eq!(statuses.iter().filter(|status| **status == StatusCode::OK).count(), 1);
+    assert_eq!(
+        statuses
+            .iter()
+            .filter(|status| **status == StatusCode::OK)
+            .count(),
+        1
+    );
     assert_eq!(
         statuses
             .iter()

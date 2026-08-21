@@ -298,7 +298,10 @@ fn parse_money(value: &str, field: &'static str) -> Result<Decimal, Response> {
 
 fn validate_amounts(net: Decimal, vat: Decimal, gross: Decimal) -> Result<(), Response> {
     let Some(sum) = net.checked_add(vat) else {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Amounts are out of range"));
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Amounts are out of range",
+        ));
     };
     if gross <= Decimal::ZERO || sum != gross {
         return Err(err(
@@ -346,16 +349,24 @@ async fn load_service_context(
     {
         Ok(Some(row)) => Ok(ServiceContext {
             patient_id: row.try_get("patient_id").map_err(|_| {
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode service")
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode service",
+                )
             })?,
             assigned_concierge_id: row.try_get("assigned_concierge_id").unwrap_or_default(),
             provider_id: row.try_get("provider_id").unwrap_or_default(),
-            currency: row.try_get("currency").unwrap_or_else(|_| "EUR".to_string()),
+            currency: row
+                .try_get("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Concierge service not found")),
         Err(error) => {
             tracing::error!(error = %error, service_id = %service_id, "load concierge expense service context");
-            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load service"))
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load service",
+            ))
         }
     }
 }
@@ -376,16 +387,24 @@ async fn lock_service_context(
     {
         Ok(Some(row)) => Ok(ServiceContext {
             patient_id: row.try_get("patient_id").map_err(|_| {
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode service")
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode service",
+                )
             })?,
             assigned_concierge_id: row.try_get("assigned_concierge_id").unwrap_or_default(),
             provider_id: row.try_get("provider_id").unwrap_or_default(),
-            currency: row.try_get("currency").unwrap_or_else(|_| "EUR".to_string()),
+            currency: row
+                .try_get("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Concierge service not found")),
         Err(error) => {
             tracing::error!(error = %error, service_id = %service_id, "lock concierge expense service context");
-            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load service"))
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load service",
+            ))
         }
     }
 }
@@ -494,7 +513,10 @@ async fn get_expense_context(
         for row in rows {
             let order_id = row.try_get::<Uuid, _>("order_id").unwrap_or_default();
             let order_id_text = order_id.to_string();
-            if orders.last().and_then(|value| value.get("id")).and_then(Value::as_str)
+            if orders
+                .last()
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str)
                 != Some(order_id_text.as_str())
             {
                 orders.push(json!({
@@ -505,8 +527,11 @@ async fn get_expense_context(
                     "leistungen": [],
                 }));
             }
-            if let Some(order_service_id) = row.try_get::<Option<Uuid>, _>("service_id").unwrap_or_default()
-                && let Some(leistungen) = orders.last_mut()
+            if let Some(order_service_id) = row
+                .try_get::<Option<Uuid>, _>("service_id")
+                .unwrap_or_default()
+                && let Some(leistungen) = orders
+                    .last_mut()
                     .and_then(|value| value.get_mut("leistungen"))
                     .and_then(Value::as_array_mut)
             {
@@ -543,7 +568,10 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
         let name = field.name().unwrap_or_default().to_string();
         if name == "file" {
             if input.file_data.is_some() {
-                return Err(err(StatusCode::BAD_REQUEST, "Only one receipt file is allowed"));
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    "Only one receipt file is allowed",
+                ));
             }
             input.file_name = field.file_name().map(ToOwned::to_owned);
             input.declared_mime = field.content_type().map(ToOwned::to_owned);
@@ -552,7 +580,10 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
                 err(StatusCode::BAD_REQUEST, "Failed to read receipt file")
             })?;
             if bytes.len() > MAX_FILE_SIZE {
-                return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 25MB)"));
+                return Err(err(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "File too large (max 25MB)",
+                ));
             }
             input.file_data = Some(bytes.to_vec());
             continue;
@@ -567,7 +598,10 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
         match name.as_str() {
             "request_id" => {
                 input.request_id = Some(Uuid::parse_str(value.trim()).map_err(|_| {
-                    err(StatusCode::UNPROCESSABLE_ENTITY, "request_id must be a UUID")
+                    err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "request_id must be a UUID",
+                    )
                 })?)
             }
             "order_id" if !value.trim().is_empty() => {
@@ -585,9 +619,14 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
             }
             "vendor" => input.vendor = clean_text(Some(value), 200),
             "expense_date" => {
-                input.expense_date = Some(NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(
-                    |_| err(StatusCode::UNPROCESSABLE_ENTITY, "expense_date must be YYYY-MM-DD"),
-                )?)
+                input.expense_date = Some(
+                    NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").map_err(|_| {
+                        err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "expense_date must be YYYY-MM-DD",
+                        )
+                    })?,
+                )
             }
             "amount_net" => input.amount_net = Some(parse_money(&value, "amount_net")?),
             "amount_vat" => input.amount_vat = Some(parse_money(&value, "amount_vat")?),
@@ -646,7 +685,12 @@ async fn submit_expense(
     };
     let expense_date = match input.expense_date {
         Some(value) if value <= Utc::now().date_naive() => value,
-        Some(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "expense_date cannot be in the future"),
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "expense_date cannot be in the future",
+            );
+        }
         None => return err(StatusCode::UNPROCESSABLE_ENTITY, "expense_date is required"),
     };
     let amount_net = match input.amount_net {
@@ -679,13 +723,21 @@ async fn submit_expense(
     };
     let service_delivered = match input.service_delivered {
         Some(value) => value,
-        None => return err(StatusCode::UNPROCESSABLE_ENTITY, "service_delivered is required"),
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "service_delivered is required",
+            );
+        }
     };
     let data = match input.file_data.take() {
         Some(value) if !value.is_empty() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "receipt file is required"),
     };
-    let file_name = input.file_name.take().unwrap_or_else(|| "receipt".to_string());
+    let file_name = input
+        .file_name
+        .take()
+        .unwrap_or_else(|| "receipt".to_string());
     let declared_mime = input
         .declared_mime
         .take()
@@ -745,7 +797,10 @@ async fn submit_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin concierge expense submission");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to submit expense",
+            );
         }
     };
     let service = match lock_service_context(&mut transaction, service_id).await {
@@ -776,17 +831,32 @@ async fn submit_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, service_id = %service_id, "load expense submission replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to submit expense",
+            );
         }
     };
     if let Some(row) = existing {
         let expense_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-        let same_payload = row.try_get::<String, _>("payload_hash").unwrap_or_default() == payload_hash;
+        let same_payload =
+            row.try_get::<String, _>("payload_hash").unwrap_or_default() == payload_hash;
         drop(transaction);
         if !same_payload {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
-        return expense_mutation_response(&state, &auth, service_id, expense_id, true, StatusCode::OK).await;
+        return expense_mutation_response(
+            &state,
+            &auth,
+            service_id,
+            expense_id,
+            true,
+            StatusCode::OK,
+        )
+        .await;
     }
 
     let duplicate_receipt = match sqlx::query_scalar::<_, Uuid>(
@@ -802,7 +872,10 @@ async fn submit_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, service_id = %service_id, "check duplicate concierge receipt");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to submit expense",
+            );
         }
     };
     if duplicate_receipt.is_some() {
@@ -825,7 +898,10 @@ async fn submit_expense(
             Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Order not found"),
             Err(error) => {
                 tracing::error!(error = %error, order_id = %order_id, "validate concierge expense order");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to submit expense",
+                );
             }
         };
         if order.try_get::<Uuid, _>("patient_id").ok() != Some(service.patient_id)
@@ -854,7 +930,10 @@ async fn submit_expense(
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(error = %error, order_leistung_id = %order_leistung_id, "validate concierge expense order service");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to submit expense",
+                );
             }
         };
         if !valid {
@@ -976,7 +1055,10 @@ async fn submit_expense(
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit concierge expense submission");
         remove_document_blob(&storage_key).await;
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to submit expense");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to submit expense",
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1096,7 +1178,10 @@ async fn load_expense_item(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, expense_id = %expense_id, "load concierge expense item");
-            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load expense"));
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load expense",
+            ));
         }
     };
     let Some(row) = row else {
@@ -1121,9 +1206,7 @@ async fn load_expense_item(
     let paid_by = row
         .try_get::<String, _>("paid_by")
         .unwrap_or_else(|_| "unpaid".to_string());
-    let service_delivered = row
-        .try_get::<bool, _>("service_delivered")
-        .unwrap_or(false);
+    let service_delivered = row.try_get::<bool, _>("service_delivered").unwrap_or(false);
     let posted = status == "posted";
     let intended_receivable = if paid_by == "agency" || (paid_by == "unpaid" && service_delivered) {
         amount_gross
@@ -1268,10 +1351,13 @@ async fn expense_mutation_response(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     match load_expense_item(state, service_id, expense_id).await {
-        Ok(Some(item)) => (status, Json(json!({
-            "item": item,
-            "idempotent_replay": idempotent_replay,
-        })))
+        Ok(Some(item)) => (
+            status,
+            Json(json!({
+                "item": item,
+                "idempotent_replay": idempotent_replay,
+            })),
+        )
             .into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Expense not found"),
         Err(response) => response,
@@ -1297,21 +1383,20 @@ async fn list_expense_review_queue(
     }
     let offset = page.saturating_sub(1).saturating_mul(page_size);
 
-    let total = match sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM concierge_expense_submissions",
-    )
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, "count Concierge expense review queue");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load expense review queue",
-            );
-        }
-    };
+    let total =
+        match sqlx::query_scalar::<_, i64>("SELECT count(*) FROM concierge_expense_submissions")
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, "count Concierge expense review queue");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load expense review queue",
+                );
+            }
+        };
 
     let rows = match sqlx::query(
         r#"SELECT submission.id AS expense_id,
@@ -1479,7 +1564,9 @@ async fn download_receipt(
         }
     };
     let document_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-    let storage_key = row.try_get::<Option<String>, _>("storage_key").unwrap_or_default();
+    let storage_key = row
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default();
     let Some(storage_key) = storage_key else {
         return err(StatusCode::NOT_FOUND, "Receipt file is not stored");
     };
@@ -1537,24 +1624,43 @@ async fn lock_expense(
     .await
     {
         Ok(Some(row)) => Ok(LockedExpense {
-            id: row.try_get("id").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
-            patient_id: row.try_get("patient_id").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            id: row
+                .try_get("id")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            patient_id: row
+                .try_get("patient_id")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
             submitted_order_id: row.try_get("order_id").unwrap_or_default(),
             submitted_order_leistung_id: row.try_get("order_leistung_id").unwrap_or_default(),
             vendor_name: row.try_get("vendor_name").unwrap_or_default(),
-            expense_date: row.try_get("expense_date").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
-            amount_net: row.try_get("amount_net").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
-            amount_vat: row.try_get("amount_vat").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
-            amount_gross: row.try_get("amount_gross").map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
-            currency: row.try_get("currency").unwrap_or_else(|_| "EUR".to_string()),
-            paid_by: row.try_get("paid_by").unwrap_or_else(|_| "unpaid".to_string()),
+            expense_date: row
+                .try_get("expense_date")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            amount_net: row
+                .try_get("amount_net")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            amount_vat: row
+                .try_get("amount_vat")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            amount_gross: row
+                .try_get("amount_gross")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))?,
+            currency: row
+                .try_get("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+            paid_by: row
+                .try_get("paid_by")
+                .unwrap_or_else(|_| "unpaid".to_string()),
             service_delivered: row.try_get("service_delivered").unwrap_or(false),
             note: row.try_get("note").unwrap_or_default(),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Expense not found")),
         Err(error) => {
             tracing::error!(error = %error, expense_id = %expense_id, "lock concierge expense");
-            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load expense"))
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load expense",
+            ))
         }
     }
 }
@@ -1647,9 +1753,7 @@ async fn post_expense(
     };
     let agency_paid_on = if expense.paid_by == "agency" {
         match body.paid_on {
-            Some(value)
-                if value >= expense.expense_date && value <= Utc::now().date_naive() =>
-            {
+            Some(value) if value >= expense.expense_date && value <= Utc::now().date_naive() => {
                 Some(value)
             }
             Some(_) => {
@@ -1690,7 +1794,10 @@ async fn post_expense(
             .await;
         }
         Ok(Some(false)) => {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         Ok(None) => {}
         Err(response) => return response,
@@ -1700,7 +1807,9 @@ async fn post_expense(
         Ok(true) => return err(StatusCode::CONFLICT, "Expense was already reviewed"),
         Err(response) => return response,
     }
-    if expense.submitted_order_id.is_some_and(|value| value != body.order_id)
+    if expense
+        .submitted_order_id
+        .is_some_and(|value| value != body.order_id)
         || expense
             .submitted_order_leistung_id
             .is_some_and(|value| Some(value) != body.order_leistung_id)
@@ -1759,7 +1868,8 @@ async fn post_expense(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
             }
         };
-        row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default()
+        row.try_get::<Option<Uuid>, _>("provider_id")
+            .unwrap_or_default()
     } else {
         None
     };
@@ -1840,7 +1950,12 @@ async fn post_expense(
         .await
         {
             Ok(Some(row)) => row,
-            Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Financial account not found"),
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Financial account not found",
+                );
+            }
             Err(error) => {
                 tracing::error!(error = %error, "load expense financial account");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
@@ -1925,7 +2040,10 @@ async fn post_expense(
     .await
     {
         tracing::warn!(error = %error, expense_id = %expense_id, "insert canonical external invoice for Concierge expense");
-        return err(StatusCode::CONFLICT, "Expense could not be posted to the selected order");
+        return err(
+            StatusCode::CONFLICT,
+            "Expense could not be posted to the selected order",
+        );
     }
 
     let mut provider_payment_transaction_id = None;
@@ -1979,7 +2097,9 @@ async fn post_expense(
         .bind(body.order_id)
         .bind(expense.patient_id)
         .bind(agency_paid_on.expect("agency payment date validated"))
-        .bind(format!("Concierge partner payment {external_invoice_number}"))
+        .bind(format!(
+            "Concierge partner payment {external_invoice_number}"
+        ))
         .bind(expense.amount_net)
         .bind(expense.amount_vat)
         .bind(expense.amount_gross)
@@ -2096,15 +2216,7 @@ async fn post_expense(
     )
     .await;
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(
-        &state,
-        &auth,
-        service_id,
-        expense_id,
-        false,
-        StatusCode::OK,
-    )
-    .await
+    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
 }
 
 fn validate_reason(value: &str) -> Result<String, Response> {
@@ -2136,7 +2248,10 @@ async fn reject_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin Concierge expense rejection");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reject expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reject expense",
+            );
         }
     };
     if let Err(response) = lock_service_context(&mut transaction, service_id).await {
@@ -2167,7 +2282,10 @@ async fn reject_expense(
             .await;
         }
         Ok(Some(false)) => {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         Ok(None) => {}
         Err(response) => return response,
@@ -2217,7 +2335,10 @@ async fn reject_expense(
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit Concierge expense rejection");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reject expense");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reject expense",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "reject_concierge_expense",
@@ -2235,15 +2356,7 @@ async fn reject_expense(
     )
     .await;
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(
-        &state,
-        &auth,
-        service_id,
-        expense_id,
-        false,
-        StatusCode::OK,
-    )
-    .await
+    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
 }
 
 async fn reverse_expense(
@@ -2260,7 +2373,10 @@ async fn reverse_expense(
         Err(response) => return response,
     };
     if body.reversed_on > Utc::now().date_naive() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "reversed_on cannot be in the future");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "reversed_on cannot be in the future",
+        );
     }
     let payload_hash = hash_json(&json!({
         "action": "reversed",
@@ -2271,7 +2387,10 @@ async fn reverse_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, "begin Concierge expense reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if let Err(response) = lock_service_context(&mut transaction, service_id).await {
@@ -2309,7 +2428,10 @@ async fn reverse_expense(
             .await;
         }
         Ok(Some(false)) => {
-            return err(StatusCode::CONFLICT, "request_id was already used with different data");
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
         }
         Ok(None) => {}
         Err(response) => return response,
@@ -2326,10 +2448,18 @@ async fn reverse_expense(
     .await
     {
         Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::CONFLICT, "Only a posted expense can be reversed"),
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Only a posted expense can be reversed",
+            );
+        }
         Err(error) => {
             tracing::error!(error = %error, expense_id = %expense_id, "load posted Concierge expense review");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     let posted_event_id = posted.try_get::<Uuid, _>("id").unwrap_or_default();
@@ -2352,7 +2482,10 @@ async fn reverse_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, expense_id = %expense_id, "check Concierge expense reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if already_reversed {
@@ -2371,11 +2504,17 @@ async fn reverse_expense(
         Ok(None) => return err(StatusCode::CONFLICT, "Posted external invoice is missing"),
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "lock Concierge external invoice for reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if external.try_get::<String, _>("status").unwrap_or_default() == "cancelled" {
-        return err(StatusCode::CONFLICT, "Posted external invoice is already cancelled");
+        return err(
+            StatusCode::CONFLICT,
+            "Posted external invoice is already cancelled",
+        );
     }
 
     if let Err(error) = sqlx::query_scalar::<_, Uuid>(
@@ -2391,7 +2530,10 @@ async fn reverse_expense(
     .await
     {
         tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "lock patient invoices before Concierge expense reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse expense",
+        );
     }
     let active_allocation_count = match sqlx::query_scalar::<_, i64>(
         r#"SELECT count(*)
@@ -2408,7 +2550,10 @@ async fn reverse_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "check Concierge expense patient allocations before reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if active_allocation_count > 0 {
@@ -2437,7 +2582,10 @@ async fn reverse_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "check patient invoice correction before Concierge expense reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if uncorrected_patient_invoice_count > 0 {
@@ -2461,7 +2609,10 @@ async fn reverse_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "sum provider payments before Concierge expense reversal");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
     };
     if provider_payment_id.is_none() && net_provider_paid > Decimal::ZERO {
@@ -2497,7 +2648,10 @@ async fn reverse_expense(
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(error = %error, payment_id = %payment_id, "verify canonical Concierge provider payment reversal");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to reverse expense",
+                );
             }
         };
         if !canonical_payment_reversed {
@@ -2527,7 +2681,10 @@ async fn reverse_expense(
             Ok(None) => return err(StatusCode::CONFLICT, "Provider payment is missing"),
             Err(error) => {
                 tracing::error!(error = %error, payment_id = %payment_id, "load Concierge provider payment for reversal");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to reverse expense",
+                );
             }
         };
         let paid_on = payment
@@ -2576,7 +2733,10 @@ async fn reverse_expense(
         .await
         {
             tracing::warn!(error = %error, expense_id = %expense_id, "insert Concierge provider payment reversal");
-            return err(StatusCode::CONFLICT, "Provider payment reversal was rejected");
+            return err(
+                StatusCode::CONFLICT,
+                "Provider payment reversal was rejected",
+            );
         }
         if let Err(error) = sqlx::query(
             r#"INSERT INTO accounting_entries (
@@ -2595,7 +2755,11 @@ async fn reverse_expense(
         .bind(external_invoice_id)
         .bind(reversal_id)
         .bind(external.try_get::<Uuid, _>("order_id").unwrap_or_default())
-        .bind(external.try_get::<Uuid, _>("patient_id").unwrap_or_default())
+        .bind(
+            external
+                .try_get::<Uuid, _>("patient_id")
+                .unwrap_or_default(),
+        )
         .bind(body.reversed_on)
         .bind(format!(
             "Concierge partner payment reversal {}",
@@ -2619,7 +2783,10 @@ async fn reverse_expense(
         .await
         {
             tracing::error!(error = %error, expense_id = %expense_id, "insert Concierge expense reversal accounting entry");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse expense",
+            );
         }
         provider_reversal_id = Some(reversal_id);
     }
@@ -2656,7 +2823,10 @@ async fn reverse_expense(
     .await
     {
         tracing::warn!(error = %error, expense_id = %expense_id, "cancel reversed Concierge external invoice");
-        return err(StatusCode::CONFLICT, "Expense reversal could not cancel its financial record");
+        return err(
+            StatusCode::CONFLICT,
+            "Expense reversal could not cancel its financial record",
+        );
     }
     let notification_deliveries = match insert_concierge_decision_notifications(
         &mut transaction,
@@ -2680,7 +2850,10 @@ async fn reverse_expense(
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit Concierge expense reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse expense",
+        );
     }
     state.audit_sender.try_send(audit::domain_event(
         "reverse_concierge_expense",
@@ -2705,13 +2878,5 @@ async fn reverse_expense(
     )
     .await;
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(
-        &state,
-        &auth,
-        service_id,
-        expense_id,
-        false,
-        StatusCode::OK,
-    )
-    .await
+    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
 }

@@ -5,8 +5,8 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use uuid::Uuid;
 use gmed_domain::role::Role;
+use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
@@ -68,7 +68,10 @@ async fn unread_count(
         Ok(count) => count,
         Err(error) => {
             tracing::error!(%error, user_id = %auth.user_id, "count unread notifications");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to count notifications");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to count notifications",
+            );
         }
     };
 
@@ -91,7 +94,10 @@ async fn mark_read(
         Ok(outcome) => outcome,
         Err(error) => {
             tracing::error!(%error, notification_id = %id, user_id = %auth.user_id, "mark notification read");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update notification");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update notification",
+            );
         }
     };
     if outcome.rows_affected() == 0 {
@@ -120,7 +126,10 @@ async fn mark_all_read(
     .await
     {
         tracing::error!(%error, user_id = %auth.user_id, "mark all notifications read");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update notifications");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update notifications",
+        );
     }
     crate::realtime::publish_notification_event(
         &state,

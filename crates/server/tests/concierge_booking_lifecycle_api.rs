@@ -151,17 +151,14 @@ async fn assigned_concierge_books_non_medical_partner_with_retry_safe_history() 
     assert_eq!(status, StatusCode::OK, "{requested}");
     assert_eq!(requested["service"]["status"], "booked");
     assert_eq!(requested["service"]["provider_id"], provider_id.to_string());
-    assert_eq!(requested["service"]["service_address"], "Terminal 1, Munich Airport");
+    assert_eq!(
+        requested["service"]["service_address"],
+        "Terminal 1, Munich Airport"
+    );
     let first_interaction = requested["interaction_id"].clone();
 
-    let (status, retry) = json_request(
-        &ctx.app,
-        "POST",
-        &path,
-        &bearer,
-        Some(requested_body),
-    )
-    .await;
+    let (status, retry) =
+        json_request(&ctx.app, "POST", &path, &bearer, Some(requested_body)).await;
     assert_eq!(status, StatusCode::OK, "{retry}");
     assert_eq!(retry["interaction_id"], first_interaction);
 
@@ -253,8 +250,14 @@ async fn assigned_concierge_books_non_medical_partner_with_retry_safe_history() 
     .unwrap();
     assert_eq!(outcomes, vec!["booking_requested", "booking_confirmed"]);
 
-    let cancelled_service_id =
-        seed_service(&ctx.pool, patient_id, concierge_id, ctx.admin_id, "cancelled").await;
+    let cancelled_service_id = seed_service(
+        &ctx.pool,
+        patient_id,
+        concierge_id,
+        ctx.admin_id,
+        "cancelled",
+    )
+    .await;
     sqlx::query("UPDATE concierge_services SET status = 'cancelled' WHERE id = $1")
         .bind(cancelled_service_id)
         .execute(&ctx.pool)
@@ -263,9 +266,7 @@ async fn assigned_concierge_books_non_medical_partner_with_retry_safe_history() 
     let (status, cancelled_bypass) = json_request(
         &ctx.app,
         "POST",
-        &format!(
-            "/api/v1/concierge-services/{cancelled_service_id}/partner-interactions"
-        ),
+        &format!("/api/v1/concierge-services/{cancelled_service_id}/partner-interactions"),
         &bearer,
         Some(json!({
             "channel": "phone",
@@ -308,23 +309,24 @@ async fn concierge_booking_rejects_medical_provider_and_unknown_clinical_payload
         "POST",
         &path,
         &bearer,
-        Some(booking_body(Uuid::new_v4(), medical_provider_id, "requested")),
+        Some(booking_body(
+            Uuid::new_v4(),
+            medical_provider_id,
+            "requested",
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{medical}");
 
     let mut clinical_payload = booking_body(Uuid::new_v4(), medical_provider_id, "requested");
     clinical_payload["diagnosis"] = json!("must never be accepted here");
-    let (status, unknown) = json_request(
-        &ctx.app,
-        "POST",
-        &path,
-        &bearer,
-        Some(clinical_payload),
-    )
-    .await;
+    let (status, unknown) =
+        json_request(&ctx.app, "POST", &path, &bearer, Some(clinical_payload)).await;
     assert!(
-        matches!(status, StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY),
+        matches!(
+            status,
+            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+        ),
         "{unknown}"
     );
 }

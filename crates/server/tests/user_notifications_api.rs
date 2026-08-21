@@ -80,7 +80,8 @@ async fn patient_notifications_are_self_scoped_and_presence_is_staff_only() {
     let other_notification = seed_notification(&ctx.pool, other_patient_id, "Other update").await;
     let patient_auth = auth_header_for(patient_id, "patient");
 
-    let (status, payload) = request_json(&ctx.app, "GET", "/api/v1/notifications", &patient_auth).await;
+    let (status, payload) =
+        request_json(&ctx.app, "GET", "/api/v1/notifications", &patient_auth).await;
     assert_eq!(status, StatusCode::OK);
     let rows = payload.as_array().unwrap();
     assert_eq!(rows.len(), 1);

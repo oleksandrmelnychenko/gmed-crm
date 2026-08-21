@@ -3296,8 +3296,7 @@ async fn get_order_economics(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) =
-        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing])
+    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing])
     {
         return response;
     }
@@ -3315,7 +3314,10 @@ async fn get_order_economics(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "load order economics context");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
         }
     };
     let patient_id = order
@@ -3333,17 +3335,21 @@ async fn get_order_economics(
         Ok(transaction) => transaction,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "begin order economics snapshot");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
         }
     };
-    if let Err(error) = sqlx::query(
-        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
-    )
-    .execute(&mut *economics_transaction)
-    .await
+    if let Err(error) = sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *economics_transaction)
+        .await
     {
         tracing::error!(error = %error, order_id = %order_id, "configure order economics snapshot");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order economics",
+        );
     }
 
     let invoice = match sqlx::query(
@@ -3669,7 +3675,10 @@ async fn get_order_economics(
     };
     if let Err(error) = economics_transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, "commit order economics snapshot");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order economics",
+        );
     }
 
     let margin_visible = matches!(auth.role, Role::Ceo | Role::Billing);
@@ -6091,22 +6100,16 @@ async fn create_external_invoice(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let amount_gross = match money_decimal_from_f64(
-        body.amount_gross,
-        "External invoice gross amount",
-    ) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    let (amount_net, amount_vat, amount_gross) = match validate_money_components(
-        amount_net,
-        amount_vat,
-        amount_gross,
-        "External invoice",
-    ) {
-        Ok(values) => values,
-        Err(response) => return response,
-    };
+    let amount_gross =
+        match money_decimal_from_f64(body.amount_gross, "External invoice gross amount") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let (amount_net, amount_vat, amount_gross) =
+        match validate_money_components(amount_net, amount_vat, amount_gross, "External invoice") {
+            Ok(values) => values,
+            Err(response) => return response,
+        };
     let currency = body
         .currency
         .as_deref()
@@ -6142,7 +6145,10 @@ async fn create_external_invoice(
         Ok(row) => row,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "validate external invoice economics context");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create external invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create external invoice",
+            );
         }
     };
     let order_currency = economics_context
@@ -6486,7 +6492,10 @@ async fn update_external_invoice(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "load order currency for external invoice update");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update external invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            );
         }
     };
     let effective_currency = currency.as_deref().unwrap_or_else(|| {
@@ -6524,7 +6533,10 @@ async fn update_external_invoice(
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(error = %error, order_id = %order_id, service_id = %service_id, "validate external invoice service update");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update external invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update external invoice",
+                );
             }
         };
         if !valid_service {
@@ -6806,20 +6818,19 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    let order_currency = match sqlx::query_scalar::<_, String>(
-        "SELECT UPPER(currency) FROM orders WHERE id = $1",
-    )
-    .bind(order_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(currency)) => currency,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(error) => {
-            tracing::error!(%error, %order_id, "load order currency for service");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
+    let order_currency =
+        match sqlx::query_scalar::<_, String>("SELECT UPPER(currency) FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(currency)) => currency,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load order currency for service");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
 
     if let Some(agency_service_id) = body.agency_service_id {
         match sqlx::query_scalar::<_, String>(
@@ -6925,16 +6936,15 @@ async fn add_leistung(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let (planned_cost_net, planned_cost_vat, planned_cost_gross) =
-        match validate_money_components(
-            planned_cost_net,
-            planned_cost_vat,
-            planned_cost_gross,
-            "Planned partner cost",
-        ) {
-            Ok(values) => values,
-            Err(response) => return response,
-        };
+    let (planned_cost_net, planned_cost_vat, planned_cost_gross) = match validate_money_components(
+        planned_cost_net,
+        planned_cost_vat,
+        planned_cost_gross,
+        "Planned partner cost",
+    ) {
+        Ok(values) => values,
+        Err(response) => return response,
+    };
     if !matches!(auth.role, Role::Ceo | Role::Billing)
         && (planned_cost_net != rust_decimal::Decimal::ZERO
             || planned_cost_vat != rust_decimal::Decimal::ZERO
@@ -7148,7 +7158,10 @@ async fn sync_lead_wizard_leistungen(
         Ok(transaction) => transaction,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, "begin lead wizard service sync");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to sync order services");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
         }
     };
     let removable_ids = match sqlx::query_scalar::<_, Uuid>(
@@ -7169,7 +7182,10 @@ async fn sync_lead_wizard_leistungen(
         Ok(ids) => ids,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "lock lead wizard services for sync");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to sync order services");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
         }
     };
     if !removable_ids.is_empty() {
@@ -7191,7 +7207,10 @@ async fn sync_lead_wizard_leistungen(
             Ok(value) => value,
             Err(error) => {
                 tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "check lead wizard service financial references");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to sync order services");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to sync order services",
+                );
             }
         };
         if referenced {
@@ -7201,12 +7220,10 @@ async fn sync_lead_wizard_leistungen(
             );
         }
     }
-    let deleted = match sqlx::query(
-        "DELETE FROM order_leistungen WHERE id = ANY($1::uuid[])",
-    )
-    .bind(&removable_ids)
-    .execute(&mut *transaction)
-    .await
+    let deleted = match sqlx::query("DELETE FROM order_leistungen WHERE id = ANY($1::uuid[])")
+        .bind(&removable_ids)
+        .execute(&mut *transaction)
+        .await
     {
         Ok(result) => result.rows_affected(),
         Err(error) => {
@@ -7221,12 +7238,18 @@ async fn sync_lead_wizard_leistungen(
                 );
             }
             tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "delete unreferenced lead wizard services");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to sync order services");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
         }
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "commit lead wizard service sync");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to sync order services");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to sync order services",
+        );
     }
     if deleted > 0 {
         state.audit_sender.try_send(audit::domain_event(
@@ -7289,7 +7312,10 @@ async fn update_leistung_planned_cost(
         Ok(transaction) => transaction,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "begin planned cost update");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update planned cost",
+            );
         }
     };
     let current = match sqlx::query(
@@ -7308,7 +7334,10 @@ async fn update_leistung_planned_cost(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Order service not found"),
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "lock order service planned cost");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update planned cost",
+            );
         }
     };
 
@@ -7325,7 +7354,10 @@ async fn update_leistung_planned_cost(
         Ok(row) => row,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "load planned cost idempotency key");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update planned cost",
+            );
         }
     };
     if let Some(existing) = existing {
@@ -7349,7 +7381,10 @@ async fn update_leistung_planned_cost(
         }
         if let Err(error) = transaction.commit().await {
             tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "commit planned cost replay");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update planned cost",
+            );
         }
         return Json(serde_json::json!({
             "change_id": existing.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -7394,7 +7429,10 @@ async fn update_leistung_planned_cost(
         Ok(id) => id,
         Err(error) => {
             tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "journal planned cost change");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update planned cost",
+            );
         }
     };
     if let Err(error) = sqlx::query(
@@ -7413,11 +7451,17 @@ async fn update_leistung_planned_cost(
     .await
     {
         tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "persist planned cost");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update planned cost",
+        );
     }
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, "commit planned cost update");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update planned cost");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update planned cost",
+        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
