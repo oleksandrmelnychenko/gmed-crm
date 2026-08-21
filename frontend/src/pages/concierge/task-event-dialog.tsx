@@ -138,6 +138,17 @@ function toIso(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
+export function selectTaskAssigneeId(
+  itemAssignedTo: string | null | undefined,
+  currentUserId: string | null,
+  assignees: ConciergeAssignee[],
+) {
+  const itemAssignee = assignees.find((assignee) => assignee.id === itemAssignedTo);
+  if (itemAssignee) return itemAssignee.id;
+  const currentUserAssignee = assignees.find((assignee) => assignee.id === currentUserId);
+  return currentUserAssignee?.id ?? assignees[0]?.id ?? "";
+}
+
 export function ConciergeTaskEventDialog({
   item,
   services,
@@ -200,7 +211,7 @@ export function ConciergeTaskEventDialog({
     setLocation(item?.location ?? "");
     setPriority(item?.priority ?? "normal");
     setStatus(item?.status ?? "open");
-    setAssigneeId(item?.assigned_to ?? currentUserId ?? assignees[0]?.id ?? "");
+    setAssigneeId(selectTaskAssigneeId(item?.assigned_to, currentUserId, assignees));
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
   }, [assignees, currentUserId, item, open]);
 
