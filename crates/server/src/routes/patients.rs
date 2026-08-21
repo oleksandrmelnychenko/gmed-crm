@@ -9188,7 +9188,10 @@ fn build_patient_summary_json(
         Value::String(patient.created_at.to_rfc3339()),
     );
     if let Some(account_balance) = patient.account_balance {
-        data.insert("account_balance".to_string(), Value::String(account_balance));
+        data.insert(
+            "account_balance".to_string(),
+            Value::String(account_balance),
+        );
     }
     if let Some(account_balance_currency) = patient.account_balance_currency {
         data.insert(
