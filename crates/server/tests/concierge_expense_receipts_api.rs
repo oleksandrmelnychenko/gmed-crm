@@ -239,6 +239,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     let concierge_id = seed_user(&context.pool, "concierge", &format!("owner-{tag}")).await;
     let other_concierge_id =
         seed_user(&context.pool, "concierge", &format!("other-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("review-{tag}")).await;
     let (patient_id, provider_id, service_id, order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
     let owner = auth_header(concierge_id, "concierge");
@@ -322,6 +323,35 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     assert_eq!(created["item"]["balance_consequence"]["patient_receivable_gross"], "0");
     assert_eq!(created["item"]["balance_consequence"]["intended_patient_receivable_gross"], "119.00");
     let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
+    for user_id in [context.admin_id, billing_id] {
+        let notification_count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM user_notifications
+               WHERE user_id = $1
+                 AND kind = 'concierge_expense_submitted'
+                 AND entity_type = 'concierge_expense'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(expense_id)
+        .fetch_one(&context.pool)
+        .await
+        .unwrap();
+        assert_eq!(notification_count, 1, "finance must receive one review notification");
+    }
+    for user_id in [concierge_id, other_concierge_id] {
+        let notification_count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM user_notifications
+               WHERE user_id = $1
+                 AND entity_type = 'concierge_expense'
+                 AND entity_id = $2"#,
+        )
+        .bind(user_id)
+        .bind(expense_id)
+        .fetch_one(&context.pool)
+        .await
+        .unwrap();
+        assert_eq!(notification_count, 0, "submission notification must stay finance-only");
+    }
     let receipt_document_id = Uuid::parse_str(
         created["item"]["receipt"]["document_id"]
             .as_str()
@@ -376,6 +406,18 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     assert_eq!(status, StatusCode::OK, "{replay}");
     assert_eq!(replay["idempotent_replay"], true);
     assert_eq!(replay["item"]["id"], expense_id.to_string());
+    let replay_notification_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'concierge_expense_submitted'
+             AND entity_id = $2"#,
+    )
+    .bind(billing_id)
+    .bind(expense_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(replay_notification_count, 1, "idempotent replay must not notify twice");
 
     let (status, duplicate_receipt) = submit_fixture_expense(
         &context.app,
@@ -892,6 +934,22 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     .await;
     assert_eq!(status, StatusCode::OK, "{reject_replay}");
     assert_eq!(reject_replay["idempotent_replay"], true);
+    let rejection_notification_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'concierge_expense_rejected'
+             AND entity_type = 'concierge_expense'
+             AND entity_id = $2"#,
+    )
+    .bind(concierge_id)
+    .bind(rejected_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rejection_notification_count, 1,
+        "Concierge must receive one durable decision notification",
+    );
     let (status, cannot_post_rejected) = json_request(
         &context.app,
         "POST",

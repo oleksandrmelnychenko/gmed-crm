@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { StaffLink } from "@/components/staff-link";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
 import {
@@ -64,7 +65,15 @@ type Props = {
   locale: string;
   onChanged: () => void;
   onPendingCountChange: (count: number) => void;
+  requestedExpenseId?: string | null;
 };
+
+const EXPENSE_REALTIME_EVENTS = [
+  "concierge_expense.submitted",
+  "concierge_expense.posted",
+  "concierge_expense.rejected",
+  "concierge_expense.reversed",
+] as const;
 
 type PreviewState = {
   url: string;
@@ -317,6 +326,7 @@ export function ConciergeExpenseReviewPanel({
   locale,
   onChanged,
   onPendingCountChange,
+  requestedExpenseId,
 }: Props) {
   const { lang } = useLang();
   const text = textByLanguage[lang];
@@ -338,9 +348,11 @@ export function ConciergeExpenseReviewPanel({
   const [previewBusy, setPreviewBusy] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const queueRequestRef = useRef(0);
   const contextRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
   const requestIdsRef = useRef(new Map<string, StableRequestIdEntry>());
+  const openedRequestedExpenseRef = useRef(false);
 
   const revokePreview = useCallback(() => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -353,21 +365,32 @@ export function ConciergeExpenseReviewPanel({
   }, []);
 
   const loadQueue = useCallback(async (forceFresh: boolean) => {
+    const request = ++queueRequestRef.current;
     setLoading(true);
     setLoadError(null);
     try {
-      setQueue(await fetchCompanyConciergeExpenseQueue(forceFresh));
+      const result = await fetchCompanyConciergeExpenseQueue(forceFresh);
+      if (queueRequestRef.current !== request) return;
+      setQueue(result);
+      setSelected((current) => (
+        current ? result.rows.find((row) => row.id === current.id) ?? current : null
+      ));
     } catch (error) {
+      if (queueRequestRef.current !== request) return;
       setQueue(null);
       setLoadError(error instanceof Error ? error.message : text.loadFailed);
     } finally {
-      setLoading(false);
+      if (queueRequestRef.current === request) setLoading(false);
     }
   }, [text.loadFailed]);
 
   useEffect(() => {
     void loadQueue(true);
   }, [loadQueue]);
+
+  useDebouncedRealtimeSubscription(EXPENSE_REALTIME_EVENTS, () => {
+    void loadQueue(true);
+  }, 250);
 
   const pendingCount = queue?.rows.filter((row) => row.status === "pending_review").length ?? 0;
   useEffect(() => {
@@ -487,7 +510,7 @@ export function ConciergeExpenseReviewPanel({
     },
   ], [locale, payerLabel, statusBadge, text]);
 
-  async function openExpense(row: CompanyConciergeExpenseReviewRow) {
+  const openExpense = useCallback(async (row: CompanyConciergeExpenseReviewRow) => {
     const request = ++contextRequestRef.current;
     previewRequestRef.current += 1;
     revokePreview();
@@ -519,7 +542,22 @@ export function ConciergeExpenseReviewPanel({
     } finally {
       if (contextRequestRef.current === request) setContextLoading(false);
     }
-  }
+  }, [accounts, revokePreview, text.contextFailed]);
+
+  useEffect(() => {
+    if (!requestedExpenseId || !queue || openedRequestedExpenseRef.current) return;
+    const requested = queue.rows.find((row) => row.id === requestedExpenseId);
+    if (!requested) return;
+    openedRequestedExpenseRef.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("expense");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+    void openExpense(requested);
+  }, [openExpense, queue, requestedExpenseId]);
 
   function closeExpense() {
     contextRequestRef.current += 1;

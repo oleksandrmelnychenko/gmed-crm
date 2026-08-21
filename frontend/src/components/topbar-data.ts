@@ -77,6 +77,12 @@ export function notificationHrefForRole(item: Notification, role: string) {
       ? `/task-manager?task=${item.entity_id}`
       : null;
   }
+  if (item.entity_type === "concierge_expense") {
+    if (role === "ceo" || role === "billing") {
+      return `/company-finance?tab=concierge-expenses&expense=${item.entity_id}`;
+    }
+    return role === "concierge" ? "/concierge" : null;
+  }
   if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
   if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
   if (item.entity_type === "privacy_request") return "/admin/compliance";

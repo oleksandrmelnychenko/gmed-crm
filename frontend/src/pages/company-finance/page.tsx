@@ -281,10 +281,17 @@ export function CompanyFinancePage() {
   const [activeTab, setActiveTab] = useState(
     () => {
       const params = new URL(window.location.href).searchParams;
-      return params.has("provider_invoice") || params.has("provider")
-        ? "providers"
+      if (params.has("provider_invoice") || params.has("provider")) return "providers";
+      const requestedTab = params.get("tab");
+      return ["patients", "providers", "concierge-expenses", "accounts", "cash"].includes(
+        requestedTab ?? "",
+      )
+        ? requestedTab!
         : "patients";
     },
+  );
+  const [requestedExpenseId] = useState(
+    () => new URL(window.location.href).searchParams.get("expense"),
   );
   const [patientSide, setPatientSide] = useState<PatientSideFilter>("all");
   const [providerFilter, setProviderFilter] = useState<ProviderSettlementFilter>("open");
@@ -371,6 +378,19 @@ export function CompanyFinancePage() {
   }, [position]);
 
   const currency = position?.currency || filters.currency || "EUR";
+
+  function handleActiveTabChange(value: string) {
+    setActiveTab(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", value);
+    if (value !== "concierge-expenses") url.searchParams.delete("expense");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }
+
   const money = (value: string | null | undefined) => formatMoney(value, currency, locale);
   const patientRows = useMemo(() => {
     const rows = position?.patient_positions ?? [];
@@ -719,7 +739,7 @@ export function CompanyFinancePage() {
       ) : null}
 
       {position && accounts ? (
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
+        <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="gap-3">
           <TabsList className="mx-auto h-auto max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
             {([
               ["patients", text.patients, position.patient_positions.length],
@@ -847,6 +867,7 @@ export function CompanyFinancePage() {
               locale={locale}
               onChanged={() => setReloadToken((current) => current + 1)}
               onPendingCountChange={setConciergeExpensePendingCount}
+              requestedExpenseId={requestedExpenseId}
             />
           </TabsContent>
 

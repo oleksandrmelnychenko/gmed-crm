@@ -134,6 +134,122 @@ struct LockedExpense {
     note: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct NotificationDelivery {
+    notification_id: Uuid,
+    user_id: Uuid,
+}
+
+async fn insert_finance_review_notifications(
+    transaction: &mut Transaction<'_, Postgres>,
+    expense_id: Uuid,
+    actor_user_id: Uuid,
+    vendor: &str,
+    amount_gross: Decimal,
+    currency: &str,
+) -> Result<Vec<NotificationDelivery>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (
+               user_id, kind, title, body, entity_type, entity_id
+           )
+           SELECT finance_user.id,
+                  'concierge_expense_submitted',
+                  'Concierge expense requires review',
+                  $3,
+                  'concierge_expense',
+                  $1
+           FROM users finance_user
+           WHERE finance_user.is_active = true
+             AND finance_user.role IN ('ceo', 'billing')
+             AND finance_user.id <> $2
+           RETURNING id, user_id"#,
+    )
+    .bind(expense_id)
+    .bind(actor_user_id)
+    .bind(format!(
+        "A new receipt from {vendor} for {} {currency} is waiting for financial review.",
+        amount_gross.round_dp(2)
+    ))
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(NotificationDelivery {
+                notification_id: row.try_get("id").ok()?,
+                user_id: row.try_get("user_id").ok()?,
+            })
+        })
+        .collect())
+}
+
+async fn insert_concierge_decision_notifications(
+    transaction: &mut Transaction<'_, Postgres>,
+    expense_id: Uuid,
+    service_id: Uuid,
+    actor_user_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> Result<Vec<NotificationDelivery>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (
+               user_id, kind, title, body, entity_type, entity_id
+           )
+           SELECT DISTINCT target_user.id, $4, $5, $6, 'concierge_expense', $1
+           FROM concierge_expense_submissions submission
+           JOIN concierge_services service
+             ON service.id = submission.concierge_service_id
+           JOIN users target_user
+             ON target_user.id IN (submission.submitted_by, service.assigned_concierge_id)
+           WHERE submission.id = $1
+             AND submission.concierge_service_id = $2
+             AND target_user.id <> $3
+             AND target_user.is_active = true
+             AND target_user.role = 'concierge'
+           RETURNING id, user_id"#,
+    )
+    .bind(expense_id)
+    .bind(service_id)
+    .bind(actor_user_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(NotificationDelivery {
+                notification_id: row.try_get("id").ok()?,
+                user_id: row.try_get("user_id").ok()?,
+            })
+        })
+        .collect())
+}
+
+async fn publish_notification_deliveries(
+    state: &AppState,
+    deliveries: Vec<NotificationDelivery>,
+    entity_id: Uuid,
+) {
+    for delivery in deliveries {
+        crate::realtime::publish_notification_event(
+            state,
+            delivery.user_id,
+            "notification.created",
+            Some(delivery.notification_id),
+            json!({
+                "entity_type": "concierge_expense",
+                "entity_id": entity_id,
+            }),
+        )
+        .await;
+    }
+}
+
 fn err(status: StatusCode, message: &str) -> Response {
     (
         status,
@@ -837,6 +953,26 @@ async fn submit_expense(
         remove_document_blob(&storage_key).await;
         return err(StatusCode::CONFLICT, "Expense submission was rejected");
     }
+    let notification_deliveries = match insert_finance_review_notifications(
+        &mut transaction,
+        expense_id,
+        auth.user_id,
+        &vendor,
+        amount_gross,
+        &currency,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, expense_id = %expense_id, "create Concierge expense review notifications");
+            remove_document_blob(&storage_key).await;
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to notify financial review",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit concierge expense submission");
         remove_document_blob(&storage_key).await;
@@ -867,6 +1003,7 @@ async fn submit_expense(
         json!({ "expense_id": expense_id, "status": "pending_review" }),
     )
     .await;
+    publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
 
     expense_mutation_response(
         &state,
@@ -1900,6 +2037,31 @@ async fn post_expense(
         tracing::warn!(error = %error, expense_id = %expense_id, "insert Concierge expense post review");
         return err(StatusCode::CONFLICT, "Expense review was rejected");
     }
+    let notification_deliveries = match insert_concierge_decision_notifications(
+        &mut transaction,
+        expense_id,
+        service_id,
+        auth.user_id,
+        "concierge_expense_posted",
+        "Concierge expense approved",
+        &format!(
+            "The receipt from {} for {} {} was approved and posted.",
+            expense.vendor_name,
+            expense.amount_gross.round_dp(2),
+            expense.currency
+        ),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, expense_id = %expense_id, "create Concierge expense approval notifications");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to notify Concierge about the review",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit Concierge expense post");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
@@ -1933,6 +2095,7 @@ async fn post_expense(
         }),
     )
     .await;
+    publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
     expense_mutation_response(
         &state,
         &auth,
@@ -2032,6 +2195,26 @@ async fn reject_expense(
         tracing::warn!(error = %error, expense_id = %expense_id, "insert Concierge expense rejection");
         return err(StatusCode::CONFLICT, "Expense review was rejected");
     }
+    let notification_deliveries = match insert_concierge_decision_notifications(
+        &mut transaction,
+        expense_id,
+        service_id,
+        auth.user_id,
+        "concierge_expense_rejected",
+        "Concierge expense rejected",
+        &format!("The submitted receipt was rejected. Reason: {reason}"),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, expense_id = %expense_id, "create Concierge expense rejection notifications");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to notify Concierge about the review",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit Concierge expense rejection");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reject expense");
@@ -2051,6 +2234,7 @@ async fn reject_expense(
         json!({ "expense_id": expense_id, "status": "rejected" }),
     )
     .await;
+    publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
     expense_mutation_response(
         &state,
         &auth,
@@ -2474,6 +2658,26 @@ async fn reverse_expense(
         tracing::warn!(error = %error, expense_id = %expense_id, "cancel reversed Concierge external invoice");
         return err(StatusCode::CONFLICT, "Expense reversal could not cancel its financial record");
     }
+    let notification_deliveries = match insert_concierge_decision_notifications(
+        &mut transaction,
+        expense_id,
+        service_id,
+        auth.user_id,
+        "concierge_expense_reversed",
+        "Concierge expense reversed",
+        &format!("The posted expense was reversed. Reason: {reason}"),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, expense_id = %expense_id, "create Concierge expense reversal notifications");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to notify Concierge about the reversal",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit Concierge expense reversal");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to reverse expense");
@@ -2500,6 +2704,7 @@ async fn reverse_expense(
         json!({ "expense_id": expense_id, "status": "reversed" }),
     )
     .await;
+    publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
     expense_mutation_response(
         &state,
         &auth,
