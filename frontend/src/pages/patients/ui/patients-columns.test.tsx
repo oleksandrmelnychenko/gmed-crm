@@ -16,10 +16,14 @@ const translations = {
   insurance_private: "Частная",
   insurance_public: "Государственная",
   insurance_self_pay: "Самоплательщик",
+  invoices_workspace_balance: "Баланс",
   patients_col_age: "Возраст",
   patients_col_no: "№",
   patients_col_patient: "Пациент",
   patients_col_status: "Статус",
+  patients_balance_credit: "Переплата",
+  patients_balance_debt: "Долг",
+  patients_balance_reconciliation_required: "Требуется сверка",
   patients_created_at: "Создан",
   patients_email: "Email",
   patients_functional_labels: "Метки",
@@ -101,5 +105,26 @@ describe("buildPatientColumns", () => {
     expect(labelsHtml).toContain('data-patient-functional-label="high_risk"');
     expect(labelsHtml).toContain('data-patient-functional-label="fall_risk"');
     expect(labelsHtml).not.toContain("+1");
+  });
+
+  it("shows patient debt in the main grid as a red balance", () => {
+    const columns = buildPatientColumns(translations, [], { showBalance: true });
+    const balanceColumn = columns.find((column) => column.id === "account_balance");
+    const row = patient({
+      account_balance: "450.00",
+      account_balance_currency: "EUR",
+      account_balance_side: "debit",
+    });
+
+    expect(balanceColumn?.defaultVisible).toBe(true);
+    const html = renderToStaticMarkup(<>{balanceColumn?.render?.(row)}</>);
+    expect(html).toContain("450,00");
+    expect(html).toContain("Долг");
+    expect(html).toContain("text-red-600");
+  });
+
+  it("does not expose a balance column when the role cannot view financial data", () => {
+    const columns = buildPatientColumns(translations, []);
+    expect(columns.some((column) => column.id === "account_balance")).toBe(false);
   });
 });

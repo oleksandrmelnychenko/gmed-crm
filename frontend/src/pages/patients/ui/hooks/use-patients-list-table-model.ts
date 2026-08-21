@@ -9,6 +9,7 @@ import { buildPatientColumns } from "../patients-columns";
 import type { PatientSummary } from "../../model/list-model";
 
 type UsePatientsListTableModelArgs = {
+  canViewFinancialBalance: boolean;
   deferredSearch: string;
   filterPredicates: FilterPredicate[];
   frozenColumns: string[];
@@ -25,6 +26,7 @@ type PatientsMetrics = {
 };
 
 export function usePatientsListTableModel({
+  canViewFinancialBalance,
   deferredSearch,
   filterPredicates,
   frozenColumns,
@@ -45,7 +47,10 @@ export function usePatientsListTableModel({
     );
   }, [patients]);
 
-  const baseColumns = useMemo(() => buildPatientColumns(tr, patients), [tr, patients]);
+  const baseColumns = useMemo(
+    () => buildPatientColumns(tr, patients, { showBalance: canViewFinancialBalance }),
+    [canViewFinancialBalance, tr, patients],
+  );
 
   const columns = useMemo(() => {
     const frozenSet = new Set(frozenColumns);

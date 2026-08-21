@@ -1884,6 +1884,10 @@ async fn list_patients(
     let search_pattern = format!("%{search}%");
     let provider_id = query.provider_id;
     let doctor_id = query.doctor_id;
+    let include_financial_balance = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    );
     let lifecycle = query
         .lifecycle
         .as_deref()
@@ -1911,12 +1915,121 @@ async fn list_patients(
     }
 
     let rows = sqlx::query(
-        r#"SELECT p.id, p.patient_id, p.title, p.first_name, p.last_name,
-                  p.birth_date, p.gender, p.nationality, p.residence_country,
-                  p.languages, p.functional_labels, p.phone_primary, p.email,
-                  p.insurance_provider, p.insurance_type,
-                  p.is_active, p.lifecycle_status, p.created_at
+        r#"WITH source_allocations AS (
+               SELECT allocation.advance_invoice_id,
+                      COALESCE(SUM(allocation.amount_gross), 0) AS allocated
+               FROM invoice_prepayment_allocations allocation
+               GROUP BY allocation.advance_invoice_id
+           ), invoice_positions AS (
+               SELECT invoice.patient_id,
+                      COALESCE(SUM(
+                          CASE
+                              WHEN invoice.invoice_type <> 'advance'
+                               AND invoice.status NOT IN ('draft', 'cancelled')
+                                  THEN GREATEST(
+                                      invoice.total_gross
+                                          - invoice.credited_amount
+                                          - invoice.paid_amount
+                                          - invoice.prepayment_applied_amount,
+                                      0
+                                  )
+                              ELSE 0
+                          END
+                      ), 0) AS invoice_due,
+                      COALESCE(SUM(
+                          CASE
+                              WHEN invoice.invoice_type = 'advance'
+                               AND invoice.status NOT IN ('draft', 'cancelled')
+                                  THEN GREATEST(
+                                      LEAST(
+                                          invoice.paid_amount,
+                                          GREATEST(invoice.total_gross - invoice.credited_amount, 0)
+                                      ) - COALESCE(source.allocated, 0),
+                                      0
+                                  )
+                              ELSE 0
+                          END
+                      ), 0) AS available_prepayment,
+                      COUNT(*) FILTER (
+                          WHERE invoice.invoice_type <> 'advance'
+                            AND invoice.status NOT IN ('draft', 'cancelled')
+                      )::bigint AS released_invoice_count
+               FROM invoices invoice
+               JOIN orders ON orders.id = invoice.order_id
+               LEFT JOIN source_allocations source
+                 ON source.advance_invoice_id = invoice.id
+               WHERE $6::boolean = true
+                 AND UPPER(orders.currency) = 'EUR'
+               GROUP BY invoice.patient_id
+           ), external_allocations AS (
+               SELECT allocation.external_invoice_id,
+                      COALESCE(SUM(allocation.amount_gross), 0) AS allocated
+               FROM external_invoice_patient_invoice_allocations allocation
+               JOIN invoices target ON target.id = allocation.patient_invoice_id
+               WHERE allocation.reversed_at IS NULL
+                 AND target.status NOT IN ('draft', 'cancelled')
+               GROUP BY allocation.external_invoice_id
+           ), external_positions AS (
+               SELECT external.patient_id,
+                      COALESCE(SUM(GREATEST(
+                          external.patient_receivable_gross - COALESCE(allocation.allocated, 0),
+                          0
+                      )), 0) AS external_receivable
+               FROM external_invoices external
+               LEFT JOIN external_allocations allocation
+                 ON allocation.external_invoice_id = external.id
+               WHERE $6::boolean = true
+                 AND external.status <> 'cancelled'
+                 AND external.patient_receivable_gross > 0
+                 AND UPPER(external.currency) = 'EUR'
+               GROUP BY external.patient_id
+           ), manual_positions AS (
+               SELECT adjustment.patient_id,
+                      COALESCE(SUM(
+                          CASE
+                              WHEN adjustment.direction = 'debit' THEN adjustment.amount
+                              ELSE -adjustment.amount
+                          END
+                      ), 0) AS manual_balance
+               FROM patient_balance_adjustments adjustment
+               WHERE $6::boolean = true
+                 AND UPPER(adjustment.currency) = 'EUR'
+               GROUP BY adjustment.patient_id
+           ), scoped_financial_patients AS (
+               SELECT patient_id FROM invoice_positions
+               UNION
+               SELECT patient_id FROM external_positions
+               UNION
+               SELECT patient_id FROM manual_positions
+           ), financial_positions AS (
+               SELECT scoped.patient_id,
+                      COALESCE(invoice.invoice_due, 0)
+                          + COALESCE(external.external_receivable, 0)
+                          + COALESCE(manual.manual_balance, 0)
+                          - COALESCE(invoice.available_prepayment, 0) AS account_balance,
+                      COALESCE(external.external_receivable, 0) > 0
+                          AND COALESCE(invoice.released_invoice_count, 0) > 0
+                          AS reconciliation_required
+               FROM scoped_financial_patients scoped
+               LEFT JOIN invoice_positions invoice ON invoice.patient_id = scoped.patient_id
+               LEFT JOIN external_positions external ON external.patient_id = scoped.patient_id
+               LEFT JOIN manual_positions manual ON manual.patient_id = scoped.patient_id
+           )
+           SELECT p.id, p.patient_id, p.title, p.first_name, p.last_name,
+                   p.birth_date, p.gender, p.nationality, p.residence_country,
+                   p.languages, p.functional_labels, p.phone_primary, p.email,
+                   p.insurance_provider, p.insurance_type,
+                   p.is_active, p.lifecycle_status, p.created_at,
+                   COALESCE(financial.account_balance, 0)::text AS account_balance,
+                   CASE
+                       WHEN COALESCE(financial.reconciliation_required, false)
+                           THEN 'reconciliation_required'
+                       WHEN COALESCE(financial.account_balance, 0) > 0 THEN 'debit'
+                       WHEN COALESCE(financial.account_balance, 0) < 0 THEN 'credit'
+                       ELSE 'settled'
+                   END AS account_balance_side
            FROM patients p
+           LEFT JOIN financial_positions financial ON financial.patient_id = p.id
            WHERE (
                 ($5::text IS NOT NULL AND p.lifecycle_status = $5)
                 OR (
@@ -1975,6 +2088,7 @@ async fn list_patients(
     .bind(provider_id)
     .bind(doctor_id)
     .bind(lifecycle)
+    .bind(include_financial_balance)
     .fetch_all(&state.db)
     .await;
 
@@ -2024,6 +2138,16 @@ async fn list_patients(
                         lifecycle_status: r
                             .try_get("lifecycle_status")
                             .unwrap_or_else(|_| "active".to_string()),
+                        account_balance: include_financial_balance.then(|| {
+                            r.try_get("account_balance")
+                                .unwrap_or_else(|_| "0".to_string())
+                        }),
+                        account_balance_currency: include_financial_balance
+                            .then(|| "EUR".to_string()),
+                        account_balance_side: include_financial_balance.then(|| {
+                            r.try_get("account_balance_side")
+                                .unwrap_or_else(|_| "settled".to_string())
+                        }),
                         created_at: r.try_get("created_at").map_err(|_| {
                             err(
                                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -8998,6 +9122,9 @@ struct PatientSummaryInput {
     insurance_type: Option<String>,
     is_active: bool,
     lifecycle_status: String,
+    account_balance: Option<String>,
+    account_balance_currency: Option<String>,
+    account_balance_side: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -9060,6 +9187,24 @@ fn build_patient_summary_json(
         "created_at".to_string(),
         Value::String(patient.created_at.to_rfc3339()),
     );
+    if let Some(account_balance) = patient.account_balance {
+        data.insert(
+            "account_balance".to_string(),
+            Value::String(account_balance),
+        );
+    }
+    if let Some(account_balance_currency) = patient.account_balance_currency {
+        data.insert(
+            "account_balance_currency".to_string(),
+            Value::String(account_balance_currency),
+        );
+    }
+    if let Some(account_balance_side) = patient.account_balance_side {
+        data.insert(
+            "account_balance_side".to_string(),
+            Value::String(account_balance_side),
+        );
+    }
 
     insert_name_fields(
         &mut data,
@@ -9119,6 +9264,9 @@ fn build_patient_detail_json(
             insurance_type: patient.insurance_type.clone(),
             is_active: patient.is_active,
             lifecycle_status: patient.lifecycle_status.clone(),
+            account_balance: None,
+            account_balance_currency: None,
+            account_balance_side: None,
             created_at: patient.created_at,
         },
     );

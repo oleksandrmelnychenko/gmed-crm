@@ -272,6 +272,7 @@ export function PatientsPage() {
     [staff, user?.role]
   );
   const { columns, sortedAndFilteredPatients } = usePatientsListTableModel({
+    canViewFinancialBalance: permissions.canViewFinancialBalance,
     deferredSearch,
     filterPredicates,
     frozenColumns,

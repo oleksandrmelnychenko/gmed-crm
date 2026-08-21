@@ -1,4 +1,4 @@
-import { Mail } from "lucide-react";
+import { AlertTriangle, Mail } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -8,6 +8,7 @@ import {
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { formatUiText } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
@@ -36,7 +37,7 @@ function patientColumnText(
   key: string,
   values?: Record<string, string | number | boolean | null | undefined>,
 ) {
-  return formatUiText(tr.uiText?.[key] ?? key, values);
+  return formatUiText(tr.uiText?.[key] ?? tr[key] ?? key, values);
 }
 
 function translatedOrUiText(
@@ -145,6 +146,7 @@ const PATIENT_COLUMN_GROUP_KEYS: Record<string, string> = {
   identity: "patients_column_group_identity",
   contact: "patients_column_group_contact",
   insurance: "patients_column_group_insurance",
+  financial: "patients_column_group_financial",
   metadata: "patients_column_group_metadata",
   relations: "patients_column_group_relations",
   audit: "patients_column_group_audit",
@@ -164,6 +166,7 @@ export function patientColumnGroupLabels(
 export function buildPatientColumns(
   tr: PatientColumnTranslations,
   rows: readonly PatientSummary[] = [],
+  options: { showBalance?: boolean } = {},
 ): ColumnDef<PatientSummary>[] {
   const dyn = deriveDynamicOptions(rows);
 
@@ -439,6 +442,65 @@ export function buildPatientColumns(
       ),
     },
   ];
+  if (options.showBalance) {
+    const balanceColumn: ColumnDef<PatientSummary> = {
+      id: "account_balance",
+      label: translatedOrUiText(tr, "invoices_workspace_balance"),
+      accessor: (patient) => {
+        const value = Number(patient.account_balance);
+        return Number.isFinite(value) ? value : null;
+      },
+      filterType: "number",
+      sortable: true,
+      defaultVisible: true,
+      width: 190,
+      group: "financial",
+      render: (patient) => {
+        const side = patient.account_balance_side;
+        const rawValue = Number(patient.account_balance);
+        if (!side || !Number.isFinite(rawValue)) {
+          return <span className="text-xs text-muted-foreground/60">—</span>;
+        }
+        if (side === "reconciliation_required") {
+          return (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700">
+              <AlertTriangle className="size-3.5" />
+              {patientColumnText(tr, "patients_balance_reconciliation_required")}
+            </span>
+          );
+        }
+
+        const isDebt = side === "debit" && rawValue > 0;
+        const isCredit = side === "credit" && rawValue < 0;
+        return (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-xs font-semibold tabular-nums",
+              isDebt
+                ? "text-red-600"
+                : isCredit
+                  ? "text-emerald-600"
+                  : "text-foreground",
+            )}
+          >
+            {formatMoneyAmount(Math.abs(rawValue), patient.account_balance_currency ?? "EUR")}
+            {isDebt ? (
+              <span className="font-sans text-[10px] font-medium">
+                {patientColumnText(tr, "patients_balance_debt")}
+              </span>
+            ) : null}
+            {isCredit ? (
+              <span className="font-sans text-[10px] font-medium">
+                {patientColumnText(tr, "patients_balance_credit")}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
+    };
+    const labelsIndex = cols.findIndex((column) => column.id === "functional_labels");
+    cols.splice(labelsIndex >= 0 ? labelsIndex + 1 : 0, 0, balanceColumn);
+  }
   return cols;
 }
 
