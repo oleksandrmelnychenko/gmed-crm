@@ -48,7 +48,9 @@ env:
 jobs:
   application-quality-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The full Rust workspace gate currently takes a little over 60 minutes
+    # before the frontend release checks run, so keep enough headroom for both.
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
