@@ -60,7 +60,11 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
+import {
+  agencyServiceDescriptionLabel,
+  agencyServiceNameLabel,
+  agencyServiceUnitLabel,
+} from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabel,
@@ -111,6 +115,7 @@ import {
   createWorkflowChecklistItem,
   fetchOrderDebtQueue,
   fetchOrderDirectory,
+  fetchOrderEconomics,
   fetchOrderWorkspace,
   fetchOrders,
   fetchPatientOrderRecheck,
@@ -123,10 +128,13 @@ import {
   updateOrderStatus,
   updateOrderPlanningPreparation,
   updateOrderProcessGates,
+  updateOrderLeistungPlannedCost,
 } from "./data/order-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
+import { fetchAgencyServices } from "@/pages/contracts/data/contracts-api";
+import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import {
   DEFAULT_FILTERS,
   EXTERNAL_INVOICE_STATUSES,
@@ -141,6 +149,7 @@ import {
   blankOrderProcessGateForm,
   blankWorkflowChecklistForm,
   formatCurrency,
+  formatOptionalCurrency,
   formatDate,
   formatDateOnly,
   formatDateTime,
@@ -164,10 +173,13 @@ import type {
   CreateOrderFormState,
   DoctorOption,
   ExternalInvoiceFormState,
+  ExternalInvoicePaidBy,
   ExternalInvoiceStatus,
+  LeistungBillingStatus,
   LeistungFormState,
   OrderDebtQueueItem,
   OrderDetail,
+  OrderEconomics,
   OrderExecutionFormState,
   OrderFollowupFormState,
   OrderPlanningFormState,
@@ -186,6 +198,7 @@ import type {
 } from "./model/types";
 import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderGroupPanel } from "./ui/order-group-panel";
+import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
@@ -203,8 +216,15 @@ const ORDER_REALTIME_EVENTS = [
   "order.external_invoice_created",
   "order.external_invoice_updated",
   "order.external_invoice_overdue",
+  "order.external_invoice_allocation_created",
+  "order.external_invoice_allocation_reversed",
   "order.leistung_added",
+  "order.leistung_planned_cost_updated",
   "order.leistung_approved",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.prepayment_applied",
+  "invoice.prepayment_released",
   "task.created",
   "task.status_changed",
   "workflow_checklist_item.created",
@@ -334,6 +354,21 @@ function orderAccentClass(phase: string, status: string) {
   if (status === "paused") return "bg-amber-500";
   if (phase === "execution" || phase === "closure") return "bg-sky-500";
   return "bg-orange-500";
+}
+
+function leistungBillingStatusClass(status: LeistungBillingStatus) {
+  switch (status) {
+    case "paid":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "partially_paid":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "awaiting_payment":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "partially_invoiced":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "not_invoiced":
+      return "border-slate-200 bg-slate-50 text-slate-600";
+  }
 }
 
 function EmptyState({ title, description, action }: EmptyStateProps) {
@@ -709,6 +744,13 @@ function useOrdersPageContent() {
   ) => formatEnumLabel(value, labels, t);
   const formatMoney = (value: unknown, currency = "EUR") =>
     formatCurrency(value, currency, locale);
+  const formatOptionalMoney = (value: unknown, currency = "EUR") =>
+    formatOptionalCurrency(
+      value,
+      currency,
+      locale,
+      lang === "de" ? "Nicht berechenbar" : "Нельзя рассчитать",
+    );
   const formatDateLabel = (value: string | null | undefined) =>
     formatDate(value, locale, l("orders_nicht_festgelegt"));
   const formatDateTimeLabel = (value: string | null | undefined) =>
@@ -730,6 +772,16 @@ function useOrdersPageContent() {
       delivered: l("orders_erbracht"),
       approved: l("orders_freigegeben_2"),
       invoiced: lang === "de" ? "Abgerechnet" : "Выставлен счёт",
+    });
+  const leistungBillingStatusLabel = (value: LeistungBillingStatus) =>
+    labelFor(value, {
+      not_invoiced: lang === "de" ? "Noch nicht abgerechnet" : "Счёт не выставлен",
+      partially_invoiced:
+        lang === "de" ? "Teilweise abgerechnet" : "Частично выставлено",
+      awaiting_payment:
+        lang === "de" ? "Zahlung ausstehend" : "Ожидает оплаты",
+      partially_paid: lang === "de" ? "Teilweise bezahlt" : "Частично оплачено",
+      paid: lang === "de" ? "Vollständig bezahlt" : "Полностью оплачено",
     });
   const externalInvoiceStatusLabel = (value: string) =>
     labelFor(value, {
@@ -1021,6 +1073,23 @@ function useOrdersPageContent() {
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
+  const [externalInvoiceAllocationId, setExternalInvoiceAllocationId] = useState<string | null>(null);
+  const [orderEconomics, setOrderEconomics] = useState<OrderEconomics | null>(null);
+  const [orderEconomicsLoading, setOrderEconomicsLoading] = useState(false);
+  const [orderEconomicsError, setOrderEconomicsError] = useState<string | null>(null);
+  const [plannedCostEditor, setPlannedCostEditor] = useState<{
+    leistungId: string;
+    serviceName: string;
+    amountNet: string;
+    amountVat: string;
+    amountGross: string;
+    reason: string;
+    requestId: string;
+  } | null>(null);
+  const [plannedCostSaving, setPlannedCostSaving] = useState(false);
+  const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
+  const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
+  const [agencyServicesLoaded, setAgencyServicesLoaded] = useState(false);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
     field: K,
     nextValue: SetStateAction<OrdersPageState[K]>,
@@ -1216,6 +1285,10 @@ function useOrdersPageContent() {
       ),
     [orderDocuments, selectedOrderId],
   );
+  const requestedAgencyServiceId = searchParams.get("service") ?? "";
+  const pendingCreateAgencyService = requestedAgencyServiceId
+    ? agencyServices.find((item) => item.id === requestedAgencyServiceId) ?? null
+    : null;
 
   const orderTableColumns: ColumnDef<OrderSummary>[] = [
     {
@@ -1351,6 +1424,21 @@ function useOrdersPageContent() {
       paid: items.filter((item) => item.status === "paid").length,
       gross: items.reduce(
         (sum, item) => sum + (numberFromUnknown(item.amount_gross) ?? 0),
+        0,
+      ),
+      receivable: items.reduce(
+        (sum, item) =>
+          sum + (numberFromUnknown(item.remaining_receivable_gross) ?? 0),
+        0,
+      ),
+      allocated: items.reduce(
+        (sum, item) =>
+          sum + (numberFromUnknown(item.allocated_receivable_gross) ?? 0),
+        0,
+      ),
+      liability: items.reduce(
+        (sum, item) =>
+          sum + (numberFromUnknown(item.provider_liability_gross) ?? 0),
         0,
       ),
     };
@@ -1493,6 +1581,7 @@ function useOrdersPageContent() {
     orderId: string,
     section: OrderSectionKey = DEFAULT_ORDER_SECTION,
     patientIdOverride = "",
+    agencyServiceId = "",
   ) {
     const params = new URLSearchParams();
     const patientId = patientIdOverride || filters.patientId || patientContextId;
@@ -1505,6 +1594,7 @@ function useOrdersPageContent() {
     if (taxonomyNodeId) params.set("taxonomy", taxonomyNodeId);
     if (providerId) params.set("provider", providerId);
     if (doctorId) params.set("doctor", doctorId);
+    if (agencyServiceId) params.set("add_service", agencyServiceId);
     if (section !== DEFAULT_ORDER_SECTION) params.set("section", section);
 
     const query = params.toString();
@@ -1582,16 +1672,27 @@ function useOrdersPageContent() {
     }));
   }, [activeWorkflowAssignments, user?.id, workflowForm.ownerUserId]);
 
-  function openOrder(orderId: string, patientId?: string | null) {
+  function openOrder(
+    orderId: string,
+    patientId?: string | null,
+    agencyServiceId = "",
+  ) {
     setDetailError(null);
     setDetailLoading(true);
     startTransition(() => {
       setSelectedOrderId(orderId);
     });
-    staffGo(buildOrderWorkspaceHref(orderId, DEFAULT_ORDER_SECTION, patientId ?? ""));
+    staffGo(
+      buildOrderWorkspaceHref(
+        orderId,
+        DEFAULT_ORDER_SECTION,
+        patientId ?? "",
+        agencyServiceId,
+      ),
+    );
   }
 
-  function resetCreateDialog(open: boolean) {
+  function updateCreateDialog(open: boolean, clearRequestedService: boolean) {
     setCreateOpen(open);
     if (!open) {
       setCreateError(null);
@@ -1600,7 +1701,16 @@ function useOrdersPageContent() {
       setCreateRecheck(null);
       setCreateRecheckError(null);
       setCreateRecheckLoading(false);
+      if (clearRequestedService && searchParams.has("service")) {
+        const params = new URLSearchParams(searchParams);
+        params.delete("service");
+        setSearchParams(params, { replace: true });
+      }
     }
+  }
+
+  function resetCreateDialog(open: boolean) {
+    updateCreateDialog(open, true);
   }
 
   function resetLeistungDialog(open: boolean) {
@@ -1614,7 +1724,12 @@ function useOrdersPageContent() {
 
   function resetExternalInvoiceDialog(open: boolean) {
     setExternalInvoiceOpen(open);
-    if (!open) {
+    if (open) {
+      setExternalInvoiceForm({
+        ...blankExternalInvoiceForm(),
+        currency: orderDetail?.currency || "EUR",
+      });
+    } else {
       setExternalInvoiceError(null);
       setExternalInvoiceForm(blankExternalInvoiceForm());
       setExternalInvoiceSaving(false);
@@ -1954,6 +2069,83 @@ function useOrdersPageContent() {
   ]);
 
   useEffect(() => {
+    if (!permissions.canAddLeistung) {
+      setAgencyServices([]);
+      setAgencyServicesLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+    setAgencyServicesLoaded(false);
+    void fetchAgencyServices("/agency-services?active_only=true")
+      .then((items) => {
+        if (!cancelled) setAgencyServices(items);
+      })
+      .catch(() => {
+        if (!cancelled) setAgencyServices([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAgencyServicesLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.canAddLeistung]);
+
+  useEffect(() => {
+    const agencyServiceId = searchParams.get("add_service") ?? "";
+    if (
+      !agencyServiceId ||
+      !routeOrderId ||
+      !orderDetail ||
+      orderDetail.id !== routeOrderId ||
+      !agencyServicesLoaded ||
+      leistungOpen
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(searchParams);
+    params.delete("add_service");
+    setSearchParams(params, { replace: true });
+
+    const service = agencyServices.find((item) => item.id === agencyServiceId);
+    if (!service) {
+      setDetailError(
+        lang === "de"
+          ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
+          : "Выбранная позиция каталога больше не активна или недоступна.",
+      );
+      return;
+    }
+
+    setLeistungError(null);
+    setLeistungForm({
+      ...blankLeistungForm(),
+      agencyServiceId: service.id,
+      description: agencyServiceNameLabel(
+        service.service_key,
+        service.service_name,
+        t,
+      ),
+      unitPrice: String(service.unit_price ?? ""),
+      vatRate: String(service.vat_rate ?? "0"),
+    });
+    setLeistungOpen(true);
+  }, [
+    agencyServices,
+    agencyServicesLoaded,
+    lang,
+    leistungOpen,
+    orderDetail,
+    routeOrderId,
+    searchParams,
+    setSearchParams,
+    t,
+  ]);
+
+  useEffect(() => {
     if (!permissions.canViewPage) return;
 
     let cancelled = false;
@@ -2071,6 +2263,8 @@ function useOrdersPageContent() {
   useEffect(() => {
     if (!selectedOrderId) {
       resetSelectedOrderWorkspaceData();
+      setOrderEconomics(null);
+      setOrderEconomicsError(null);
       return;
     }
 
@@ -2106,6 +2300,31 @@ function useOrdersPageContent() {
     selectedOrderId,
     startOrderDetailLoad,
   ]);
+
+  useEffect(() => {
+    if (!selectedOrderId) return;
+    const currentOrderId = selectedOrderId;
+    let cancelled = false;
+    setOrderEconomicsLoading(true);
+    setOrderEconomicsError(null);
+    void fetchOrderEconomics(currentOrderId)
+      .then((value) => {
+        if (!cancelled) setOrderEconomics(value);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setOrderEconomics(null);
+        setOrderEconomicsError(
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setOrderEconomicsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadNonce, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -2185,6 +2404,21 @@ function useOrdersPageContent() {
       setCreateError(l("orders_error_patient_required"));
       return;
     }
+    if (
+      requestedAgencyServiceId &&
+      (!agencyServicesLoaded || !pendingCreateAgencyService)
+    ) {
+      setCreateError(
+        agencyServicesLoaded
+          ? lang === "de"
+            ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
+            : "Выбранная позиция каталога больше не активна или недоступна."
+          : lang === "de"
+            ? "Der Leistungskatalog wird noch geladen."
+            : "Каталог услуг ещё загружается.",
+      );
+      return;
+    }
     if (createRecheckLoading) {
       setCreateError(l("orders_error_recheck_still_loading"));
       return;
@@ -2206,14 +2440,15 @@ function useOrdersPageContent() {
     setCreateSaving(true);
     setCreateError(null);
     try {
+      const agencyServiceId = searchParams.get("service") ?? "";
       const created = await createOrder({
         patient_id: createForm.patientId,
         contract_id: null,
         needs_description: optString(createForm.needsDescription),
       });
 
-      resetCreateDialog(false);
-      openOrder(created.id, createForm.patientId);
+      updateCreateDialog(false, false);
+      openOrder(created.id, createForm.patientId, agencyServiceId);
       triggerReload();
     } catch (error) {
       setCreateError(
@@ -2491,6 +2726,15 @@ function useOrdersPageContent() {
     const quantity = Number(leistungForm.quantity.replace(",", "."));
     const unitPrice = Number(leistungForm.unitPrice.replace(",", "."));
     const vatRate = Number(leistungForm.vatRate.replace(",", "."));
+    const plannedCostNet = Number(
+      (leistungForm.plannedPartnerCostNet || "0").replace(",", "."),
+    );
+    const plannedCostVat = Number(
+      (leistungForm.plannedPartnerCostVat || "0").replace(",", "."),
+    );
+    const plannedCostGross = Number(
+      (leistungForm.plannedPartnerCostGross || "0").replace(",", "."),
+    );
 
     if (!leistungForm.description.trim()) {
       setLeistungError(l("orders_error_description_required"));
@@ -2508,15 +2752,32 @@ function useOrdersPageContent() {
       setLeistungError(l("orders_error_vat_numeric"));
       return;
     }
+    if (
+      !Number.isFinite(plannedCostNet) || plannedCostNet < 0 ||
+      !Number.isFinite(plannedCostVat) || plannedCostVat < 0 ||
+      !Number.isFinite(plannedCostGross) || plannedCostGross < 0 ||
+      Math.abs(plannedCostNet + plannedCostVat - plannedCostGross) > 0.005
+    ) {
+      setLeistungError(
+        lang === "de"
+          ? "Geplante Partnerkosten: Bruttobetrag muss Nettobetrag plus Mehrwertsteuer entsprechen."
+          : "Плановая стоимость партнёра: сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
 
     setLeistungSaving(true);
     setLeistungError(null);
     try {
       await createOrderLeistung(selectedOrderId, {
+        agency_service_id: optString(leistungForm.agencyServiceId),
         description: leistungForm.description.trim(),
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
+        planned_partner_cost_net: plannedCostNet,
+        planned_partner_cost_vat: plannedCostVat,
+        planned_partner_cost_gross: plannedCostGross,
         is_cost_passthrough: leistungForm.isCostPassthrough,
         provider_id: optString(leistungForm.providerId),
         doctor_id: optString(leistungForm.doctorId),
@@ -2531,6 +2792,56 @@ function useOrdersPageContent() {
       );
     } finally {
       setLeistungSaving(false);
+    }
+  }
+
+  async function handlePlannedCostSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedOrderId || !plannedCostEditor) return;
+    const net = Number(plannedCostEditor.amountNet.replace(",", "."));
+    const vat = Number(plannedCostEditor.amountVat.replace(",", "."));
+    const gross = Number(plannedCostEditor.amountGross.replace(",", "."));
+    if (
+      !Number.isFinite(net) || net < 0 ||
+      !Number.isFinite(vat) || vat < 0 ||
+      !Number.isFinite(gross) || gross < 0 ||
+      Math.abs(net + vat - gross) > 0.005
+    ) {
+      setPlannedCostError(
+        lang === "de"
+          ? "Bruttobetrag muss dem Nettobetrag zuzüglich Mehrwertsteuer entsprechen."
+          : "Сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
+    if (!plannedCostEditor.reason.trim()) {
+      setPlannedCostError(
+        lang === "de"
+          ? "Bitte geben Sie einen Grund für die Änderung an."
+          : "Укажите причину изменения.",
+      );
+      return;
+    }
+    setPlannedCostSaving(true);
+    setPlannedCostError(null);
+    try {
+      await updateOrderLeistungPlannedCost(
+        selectedOrderId,
+        plannedCostEditor.leistungId,
+        {
+          request_id: plannedCostEditor.requestId,
+          amount_net: net.toFixed(2),
+          amount_vat: vat.toFixed(2),
+          amount_gross: gross.toFixed(2),
+          reason: plannedCostEditor.reason.trim(),
+        },
+      );
+      setPlannedCostEditor(null);
+      triggerReload();
+    } catch (error) {
+      setPlannedCostError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPlannedCostSaving(false);
     }
   }
 
@@ -2629,21 +2940,34 @@ function useOrdersPageContent() {
       setExternalInvoiceError(l("orders_error_vat_amount_numeric"));
       return;
     }
+    const normalizedNet = externalInvoiceForm.amountNet.trim() ? amountNet : 0;
+    const normalizedVat = externalInvoiceForm.amountVat.trim() ? amountVat : 0;
+    if (Math.abs(normalizedNet + normalizedVat - amountGross) > 0.005) {
+      setExternalInvoiceError(
+        lang === "de"
+          ? "Bruttobetrag muss dem Nettobetrag zuzüglich Mehrwertsteuer entsprechen."
+          : "Сумма с налогом должна быть равна сумме без налога плюс налог.",
+      );
+      return;
+    }
 
     setExternalInvoiceSaving(true);
     setExternalInvoiceError(null);
     try {
       await createExternalInvoice(selectedOrderId, {
         provider_id: optString(externalInvoiceForm.providerId),
+        order_leistung_id: optString(externalInvoiceForm.orderLeistungId),
         external_invoice_number:
           externalInvoiceForm.externalInvoiceNumber.trim(),
         invoice_date: optString(externalInvoiceForm.invoiceDate),
         due_date: optString(externalInvoiceForm.dueDate),
-        amount_net: externalInvoiceForm.amountNet.trim() ? amountNet : 0,
-        amount_vat: externalInvoiceForm.amountVat.trim() ? amountVat : 0,
+        amount_net: normalizedNet,
+        amount_vat: normalizedVat,
         amount_gross: amountGross,
         currency: optString(externalInvoiceForm.currency) ?? "EUR",
         status: externalInvoiceForm.status,
+        paid_by: externalInvoiceForm.paidBy,
+        service_delivered: externalInvoiceForm.serviceDelivered,
         notes: optString(externalInvoiceForm.notes),
       });
       resetExternalInvoiceDialog(false);
@@ -2662,13 +2986,17 @@ function useOrdersPageContent() {
   async function handleUpdateExternalInvoiceStatus(
     externalInvoiceId: string,
     status: ExternalInvoiceStatus,
+    paidBy?: ExternalInvoicePaidBy,
   ) {
     if (!selectedOrderId) return;
 
     setExternalInvoiceUpdatingId(externalInvoiceId);
     setDetailError(null);
     try {
-      await updateExternalInvoice(selectedOrderId, externalInvoiceId, { status });
+      await updateExternalInvoice(selectedOrderId, externalInvoiceId, {
+        status,
+        paid_by: paidBy,
+      });
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -2676,6 +3004,45 @@ function useOrdersPageContent() {
           ? error.message
           : l("orders_error_update_external_invoice"),
       );
+    } finally {
+      setExternalInvoiceUpdatingId(null);
+    }
+  }
+
+  async function handleMarkExternalInvoiceDelivered(externalInvoiceId: string) {
+    if (!selectedOrderId) return;
+    setExternalInvoiceUpdatingId(externalInvoiceId);
+    setDetailError(null);
+    try {
+      await updateExternalInvoice(selectedOrderId, externalInvoiceId, {
+        service_delivered: true,
+      });
+      triggerReload();
+    } catch (error) {
+      setDetailError(
+        error instanceof Error
+          ? error.message
+          : l("orders_error_update_external_invoice"),
+      );
+    } finally {
+      setExternalInvoiceUpdatingId(null);
+    }
+  }
+
+  async function handleExternalInvoiceServiceChange(
+    externalInvoiceId: string,
+    orderLeistungId: string,
+  ) {
+    if (!selectedOrderId) return;
+    setExternalInvoiceUpdatingId(externalInvoiceId);
+    setExternalInvoiceError(null);
+    try {
+      await updateExternalInvoice(selectedOrderId, externalInvoiceId, orderLeistungId
+        ? { order_leistung_id: orderLeistungId }
+        : { clear_order_leistung: true });
+      triggerReload();
+    } catch (error) {
+      setExternalInvoiceError(error instanceof Error ? error.message : String(error));
     } finally {
       setExternalInvoiceUpdatingId(null);
     }
@@ -3572,6 +3939,175 @@ function useOrdersPageContent() {
 
                 {shouldRenderOrderSection("overview") ? (
                   <>
+                    <SectionCard
+                      title={lang === "de" ? "Wirtschaftlichkeit des Auftrags" : "Экономика заказа"}
+                      description={
+                        lang === "de"
+                          ? "Plan, tatsächliche Abrechnung, Zahlungen und Partnerkosten in der Auftragswährung."
+                          : "План, фактическое выставление счетов, оплаты и затраты на партнёров в валюте заказа."
+                      }
+                    >
+                      {orderEconomicsLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <LoaderCircle className="size-4 animate-spin" />
+                          {t.common_loading}
+                        </div>
+                      ) : orderEconomicsError ? (
+                        <Banner tone="error" withIcon>{orderEconomicsError}</Banner>
+                      ) : orderEconomics ? (
+                        <div className="space-y-4">
+                          {orderEconomics.warnings.length > 0 ? (
+                            <Banner tone="warning" withIcon>
+                              <div className="space-y-1">
+                                {orderEconomics.warnings.map((warning) => (
+                                  <div key={warning}>
+                                    {warning === "external_invoice_currency_mismatch"
+                                      ? lang === "de"
+                                        ? "Mindestens eine Partnerrechnung hat eine andere Währung. Die Marge wird deshalb nicht berechnet."
+                                        : "Хотя бы один счёт партнёра имеет другую валюту. Поэтому маржа не рассчитывается."
+                                      : warning === "order_service_currency_mismatch"
+                                        ? lang === "de"
+                                          ? "Mindestens eine Leistung hat eine andere Währung als der Auftrag. Planwerte und Marge werden nicht berechnet."
+                                          : "Хотя бы одна услуга имеет другую валюту, чем заказ. Плановые суммы и маржа не рассчитываются."
+                                      : warning === "order_service_amount_mismatch"
+                                        ? lang === "de"
+                                          ? "Mindestens eine Leistung enthält einen nicht unterstützten Betrag. Planwerte und Marge werden nicht berechnet."
+                                          : "Хотя бы одна услуга содержит неподдерживаемую сумму. Плановые значения и маржа не рассчитываются."
+                                      : warning === "external_invoice_amount_mismatch"
+                                        ? lang === "de"
+                                          ? "Bei mindestens einer Partnerrechnung stimmen Nettobetrag, Mehrwertsteuer und Bruttobetrag nicht überein."
+                                          : "Хотя бы в одном счёте партнёра сумма без налога, налог и сумма с налогом не совпадают."
+                                        : warning === "unassigned_external_costs"
+                                          ? lang === "de"
+                                            ? `Partnerkosten ohne Leistungszuordnung: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
+                                            : `Затраты на партнёров без привязки к услуге: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
+                                          : warning === "unbilled_patient_receivable"
+                                            ? lang === "de"
+                                              ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
+                                              : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
+                                            : lang === "de"
+                                              ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet."
+                                              : "Часть выставленного дохода не связана с услугой заказа."}
+                                  </div>
+                                ))}
+                              </div>
+                            </Banner>
+                          ) : null}
+
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {lang === "de" ? "Plan" : "План"}
+                              </h3>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <MiniMetric
+                                  label={lang === "de" ? "Geplanter Erlös ohne Mehrwertsteuer" : "Плановый доход без налога"}
+                                  value={formatMoney(orderEconomics.planned.revenue_net, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Geplanter Erlös mit Mehrwertsteuer" : "Плановый доход с налогом"}
+                                  value={formatMoney(orderEconomics.planned.revenue_gross, orderEconomics.currency)}
+                                />
+                                {orderEconomics.margin_visible ? (
+                                  <>
+                                    <MiniMetric
+                                      label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёров без налога"}
+                                      value={formatOptionalMoney(orderEconomics.planned.partner_cost_net, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Geplante Marge ohne Mehrwertsteuer" : "Плановая маржа без налога"}
+                                      value={formatOptionalMoney(orderEconomics.planned.margin_net, orderEconomics.currency)}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                              <h3 className="text-sm font-semibold text-foreground">
+                                {lang === "de" ? "Tatsächlicher Stand" : "Фактическое состояние"}
+                              </h3>
+                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                <MiniMetric
+                                  label={lang === "de" ? "Abgerechneter Erlös ohne Mehrwertsteuer" : "Выставленный доход без налога"}
+                                  value={formatMoney(orderEconomics.actual.recognized_revenue_net, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Vom Patienten tatsächlich erhalten" : "Фактически получено от пациента"}
+                                  value={formatMoney(orderEconomics.actual.patient_cash_collected_gross, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Noch vom Patienten zu zahlen" : "Осталось оплатить пациенту"}
+                                  value={formatMoney(orderEconomics.actual.invoice_outstanding_gross, orderEconomics.currency)}
+                                />
+                                <MiniMetric
+                                  label={lang === "de" ? "Direkt vom Patienten an Partner bezahlt" : "Оплачено пациентом напрямую партнёру"}
+                                  value={formatMoney(orderEconomics.actual.paid_directly_by_patient_gross, orderEconomics.currency)}
+                                />
+                                {orderEconomics.margin_visible ? (
+                                  <>
+                                    <MiniMetric
+                                      label={lang === "de" ? "Tatsächliche Partnerkosten ohne Mehrwertsteuer" : "Фактические затраты на партнёров без налога"}
+                                      value={formatOptionalMoney(orderEconomics.actual.partner_cost_net, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "An Partner bezahlt" : "Оплачено партнёрам"}
+                                      value={formatOptionalMoney(orderEconomics.actual.paid_to_partner_gross, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
+                                      value={formatOptionalMoney(orderEconomics.actual.unpaid_to_partner_gross, orderEconomics.currency)}
+                                    />
+                                    <MiniMetric
+                                      label={lang === "de" ? "Tatsächliche Marge ohne Mehrwertsteuer" : "Фактическая маржа без налога"}
+                                      value={orderEconomics.economics_valid
+                                        ? `${formatMoney(orderEconomics.actual.margin_net, orderEconomics.currency)} (${formatNumber(orderEconomics.actual.margin_percent, locale)}%)`
+                                        : lang === "de" ? "Nicht berechenbar" : "Нельзя рассчитать"}
+                                    />
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto rounded-xl border border-border/70">
+                            <table className="w-full min-w-[760px] text-left text-xs">
+                              <thead className="bg-muted/40 text-muted-foreground">
+                                <tr>
+                                  <th className="px-3 py-2.5 font-medium">{lang === "de" ? "Leistung" : "Услуга"}</th>
+                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplanter Erlös" : "Плановый доход"}</th>
+                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Abgerechneter Erlös" : "Выставленный доход"}</th>
+                                  {orderEconomics.margin_visible ? (
+                                    <>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}</th>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Tatsächliche Partnerkosten" : "Фактические затраты на партнёра"}</th>
+                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Marge ohne Mehrwertsteuer" : "Маржа без налога"}</th>
+                                    </>
+                                  ) : null}
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-border/70">
+                                {orderEconomics.services.map((service) => (
+                                  <tr key={service.order_leistung_id}>
+                                    <td className="max-w-[300px] px-3 py-2.5 font-medium text-foreground">{service.name}</td>
+                                    <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_revenue_net, orderEconomics.currency)}</td>
+                                    <td className="px-3 py-2.5 text-right">{formatMoney(service.actual_revenue_net, orderEconomics.currency)}</td>
+                                    {orderEconomics.margin_visible ? (
+                                      <>
+                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_partner_cost_net, orderEconomics.currency)}</td>
+                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.actual_partner_cost_net, orderEconomics.currency)}</td>
+                                        <td className="px-3 py-2.5 text-right font-semibold">{formatOptionalMoney(service.margin_net, orderEconomics.currency)}</td>
+                                      </>
+                                    ) : null}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : null}
+                    </SectionCard>
+
                     <section className="rounded-lg border border-border/70 bg-card p-6">
                       <h2 className={tokens.text.sectionTitle}>
                         {titleWithDot(lang === "de" ? "Auftrag" : "Заказ")}
@@ -5822,6 +6358,13 @@ function useOrdersPageContent() {
                                     t,
                                   )
                                 : t.orders_not_catalog_linked;
+                            const catalogDescription =
+                              leistung.agency_service_description_snapshot
+                              ?? leistung.agency_service_description;
+                            const billingStatus =
+                              leistung.billing_status ?? "not_invoiced";
+                            const invoiceReferences =
+                              leistung.invoice_references ?? [];
 
                             return (
                               <article
@@ -5840,6 +6383,11 @@ function useOrdersPageContent() {
                                             leistung.description,
                                           )}
                                         </h3>
+                                        {catalogDescription?.trim() ? (
+                                          <p className="mt-1 max-w-3xl whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                                            {catalogDescription.trim()}
+                                          </p>
+                                        ) : null}
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           <Badge
                                             variant="outline"
@@ -5849,6 +6397,15 @@ function useOrdersPageContent() {
                                             )}
                                           >
                                             {leistungStatusLabel(leistung.status)}
+                                          </Badge>
+                                          <Badge
+                                            variant="outline"
+                                            className={cn(
+                                              "rounded-full",
+                                              leistungBillingStatusClass(billingStatus),
+                                            )}
+                                          >
+                                            {leistungBillingStatusLabel(billingStatus)}
                                           </Badge>
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -5906,6 +6463,28 @@ function useOrdersPageContent() {
                                     <div className="mt-1 text-xl font-semibold leading-none text-foreground">
                                       {formatMoney(lineTotal, leistung.currency)}
                                     </div>
+                                    {permissions.canManageEconomics ? (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-4 h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                        onClick={() => {
+                                          setPlannedCostError(null);
+                                          setPlannedCostEditor({
+                                            leistungId: leistung.id,
+                                            serviceName: normalizeLeistungDescription(leistung.description),
+                                            amountNet: String(leistung.planned_partner_cost_net ?? "0"),
+                                            amountVat: String(leistung.planned_partner_cost_vat ?? "0"),
+                                            amountGross: String(leistung.planned_partner_cost_gross ?? "0"),
+                                            reason: "",
+                                            requestId: crypto.randomUUID(),
+                                          });
+                                        }}
+                                      >
+                                        {lang === "de" ? "Geplante Partnerkosten bearbeiten" : "Изменить плановые затраты на партнёра"}
+                                      </Button>
+                                    ) : null}
                                     {permissions.canApproveLeistung &&
                                     leistung.status === "delivered" ? (
                                       <Button
@@ -5953,6 +6532,13 @@ function useOrdersPageContent() {
                                     label={l("orders_mwst")}
                                     value={`${formatNumber(leistung.vat_rate, locale)}%`}
                                   />
+                                  {permissions.canManageEconomics ? <MiniMetric
+                                    label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}
+                                    value={formatMoney(
+                                      leistung.planned_partner_cost_gross,
+                                      leistung.currency,
+                                    )}
+                                  /> : null}
                                   <MiniMetric
                                     label={l("orders_erbracht")}
                                     value={formatDateTimeLabel(
@@ -5982,6 +6568,37 @@ function useOrdersPageContent() {
                                           ? `${t.orders_billing_source_completed_appointment} ${leistung.source_medical_appointment_id}`
                                           : t.orders_billing_source_manual
                                     }
+                                    className="min-[760px]:col-span-2"
+                                  />
+                                  <MiniMetric
+                                    label={lang === "de" ? "Abrechnung" : "Расчёты"}
+                                    value={
+                                      invoiceReferences.length > 0 ? (
+                                        <span className="flex min-w-0 flex-wrap justify-end gap-1.5">
+                                          {invoiceReferences.map((invoice) => (
+                                            <button
+                                              key={invoice.invoice_id}
+                                              type="button"
+                                              className="rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-sky-700 hover:border-sky-300 hover:text-sky-800"
+                                              onClick={() =>
+                                                staffGo(`/invoices?invoice=${invoice.invoice_id}`)
+                                              }
+                                              title={`${formatMoney(invoice.line_gross, leistung.currency)} · ${leistungBillingStatusLabel(billingStatus)}`}
+                                            >
+                                              {invoice.invoice_number ||
+                                                (lang === "de" ? "Rechnung" : "Счёт")}
+                                            </button>
+                                          ))}
+                                        </span>
+                                      ) : (
+                                        leistungBillingStatusLabel("not_invoiced")
+                                      )
+                                    }
+                                    className="min-[760px]:col-span-2"
+                                  />
+                                  <MiniMetric
+                                    label={lang === "de" ? "Abgerechnete Menge" : "Выставленное количество"}
+                                    value={`${formatNumber(leistung.invoiced_quantity ?? 0, locale)} / ${formatNumber(leistung.quantity, locale)}`}
                                     className="min-[760px]:col-span-2"
                                   />
                                 </div>
@@ -6035,6 +6652,18 @@ function useOrdersPageContent() {
                           label={t.orders_external_invoices_gross_label}
                           value={formatMoney(externalInvoiceMetrics.gross)}
                         />
+                        <MiniMetric
+                          label={lang === "de" ? "Noch nicht zugeordnet" : "Ещё не распределено"}
+                          value={formatMoney(externalInvoiceMetrics.receivable)}
+                        />
+                        <MiniMetric
+                          label={lang === "de" ? "Patientenrechnungen zugeordnet" : "Распределено по счетам пациента"}
+                          value={formatMoney(externalInvoiceMetrics.allocated)}
+                        />
+                        <MiniMetric
+                          label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
+                          value={formatMoney(externalInvoiceMetrics.liability)}
+                        />
                       </div>
                     </SectionCard>
 
@@ -6066,6 +6695,9 @@ function useOrdersPageContent() {
                             const taxonomyLabel = providerTaxonomyLabel(
                               invoice,
                               lang,
+                            );
+                            const linkedService = orderDetail.leistungen.find(
+                              (leistung) => leistung.id === invoice.order_leistung_id,
                             );
                             const providerValue = invoice.provider_id ? (
                               <button
@@ -6112,6 +6744,28 @@ function useOrdersPageContent() {
                                           >
                                             {externalInvoiceStatusLabel(invoice.status)}
                                           </Badge>
+                                          <Badge variant="outline" className="rounded-full">
+                                            {invoice.provider_settlement_status === "partial"
+                                              ? lang === "de"
+                                                ? "Teilweise von GMED bezahlt"
+                                                : "Частично оплачено GMED"
+                                              : invoice.paid_by === "agency"
+                                              ? lang === "de"
+                                                ? "Bezahlt: GMED"
+                                                : "Плательщик: GMED"
+                                              : invoice.paid_by === "patient"
+                                                ? lang === "de"
+                                                  ? "Bezahlt: Patient"
+                                                  : "Плательщик: пациент"
+                                                : lang === "de"
+                                                  ? "Noch unbezahlt"
+                                                  : "Не оплачено"}
+                                          </Badge>
+                                          {invoice.service_delivered ? (
+                                            <Badge variant="outline" className="rounded-full border-emerald-300 text-emerald-700">
+                                              {lang === "de" ? "Leistung erbracht" : "Услуга оказана"}
+                                            </Badge>
+                                          ) : null}
                                         </div>
                                         <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                                           {providerValue}
@@ -6120,6 +6774,13 @@ function useOrdersPageContent() {
                                               {taxonomyLabel}
                                             </Badge>
                                           ) : null}
+                                          <Badge variant="outline" className="rounded-full">
+                                            {linkedService
+                                              ? `${lang === "de" ? "Leistung" : "Услуга"}: ${normalizeLeistungDescription(linkedService.description)}`
+                                              : lang === "de"
+                                                ? "Keine Leistung zugeordnet"
+                                                : "Услуга не привязана"}
+                                          </Badge>
                                         </div>
                                         <p className="mt-2 max-w-2xl text-xs leading-snug text-muted-foreground">
                                           {t.orders_external_invoice_date}:{" "}
@@ -6136,39 +6797,129 @@ function useOrdersPageContent() {
                                     <div className="space-y-3">
                                       {permissions.canManageExternalInvoices ? (
                                         <div className="flex flex-col gap-2">
-                                          {externalInvoiceStatusTransitions(invoice.status).map(
-                                            (nextStatus) => (
+                                          <NativeComboboxSelect
+                                            value={invoice.order_leistung_id ?? ""}
+                                            onChange={(event) =>
+                                              void handleExternalInvoiceServiceChange(
+                                                invoice.id,
+                                                event.target.value,
+                                              )
+                                            }
+                                            className={selectClassName}
+                                            disabled={invoiceUpdating}
+                                            aria-label={lang === "de" ? "Zugeordnete Leistung" : "Связанная услуга"}
+                                          >
+                                            <option value="">
+                                              {lang === "de" ? "Keine Leistung zugeordnet" : "Услуга не привязана"}
+                                            </option>
+                                            {orderDetail.leistungen.map((leistung) => (
+                                              <option key={leistung.id} value={leistung.id}>
+                                                {normalizeLeistungDescription(leistung.description)}
+                                              </option>
+                                            ))}
+                                          </NativeComboboxSelect>
+                                          {(numberFromUnknown(invoice.patient_receivable_gross) ?? 0) > 0 ? (
                                             <Button
-                                              key={nextStatus}
-                                              variant={
-                                                nextStatus === "cancelled"
-                                                  ? "destructive"
-                                                  : "outline"
-                                              }
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                              onClick={() => setExternalInvoiceAllocationId(invoice.id)}
+                                              disabled={invoiceUpdating}
+                                            >
+                                              {lang === "de"
+                                                ? "Patientenrechnung zuordnen"
+                                                : "Связать со счётом пациента"}
+                                            </Button>
+                                          ) : null}
+                                          {!invoice.service_delivered &&
+                                          invoice.status !== "cancelled" ? (
+                                            <Button
+                                              type="button"
+                                              variant="outline"
                                               size="sm"
                                               className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
                                               onClick={() =>
-                                                void handleUpdateExternalInvoiceStatus(
+                                                void handleMarkExternalInvoiceDelivered(
                                                   invoice.id,
-                                                  nextStatus,
                                                 )
                                               }
                                               disabled={invoiceUpdating}
                                             >
-                                              {invoiceUpdating ? (
-                                                <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                              ) : null}
-                                              {nextStatus === "received"
-                                                ? lang === "de"
-                                                  ? "Als eingegangen markieren"
-                                                  : "Отметить как полученный"
-                                                : nextStatus === "approved"
-                                                  ? t.orders_external_invoice_mark_approved
-                                                  : nextStatus === "paid"
-                                                    ? t.orders_external_invoice_mark_paid
-                                                    : t.orders_external_invoice_cancel}
+                                              {lang === "de"
+                                                ? "Leistung als erbracht markieren"
+                                                : "Отметить услугу оказанной"}
                                             </Button>
-                                            ),
+                                          ) : null}
+                                          {externalInvoiceStatusTransitions(invoice.status).map(
+                                            (nextStatus) =>
+                                              nextStatus === "paid" ? (
+                                                <div key={nextStatus} className="grid gap-2">
+                                                  <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                                    onClick={() =>
+                                                      void handleUpdateExternalInvoiceStatus(
+                                                        invoice.id,
+                                                        nextStatus,
+                                                        "patient",
+                                                      )
+                                                    }
+                                                    disabled={invoiceUpdating}
+                                                  >
+                                                    {lang === "de"
+                                                      ? "Vom Patienten bezahlt"
+                                                      : "Оплачено пациентом"}
+                                                  </Button>
+                                                  <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                                    onClick={() => window.location.assign(`/company-finance?provider_invoice=${invoice.id}`)}
+                                                    disabled={invoiceUpdating}
+                                                  >
+                                                    {invoiceUpdating ? (
+                                                      <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                                    ) : null}
+                                                    {lang === "de"
+                                                      ? "Zahlung über Unternehmenssaldo erfassen"
+                                                      : "Записать выплату в балансе компании"}
+                                                  </Button>
+                                                </div>
+                                              ) : (
+                                                <Button
+                                                  key={nextStatus}
+                                                  type="button"
+                                                  variant={
+                                                    nextStatus === "cancelled"
+                                                      ? "destructive"
+                                                      : "outline"
+                                                  }
+                                                  size="sm"
+                                                  className="h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                                  onClick={() =>
+                                                    void handleUpdateExternalInvoiceStatus(
+                                                      invoice.id,
+                                                      nextStatus,
+                                                    )
+                                                  }
+                                                  disabled={invoiceUpdating}
+                                                >
+                                                  {invoiceUpdating ? (
+                                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
+                                                  ) : null}
+                                                  {nextStatus === "received"
+                                                    ? lang === "de"
+                                                      ? "Als eingegangen markieren"
+                                                      : "Отметить как полученный"
+                                                    : nextStatus === "approved"
+                                                      ? t.orders_external_invoice_mark_approved
+                                                      : t.orders_external_invoice_cancel}
+                                                </Button>
+                                              ),
                                           )}
                                         </div>
                                       ) : null}
@@ -6176,7 +6927,7 @@ function useOrdersPageContent() {
                                   </div>
                                 </div>
 
-                                <div className="grid border-t border-border bg-muted/15 sm:grid-cols-2 xl:grid-cols-5">
+                                <div className="grid border-t border-border bg-muted/15 sm:grid-cols-2 xl:grid-cols-9">
                                   <div className="px-4 py-3">
                                     <div className="text-xs text-muted-foreground">
                                       {t.orders_external_invoice_net}
@@ -6206,6 +6957,50 @@ function useOrdersPageContent() {
                                     <div className="mt-1 text-sm font-semibold text-foreground">
                                       {formatMoney(
                                         invoice.amount_gross,
+                                        invoice.currency,
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 sm:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {lang === "de" ? "Forderung Patient" : "Долг пациента"}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
+                                        invoice.patient_receivable_gross,
+                                        invoice.currency,
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 xl:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {lang === "de" ? "Zugeordnet" : "Распределено"}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
+                                        invoice.allocated_receivable_gross,
+                                        invoice.currency,
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 sm:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {lang === "de" ? "Noch zuzuordnen" : "Осталось распределить"}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
+                                        invoice.remaining_receivable_gross,
+                                        invoice.currency,
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="border-t border-border px-4 py-3 xl:border-l xl:border-t-0">
+                                    <div className="text-xs text-muted-foreground">
+                                      {lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-foreground">
+                                      {formatMoney(
+                                        invoice.provider_liability_gross,
                                         invoice.currency,
                                       )}
                                     </div>
@@ -6246,6 +7041,16 @@ function useOrdersPageContent() {
           </AdminSheetScaffold>
       </SheetContent>
       </Sheet>
+
+      <ExternalInvoiceAllocationSheet
+        open={Boolean(externalInvoiceAllocationId)}
+        orderId={selectedOrderId ?? ""}
+        externalInvoiceId={externalInvoiceAllocationId}
+        onOpenChange={(open) => {
+          if (!open) setExternalInvoiceAllocationId(null);
+        }}
+        onChanged={triggerReload}
+      />
 
       <Sheet
         open={debtManagementSheetOpen}
@@ -6441,6 +7246,73 @@ function useOrdersPageContent() {
         </SheetContent>
       </Sheet>
 
+      <Sheet
+        open={plannedCostEditor != null}
+        onOpenChange={(open) => {
+          if (!open && !plannedCostSaving) {
+            setPlannedCostEditor(null);
+            setPlannedCostError(null);
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[620px]">
+          {plannedCostEditor ? (
+            <form onSubmit={handlePlannedCostSave} className="flex h-full min-h-0 flex-col">
+              <AdminSheetScaffold
+                title={lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}
+                description={plannedCostEditor.serviceName}
+                footer={
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={lang === "de" ? "Änderung speichern" : "Сохранить изменение"}
+                    submittingLabel={lang === "de" ? "Wird gespeichert" : "Сохранение"}
+                    submitting={plannedCostSaving}
+                    submitDisabled={plannedCostSaving}
+                    onCancel={() => setPlannedCostEditor(null)}
+                  />
+                }
+                headerClassName="px-4 py-3"
+                bodyClassName="min-h-0 space-y-4 px-5 py-4"
+              >
+                {plannedCostError ? <Banner tone="error" withIcon>{plannedCostError}</Banner> : null}
+                <OrderSheetSection title={lang === "de" ? "Kostenplanung" : "Планирование затрат"}>
+                  <div className="grid gap-3">
+                    <Field label={lang === "de" ? "Betrag ohne Mehrwertsteuer" : "Сумма без налога"}>
+                      <Input
+                        value={plannedCostEditor.amountNet}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountNet: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Mehrwertsteuer" : "Налог на добавленную стоимость"}>
+                      <Input
+                        value={plannedCostEditor.amountVat}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountVat: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Betrag mit Mehrwertsteuer" : "Сумма с налогом"}>
+                      <Input
+                        value={plannedCostEditor.amountGross}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountGross: event.target.value }) : current)}
+                        className={inputClassName}
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Grund der Änderung" : "Причина изменения"}>
+                      <textarea
+                        value={plannedCostEditor.reason}
+                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, reason: event.target.value }) : current)}
+                        className={textareaClassName}
+                      />
+                    </Field>
+                  </div>
+                </OrderSheetSection>
+              </AdminSheetScaffold>
+            </form>
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
       <Sheet open={externalInvoiceOpen} onOpenChange={resetExternalInvoiceDialog}>
         <SheetContent
           side="right"
@@ -6511,6 +7383,30 @@ function useOrdersPageContent() {
                       }
                     />
                   </div>
+                  <Field
+                    label={lang === "de" ? "Zugeordnete Leistung" : "Связанная услуга"}
+                    className="md:col-span-2"
+                  >
+                    <NativeComboboxSelect
+                      value={externalInvoiceForm.orderLeistungId}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          orderLeistungId: event.target.value,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="">
+                        {lang === "de" ? "Noch keiner Leistung zugeordnet" : "Пока не связана с услугой"}
+                      </option>
+                      {(orderDetail?.leistungen ?? []).map((leistung) => (
+                        <option key={leistung.id} value={leistung.id}>
+                          {normalizeLeistungDescription(leistung.description)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
                   <Field label={t.orders_external_invoice_date}>
                     <Input
                       type="date"
@@ -6544,6 +7440,12 @@ function useOrdersPageContent() {
                         setExternalInvoiceForm((current) => ({
                           ...current,
                           status: event.target.value as ExternalInvoiceStatus,
+                            paidBy:
+                              event.target.value === "paid"
+                                ? current.paidBy === "unpaid"
+                                  ? "patient"
+                                  : current.paidBy
+                                : "unpaid",
                         }))
                       }
                       className={selectClassName}
@@ -6555,6 +7457,44 @@ function useOrdersPageContent() {
                       ))}
                     </NativeComboboxSelect>
                   </Field>
+                  <Field label={lang === "de" ? "Bezahlt durch" : "Кто оплатил"}>
+                    <NativeComboboxSelect
+                      value={externalInvoiceForm.paidBy}
+                      disabled={externalInvoiceForm.status !== "paid"}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          paidBy: event.target.value as ExternalInvoicePaidBy,
+                        }))
+                      }
+                      className={selectClassName}
+                    >
+                      <option value="unpaid">
+                        {lang === "de" ? "Noch unbezahlt" : "Не оплачено"}
+                      </option>
+                      <option value="patient">
+                        {lang === "de" ? "Patient" : "Пациент"}
+                      </option>
+                    </NativeComboboxSelect>
+                  </Field>
+                  <label className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm text-foreground md:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={externalInvoiceForm.serviceDelivered}
+                      onChange={(event) =>
+                        setExternalInvoiceForm((current) => ({
+                          ...current,
+                          serviceDelivered: event.target.checked,
+                        }))
+                      }
+                      className="size-4 rounded border-border"
+                    />
+                    <span>
+                      {lang === "de"
+                        ? "Leistung wurde dem Patienten bereits erbracht"
+                        : "Услуга пациенту уже оказана"}
+                    </span>
+                  </label>
                 </div>
               </OrderSheetSection>
 
@@ -6790,6 +7730,8 @@ function useOrdersPageContent() {
                   submitLabel={t.common_save}
                   submitting={createSaving}
                   submitDisabled={
+                    (!!requestedAgencyServiceId &&
+                      (!agencyServicesLoaded || !pendingCreateAgencyService)) ||
                     createRecheckLoading ||
                     (!!createForm.patientId &&
                       !createRecheck &&
@@ -6807,6 +7749,51 @@ function useOrdersPageContent() {
                   <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                     {createError}
                   </div>
+                ) : null}
+
+                {requestedAgencyServiceId ? (
+                  <OrderSheetSection title={t.revenue_agency_service_catalog_items}>
+                    {!agencyServicesLoaded ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <LoaderCircle className="size-4 animate-spin" />
+                        {lang === "de"
+                          ? "Leistungskatalog wird geladen …"
+                          : "Загружается каталог услуг…"}
+                      </div>
+                    ) : pendingCreateAgencyService ? (
+                      <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
+                        <div className="font-medium text-foreground">
+                          {agencyServiceNameLabel(
+                            pendingCreateAgencyService.service_key,
+                            pendingCreateAgencyService.service_name,
+                            t,
+                          )}
+                        </div>
+                        <div className="mt-1 text-sm text-muted-foreground">
+                          {pendingCreateAgencyService.description
+                            ? agencyServiceDescriptionLabel(
+                                pendingCreateAgencyService.service_key,
+                                pendingCreateAgencyService.description,
+                                t,
+                              )
+                            : t.common_not_set}
+                        </div>
+                        <div className="mt-2 text-xs font-medium text-foreground">
+                          {formatMoney(
+                            pendingCreateAgencyService.unit_price,
+                            pendingCreateAgencyService.currency,
+                          )}
+                          {` · ${pendingCreateAgencyService.vat_rate}% ${t.finance_catalog_vat_label}`}
+                        </div>
+                      </div>
+                    ) : (
+                      <Banner tone="error" withIcon>
+                        {lang === "de"
+                          ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
+                          : "Выбранная позиция каталога больше не активна или недоступна."}
+                      </Banner>
+                    )}
+                  </OrderSheetSection>
                 ) : null}
 
                 <OrderSheetSection title={l("orders_grunddaten")}>
@@ -6907,6 +7894,14 @@ function useOrdersPageContent() {
                                               : check.label}
                               </span>
                               {check.key === "passport_valid" &&
+                              check.status === "unknown" ? (
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-full border-slate-200 bg-slate-50 text-slate-600"
+                                >
+                                  {t.common_not_set}
+                                </Badge>
+                              ) : check.key === "passport_valid" &&
                               (check.status === "expired" ||
                                 check.status === "expiring") ? (
                                 <Badge
@@ -7127,6 +8122,70 @@ function useOrdersPageContent() {
 
             <OrderSheetSection title={l("orders_basis")}>
               <div className="grid gap-3 md:grid-cols-4">
+                <Field
+                  label={t.revenue_agency_service_catalog_items}
+                  className="md:col-span-4"
+                >
+                  <NativeComboboxSelect
+                    value={leistungForm.agencyServiceId}
+                    onChange={(event) => {
+                      const agencyServiceId = event.target.value;
+                      const service = agencyServices.find(
+                        (item) => item.id === agencyServiceId,
+                      );
+                      setLeistungForm((current) => ({
+                        ...current,
+                        agencyServiceId,
+                        description: service
+                          ? agencyServiceNameLabel(
+                              service.service_key,
+                              service.service_name,
+                              t,
+                            )
+                          : current.description,
+                        unitPrice: service
+                          ? String(service.unit_price ?? "")
+                          : current.unitPrice,
+                        vatRate: service
+                          ? String(service.vat_rate ?? "0")
+                          : current.vatRate,
+                      }));
+                    }}
+                    className={selectClassName}
+                  >
+                    <option value="">
+                      {lang === "de"
+                        ? "Individuelle Leistung ohne Katalogbezug"
+                        : "Индивидуальная услуга без позиции каталога"}
+                    </option>
+                    {agencyServices.map((service) => (
+                      <option key={service.id} value={service.id}>
+                        {agencyServiceNameLabel(
+                          service.service_key,
+                          service.service_name,
+                          t,
+                        )}
+                        {` · ${formatMoney(service.unit_price, service.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                  {leistungForm.agencyServiceId ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {(() => {
+                        const service = agencyServices.find(
+                          (item) => item.id === leistungForm.agencyServiceId,
+                        );
+                        return service?.description
+                          ? agencyServiceDescriptionLabel(
+                              service.service_key,
+                              service.description,
+                              t,
+                            )
+                          : t.common_not_set;
+                      })()}
+                    </p>
+                  ) : null}
+                </Field>
                 <Field label={t.orders_service_description} className="md:col-span-2">
                   <Input
                     required
@@ -7193,6 +8252,44 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
+                {permissions.canManageEconomics ? <>
+                <Field label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostNet}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostNet: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={lang === "de" ? "Mehrwertsteuer auf geplante Partnerkosten" : "Налог на плановые затраты партнёра"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostVat}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostVat: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                <Field label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}>
+                  <Input
+                    value={leistungForm.plannedPartnerCostGross}
+                    onChange={(event) =>
+                      setLeistungForm((current) => ({
+                        ...current,
+                        plannedPartnerCostGross: event.target.value,
+                      }))
+                    }
+                    className={inputClassName}
+                  />
+                </Field>
+                </> : null}
               </div>
             </OrderSheetSection>
 

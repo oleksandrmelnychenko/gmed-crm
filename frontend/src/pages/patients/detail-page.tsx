@@ -1150,6 +1150,8 @@ function usePatientDetailPageContent() {
   const timelineLimit = 50;
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
+  const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
+  const canOpenLeadWizard = user?.role === "ceo" || user?.role === "patient_manager";
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
@@ -1505,6 +1507,7 @@ function usePatientDetailPageContent() {
     clearApiCache(`/patients/${id}/framework-contracts`);
     clearApiCache(`/patients/${id}/financial-ledger`);
     clearApiCache(`/patients/${id}/financial-summary`);
+    clearApiCache(`/patients/${id}/account-statement`);
     clearApiCache(`/patients/${id}/invoices`);
     clearApiCache(`/patients/${id}/service-packages`);
     clearApiCache(`/patients/${id}/timeline`);
@@ -2050,6 +2053,7 @@ function usePatientDetailPageContent() {
         assignBusy={assignBusy}
         assignments={assignments}
         assignableStaff={assignableStaff}
+        canCreateOrders={canCreateOrders}
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}
         canManage={canManage}
@@ -2059,6 +2063,7 @@ function usePatientDetailPageContent() {
         canManageRelations={canManageRelations}
         canManageWorkflowChecklist={canManageWorkflowChecklist}
         canOpenComplianceWorkspace={canOpenComplianceWorkspace}
+        canOpenLeadWizard={canOpenLeadWizard}
         canOpenDocumentsWorkspace={canOpenDocumentsWorkspace}
         canPrintPatientLabel={canPrintPatientLabel}
         canViewClinical={canViewClinical}
@@ -2109,6 +2114,7 @@ function usePatientDetailPageContent() {
         invoiceTypeLabel={invoiceTypeLabel}
         invoices={invoices}
         isContractExpiringSoon={isContractExpiringSoon}
+        lang={lang}
         l={l}
         legalStatus={legalStatus}
         legalStatusChecklist={legalStatusChecklist}

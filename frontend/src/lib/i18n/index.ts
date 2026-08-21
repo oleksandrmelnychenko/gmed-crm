@@ -26,20 +26,25 @@ export interface Translations
   app_not_found_body: string;
 
   nav_dashboard: string;
+  nav_concierge_workspace: string;
+  nav_task_manager: string;
   nav_main: string;
   nav_documents: string;
   nav_specializations: string;
   nav_contracts: string;
   nav_invoices: string;
+  nav_company_finance: string;
   nav_finance_catalog: string;
   nav_admin: string;
   nav_users_roles: string;
   nav_access_matrix: string;
   nav_logout: string;
+  nav_my_notifications: string;
   nav_my_documents: string;
   nav_my_appointments: string;
   nav_my_recommendations: string;
   nav_my_services: string;
+  nav_my_subscriptions: string;
   nav_my_invoices: string;
   nav_my_privacy: string;
   nav_my_feedback: string;

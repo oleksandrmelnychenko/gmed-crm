@@ -74,6 +74,10 @@ import {
   statusBadgeClass,
 } from "./appearance/status-appearance";
 import {
+  applyInvoicePrepayment,
+  createInvoiceCreditNote,
+  createInvoicePayment,
+  createInvoiceRefund,
   createDunningEvent,
   createInvoice,
   fetchAccountingLedger,
@@ -82,6 +86,10 @@ import {
   fetchInvoicePdfBlob,
   fetchInvoiceWorkspace,
   fetchInvoices,
+  releaseInvoicePrepayment,
+  reverseInvoicePayment,
+  reverseInvoiceCreditNote,
+  reverseInvoiceRefund,
   updateInvoicePayer,
   updateInvoiceStatus,
   updateInvoiceVisibility,
@@ -94,12 +102,14 @@ import {
   blankCreateForm,
   buildInvoicesPath,
   buildSearchParams,
+  calculateInvoiceSelectionTotals,
   formatCurrency,
   formatDate,
   formatDateTime,
   invoiceToStatusForm,
   invoiceToPayerForm,
   invoiceToVisibilityForm,
+  invoiceLineQuantityAvailable,
   invoicesPermissions,
   nextDunningLevel,
 } from "./model/invoice-model";
@@ -112,7 +122,10 @@ import type {
   DunningForm,
   Filters,
   InvoiceItem,
+  InvoiceCreditNoteTransaction,
   InvoiceLineItem,
+  InvoicePaymentTransaction,
+  InvoiceRefundTransaction,
   InvoiceStatus,
   InvoiceType,
   OrderOption,
@@ -143,6 +156,9 @@ type InvoiceWorkspaceState = {
   selectedInvoiceId: string;
   detail: InvoiceItem | null;
   dunningEvents: DunningEvent[];
+  paymentTransactions: InvoicePaymentTransaction[];
+  creditNoteTransactions: InvoiceCreditNoteTransaction[];
+  refundTransactions: InvoiceRefundTransaction[];
   detailBusy: boolean;
   detailError: string | null;
   reloadToken: number;
@@ -214,6 +230,12 @@ const VAT_SOURCE_LABEL_KEYS = {
 const STAFF_INVOICE_REALTIME_EVENTS = [
   "invoice.created",
   "invoice.status_changed",
+  "invoice.payment_recorded",
+  "invoice.payment_reversed",
+  "invoice.refund_recorded",
+  "invoice.refund_reversed",
+  "invoice.credit_note_created",
+  "invoice.credit_note_reversed",
   "invoice.dunning_created",
   "invoice.overdue_marked",
   "document.payment_proof_uploaded",
@@ -228,6 +250,13 @@ function quoteOptionLabel(quote: QuoteOption) {
   ]
     .filter((value) => value.trim().length > 0)
     .join(" | ");
+}
+
+function cappedPrepaymentAmount(available: unknown, balanceDue: unknown) {
+  const availableAmount = Number(available ?? 0);
+  const balanceAmount = Number(balanceDue ?? 0);
+  if (!Number.isFinite(availableAmount) || !Number.isFinite(balanceAmount)) return "";
+  return Math.max(0, Math.min(availableAmount, balanceAmount)).toFixed(2);
 }
 
 async function downloadInvoicePdf(
@@ -291,7 +320,7 @@ function createInvoiceUiState(initialQuoteId = ""): InvoiceUiState {
     createForm: blankCreateForm(initialQuoteId),
     createBusy: false,
     createError: null,
-    statusForm: { status: "draft", dueDate: "", paidAmount: "", notes: "" },
+    statusForm: { status: "draft", dueDate: "", notes: "" },
     statusBusy: false,
     statusError: null,
     statusDialogOpen: false,
@@ -462,6 +491,66 @@ function useStaffInvoicesPageContent() {
     ledgerCategory: t.revenue_invoices_ledger_category,
     ledgerPeriod: t.revenue_invoices_ledger_period,
     vatSource: t.revenue_invoices_vat_source,
+    invoiceLines: lang === "de" ? "Rechnungspositionen" : "Позиции счета",
+    invoiceLinesDescription:
+      lang === "de"
+        ? "Positionen und Mengen für diese Rechnung auswählen. Preise, Beschreibung und USt. bleiben als Snapshot erhalten."
+        : "Выберите позиции и количество для этого счёта. Цена, описание и НДС сохраняются как снимок.",
+    selectionNet: lang === "de" ? "Netto" : "Нетто",
+    selectionVat: lang === "de" ? "Umsatzsteuer" : "НДС",
+    selectionGross: lang === "de" ? "Zahlbetrag brutto" : "К оплате брутто",
+    advanceVatTitle:
+      lang === "de" ? "Vorauszahlung inklusive Umsatzsteuer" : "Предоплата с учетом НДС",
+    advanceVatDescription:
+      lang === "de"
+        ? "Der Patient zahlt den Bruttobetrag: ausgewählter Nettowert plus Umsatzsteuer. Dieser Bruttobetrag steht später zur Anrechnung auf Rechnungen bereit."
+        : "Пациент оплачивает сумму брутто: выбранная сумма нетто плюс НДС. Именно сумма брутто затем доступна для зачета в последующих счетах.",
+    selectAllLines: lang === "de" ? "Alle Positionen" : "Все позиции",
+    prepayment: lang === "de" ? "Vorauszahlung" : "Предоплата",
+    prepaymentApplied:
+      lang === "de" ? "Angerechnete Vorauszahlung" : "Зачтенная предоплата",
+    applyPrepayment:
+      lang === "de" ? "Vorauszahlung anrechnen" : "Зачесть предоплату",
+    availableAdvance:
+      lang === "de" ? "Verfügbare Vorauszahlung" : "Доступная предоплата",
+    amountToApply: lang === "de" ? "Anzurechnender Bruttobetrag" : "Сумма зачета брутто",
+    payments: lang === "de" ? "Zahlungseingänge" : "Поступления по счёту",
+    paymentsDescription:
+      lang === "de"
+        ? "Unveränderbares Journal einzelner Zahlungen und Stornierungen."
+        : "Неизменяемый журнал отдельных платежей и их сторнирований.",
+    recordPayment: lang === "de" ? "Zahlung erfassen" : "Записать платёж",
+    paymentAmount: lang === "de" ? "Eingang brutto" : "Сумма брутто",
+    paymentMethod: lang === "de" ? "Zahlungsart" : "Способ оплаты",
+    paymentReference: lang === "de" ? "Referenz" : "Референс",
+    paymentDate: lang === "de" ? "Eingangsdatum" : "Дата поступления",
+    paymentNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    noPayments: lang === "de" ? "Noch keine Zahlungen erfasst." : "Платежей ещё нет.",
+    reversal: lang === "de" ? "Stornierung" : "Сторнирование",
+    reversePayment: lang === "de" ? "Zahlung stornieren" : "Сторнировать платёж",
+    reversalReason: lang === "de" ? "Stornogrund" : "Причина сторнирования",
+    reversed: lang === "de" ? "Storniert" : "Сторнирован",
+    refunds: lang === "de" ? "Rückzahlungen" : "Возвраты пациенту",
+    refundsDescription:
+      lang === "de"
+        ? "Tatsächlich an den Patienten ausgezahltes Guthaben. Eine Rückzahlung ist nur bis zur verfügbaren Bar-Gutschrift möglich."
+        : "Фактически возвращённые пациенту деньги. Возврат возможен только в пределах доступной денежной переплаты.",
+    recordRefund: lang === "de" ? "Rückzahlung erfassen" : "Записать возврат",
+    refundAmount: lang === "de" ? "Rückzahlung brutto" : "Сумма возврата брутто",
+    refundDate: lang === "de" ? "Auszahlungsdatum" : "Дата возврата",
+    refundReason: lang === "de" ? "Grund der Rückzahlung" : "Причина возврата",
+    refundNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    noRefunds: lang === "de" ? "Noch keine Rückzahlungen." : "Возвратов пока нет.",
+    reverseRefund: lang === "de" ? "Rückzahlung stornieren" : "Сторнировать возврат",
+    paymentMethods: {
+      bank_transfer: lang === "de" ? "Überweisung" : "Банковский перевод",
+      card: lang === "de" ? "Karte" : "Карта",
+      cash: lang === "de" ? "Bar" : "Наличные",
+      direct_debit: lang === "de" ? "Lastschrift" : "Прямое списание",
+      cheque: lang === "de" ? "Scheck" : "Чек",
+      other: lang === "de" ? "Sonstige" : "Другое",
+      legacy_import: lang === "de" ? "Übernommener Bestand" : "Перенесённый остаток",
+    } as Record<string, string>,
     sendDunning: (level: string) => t.invoices_workspace_send_dunning.replace("{level}", level),
   };
   const invoiceColumnGroups = {
@@ -535,6 +624,9 @@ function useStaffInvoicesPageContent() {
       selectedInvoiceId: initialInvoiceId,
       detail: null,
       dunningEvents: [],
+      paymentTransactions: [],
+      creditNoteTransactions: [],
+      refundTransactions: [],
       detailBusy: false,
       detailError: null,
       reloadToken: 0,
@@ -558,6 +650,9 @@ function useStaffInvoicesPageContent() {
     selectedInvoiceId,
     detail,
     dunningEvents,
+    paymentTransactions,
+    creditNoteTransactions,
+    refundTransactions,
     detailBusy,
     detailError,
     reloadToken,
@@ -704,6 +799,47 @@ function useStaffInvoicesPageContent() {
     title: string;
   } | null>(null);
   const [invoicePdfPreviewBusy, setInvoicePdfPreviewBusy] = useState(false);
+  const [prepaymentInvoiceId, setPrepaymentInvoiceId] = useState("");
+  const [prepaymentAmount, setPrepaymentAmount] = useState("");
+  const [prepaymentRequestId, setPrepaymentRequestId] = useState(() => crypto.randomUUID());
+  const [prepaymentBusy, setPrepaymentBusy] = useState(false);
+  const [prepaymentError, setPrepaymentError] = useState<string | null>(null);
+  const [paymentForm, setPaymentForm] = useState({
+    requestId: crypto.randomUUID(),
+    amountGross: "",
+    paymentMethod: "bank_transfer",
+    paymentReference: "",
+    receivedOn: new Date().toISOString().slice(0, 10),
+    note: "",
+  });
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [reversingPaymentId, setReversingPaymentId] = useState("");
+  const [reversalNote, setReversalNote] = useState("");
+  const [creditNoteForm, setCreditNoteForm] = useState({
+    requestId: crypto.randomUUID(),
+    amountGross: "",
+    reason: "",
+    issuedOn: new Date().toISOString().slice(0, 10),
+    portalVisible: true,
+  });
+  const [creditNoteBusy, setCreditNoteBusy] = useState(false);
+  const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
+  const [reversingCreditNoteId, setReversingCreditNoteId] = useState("");
+  const [creditNoteReversalReason, setCreditNoteReversalReason] = useState("");
+  const [refundForm, setRefundForm] = useState({
+    requestId: crypto.randomUUID(),
+    amountGross: "",
+    paymentMethod: "bank_transfer",
+    paymentReference: "",
+    refundedOn: new Date().toISOString().slice(0, 10),
+    reason: "",
+    note: "",
+  });
+  const [refundBusy, setRefundBusy] = useState(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [reversingRefundId, setReversingRefundId] = useState("");
+  const [refundReversalReason, setRefundReversalReason] = useState("");
   const deferredSearch = useDeferredValue(filters.search);
   const effectiveFilters = useMemo(() => ({ ...filters, search: deferredSearch }), [filters, deferredSearch]);
 
@@ -729,6 +865,19 @@ function useStaffInvoicesPageContent() {
     });
   }, [filters.orderId, filters.patientId, quotes]);
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
+  const selectedCreateTotals = useMemo(
+    () =>
+      calculateInvoiceSelectionTotals(
+        selectedCreateQuote?.line_items ?? [],
+        createForm.selectedLineIndexes,
+        createForm.lineQuantities,
+      ),
+    [
+      createForm.lineQuantities,
+      createForm.selectedLineIndexes,
+      selectedCreateQuote?.line_items,
+    ],
+  );
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
@@ -737,6 +886,52 @@ function useStaffInvoicesPageContent() {
     filters.status !== "" ||
     filters.invoiceType !== "";
   const invoiceParam = searchParams.get("invoice") ?? "";
+
+  useEffect(() => {
+    if (!selectedCreateQuote || Object.keys(createForm.lineQuantities).length > 0) return;
+    setCreateForm((current) => ({
+      ...current,
+      selectedLineIndexes: selectedCreateQuote.line_items.flatMap((line, index) =>
+        invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0 ? [index] : [],
+      ),
+      lineQuantities: Object.fromEntries(
+        selectedCreateQuote.line_items.map((line, index) => [
+          String(index),
+          String(invoiceLineQuantityAvailable(line, createForm.invoiceType) || "1"),
+        ]),
+      ),
+    }));
+  }, [createForm.invoiceType, createForm.lineQuantities, selectedCreateQuote]);
+
+  useEffect(() => {
+    const firstAvailable = detail?.available_prepayments?.[0];
+    setPrepaymentInvoiceId(firstAvailable?.invoice_id ?? "");
+    setPrepaymentAmount(
+      firstAvailable
+        ? cappedPrepaymentAmount(
+            firstAvailable.available_amount,
+            detail?.balance_due,
+          )
+        : "",
+    );
+    setPrepaymentRequestId(crypto.randomUUID());
+    setPrepaymentError(null);
+  }, [detail?.id, detail?.available_prepayments]);
+
+  useEffect(() => {
+    const balance = Number(detail?.balance_due ?? 0);
+    setPaymentForm({
+      requestId: crypto.randomUUID(),
+      amountGross: Number.isFinite(balance) && balance > 0 ? balance.toFixed(2) : "",
+      paymentMethod: "bank_transfer",
+      paymentReference: "",
+      receivedOn: new Date().toISOString().slice(0, 10),
+      note: "",
+    });
+    setPaymentError(null);
+    setReversingPaymentId("");
+    setReversalNote("");
+  }, [detail?.id, detail?.balance_due]);
 
   useEffect(() => {
     return () => {
@@ -1173,7 +1368,13 @@ function useStaffInvoicesPageContent() {
     accountingMonthly,
     accountingYear,
   );
-  const applyLoadedInvoiceDetail = useCallback((data: NonNullable<typeof detail>, dunning: typeof dunningEvents) => {
+  const applyLoadedInvoiceDetail = useCallback((
+    data: NonNullable<typeof detail>,
+    dunning: typeof dunningEvents,
+    payments: InvoicePaymentTransaction[],
+    creditNotes: InvoiceCreditNoteTransaction[],
+    refunds: InvoiceRefundTransaction[],
+  ) => {
     setStatusForm(invoiceToStatusForm(data));
     setVisibilityForm(invoiceToVisibilityForm(data));
     setPayerForm(invoiceToPayerForm(data));
@@ -1184,6 +1385,9 @@ function useStaffInvoicesPageContent() {
     dispatchWorkspaceState({
       detail: data,
       dunningEvents: dunning,
+      paymentTransactions: payments,
+      creditNoteTransactions: creditNotes,
+      refundTransactions: refunds,
       detailError: null,
       detailBusy: false,
     });
@@ -1271,6 +1475,9 @@ function useStaffInvoicesPageContent() {
       dispatchWorkspaceState({
         detail: null,
         dunningEvents: [],
+        paymentTransactions: [],
+        creditNoteTransactions: [],
+        refundTransactions: [],
         detailError: null,
       });
       return;
@@ -1279,10 +1486,10 @@ function useStaffInvoicesPageContent() {
     async function loadDetail() {
       dispatchWorkspaceState({ detailBusy: true });
       try {
-        const { invoice: data, dunning } =
+        const { invoice: data, dunning, payments, creditNotes, refunds } =
           await fetchInvoiceWorkspace(selectedInvoiceId);
         if (!ignore) {
-          applyLoadedInvoiceDetail(data, dunning);
+          applyLoadedInvoiceDetail(data, dunning, payments, creditNotes, refunds);
         }
       } catch (error) {
         if (!ignore) {
@@ -1344,10 +1551,19 @@ function useStaffInvoicesPageContent() {
     }
     setCreateBusy(true);
     try {
+      const selectedLines = createForm.selectedLineIndexes.map((lineIndex) => ({
+        line_index: lineIndex,
+        quantity: Number(createForm.lineQuantities[String(lineIndex)] || 0),
+      }));
+      if (selectedLines.length === 0 || selectedLines.some((line) => line.quantity <= 0)) {
+        setCreateError(text.invoiceLinesDescription);
+        return;
+      }
       const created = await createInvoice(createForm.quoteId, {
         invoice_type: createForm.invoiceType,
         due_date: createForm.dueDate || null,
         notes: createForm.notes.trim() || null,
+        line_items: selectedLines,
       });
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));
@@ -1362,6 +1578,181 @@ function useStaffInvoicesPageContent() {
     }
   }
 
+  async function handleApplyPrepayment() {
+    if (!detail || !prepaymentInvoiceId || Number(prepaymentAmount) <= 0) return;
+    setPrepaymentBusy(true);
+    setPrepaymentError(null);
+    try {
+      const updated = await applyInvoicePrepayment(detail.id, {
+        request_id: prepaymentRequestId,
+        advance_invoice_id: prepaymentInvoiceId,
+        amount_gross: Number(prepaymentAmount),
+      });
+      setDetail(updated);
+      setPrepaymentRequestId(crypto.randomUUID());
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPrepaymentError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPrepaymentBusy(false);
+    }
+  }
+
+  async function handleRecordPayment() {
+    if (!detail || Number(paymentForm.amountGross) <= 0) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      await createInvoicePayment(detail.id, {
+        request_id: paymentForm.requestId,
+        amount_gross: Number(paymentForm.amountGross),
+        payment_method: paymentForm.paymentMethod,
+        payment_reference: paymentForm.paymentReference.trim() || null,
+        received_on: paymentForm.receivedOn,
+        note: paymentForm.note.trim() || null,
+      });
+      setPaymentForm((current) => ({
+        ...current,
+        requestId: crypto.randomUUID(),
+      }));
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function handleReversePayment(paymentId: string) {
+    if (!detail || !reversalNote.trim()) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      await reverseInvoicePayment(detail.id, paymentId, {
+        reversed_on: new Date().toISOString().slice(0, 10),
+        note: reversalNote.trim(),
+      });
+      setReversingPaymentId("");
+      setReversalNote("");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function handleCreateCreditNote() {
+    if (!detail || Number(creditNoteForm.amountGross) <= 0 || !creditNoteForm.reason.trim()) return;
+    setCreditNoteBusy(true);
+    setCreditNoteError(null);
+    try {
+      await createInvoiceCreditNote(detail.id, {
+        request_id: creditNoteForm.requestId,
+        amount_gross: Number(creditNoteForm.amountGross),
+        reason: creditNoteForm.reason.trim(),
+        issued_on: creditNoteForm.issuedOn,
+        portal_visible: creditNoteForm.portalVisible,
+      });
+      setCreditNoteForm({
+        requestId: crypto.randomUUID(),
+        amountGross: "",
+        reason: "",
+        issuedOn: new Date().toISOString().slice(0, 10),
+        portalVisible: true,
+      });
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setCreditNoteError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setCreditNoteBusy(false);
+    }
+  }
+
+  async function handleReverseCreditNote(creditNoteId: string) {
+    if (!detail || !creditNoteReversalReason.trim()) return;
+    setCreditNoteBusy(true);
+    setCreditNoteError(null);
+    try {
+      await reverseInvoiceCreditNote(detail.id, creditNoteId, {
+        reason: creditNoteReversalReason.trim(),
+        issued_on: new Date().toISOString().slice(0, 10),
+      });
+      setReversingCreditNoteId("");
+      setCreditNoteReversalReason("");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setCreditNoteError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setCreditNoteBusy(false);
+    }
+  }
+
+  async function handleRecordRefund() {
+    if (!detail || Number(refundForm.amountGross) <= 0 || !refundForm.reason.trim()) return;
+    setRefundBusy(true);
+    setRefundError(null);
+    try {
+      await createInvoiceRefund(detail.id, {
+        request_id: refundForm.requestId,
+        amount_gross: Number(refundForm.amountGross),
+        payment_method: refundForm.paymentMethod,
+        payment_reference: refundForm.paymentReference.trim() || null,
+        refunded_on: refundForm.refundedOn,
+        reason: refundForm.reason.trim(),
+        note: refundForm.note.trim() || null,
+      });
+      setRefundForm({
+        requestId: crypto.randomUUID(),
+        amountGross: "",
+        paymentMethod: "bank_transfer",
+        paymentReference: "",
+        refundedOn: new Date().toISOString().slice(0, 10),
+        reason: "",
+        note: "",
+      });
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setRefundError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setRefundBusy(false);
+    }
+  }
+
+  async function handleReverseRefund(refundId: string) {
+    if (!detail || !refundReversalReason.trim()) return;
+    setRefundBusy(true);
+    setRefundError(null);
+    try {
+      await reverseInvoiceRefund(detail.id, refundId, {
+        reversed_on: new Date().toISOString().slice(0, 10),
+        reason: refundReversalReason.trim(),
+      });
+      setReversingRefundId("");
+      setRefundReversalReason("");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setRefundError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setRefundBusy(false);
+    }
+  }
+
+  async function handleReleasePrepayment(allocationId: string) {
+    if (!detail) return;
+    setPrepaymentBusy(true);
+    setPrepaymentError(null);
+    try {
+      const updated = await releaseInvoicePrepayment(detail.id, allocationId);
+      setDetail(updated);
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPrepaymentError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPrepaymentBusy(false);
+    }
+  }
+
   async function handleSaveStatus() {
     if (!selectedInvoiceId) return;
     setStatusBusy(true);
@@ -1369,9 +1760,6 @@ function useStaffInvoicesPageContent() {
       await updateInvoiceStatus(selectedInvoiceId, {
         status: statusForm.status,
         due_date: statusForm.dueDate || null,
-        paid_amount: statusForm.paidAmount.trim()
-          ? Number(statusForm.paidAmount)
-          : null,
         notes: statusForm.notes.trim() || null,
       });
       setStatusError(null);
@@ -1875,7 +2263,7 @@ function useStaffInvoicesPageContent() {
                   cancelLabel={t.common_cancel}
                   submitLabel={t.invoices_new}
                   submitting={createBusy}
-                  submitDisabled={!createForm.quoteId}
+                  submitDisabled={!createForm.quoteId || selectedCreateTotals.gross <= 0}
                   onCancel={() => setCreateOpen(false)}
                 />
               )}
@@ -1888,15 +2276,31 @@ function useStaffInvoicesPageContent() {
                     <Field label={text.createQuoteSection}>
                       <NativeComboboxSelect
                         value={createForm.quoteId || "__empty__"}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const quoteId =
+                            event.target.value && event.target.value !== "__empty__"
+                              ? event.target.value
+                              : "";
+                          const quote = quotes.find((item) => item.id === quoteId);
                           setCreateForm((current) => ({
                             ...current,
-                            quoteId:
-                              event.target.value && event.target.value !== "__empty__"
-                                ? event.target.value
-                                : "",
-                          }))
-                        }
+                            quoteId,
+                            selectedLineIndexes:
+                              quote?.line_items.flatMap((line, index) =>
+                                invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0
+                                  ? [index]
+                                  : [],
+                              ) ?? [],
+                            lineQuantities: Object.fromEntries(
+                              quote?.line_items.map((line, index) => [
+                                String(index),
+                                String(
+                                  invoiceLineQuantityAvailable(line, createForm.invoiceType) || "1",
+                                ),
+                              ]) ?? [],
+                            ),
+                          }));
+                        }}
                         className={selectClassName}
                       >
                         <option value="__empty__">{text.chooseQuote}</option>
@@ -1917,6 +2321,153 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </section>
 
+                {selectedCreateQuote ? (
+                  <section className="rounded-lg border border-border/70 bg-card p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className={tokens.text.sectionTitle}>
+                          {titleWithDot(text.invoiceLines)}
+                        </h2>
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {text.invoiceLinesDescription}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setCreateForm((current) => ({
+                            ...current,
+                            selectedLineIndexes: selectedCreateQuote.line_items.flatMap(
+                              (line, index) =>
+                                invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0
+                                  ? [index]
+                                  : [],
+                            ),
+                          }))
+                        }
+                      >
+                        {text.selectAllLines}
+                      </Button>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      {selectedCreateQuote.line_items.map((line, lineIndex) => {
+                        const selected = createForm.selectedLineIndexes.includes(lineIndex);
+                        const availableQuantity = invoiceLineQuantityAvailable(
+                          line,
+                          createForm.invoiceType,
+                        );
+                        const fullyInvoiced = availableQuantity <= 0;
+                        return (
+                          <div
+                            key={`${selectedCreateQuote.id}-${lineIndex}`}
+                            className={cn(
+                              "grid gap-3 rounded-lg border p-3 sm:grid-cols-[auto_1fr_7rem_7rem] sm:items-center",
+                              selected
+                                ? "border-sky-300/70 bg-sky-50/40"
+                                : "border-border/70 bg-muted/20 opacity-70",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              disabled={fullyInvoiced || createForm.invoiceType === "final"}
+                              aria-label={`${text.invoiceLines}: ${line.description}`}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  selectedLineIndexes: event.target.checked
+                                    ? [...current.selectedLineIndexes, lineIndex].sort((a, b) => a - b)
+                                    : current.selectedLineIndexes.filter(
+                                        (index) => index !== lineIndex,
+                                      ),
+                                }))
+                              }
+                              className="size-4 rounded border-border"
+                            />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">
+                                {agencyServiceNameLabel(undefined, line.description, t)}
+                              </p>
+                              {line.notes ? (
+                                <p className="mt-1 whitespace-pre-line text-xs leading-5 text-muted-foreground">
+                                  {line.notes}
+                                </p>
+                              ) : null}
+                            </div>
+                            <Input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              max={String(availableQuantity)}
+                              disabled={
+                                !selected ||
+                                fullyInvoiced ||
+                                createForm.invoiceType === "final"
+                              }
+                              value={createForm.lineQuantities[String(lineIndex)] ?? ""}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  lineQuantities: {
+                                    ...current.lineQuantities,
+                                    [String(lineIndex)]: event.target.value,
+                                  },
+                                }))
+                              }
+                              aria-label={`${text.quantity}: ${line.description}`}
+                              className={shellInputClassName}
+                            />
+                            <div className="text-right text-sm tabular-nums text-foreground">
+                              {formatMoney(
+                                selectedCreateTotals.lineGrossByIndex[lineIndex] ?? 0,
+                              )}
+                              <div className="text-[11px] text-muted-foreground">
+                                {line.vat_rate}% {lang === "de" ? "USt." : "НДС"}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {selectedCreateQuote ? (
+                  <section
+                    className={cn(
+                      "rounded-lg border p-5",
+                      createForm.invoiceType === "advance"
+                        ? "border-amber-300/80 bg-amber-50/70"
+                        : "border-border/70 bg-card",
+                    )}
+                  >
+                    {createForm.invoiceType === "advance" ? (
+                      <div className="mb-4">
+                        <h2 className={tokens.text.sectionTitle}>{text.advanceVatTitle}</h2>
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                          {text.advanceVatDescription}
+                        </p>
+                      </div>
+                    ) : null}
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <MiniMetric
+                        label={text.selectionNet}
+                        value={formatMoney(selectedCreateTotals.net)}
+                      />
+                      <MiniMetric
+                        label={text.selectionVat}
+                        value={formatMoney(selectedCreateTotals.vat)}
+                      />
+                      <MiniMetric
+                        label={text.selectionGross}
+                        value={formatMoney(selectedCreateTotals.gross)}
+                      />
+                    </div>
+                  </section>
+                ) : null}
+
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.invoiceSettingsSection)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -1924,10 +2475,25 @@ function useStaffInvoicesPageContent() {
                       <NativeComboboxSelect
                         value={createForm.invoiceType}
                         onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            invoiceType: event.target.value as InvoiceType,
-                          }))
+                          setCreateForm((current) => {
+                            const invoiceType = event.target.value as InvoiceType;
+                            return {
+                              ...current,
+                              invoiceType,
+                              selectedLineIndexes:
+                                selectedCreateQuote?.line_items.flatMap((line, index) =>
+                                  invoiceLineQuantityAvailable(line, invoiceType) > 0
+                                    ? [index]
+                                    : [],
+                                ) ?? [],
+                              lineQuantities: Object.fromEntries(
+                                selectedCreateQuote?.line_items.map((line, index) => [
+                                  String(index),
+                                  String(invoiceLineQuantityAvailable(line, invoiceType)),
+                                ]) ?? [],
+                              ),
+                            };
+                          })
                         }
                         className={selectClassName}
                       >
@@ -2103,8 +2669,30 @@ function useStaffInvoicesPageContent() {
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
                       <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross)} />
+                      {Number(detail.credited_amount ?? 0) > 0 ? (
+                        <SummaryLine
+                          label={lang === "de" ? "Gutschriften" : "Кредит-ноты"}
+                          value={`−${formatMoney(detail.credited_amount)}`}
+                        />
+                      ) : null}
+                      {Number(detail.credited_amount ?? 0) > 0 ? (
+                        <SummaryLine
+                          label={lang === "de" ? "Korrigierter Betrag" : "Сумма после корректировок"}
+                          value={formatMoney(detail.adjusted_total_gross ?? detail.total_gross)}
+                        />
+                      ) : null}
                       <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
+                      <SummaryLine
+                        label={text.prepaymentApplied}
+                        value={formatMoney(detail.prepayment_applied_amount ?? 0)}
+                      />
                       <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due)} />
+                      {Number(detail.credit_balance ?? 0) > 0 ? (
+                        <SummaryLine
+                          label={lang === "de" ? "Guthaben des Patienten" : "Переплата пациента"}
+                          value={formatMoney(detail.credit_balance)}
+                        />
+                      ) : null}
                     </div>
                     <div className="space-y-2.5">
                       <div className="flex items-start justify-between gap-4">
@@ -2118,6 +2706,691 @@ function useStaffInvoicesPageContent() {
                     </div>
                   </div>
                 </SectionCard>
+
+                <SectionCard title={text.payments}>
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      {text.paymentsDescription}
+                    </p>
+
+                    {access.canManage &&
+                    !["draft", "cancelled"].includes(detail.status) &&
+                    Number(detail.balance_due ?? 0) > 0 ? (
+                      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <Field label={text.paymentAmount}>
+                          <Input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            max={String(detail.balance_due ?? "")}
+                            value={paymentForm.amountGross}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                amountGross: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentMethod}>
+                          <NativeComboboxSelect
+                            value={paymentForm.paymentMethod}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                paymentMethod: event.target.value,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            {[
+                              "bank_transfer",
+                              "card",
+                              "cash",
+                              "direct_debit",
+                              "cheque",
+                              "other",
+                            ].map((method) => (
+                              <option key={method} value={method}>
+                                {text.paymentMethods[method]}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={text.paymentDate}>
+                          <Input
+                            type="date"
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={paymentForm.receivedOn}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                receivedOn: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentReference}>
+                          <Input
+                            value={paymentForm.paymentReference}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                paymentReference: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentNote} className="sm:col-span-2">
+                          <Input
+                            value={paymentForm.note}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                note: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <div className="flex items-end sm:col-span-2 lg:col-span-3 lg:justify-end">
+                          <Button
+                            type="button"
+                            disabled={
+                              paymentBusy ||
+                              Number(paymentForm.amountGross) <= 0 ||
+                              Number(paymentForm.amountGross) > Number(detail.balance_due ?? 0) ||
+                              !paymentForm.receivedOn
+                            }
+                            onClick={() => void handleRecordPayment()}
+                          >
+                            {paymentBusy ? (
+                              <LoaderCircle className="mr-2 size-4 animate-spin" />
+                            ) : null}
+                            {text.recordPayment}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {paymentError ? (
+                      <ShellBanner tone="error">{paymentError}</ShellBanner>
+                    ) : null}
+
+                    {paymentTransactions.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                        {text.noPayments}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {paymentTransactions.map((payment) => {
+                          const isReversal = payment.transaction_type === "reversal";
+                          const canReverse =
+                            access.canManage &&
+                            !isReversal &&
+                            !payment.is_reversed &&
+                            detail.status !== "cancelled";
+                          return (
+                            <div
+                              key={payment.id}
+                              className={cn(
+                                "rounded-lg border border-border/70 bg-background/70 p-3",
+                                payment.is_reversed && "opacity-70",
+                              )}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-foreground">
+                                      {isReversal ? text.reversal : text.recordPayment}
+                                    </span>
+                                    {payment.is_reversed ? (
+                                      <StatusBadge tone="neutral">{text.reversed}</StatusBadge>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {formatDate(payment.received_on, locale, t.common_not_set)} · {text.paymentMethods[payment.payment_method] ?? payment.payment_method}
+                                    {payment.payment_reference
+                                      ? ` · ${payment.payment_reference}`
+                                      : ""}
+                                  </div>
+                                  {payment.note ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                      {payment.note}
+                                    </div>
+                                  ) : null}
+                                  {payment.created_by_name ? (
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                      {payment.created_by_name}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="text-right">
+                                  <div
+                                    className={cn(
+                                      "font-mono font-semibold tabular-nums",
+                                      isReversal ? "text-rose-700" : "text-emerald-700",
+                                    )}
+                                  >
+                                    {isReversal ? "−" : "+"}
+                                    {formatMoney(payment.amount_gross)}
+                                  </div>
+                                  {canReverse ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="mt-1 h-7 px-2 text-xs"
+                                      onClick={() => {
+                                        setReversingPaymentId(payment.id);
+                                        setReversalNote("");
+                                      }}
+                                    >
+                                      {text.reversePayment}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {reversingPaymentId === payment.id ? (
+                                <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
+                                  <Input
+                                    value={reversalNote}
+                                    onChange={(event) => setReversalNote(event.target.value)}
+                                    placeholder={text.reversalReason}
+                                    className={shellInputClassName}
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setReversingPaymentId("");
+                                        setReversalNote("");
+                                      }}
+                                    >
+                                      {t.common_cancel}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      disabled={paymentBusy || !reversalNote.trim()}
+                                      onClick={() => void handleReversePayment(payment.id)}
+                                    >
+                                      {text.reversePayment}
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard title={lang === "de" ? "Gutschriften" : "Кредит-ноты"}>
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      {lang === "de"
+                        ? "Rechnungskorrekturen werden dauerhaft protokolliert. Eine falsche Gutschrift wird storniert, nicht gelöscht."
+                        : "Корректировки счета сохраняются в журнале. Ошибочная кредит-нота отменяется, а не удаляется."}
+                    </p>
+                    {access.canManage && !["draft", "cancelled"].includes(detail.status) && Number(detail.adjusted_total_gross ?? detail.total_gross) > 0 ? (
+                      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <Field label={lang === "de" ? "Bruttobetrag" : "Сумма брутто"}>
+                          <Input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            max={String(detail.adjusted_total_gross ?? detail.total_gross)}
+                            value={creditNoteForm.amountGross}
+                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, amountGross: event.target.value }))}
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={lang === "de" ? "Datum" : "Дата"}>
+                          <Input
+                            type="date"
+                            min={detail.issued_at.slice(0, 10)}
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={creditNoteForm.issuedOn}
+                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, issuedOn: event.target.value }))}
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={lang === "de" ? "Grund" : "Причина"} className="sm:col-span-2 lg:col-span-1">
+                          <Input
+                            value={creditNoteForm.reason}
+                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, reason: event.target.value }))}
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={creditNoteForm.portalVisible}
+                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, portalVisible: event.target.checked }))}
+                          />
+                          {lang === "de" ? "Im Patientenportal anzeigen" : "Показывать в портале пациента"}
+                        </label>
+                        <div className="flex items-end lg:justify-end">
+                          <Button
+                            type="button"
+                            disabled={creditNoteBusy || Number(creditNoteForm.amountGross) <= 0 || Number(creditNoteForm.amountGross) > Number(detail.adjusted_total_gross ?? detail.total_gross) || !creditNoteForm.reason.trim() || !creditNoteForm.issuedOn}
+                            onClick={() => void handleCreateCreditNote()}
+                          >
+                            {creditNoteBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                            {lang === "de" ? "Gutschrift erstellen" : "Создать кредит-ноту"}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {creditNoteError ? <ShellBanner tone="error">{creditNoteError}</ShellBanner> : null}
+                    {creditNoteTransactions.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                        {lang === "de" ? "Keine Gutschriften." : "Кредит-нот пока нет."}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {creditNoteTransactions.map((credit) => {
+                          const isReversal = credit.transaction_type === "reversal";
+                          const canReverse = access.canManage && !isReversal && !credit.is_reversed && detail.status !== "cancelled";
+                          return (
+                            <div key={credit.id} className={cn("rounded-lg border border-border/70 bg-background/70 p-3", credit.is_reversed && "opacity-70")}>
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-foreground">{credit.document_number}</span>
+                                    {credit.is_reversed ? <StatusBadge tone="neutral">{text.reversed}</StatusBadge> : null}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">{formatDate(credit.issued_on, locale, t.common_not_set)} · {credit.reason}</div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {credit.portal_visible ? (lang === "de" ? "Im Portal sichtbar" : "Видно в портале") : (lang === "de" ? "Nur intern" : "Только для сотрудников")}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className={cn("font-mono font-semibold tabular-nums", isReversal ? "text-foreground" : "text-emerald-700")}>{isReversal ? "+" : "−"}{formatMoney(credit.amount_gross)}</div>
+                                  {canReverse ? (
+                                    <Button type="button" variant="ghost" size="sm" className="mt-1 h-7 px-2 text-xs" onClick={() => { setReversingCreditNoteId(credit.id); setCreditNoteReversalReason(""); }}>
+                                      {lang === "de" ? "Stornieren" : "Отменить"}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {reversingCreditNoteId === credit.id ? (
+                                <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
+                                  <Input value={creditNoteReversalReason} onChange={(event) => setCreditNoteReversalReason(event.target.value)} placeholder={lang === "de" ? "Stornogrund" : "Причина отмены"} className={shellInputClassName} />
+                                  <div className="flex gap-2">
+                                    <Button type="button" variant="outline" onClick={() => { setReversingCreditNoteId(""); setCreditNoteReversalReason(""); }}>{t.common_cancel}</Button>
+                                    <Button type="button" disabled={creditNoteBusy || !creditNoteReversalReason.trim()} onClick={() => void handleReverseCreditNote(credit.id)}>{lang === "de" ? "Stornieren" : "Отменить"}</Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                <SectionCard title={text.refunds}>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <p className="max-w-3xl text-sm text-muted-foreground">
+                        {text.refundsDescription}
+                      </p>
+                      <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-right">
+                        <div className="text-xs text-muted-foreground">
+                          {lang === "de" ? "Verfügbar zur Auszahlung" : "Доступно к возврату"}
+                        </div>
+                        <div className="font-mono font-semibold tabular-nums text-foreground">
+                          {formatMoney(detail.refundable_cash_amount ?? 0)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {access.canManage &&
+                    !["draft", "cancelled"].includes(detail.status) &&
+                    Number(detail.refundable_cash_amount ?? 0) > 0 ? (
+                      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <Field label={text.refundAmount}>
+                          <Input
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            max={String(detail.refundable_cash_amount ?? "")}
+                            value={refundForm.amountGross}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                amountGross: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentMethod}>
+                          <NativeComboboxSelect
+                            value={refundForm.paymentMethod}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                paymentMethod: event.target.value,
+                              }))
+                            }
+                            className={selectClassName}
+                          >
+                            {[
+                              "bank_transfer",
+                              "card",
+                              "cash",
+                              "direct_debit",
+                              "cheque",
+                              "other",
+                            ].map((method) => (
+                              <option key={method} value={method}>
+                                {text.paymentMethods[method]}
+                              </option>
+                            ))}
+                          </NativeComboboxSelect>
+                        </Field>
+                        <Field label={text.refundDate}>
+                          <Input
+                            type="date"
+                            min={detail.issued_at.slice(0, 10)}
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={refundForm.refundedOn}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                refundedOn: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.refundReason} className="sm:col-span-2">
+                          <Input
+                            value={refundForm.reason}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                reason: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.paymentReference}>
+                          <Input
+                            value={refundForm.paymentReference}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                paymentReference: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={text.refundNote} className="sm:col-span-2">
+                          <Input
+                            value={refundForm.note}
+                            onChange={(event) =>
+                              setRefundForm((current) => ({
+                                ...current,
+                                note: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <div className="flex items-end lg:justify-end">
+                          <Button
+                            type="button"
+                            disabled={
+                              refundBusy ||
+                              Number(refundForm.amountGross) <= 0 ||
+                              Number(refundForm.amountGross) >
+                                Number(detail.refundable_cash_amount ?? 0) ||
+                              !refundForm.reason.trim() ||
+                              !refundForm.refundedOn
+                            }
+                            onClick={() => void handleRecordRefund()}
+                          >
+                            {refundBusy ? (
+                              <LoaderCircle className="mr-2 size-4 animate-spin" />
+                            ) : null}
+                            {text.recordRefund}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {refundError ? <ShellBanner tone="error">{refundError}</ShellBanner> : null}
+
+                    {refundTransactions.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                        {text.noRefunds}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {refundTransactions.map((refund) => {
+                          const isReversal = refund.transaction_type === "reversal";
+                          const canReverse =
+                            access.canManage &&
+                            !isReversal &&
+                            !refund.is_reversed &&
+                            detail.status !== "cancelled";
+                          return (
+                            <div
+                              key={refund.id}
+                              className={cn(
+                                "rounded-lg border border-border/70 bg-background/70 p-3",
+                                refund.is_reversed && "opacity-70",
+                              )}
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-foreground">
+                                      {isReversal ? text.reversal : text.recordRefund}
+                                    </span>
+                                    {refund.is_reversed ? (
+                                      <StatusBadge tone="neutral">{text.reversed}</StatusBadge>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {formatDate(refund.refunded_on, locale, t.common_not_set)} · {refund.reason}
+                                  </div>
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {text.paymentMethods[refund.payment_method] ?? refund.payment_method}
+                                    {refund.payment_reference ? ` · ${refund.payment_reference}` : ""}
+                                  </div>
+                                  {refund.note ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">{refund.note}</div>
+                                  ) : null}
+                                  {refund.created_by_name ? (
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                      {refund.created_by_name}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="text-right">
+                                  <div
+                                    className={cn(
+                                      "font-mono font-semibold tabular-nums",
+                                      isReversal ? "text-foreground" : "text-rose-700",
+                                    )}
+                                  >
+                                    {isReversal ? "+" : "−"}
+                                    {formatMoney(refund.amount_gross)}
+                                  </div>
+                                  {canReverse ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="mt-1 h-7 px-2 text-xs"
+                                      onClick={() => {
+                                        setReversingRefundId(refund.id);
+                                        setRefundReversalReason("");
+                                      }}
+                                    >
+                                      {text.reverseRefund}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              {reversingRefundId === refund.id ? (
+                                <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
+                                  <Input
+                                    value={refundReversalReason}
+                                    onChange={(event) => setRefundReversalReason(event.target.value)}
+                                    placeholder={text.reversalReason}
+                                    className={shellInputClassName}
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setReversingRefundId("");
+                                        setRefundReversalReason("");
+                                      }}
+                                    >
+                                      {t.common_cancel}
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      disabled={refundBusy || !refundReversalReason.trim()}
+                                      onClick={() => void handleReverseRefund(refund.id)}
+                                    >
+                                      {text.reverseRefund}
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </SectionCard>
+
+                {detail.invoice_type !== "advance" &&
+                ((detail.available_prepayments?.length ?? 0) > 0 ||
+                  (detail.prepayment_allocations?.length ?? 0) > 0) ? (
+                  <SectionCard title={text.prepayment}>
+                    <div className="space-y-4">
+                      {(detail.prepayment_allocations?.length ?? 0) > 0 ? (
+                        <div className="space-y-2">
+                          {detail.prepayment_allocations?.map((allocation) => (
+                            <div
+                              key={allocation.id}
+                              className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm"
+                            >
+                              <span className="text-muted-foreground">
+                                {allocation.advance_invoice_number}
+                              </span>
+                              <span className="font-mono font-semibold tabular-nums text-foreground">
+                                {formatMoney(allocation.amount_gross)}
+                              </span>
+                              {access.canManage ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-7 rounded-md"
+                                  disabled={prepaymentBusy}
+                                  onClick={() =>
+                                    void handleReleasePrepayment(allocation.id)
+                                  }
+                                  aria-label={
+                                    lang === "de"
+                                      ? "Vorauszahlung entfernen"
+                                      : "Убрать предоплату"
+                                  }
+                                >
+                                  <X className="size-3.5" />
+                                </Button>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(detail.available_prepayments?.length ?? 0) > 0 && access.canManage ? (
+                        <div className="grid gap-3 sm:grid-cols-[1fr_10rem_auto] sm:items-end">
+                          <Field label={text.availableAdvance}>
+                            <NativeComboboxSelect
+                              value={prepaymentInvoiceId}
+                              onChange={(event) => {
+                                const invoiceId = event.target.value;
+                                const advance = detail.available_prepayments?.find(
+                                  (item) => item.invoice_id === invoiceId,
+                                );
+                                setPrepaymentInvoiceId(invoiceId);
+                                setPrepaymentAmount(
+                                  advance
+                                    ? cappedPrepaymentAmount(
+                                        advance.available_amount,
+                                        detail.balance_due,
+                                      )
+                                    : "",
+                                );
+                              }}
+                              className={selectClassName}
+                            >
+                              {detail.available_prepayments?.map((advance) => (
+                                <option key={advance.invoice_id} value={advance.invoice_id}>
+                                  {advance.invoice_number} · {formatMoney(advance.available_amount)}
+                                </option>
+                              ))}
+                            </NativeComboboxSelect>
+                          </Field>
+                          <Field label={text.amountToApply}>
+                            <Input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              max={cappedPrepaymentAmount(
+                                detail.available_prepayments?.find(
+                                  (item) => item.invoice_id === prepaymentInvoiceId,
+                                )?.available_amount,
+                                detail.balance_due,
+                              )}
+                              value={prepaymentAmount}
+                              onChange={(event) => setPrepaymentAmount(event.target.value)}
+                              className={shellInputClassName}
+                            />
+                          </Field>
+                          <Button
+                            type="button"
+                            disabled={
+                              prepaymentBusy ||
+                              !prepaymentInvoiceId ||
+                              Number(prepaymentAmount) <= 0
+                            }
+                            onClick={() => void handleApplyPrepayment()}
+                          >
+                            {prepaymentBusy ? (
+                              <LoaderCircle className="mr-2 size-4 animate-spin" />
+                            ) : null}
+                            {text.applyPrepayment}
+                          </Button>
+                        </div>
+                      ) : null}
+                      {prepaymentError ? (
+                        <ShellBanner tone="error">{prepaymentError}</ShellBanner>
+                      ) : null}
+                    </div>
+                  </SectionCard>
+                ) : null}
 
                 <SectionCard title={t.providers_linked_patients}>
                   <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
@@ -2718,7 +3991,7 @@ function useStaffInvoicesPageContent() {
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-2">
                 <Field label={t.users_status}>
                   <NativeComboboxSelect
                     value={statusForm.status}
@@ -2732,7 +4005,11 @@ function useStaffInvoicesPageContent() {
                     disabled={!access.canManage}
                   >
                     {INVOICE_STATUSES.map((status) => (
-                      <option key={status} value={status}>
+                      <option
+                        key={status}
+                        value={status}
+                        disabled={["paid", "partially_paid"].includes(status)}
+                      >
                         {invoiceStatusLabel(status)}
                       </option>
                     ))}
@@ -2749,20 +4026,7 @@ function useStaffInvoicesPageContent() {
                     disabled={!access.canManage}
                   />
                 </Field>
-                <Field label={t.invoices_paid}>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    className={shellInputClassName}
-                    value={statusForm.paidAmount}
-                    onChange={(event) =>
-                      setStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
-                    }
-                    disabled={!access.canManage}
-                  />
-                </Field>
-                <Field label={text.notes} className="lg:col-span-3">
+                <Field label={text.notes} className="lg:col-span-2">
                   <textarea
                     className={textareaClassName}
                     value={statusForm.notes}

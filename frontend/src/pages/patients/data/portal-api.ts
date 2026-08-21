@@ -1,6 +1,7 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
 
 import type {
+  PortalAccountStatement,
   PortalAppointmentItem,
   PortalAppointmentRequestItem,
   PortalConciergeServiceItem,
@@ -8,11 +9,15 @@ import type {
   PortalDocumentItem,
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
+  PortalInvoiceCreditNoteHistoryResponse,
   PortalInvoiceItem,
+  PortalInvoicePaymentHistoryResponse,
+  PortalInvoiceRefundHistoryResponse,
   PortalNextActionItem,
   PortalNextActionsResponse,
   PortalPrivacyRequest,
   PortalRecommendationItem,
+  PortalSubscriptionsResponse,
   PortalTranslationRequestItem,
   PortalUploadedDocumentItem,
 } from "@/pages/patients/model/portal-shared";
@@ -203,8 +208,39 @@ export function fetchPortalInvoices() {
   });
 }
 
+export function fetchPortalAccountStatement(currency?: string) {
+  const query = currency ? `?currency=${encodeURIComponent(currency)}` : "";
+  return apiFetch<PortalAccountStatement>(`/me/account-statement${query}`, {
+    cacheTtlMs: PORTAL_CACHE_TTL_MS,
+  });
+}
+
+export function fetchPortalSubscriptions() {
+  return apiFetch<PortalSubscriptionsResponse>("/me/subscriptions", {
+    cacheTtlMs: PORTAL_CACHE_TTL_MS,
+  });
+}
+
 export function fetchPortalInvoiceDetail(invoiceId: string) {
   return apiFetch<PortalInvoiceItem>(`/me/invoices/${invoiceId}`);
+}
+
+export function fetchPortalInvoicePayments(invoiceId: string) {
+  return apiFetch<PortalInvoicePaymentHistoryResponse>(
+    `/me/invoices/${invoiceId}/payments`,
+  );
+}
+
+export function fetchPortalInvoiceCreditNotes(invoiceId: string) {
+  return apiFetch<PortalInvoiceCreditNoteHistoryResponse>(
+    `/me/invoices/${invoiceId}/credit-notes`,
+  );
+}
+
+export function fetchPortalInvoiceRefunds(invoiceId: string) {
+  return apiFetch<PortalInvoiceRefundHistoryResponse>(
+    `/me/invoices/${invoiceId}/refunds`,
+  );
 }
 
 export function uploadPortalPaymentProof(formData: FormData) {

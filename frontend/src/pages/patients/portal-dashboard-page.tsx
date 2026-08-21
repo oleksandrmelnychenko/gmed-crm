@@ -57,6 +57,7 @@ import type {
   PortalRecommendationItem,
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
+import { PatientPortalMobileAccess } from "@/pages/patients/ui/patient-portal-mobile-access";
 
 const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "appointment.created",
@@ -421,6 +422,8 @@ function usePatientDashboardPageContent() {
       />
 
       {error ? <Banner tone="error" withIcon>{error}</Banner> : null}
+
+      <PatientPortalMobileAccess />
 
       {documentAlerts && documentAlerts.configured_rule_count > 0 ? (
         documentAlerts.document_pack_complete ? (

@@ -1,0 +1,20 @@
+{
+  "name": "GMED Patient Portal",
+  "short_name": "GMED",
+  "description": "Appointments, documents, services and invoices in the GMED patient portal.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#6d28d9",
+  "orientation": "any",
+  "categories": ["medical", "health", "business"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -24,6 +24,101 @@ export type InvoiceLineItem = {
   line_gross: string;
   external_document_id?: string | null;
   notes?: string | null;
+  source_order_leistung_id?: string | null;
+  quote_line_index?: number;
+  quoted_quantity?: string;
+  invoiced_quantity?: string;
+  remaining_quantity?: string;
+  fully_invoiced?: boolean;
+};
+
+export type InvoicePrepaymentOption = {
+  invoice_id: string;
+  invoice_number: string;
+  total_gross: unknown;
+  paid_amount: unknown;
+  allocated_amount: unknown;
+  available_amount: unknown;
+};
+
+export type InvoicePrepaymentAllocation = {
+  id: string;
+  advance_invoice_id: string;
+  advance_invoice_number: string;
+  amount_gross: unknown;
+  created_at: string;
+};
+
+export type InvoicePaymentTransaction = {
+  id: string;
+  invoice_id: string;
+  transaction_type: "payment" | "reversal";
+  reverses_transaction_id: string | null;
+  reversed_by_transaction_id: string | null;
+  is_reversed: boolean;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  payment_method: string;
+  payment_reference: string | null;
+  received_on: string;
+  note?: string | null;
+  created_by?: string;
+  created_by_name?: string;
+  created_by_role?: string;
+  created_at: string;
+};
+
+export type InvoicePaymentHistoryResponse = {
+  items: InvoicePaymentTransaction[];
+};
+
+export type InvoiceCreditNoteTransaction = {
+  id: string;
+  invoice_id: string;
+  transaction_type: "credit_note" | "reversal";
+  reverses_transaction_id: string | null;
+  reversed_by_transaction_id: string | null;
+  is_reversed: boolean;
+  document_number: string;
+  reason: string;
+  amounts_visible: boolean;
+  amount_net: unknown;
+  amount_vat: unknown;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  currency: string;
+  issued_on: string;
+  portal_visible: boolean;
+  created_by_name?: string;
+  created_at: string;
+};
+
+export type InvoiceCreditNoteHistoryResponse = {
+  items: InvoiceCreditNoteTransaction[];
+};
+
+export type InvoiceRefundTransaction = {
+  id: string;
+  invoice_id: string;
+  transaction_type: "refund" | "reversal";
+  reverses_transaction_id: string | null;
+  reversed_by_transaction_id: string | null;
+  is_reversed: boolean;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  payment_method: string;
+  payment_reference: string | null;
+  refunded_on: string;
+  reason: string;
+  note?: string | null;
+  created_by?: string;
+  created_by_name?: string;
+  created_by_role?: string;
+  created_at: string;
+};
+
+export type InvoiceRefundHistoryResponse = {
+  items: InvoiceRefundTransaction[];
 };
 
 type SupportingDocument = {
@@ -73,8 +168,13 @@ export type InvoiceItem = {
   total_net: unknown;
   total_vat: unknown;
   total_gross: unknown;
+  credited_amount?: unknown;
+  adjusted_total_gross?: unknown;
   paid_amount: unknown;
+  prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  credit_balance?: unknown;
+  refundable_cash_amount?: unknown;
   paid_at: string | null;
   notes: string | null;
   portal_visible?: boolean;
@@ -88,6 +188,8 @@ export type InvoiceItem = {
   updated_at: string;
   line_items?: InvoiceLineItem[];
   supporting_documents?: SupportingDocument[];
+  available_prepayments?: InvoicePrepaymentOption[];
+  prepayment_allocations?: InvoicePrepaymentAllocation[];
 };
 
 export type InvoiceListResponse = {
@@ -173,6 +275,7 @@ export type QuoteOption = {
   patient_pid: string;
   quote_number: string;
   total_gross: unknown;
+  line_items: InvoiceLineItem[];
 };
 
 export type Filters = {
@@ -189,12 +292,13 @@ export type CreateForm = {
   invoiceType: InvoiceType;
   dueDate: string;
   notes: string;
+  selectedLineIndexes: number[];
+  lineQuantities: Record<string, string>;
 };
 
 export type StatusForm = {
   status: InvoiceStatus;
   dueDate: string;
-  paidAmount: string;
   notes: string;
 };
 

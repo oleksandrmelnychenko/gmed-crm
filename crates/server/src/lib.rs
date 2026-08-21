@@ -1,4 +1,8 @@
 #![recursion_limit = "256"]
+// Axum handlers intentionally return `Response` as their uniform HTTP error type.
+// Clippy 1.98 flags that framework type as a large `Err` variant across the crate;
+// changing hundreds of handler signatures would add boxing without reducing risk.
+#![allow(clippy::result_large_err)]
 
 pub mod access;
 pub mod audit;

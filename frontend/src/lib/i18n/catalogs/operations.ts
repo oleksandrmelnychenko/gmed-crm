@@ -301,6 +301,7 @@ export interface OperationsTranslations {
   lead_type_questionnaire: string;
   lead_type_console: string;
   lead_source_manual: string;
+  lead_source_existing_patient: string;
   lead_source_agent: string;
   lead_source_website: string;
   lead_source_website_wizard: string;
@@ -856,6 +857,7 @@ export const operationsRu: OperationsTranslations = {
   lead_type_questionnaire: "Опросник",
   lead_type_console: "Консоль",
   lead_source_manual: "Вручную",
+  lead_source_existing_patient: "Существующий пациент",
   lead_source_agent: "Агент",
   lead_source_website: "Сайт",
   lead_source_website_wizard: "Мастер на сайте",
@@ -1432,6 +1434,7 @@ export const operationsDe: OperationsTranslations = {
   lead_type_questionnaire: "Fragebogen",
   lead_type_console: "Konsole",
   lead_source_manual: "Manuell",
+  lead_source_existing_patient: "Bestehender Patient",
   lead_source_agent: "Agent",
   lead_source_website: "Website",
   lead_source_website_wizard: "Website-Assistent",

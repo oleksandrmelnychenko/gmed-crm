@@ -107,6 +107,18 @@ const PatientRecommendationsPage = lazy(() =>
   })),
 );
 
+const PatientSubscriptionsPage = lazy(() =>
+  import("@/pages/patients/portal-subscriptions-page").then((module) => ({
+    default: module.PatientSubscriptionsPage,
+  })),
+);
+
+const PatientNotificationsPage = lazy(() =>
+  import("@/pages/patients/portal-notifications-page").then((module) => ({
+    default: module.PatientNotificationsPage,
+  })),
+);
+
 const LeadsPage = lazy(() =>
   import("@/pages/leads").then((module) => ({
     default: module.LeadsPage,
@@ -128,6 +140,12 @@ const ContractsPage = lazy(() =>
 const InvoicesPage = lazy(() =>
   import("@/pages/invoices").then((module) => ({
     default: module.InvoicesPage,
+  })),
+);
+
+const CompanyFinancePage = lazy(() =>
+  import("@/pages/company-finance").then((module) => ({
+    default: module.CompanyFinancePage,
   })),
 );
 
@@ -158,6 +176,18 @@ const PrivacyPage = lazy(() =>
 const ServicesPage = lazy(() =>
   import("@/pages/services").then((module) => ({
     default: module.ServicesPage,
+  })),
+);
+
+const ConciergeWorkspacePage = lazy(() =>
+  import("@/pages/concierge").then((module) => ({
+    default: module.ConciergeWorkspacePage,
+  })),
+);
+
+const ConciergeTaskManagerPage = lazy(() =>
+  import("@/pages/concierge").then((module) => ({
+    default: module.ConciergeTaskManagerPage,
   })),
 );
 
@@ -337,6 +367,7 @@ function AppRoutes() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
+            <Route path="notifications" element={<PatientNotificationsPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="sops" element={<SopsPage />} />
@@ -344,12 +375,14 @@ function AppRoutes() {
             <Route path="patients" element={<PatientsPage />} />
             <Route path="patients/:id" element={<PatientDetailPage />} />
             <Route path="recommendations" element={<PatientRecommendationsPage />} />
+            <Route path="subscriptions" element={<PatientSubscriptionsPage />} />
             <Route path="providers" element={<ProvidersPage />} />
             <Route path="providers/:id" element={<ProviderDetailPage />} />
             <Route path="orders" element={<OrdersPage />} />
             <Route path="orders/:orderId" element={<OrdersPage />} />
             <Route path="contracts" element={<ContractsPage />} />
             <Route path="invoices" element={<InvoicesPage />} />
+            <Route path="company-finance" element={<CompanyFinancePage />} />
             <Route path="finance-catalog" element={<FinanceCatalogPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/intake" element={<DocumentsPage />} />
@@ -360,6 +393,8 @@ function AppRoutes() {
             />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
             <Route path="specializations" element={<SpecializationsPage />} />
+            <Route path="concierge" element={<ConciergeWorkspacePage />} />
+            <Route path="task-manager" element={<ConciergeTaskManagerPage />} />
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="privacy" element={<PrivacyPage />} />

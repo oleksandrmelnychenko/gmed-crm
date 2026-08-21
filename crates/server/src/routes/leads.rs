@@ -13,10 +13,10 @@ use sqlx::Row;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{NewStoredDocument, persist_document_file};
 use crate::state::AppState;
+use crate::{access, audit};
 use gmed_domain::role::Role;
 
 const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
@@ -34,6 +34,10 @@ pub fn public_router() -> Router<AppState> {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/leads", get(list_leads).post(create_lead))
+        .route(
+            "/patients/{patient_id}/repeat-intake",
+            post(create_repeat_patient_intake),
+        )
         .route("/leads/{lead_id}", get(get_lead))
         .route("/leads/{lead_id}/update", post(update_lead))
         .route(
@@ -135,6 +139,11 @@ struct CreateLeadRequest {
     source: Option<String>,
     country: Option<String>,
     notes: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RepeatPatientIntakeRequest {
+    request_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -1617,6 +1626,268 @@ async fn create_lead(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
+}
+
+async fn create_repeat_patient_intake(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<RepeatPatientIntakeRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+        return e;
+    }
+    if !auth.role.has_full_access() && access::requires_patient_assignment(auth.role) {
+        match access::has_active_patient_assignment(&state.db, patient_id, auth.user_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_id, "validate repeat intake patient access");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate patient access",
+                );
+            }
+        }
+    }
+
+    let retention_years =
+        crate::routes::patients::load_patient_clinical_retention_years(&state, 30).await;
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "begin repeat patient intake");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            );
+        }
+    };
+    if let Err(error) = sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || ':' || $2::text, 0))",
+    )
+    .bind(patient_id)
+    .bind(body.request_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, request_id = %body.request_id, "lock repeat patient intake request");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create repeat intake",
+        );
+    }
+    let existing = match sqlx::query(
+        r#"SELECT lead.id, case_record.id AS case_id, case_record.case_id AS case_code
+           FROM leads lead
+           JOIN cases case_record ON case_record.source_lead_id = lead.id
+           WHERE lead.prospect_patient_id = $1
+             AND lead.flow = 'repeat_patient'
+             AND lead.wizard_state ->> 'repeat_intake_request_id' = $2
+           ORDER BY lead.created_at DESC, lead.id DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .bind(body.request_id.to_string())
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, request_id = %body.request_id, "find repeat patient intake replay");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            );
+        }
+    };
+    if let Some(existing) = existing {
+        let lead_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        let case_id = existing.try_get::<Uuid, _>("case_id").unwrap_or_default();
+        let case_code = existing
+            .try_get::<String, _>("case_code")
+            .unwrap_or_default();
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, patient_id = %patient_id, request_id = %body.request_id, "commit repeat patient intake replay");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            );
+        }
+        return Json(json!({
+            "id": lead_id,
+            "patient_id": patient_id,
+            "case_id": case_id,
+            "case_code": case_code,
+            "request_id": body.request_id,
+            "idempotent_replay": true,
+        }))
+        .into_response();
+    }
+
+    let created = match sqlx::query(
+        r#"INSERT INTO leads (
+               first_name, last_name, date_of_birth, legal_sex,
+               email, phone, country, street_address, city, zip_code,
+               primary_language, has_insurance, insurance_provider,
+               insurance_number, insurance_type, trusted_contact_name,
+               trusted_contact_phone, trusted_contact_relation,
+               source, flow, intake_source, intake_model,
+               prospect_patient_id, wizard_state, created_by
+           )
+           SELECT patient.first_name,
+                  patient.last_name,
+                  patient.birth_date,
+                  patient.gender,
+                  patient.email,
+                  patient.phone_primary,
+                  COALESCE(patient.residence_country, patient.address_country),
+                  patient.address_street,
+                  patient.address_city,
+                  patient.address_zip,
+                  patient.languages[1],
+                  CASE
+                    WHEN patient.insurance_type IS NULL THEN NULL
+                    WHEN patient.insurance_type = 'self_pay' THEN false
+                    ELSE true
+                  END,
+                  patient.insurance_provider,
+                  patient.insurance_number,
+                  patient.insurance_type,
+                  patient.emergency_contact_name,
+                  patient.emergency_contact_phone,
+                  patient.emergency_contact_relation,
+                  'existing_patient',
+                  'repeat_patient',
+                  'manual',
+                  'patient_first',
+                  patient.id,
+                  jsonb_build_object(
+                    'repeat_patient_id', patient.id,
+                    'source_patient_pid', patient.patient_id,
+                    'prefilled_from_patient', true,
+                    'repeat_intake_request_id', $3::text
+                  ),
+                  $2
+           FROM patients patient
+           WHERE patient.id = $1
+             AND patient.lifecycle_status IN ('active', 'inactive')
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "Active or inactive patient not found",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, "create repeat patient lead");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            );
+        }
+    };
+    let lead_id = created.try_get::<Uuid, _>("id").unwrap_or_default();
+
+    let (case_id, case_code) = match ensure_prospect_case(
+        &mut tx,
+        lead_id,
+        patient_id,
+        auth.user_id,
+        "",
+        "",
+        retention_years,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_id, lead_id = %lead_id, "create repeat patient case");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create repeat intake",
+            );
+        }
+    };
+    if let Err(error) =
+        ensure_prospect_assignments(&mut tx, patient_id, case_id, auth.user_id).await
+    {
+        tracing::error!(error = %error, patient_id = %patient_id, lead_id = %lead_id, "assign repeat patient case");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create repeat intake",
+        );
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, patient_id = %patient_id, lead_id = %lead_id, "commit repeat patient intake");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create repeat intake",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_repeat_patient_intake",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({ "patient_id": patient_id, "case_id": case_id }),
+    ));
+    if crate::routes::workflow_lifecycle::record_event(
+        &state,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: lead_id,
+            from_stage: None,
+            to_stage: "new",
+            transition_kind: "created",
+            changed_by: Some(auth.user_id),
+            note: Some("Repeat intake for existing patient"),
+            metadata: json!({
+                "source": "existing_patient",
+                "patient_id": patient_id,
+                "case_id": case_id,
+            }),
+        },
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(patient_id = %patient_id, lead_id = %lead_id, "repeat intake lifecycle event was not persisted");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.created",
+        lead_id,
+        json!({
+            "source": "existing_patient",
+            "patient_id": patient_id,
+            "case_id": case_id,
+        }),
+    )
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "id": lead_id,
+            "patient_id": patient_id,
+            "case_id": case_id,
+            "case_code": case_code,
+            "request_id": body.request_id,
+            "idempotent_replay": false,
+        })),
+    )
+        .into_response()
 }
 
 async fn get_lead(

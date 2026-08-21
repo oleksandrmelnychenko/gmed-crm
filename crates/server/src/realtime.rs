@@ -706,6 +706,29 @@ pub async fn publish_task_event(
     publish_event(state, event).await;
 }
 
+pub async fn publish_concierge_operational_task_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    task_id: Uuid,
+    assigned_to: Uuid,
+    payload: Value,
+) {
+    let target_user_ids = [actor_user_id, Some(assigned_to)]
+        .into_iter()
+        .flatten()
+        .collect();
+    publish_event(
+        state,
+        RealtimeEvent::new(event_type, "task", task_id)
+            .actor(actor_user_id)
+            .target_users(target_user_ids)
+            .roles(&["ceo"])
+            .payload(payload),
+    )
+    .await;
+}
+
 pub async fn publish_workflow_checklist_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,

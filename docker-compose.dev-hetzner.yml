@@ -29,6 +29,7 @@ services:
         VITE_DEV_LOGIN_EMAIL: "admin@gmed.de"
         VITE_DEV_LOGIN_PASSWORD: "admin123"
         VITE_DEFAULT_LANG: "ru"
+        VITE_RELEASE_CHANNEL: "dev"
 
   backend:
     # Publish the metrics-only listener so monitoring's Prometheus can

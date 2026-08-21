@@ -1,0 +1,1 @@
+export { CompanyFinancePage } from "./page";

@@ -193,6 +193,7 @@ export type PatientFinancialSummary = {
   margin_net: string | null;
   margin_percent: string | null;
   margin_visible: boolean;
+  reconciliation_required?: boolean;
   filters?: {
     from?: string | null;
     to?: string | null;
@@ -224,6 +225,120 @@ export type PatientFinancialLedger = {
   patient_id: string;
   margin_visible: boolean;
   entries: PatientFinancialLedgerEntry[];
+};
+
+export type PatientAccountStatementItem = {
+  id: string;
+  kind: "invoice" | "prepayment" | "external_expense" | "service";
+  entry_date: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  document_number?: string | null;
+  description: string;
+  status: string;
+  payment_state: string;
+  paid_by?: "patient" | "agency" | "unpaid" | null;
+  service_delivered?: boolean;
+  amounts_visible: boolean;
+  amount_gross?: string | null;
+  cash_paid?: string | null;
+  prepayment_applied?: string | null;
+  prepayment_allocated?: string | null;
+  prepayment_available?: string | null;
+  patient_receivable?: string | null;
+  allocated_receivable?: string | null;
+  remaining_receivable?: string | null;
+  provider_liability?: string | null;
+  amount_due?: string | null;
+  quantity?: string | null;
+  invoiced_quantity?: string | null;
+  currency?: string | null;
+  due_date?: string | null;
+};
+
+export type PatientAccountMovement = {
+  id: string;
+  kind:
+    | "invoice"
+    | "payment"
+    | "payment_reversal"
+    | "refund"
+    | "refund_reversal"
+    | "balance_adjustment"
+    | "balance_adjustment_reversal"
+    | "external_receivable"
+    | "external_allocation"
+    | "external_allocation_reversal";
+  direction: "debit" | "credit";
+  entry_date: string;
+  occurred_at: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  document_number?: string | null;
+  description: string;
+  debit: string;
+  credit: string;
+  balance_after: string;
+  currency: string;
+};
+
+export type PatientBalanceAdjustment = {
+  id: string;
+  patient_id: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  transaction_type: "adjustment" | "reversal";
+  reverses_adjustment_id?: string | null;
+  reversed_by_adjustment_id?: string | null;
+  is_reversed: boolean;
+  direction: "debit" | "credit";
+  category: "opening_balance" | "fee" | "goodwill" | "correction" | "other";
+  amount: string;
+  currency: string;
+  effective_on: string;
+  reason: string;
+  note?: string | null;
+  portal_visible: boolean;
+  created_by: string;
+  created_by_name: string;
+  created_by_role: string;
+  created_at: string;
+};
+
+export type PatientBalanceAdjustmentResponse = {
+  items: PatientBalanceAdjustment[];
+};
+
+export type PatientAccountStatement = {
+  patient_id: string;
+  currency: string;
+  available_currencies: string[];
+  scope: "staff" | "patient_portal";
+  amounts_complete: boolean;
+  summary: {
+    invoiced_gross: string;
+    cash_paid: string;
+    prepayment_applied: string;
+    available_prepayment: string;
+    invoice_due: string;
+    external_receivable: string | null;
+    total_due: string | null;
+    reconciliation_required: boolean;
+    opening_balance: string;
+    debit_total: string;
+    credit_total: string;
+    calculated_balance: string;
+    closing_balance: string | null;
+    balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
+    unreconciled_external_debit: string;
+  };
+  redaction: {
+    hidden_invoice_amount_count: number;
+    external_expense_count: number;
+    services_hidden: boolean;
+  };
+  movements: PatientAccountMovement[];
+  items: PatientAccountStatementItem[];
 };
 
 export type PatientServicePackageItem = {

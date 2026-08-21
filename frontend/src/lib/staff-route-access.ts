@@ -121,6 +121,11 @@ const ROLES_SERVICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
+const ROLES_CONCIERGE_WORKSPACE = [
+  "ceo",
+  "concierge",
+] as const satisfies readonly StaffRole[];
+
 type RouteRule = {
   id: string;
   match: "exact" | "prefix";
@@ -158,6 +163,20 @@ function pathMatches(pathname: string, rule: RouteRule): boolean {
  * More specific rules must appear earlier than broader prefixes.
  */
 const STAFF_ROUTE_RULES: RouteRule[] = [
+  {
+    id: "concierge",
+    match: "exact",
+    path: "/concierge",
+    roles: ROLES_CONCIERGE_WORKSPACE,
+    nav: { section: "main", labelKey: "nav_concierge_workspace" },
+  },
+  {
+    id: "task-manager",
+    match: "exact",
+    path: "/task-manager",
+    roles: ROLES_CONCIERGE_WORKSPACE,
+    nav: { section: "main", labelKey: "nav_task_manager", after: "concierge" },
+  },
   {
     id: "admin/access",
     match: "prefix",
@@ -309,6 +328,17 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "crm", labelKey: "nav_invoices" },
   },
   {
+    id: "company-finance",
+    match: "exact",
+    path: "/company-finance",
+    roles: ROLES_REPORTS,
+    nav: {
+      section: "crm",
+      labelKey: "nav_company_finance",
+      after: "invoices",
+    },
+  },
+  {
     id: "finance-catalog",
     match: "exact",
     path: "/finance-catalog",
@@ -380,11 +410,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
 
 const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "dashboard", to: "/", labelKey: "nav_dashboard" },
+  { id: "notifications", to: "/notifications", labelKey: "nav_my_notifications" },
   { id: "chat", to: "/chat", labelKey: "nav_chat" },
   { id: "appointments", to: "/appointments", labelKey: "nav_my_appointments" },
   { id: "recommendations", to: "/recommendations", labelKey: "nav_my_recommendations" },
   { id: "documents", to: "/documents", labelKey: "nav_my_documents" },
   { id: "services", to: "/services", labelKey: "nav_my_services" },
+  { id: "subscriptions", to: "/subscriptions", labelKey: "nav_my_subscriptions" },
   { id: "invoices", to: "/invoices", labelKey: "nav_my_invoices" },
   { id: "feedback", to: "/feedback", labelKey: "nav_my_feedback" },
   { id: "privacy", to: "/privacy", labelKey: "nav_my_privacy" },

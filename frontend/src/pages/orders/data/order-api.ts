@@ -5,8 +5,10 @@ import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import type {
   CreateResponse,
   DoctorOption,
+  ExternalInvoiceAllocationWorkspace,
   OrderDebtQueueItem,
   OrderDetail,
+  OrderEconomics,
   OrderSummary,
   PassportComplianceStatus,
   PatientAssignmentOption,
@@ -292,6 +294,30 @@ export function createOrderLeistung(orderId: string, payload: JsonPayload) {
   return postJson<CreatedOrderLeistung>(`/orders/${orderId}/leistungen`, payload);
 }
 
+export function updateOrderLeistungPlannedCost(
+  orderId: string,
+  leistungId: string,
+  payload: {
+    request_id: string;
+    amount_net: string;
+    amount_vat: string;
+    amount_gross: string;
+    reason: string;
+  },
+) {
+  return postJson<{
+    change_id: string;
+    amount_net: string;
+    amount_vat: string;
+    amount_gross: string;
+    idempotent_replay: boolean;
+  }>(`/orders/${orderId}/leistungen/${leistungId}/planned-cost`, payload);
+}
+
+export function fetchOrderEconomics(orderId: string) {
+  return apiFetch<OrderEconomics>(`/orders/${orderId}/economics`);
+}
+
 export function syncLeadWizardOrderLeistungen(
   orderId: string,
   leadId: string,
@@ -349,6 +375,41 @@ export function createExternalInvoice(orderId: string, payload: JsonPayload) {
 
 export function updateExternalInvoice(orderId: string, invoiceId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/external-invoices/${invoiceId}/update`, payload);
+}
+
+export function fetchExternalInvoiceAllocations(orderId: string, externalInvoiceId: string) {
+  return apiFetch<ExternalInvoiceAllocationWorkspace>(
+    `/orders/${orderId}/external-invoices/${externalInvoiceId}/allocations`,
+  );
+}
+
+export function createExternalInvoiceAllocation(
+  orderId: string,
+  externalInvoiceId: string,
+  requestId: string,
+  patientInvoiceId: string,
+  amountGross: string,
+) {
+  return postJson<{ id: string }>(
+    `/orders/${orderId}/external-invoices/${externalInvoiceId}/allocations`,
+    {
+      request_id: requestId,
+      patient_invoice_id: patientInvoiceId,
+      amount_gross: amountGross,
+    },
+  );
+}
+
+export function reverseExternalInvoiceAllocation(
+  orderId: string,
+  externalInvoiceId: string,
+  allocationId: string,
+  note: string,
+) {
+  return postJson<{ ok: boolean }>(
+    `/orders/${orderId}/external-invoices/${externalInvoiceId}/allocations/${allocationId}/reverse`,
+    { note },
+  );
 }
 
 export function createWorkflowChecklistItem(orderId: string, payload: JsonPayload) {

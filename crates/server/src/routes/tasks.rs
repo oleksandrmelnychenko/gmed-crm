@@ -84,7 +84,8 @@ async fn list_tasks(
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
-           WHERE ($1::text = '%%' OR t.title ILIKE $1 OR COALESCE(t.description, '') ILIKE $1)
+           WHERE t.task_scope = 'general'
+             AND ($1::text = '%%' OR t.title ILIKE $1 OR COALESCE(t.description, '') ILIKE $1)
              AND ($2::text IS NULL OR t.status = $2)
              AND ($3::uuid IS NULL OR t.assigned_to = $3)
              AND ($4::uuid IS NULL OR t.patient_id = $4)
@@ -158,7 +159,8 @@ async fn get_task(
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
-           WHERE t.id = $1"#,
+           WHERE t.id = $1
+             AND t.task_scope = 'general'"#,
     )
     .bind(task_id)
     .fetch_optional(&state.db)
@@ -350,7 +352,7 @@ async fn update_status(
     }
 
     let row = match sqlx::query(
-        "SELECT assigned_to, patient_id, appointment_id, order_id FROM tasks WHERE id = $1",
+        "SELECT assigned_to, patient_id, appointment_id, order_id FROM tasks WHERE id = $1 AND task_scope = 'general'",
     )
     .bind(task_id)
     .fetch_optional(&state.db)

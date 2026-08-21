@@ -149,18 +149,31 @@ pub(crate) async fn load_patient_debt_management_state(
         r#"SELECT
                 COUNT(*) FILTER (
                     WHERE status = 'overdue'
-                      AND total_gross > COALESCE(paid_amount, 0)
+                      AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
+                                         + COALESCE(prepayment_applied_amount, 0)
                 ) AS overdue_invoice_count,
                 COALESCE(
                     SUM(
                         CASE
                             WHEN status NOT IN ('paid', 'cancelled')
-                            THEN GREATEST(total_gross - COALESCE(paid_amount, 0), 0)
+                            THEN GREATEST(
+                                total_gross
+                                - COALESCE(credited_amount, 0)
+                                - COALESCE(paid_amount, 0)
+                                - COALESCE(prepayment_applied_amount, 0),
+                                0
+                            )
                             ELSE 0
                         END
                     ),
                     0
-                ) AS outstanding_balance
+                ) + COALESCE((
+                    SELECT SUM(balance.remaining_receivable_gross)
+                    FROM external_invoices external
+                    JOIN external_invoice_receivable_balances balance
+                      ON balance.external_invoice_id = external.id
+                    WHERE external.patient_id = $1
+                ), 0) AS outstanding_balance
            FROM invoices
            WHERE patient_id = $1"#,
     )
@@ -201,19 +214,32 @@ pub(crate) async fn load_patient_debt_management_state(
                     FROM invoices i
                     WHERE i.order_id = dm.order_id
                       AND i.status = 'overdue'
-                      AND i.total_gross > COALESCE(i.paid_amount, 0)
+                      AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
+                                            + COALESCE(i.prepayment_applied_amount, 0)
                   ) AS order_overdue_invoice_count,
                   (
                     SELECT COALESCE(
                         SUM(
                             CASE
                                 WHEN i.status NOT IN ('paid', 'cancelled')
-                                THEN GREATEST(i.total_gross - COALESCE(i.paid_amount, 0), 0)
+                                THEN GREATEST(
+                                    i.total_gross
+                                    - COALESCE(i.credited_amount, 0)
+                                    - COALESCE(i.paid_amount, 0)
+                                    - COALESCE(i.prepayment_applied_amount, 0),
+                                    0
+                                )
                                 ELSE 0
                             END
                         ),
                         0
-                    )
+                    ) + COALESCE((
+                        SELECT SUM(balance.remaining_receivable_gross)
+                        FROM external_invoices external
+                        JOIN external_invoice_receivable_balances balance
+                          ON balance.external_invoice_id = external.id
+                        WHERE external.order_id = dm.order_id
+                    ), 0)
                     FROM invoices i
                     WHERE i.order_id = dm.order_id
                   ) AS order_outstanding_balance
@@ -229,7 +255,8 @@ pub(crate) async fn load_patient_debt_management_state(
                         FROM invoices i
                         WHERE i.order_id = dm.order_id
                           AND i.status = 'overdue'
-                          AND i.total_gross > COALESCE(i.paid_amount, 0)
+                          AND i.total_gross - COALESCE(i.credited_amount, 0) > COALESCE(i.paid_amount, 0)
+                                                + COALESCE(i.prepayment_applied_amount, 0)
                     )
                  )
            ORDER BY dm.updated_at DESC, o.created_at DESC

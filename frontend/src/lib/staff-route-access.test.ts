@@ -29,9 +29,12 @@ describe("first-release staff RBAC", () => {
       "/orders/order-1",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/documents/document-1",
       "/specializations",
+      "/concierge",
+      "/task-manager",
       "/services",
       "/appointments",
       "/employees",
@@ -54,6 +57,8 @@ describe("first-release staff RBAC", () => {
       "/patients/patient-1",
       "/providers/provider-1",
       "/documents",
+      "/concierge",
+      "/task-manager",
       "/services",
       "/appointments",
       "/employees",
@@ -66,6 +71,7 @@ describe("first-release staff RBAC", () => {
       "/orders",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/specializations",
       "/interpreters",
@@ -86,6 +92,7 @@ describe("first-release staff RBAC", () => {
       "/orders/order-1",
       "/contracts",
       "/invoices",
+      "/company-finance",
       "/finance-catalog",
       "/documents",
       "/services",
@@ -109,12 +116,17 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/leads");
     expect(concierge).toContain("/appointments");
     expect(concierge).toContain("/employees");
+    expect(concierge).toContain("/concierge");
+    expect(concierge).toContain("/task-manager");
     expect(concierge).not.toContain("/feedback");
     expect(concierge).not.toContain("/reports");
 
     const billing = listStaffNavItems("billing").map((item) => item.to);
     expect(billing).toContain("/invoices");
+    expect(billing).toContain("/company-finance");
     expect(billing).toContain("/finance-catalog");
+    expect(billing).not.toContain("/concierge");
+    expect(billing).not.toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual(["/"]);
@@ -133,6 +145,8 @@ describe("patient portal routes", () => {
     expect(canAccessPatientPortalRoute("/")).toBe(true);
     expect(canAccessPatientPortalRoute("/chat")).toBe(true);
     expect(canAccessPatientPortalRoute("/documents?tab=portal")).toBe(true);
+    expect(canAccessPatientPortalRoute("/subscriptions")).toBe(true);
+    expect(canAccessPatientPortalRoute("/notifications")).toBe(true);
     expect(canAccessPatientPortalRoute("/reports")).toBe(false);
     expect(canAccessPatientPortalRoute("/patients")).toBe(false);
   });
@@ -140,11 +154,13 @@ describe("patient portal routes", () => {
   it("keeps the canonical portal navigation order", () => {
     expect(listPatientPortalNavItems().map((item) => item.to)).toEqual([
       "/",
+      "/notifications",
       "/chat",
       "/appointments",
       "/recommendations",
       "/documents",
       "/services",
+      "/subscriptions",
       "/invoices",
       "/feedback",
       "/privacy",

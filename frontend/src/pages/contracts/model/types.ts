@@ -156,6 +156,7 @@ export type AgencyServiceItem = {
   valid_to: string | null;
   created_at: string | null;
   updated_at: string | null;
+  usage_count?: number;
 };
 
 export type AgencyServiceFilters = {

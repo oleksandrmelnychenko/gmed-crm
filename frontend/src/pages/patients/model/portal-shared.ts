@@ -121,8 +121,12 @@ export type PortalInvoiceItem = {
   total_net: unknown;
   total_vat: unknown;
   total_gross: unknown;
+  credited_amount?: unknown;
+  adjusted_total_gross?: unknown;
   paid_amount: unknown;
   balance_due: unknown;
+  credit_balance?: unknown;
+  refundable_cash_amount?: unknown;
   paid_at: string | null;
   notes: string | null;
   created_at: string;
@@ -131,6 +135,179 @@ export type PortalInvoiceItem = {
   last_payment_proof_at?: string | null;
   line_items?: PortalInvoiceLineItem[];
   portal_visibility?: InvoicePortalVisibility;
+};
+
+export type PortalInvoicePaymentTransaction = {
+  id: string;
+  invoice_id: string;
+  transaction_type: "payment" | "reversal";
+  reverses_transaction_id: string | null;
+  reversed_by_transaction_id: string | null;
+  is_reversed: boolean;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  payment_method: string;
+  payment_reference: string | null;
+  received_on: string;
+  created_at: string;
+};
+
+export type PortalInvoicePaymentHistoryResponse = {
+  items: PortalInvoicePaymentTransaction[];
+};
+
+export type PortalInvoiceCreditNoteTransaction = {
+  id: string;
+  transaction_type: "credit_note" | "reversal";
+  document_number: string;
+  reason: string;
+  is_reversed: boolean;
+  amounts_visible: boolean;
+  amount_gross: unknown;
+  issued_on: string;
+  created_at: string;
+};
+
+export type PortalInvoiceCreditNoteHistoryResponse = {
+  items: PortalInvoiceCreditNoteTransaction[];
+};
+
+export type PortalInvoiceRefundTransaction = {
+  id: string;
+  transaction_type: "refund" | "reversal";
+  is_reversed: boolean;
+  amount_gross: unknown;
+  effective_amount_gross: unknown;
+  payment_method: string;
+  payment_reference: string | null;
+  refunded_on: string;
+  reason: string;
+  created_at: string;
+};
+
+export type PortalInvoiceRefundHistoryResponse = {
+  items: PortalInvoiceRefundTransaction[];
+};
+
+export type PortalAccountStatementItem = {
+  id: string;
+  kind: "invoice" | "prepayment" | "credit_note" | "credit_note_reversal";
+  entry_date: string;
+  order_number?: string | null;
+  document_number?: string | null;
+  description: string;
+  status: string;
+  payment_state: "paid" | "partially_paid" | "unpaid" | "amount_hidden" | "invoice_adjustment";
+  amounts_visible: boolean;
+  amount_gross?: string | null;
+  cash_paid?: string | null;
+  prepayment_applied?: string | null;
+  prepayment_allocated?: string | null;
+  prepayment_available?: string | null;
+  amount_due?: string | null;
+  due_date?: string | null;
+};
+
+export type PortalAccountMovement = {
+  id: string;
+  kind:
+    | "invoice"
+    | "payment"
+    | "payment_reversal"
+    | "refund"
+    | "refund_reversal"
+    | "balance_adjustment"
+    | "balance_adjustment_reversal";
+  direction: "debit" | "credit";
+  entry_date: string;
+  occurred_at: string;
+  order_id?: string | null;
+  order_number?: string | null;
+  document_number?: string | null;
+  description: string;
+  debit: string;
+  credit: string;
+  balance_after: string;
+  currency: string;
+};
+
+export type PortalAccountStatement = {
+  patient_id: string;
+  currency: string;
+  available_currencies: string[];
+  scope: "patient_portal";
+  amounts_complete: boolean;
+  summary: {
+    invoiced_gross: string;
+    cash_paid: string;
+    prepayment_applied: string;
+    available_prepayment: string;
+    invoice_due: string;
+    external_receivable: null;
+    total_due: string | null;
+    reconciliation_required: boolean;
+    opening_balance: string;
+    debit_total: string;
+    credit_total: string;
+    calculated_balance: string;
+    closing_balance: string | null;
+    balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
+    unreconciled_external_debit: string;
+  };
+  redaction: {
+    hidden_invoice_amount_count: number;
+    external_expense_count: number;
+    services_hidden: true;
+  };
+  movements: PortalAccountMovement[];
+  items: PortalAccountStatementItem[];
+};
+
+export type PortalSubscriptionService = {
+  id: string;
+  service_key: string | null;
+  name: string;
+  description: string | null;
+  included_quantity: string;
+  used_quantity: string;
+  remaining_quantity: string;
+  overage_quantity: string;
+  pending_overage_quantity: string;
+  unit_label: string;
+  requires_patient_approval: boolean;
+};
+
+export type PortalSubscriptionFinancial = {
+  scope: "linked_order";
+  status: "not_invoiced" | "open" | "partially_paid" | "paid" | "overdue";
+  visible_invoice_count: number;
+  linked_subscription_count: number;
+  amounts_visible: boolean;
+  balance_disclosure: "visible" | "hidden_by_invoice" | "shared_order";
+  balance_due: string | null;
+};
+
+export type PortalSubscriptionItem = {
+  id: string;
+  package_id: string;
+  package_name: string;
+  description: string | null;
+  status: "active" | "paused" | "completed";
+  lifecycle: "active" | "upcoming" | "completed";
+  starts_on: string | null;
+  ends_on: string | null;
+  assigned_at: string;
+  order_id: string | null;
+  order_number: string | null;
+  currency: string;
+  portal_visible: true;
+  financial: PortalSubscriptionFinancial;
+  services: PortalSubscriptionService[];
+};
+
+export type PortalSubscriptionsResponse = {
+  items: PortalSubscriptionItem[];
+  total: number;
 };
 
 export type PortalRecommendationItem = {
@@ -743,9 +920,9 @@ export function formatPortalFileSize(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function formatPortalCurrency(value: unknown) {
+export function formatPortalCurrency(value: unknown, currency = "EUR") {
   if (value === null || value === undefined) return portalNotSetLabel();
-  return formatMoneyAmount(value);
+  return formatMoneyAmount(value, currency);
 }
 
 export function privacyRequestLabel(value: string) {

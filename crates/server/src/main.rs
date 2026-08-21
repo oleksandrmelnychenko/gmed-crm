@@ -61,6 +61,9 @@ async fn main() {
     gmed_server::routes::patient_recommendations::spawn_recommendation_reminder_scheduler(
         app_state.clone(),
     );
+    gmed_server::routes::concierge_operational_items::spawn_concierge_task_reminder_scheduler(
+        app_state.clone(),
+    );
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());

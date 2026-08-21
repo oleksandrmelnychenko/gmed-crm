@@ -6,6 +6,7 @@ import type {
   DunningEvent,
   Filters,
   InvoiceItem,
+  InvoiceLineItem,
   InvoiceStatus,
   InvoiceType,
   InvoicesPermissions,
@@ -118,17 +119,79 @@ export function buildSearchParams(
 }
 
 export function blankCreateForm(quoteId = ""): CreateForm {
-  return { quoteId, invoiceType: "final", dueDate: "", notes: "" };
+  return {
+    quoteId,
+    invoiceType: "final",
+    dueDate: "",
+    notes: "",
+    selectedLineIndexes: [],
+    lineQuantities: {},
+  };
+}
+
+function roundInvoiceMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function invoiceLineQuantityAvailable(
+  line: InvoiceLineItem,
+  invoiceType: InvoiceType,
+) {
+  const value = invoiceType === "advance"
+    ? line.quantity
+    : (line.remaining_quantity ?? line.quantity);
+  const quantity = Number(value ?? 0);
+  return Number.isFinite(quantity) ? Math.max(0, quantity) : 0;
+}
+
+export function calculateInvoiceSelectionTotals(
+  lines: InvoiceLineItem[],
+  selectedLineIndexes: number[],
+  lineQuantities: Record<string, string>,
+) {
+  const selected = new Set(selectedLineIndexes);
+  return lines.reduce(
+    (totals, line, lineIndex) => {
+      if (!selected.has(lineIndex)) return totals;
+      const quantity = Number(lineQuantities[String(lineIndex)] ?? 0);
+      const unitPrice = Number(line.unit_price ?? 0);
+      const vatRate = Number(line.vat_rate ?? 0);
+      if (
+        !Number.isFinite(quantity) ||
+        !Number.isFinite(unitPrice) ||
+        !Number.isFinite(vatRate) ||
+        quantity <= 0 ||
+        unitPrice < 0 ||
+        vatRate < 0
+      ) {
+        return totals;
+      }
+      const lineNet = roundInvoiceMoney(quantity * unitPrice);
+      const lineVat = roundInvoiceMoney((lineNet * vatRate) / 100);
+      const lineGross = roundInvoiceMoney(lineNet + lineVat);
+      return {
+        net: roundInvoiceMoney(totals.net + lineNet),
+        vat: roundInvoiceMoney(totals.vat + lineVat),
+        gross: roundInvoiceMoney(totals.gross + lineGross),
+        lineGrossByIndex: {
+          ...totals.lineGrossByIndex,
+          [lineIndex]: lineGross,
+        },
+      };
+    },
+    {
+      net: 0,
+      vat: 0,
+      gross: 0,
+      lineGrossByIndex: {} as Record<number, number>,
+    },
+  );
 }
 
 export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
   return {
     status: (invoice.status as InvoiceStatus) ?? "draft",
     dueDate: invoice.due_date ?? "",
-    paidAmount:
-      invoice.paid_amount === null || invoice.paid_amount === undefined
-        ? ""
-        : String(invoice.paid_amount),
     notes: invoice.notes ?? "",
   };
 }

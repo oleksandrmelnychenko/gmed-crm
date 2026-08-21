@@ -260,6 +260,9 @@ type ServiceLine = {
   agencyServiceId: string | null;
   clientReference: string | null;
   description: string;
+  catalogDescription: string;
+  catalogUnitLabel: string;
+  currency: string;
   quantity: string;
   price: string;
   vat: string;
@@ -635,6 +638,9 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
           clientReference:
             typeof line.client_reference === "string" ? line.client_reference : null,
           description: inputString(line.description),
+          catalogDescription: inputString(line.catalog_description),
+          catalogUnitLabel: inputString(line.catalog_unit_label),
+          currency: inputString(line.currency, "EUR"),
           quantity: inputString(line.quantity, "1"),
           price: inputString(line.price),
           vat: inputString(line.vat, "19"),
@@ -732,6 +738,9 @@ function autosavePayload(
           agency_service_id: line.agencyServiceId,
           client_reference: line.clientReference,
           description: line.description,
+          catalog_description: line.catalogDescription,
+          catalog_unit_label: line.catalogUnitLabel,
+          currency: line.currency,
           quantity: line.quantity,
           price: line.price,
           vat: line.vat,
@@ -1410,6 +1419,9 @@ function newLine(index = 1): ServiceLine {
     agencyServiceId: null,
     clientReference: null,
     description: "",
+    catalogDescription: "",
+    catalogUnitLabel: "",
+    currency: "EUR",
     quantity: "1",
     price: "",
     vat: "19",
@@ -1561,6 +1573,7 @@ function quoteMatchesCurrentServices(
 function quoteLineItemsPayload(lines: ServiceLine[]) {
   return lines.filter(validLine).map((line) => ({
     description: line.description.trim(),
+    notes: line.catalogDescription.trim() || undefined,
     quantity: money(line.quantity),
     unit_price: money(line.price),
     vat_rate: money(line.vat),
@@ -1579,6 +1592,15 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     agencyServiceId: item.agency_service_id ?? null,
     clientReference: item.client_reference ?? null,
     description: item.description,
+    catalogDescription:
+      item.agency_service_description_snapshot
+      ?? item.agency_service_description
+      ?? "",
+    catalogUnitLabel:
+      item.agency_service_unit_label_snapshot
+      ?? item.agency_service_unit_label
+      ?? "",
+    currency: item.currency_snapshot ?? item.currency ?? "EUR",
     quantity: String(item.quantity ?? "1"),
     price: String(item.unit_price ?? ""),
     vat: String(item.vat_rate ?? "19"),
@@ -4198,6 +4220,9 @@ ${serviceCommentLines.join("\n")}`
           ...newLine(current.length + 1),
           agencyServiceId: service.id,
           description: service.service_name,
+          catalogDescription: service.description?.trim() ?? "",
+          catalogUnitLabel: service.unit_label?.trim() ?? "",
+          currency: service.currency || "EUR",
           price: inputString(service.unit_price),
           vat: inputString(service.vat_rate, "19"),
         },
@@ -4247,22 +4272,22 @@ ${serviceCommentLines.join("\n")}`
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    return catalogService?.service_name.trim() || line.description.trim();
+    return line.description.trim() || catalogService?.service_name.trim() || "";
   }
 
   function serviceDocumentNote(line: ServiceLine) {
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    return catalogService?.description?.trim() || undefined;
+    return line.catalogDescription.trim() || catalogService?.description?.trim() || undefined;
   }
 
   function serviceDocumentFee(line: ServiceLine) {
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    const unit = catalogService?.unit_label?.trim();
-    return `${money(line.price).toFixed(2)} EUR${unit ? `/${unit}` : ""}`;
+    const unit = line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim();
+    return `${money(line.price).toFixed(2)} ${line.currency || "EUR"}${unit ? `/${unit}` : ""}`;
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
@@ -4282,8 +4307,10 @@ ${serviceCommentLines.join("\n")}`
         return (
           <div className="min-w-0">
             <div className="truncate font-medium text-foreground">{line.description}</div>
-            {catalogService?.unit_label ? (
-              <div className="truncate text-[11px] text-muted-foreground">{catalogService.unit_label}</div>
+            {line.catalogUnitLabel || catalogService?.unit_label ? (
+              <div className="truncate text-[11px] text-muted-foreground">
+                {line.catalogUnitLabel || catalogService?.unit_label}
+              </div>
             ) : null}
           </div>
         );
@@ -4314,6 +4341,22 @@ ${serviceCommentLines.join("\n")}`
       ),
     },
     {
+      id: "description",
+      label: tx("Описание", "Beschreibung"),
+      accessor: (line) => line.catalogDescription,
+      sortable: false,
+      searchable: true,
+      width: 360,
+      render: (line) => (
+        <span
+          className="line-clamp-2 whitespace-normal text-xs text-muted-foreground"
+          title={line.catalogDescription || undefined}
+        >
+          {line.catalogDescription || tx("Описание не указано", "Keine Beschreibung hinterlegt")}
+        </span>
+      ),
+    },
+    {
       id: "unit_price",
       label: tx("Цена за единицу", "Einzelpreis"),
       accessor: (line) => money(line.price),
@@ -4321,10 +4364,7 @@ ${serviceCommentLines.join("\n")}`
       align: "right",
       width: 150,
       render: (line) => {
-        const currency = line.agencyServiceId
-          ? agencyServiceById.get(line.agencyServiceId)?.currency || "EUR"
-          : "EUR";
-        return <span className="whitespace-nowrap">{formatMoneyValue(money(line.price), lang)} {currency}</span>;
+        return <span className="whitespace-nowrap">{formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}</span>;
       },
     },
     {
@@ -4344,12 +4384,9 @@ ${serviceCommentLines.join("\n")}`
       align: "right",
       width: 150,
       render: (line) => {
-        const currency = line.agencyServiceId
-          ? agencyServiceById.get(line.agencyServiceId)?.currency || "EUR"
-          : "EUR";
         return (
           <span className="whitespace-nowrap font-semibold">
-            {formatMoneyValue(money(line.quantity) * money(line.price), lang)} {currency}
+            {formatMoneyValue(money(line.quantity) * money(line.price), lang)} {line.currency || "EUR"}
           </span>
         );
       },

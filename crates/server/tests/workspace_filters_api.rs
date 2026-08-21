@@ -1398,7 +1398,7 @@ async fn external_invoices_round_trip_through_order_detail_and_status_update() {
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
         &billing_bearer,
-        Some(json!({ "status": "paid" })),
+        Some(json!({ "status": "paid", "paid_by": "patient" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -10344,7 +10344,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         Some(json!({
             "name": format!("Dr Roundtrip {tag}"),
             "first_name": "Roundtrip",
-            "last_name": format!("{tag}"),
+            "last_name": tag.to_string(),
             "title": "Prof.",
             "role_code": "chefarzt",
             "gender": "female",
@@ -10392,7 +10392,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
         Some(json!({
             "name": format!("Dr Target {tag}"),
             "first_name": "Target",
-            "last_name": format!("{tag}"),
+            "last_name": tag.to_string(),
             "title": "Dr. med.",
             "gender": "male",
             "languages": ["de"],

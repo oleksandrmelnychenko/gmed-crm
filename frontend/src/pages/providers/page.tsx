@@ -59,6 +59,7 @@ import {
 import { formatUiText, uiText, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
@@ -201,6 +202,8 @@ import {
 } from "@/pages/specializations/data/specialization-work-types-api";
 import { ProviderSelectWithTaxonomyFilter } from "./ui/provider-select-with-taxonomy-filter";
 import { ProviderTaxonomyCascadeSelect } from "./ui/provider-taxonomy-cascade-select";
+import { fetchCompanyProviderFinancialSummary } from "@/pages/company-finance/data";
+import type { CompanyProviderFinancialSummary } from "@/pages/company-finance/types";
 
 const selectClassName = shellSelectClassName;
 const formSelectClassName = cn(
@@ -1690,7 +1693,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
   const detailPageMode = Boolean(detailRouteId);
-  const { staffGo } = useStaffNavigate();
+  const { staffGo, canStaffPath } = useStaffNavigate();
+  const canViewCompanyFinance = canStaffPath("/company-finance");
   const [searchParams, setSearchParams] = useSearchParams();
   const providerDetailReturnTo = searchParams.get("return_to") ?? "";
   const providerDetailBackPath =
@@ -1986,6 +1990,10 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [existingDoctorOptionsError, setExistingDoctorOptionsError] = useState("");
   const [relationshipDeleteTarget, setRelationshipDeleteTarget] =
     useState<RelationshipDeleteTarget | null>(null);
+  const [providerFinancialSummary, setProviderFinancialSummary] =
+    useState<CompanyProviderFinancialSummary | null>(null);
+  const [providerFinancialSummaryBusy, setProviderFinancialSummaryBusy] = useState(false);
+  const [providerFinancialSummaryError, setProviderFinancialSummaryError] = useState("");
   const setProvidersPageField = <K extends keyof ProvidersPageState>(
     field: K,
     value: SetStateAction<ProvidersPageState[K]>,
@@ -2569,6 +2577,46 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     finishProviderDetailLoad,
     selectedId,
     startProviderDetailLoad,
+  ]);
+
+  useEffect(() => {
+    const shouldLoadSummary = canViewCompanyFinance && (detailOpen || detailPageMode) && selectedId;
+    if (!shouldLoadSummary) {
+      setProviderFinancialSummary(null);
+      setProviderFinancialSummaryBusy(false);
+      setProviderFinancialSummaryError("");
+      return;
+    }
+
+    let cancelled = false;
+    setProviderFinancialSummaryBusy(true);
+    setProviderFinancialSummaryError("");
+    void fetchCompanyProviderFinancialSummary(selectedId, "EUR", detailVersion > 0)
+      .then((summary) => {
+        if (cancelled) return;
+        setProviderFinancialSummary(summary);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setProviderFinancialSummary(null);
+        setProviderFinancialSummaryError(
+          providerLoadErrorMessage(error, t.common_failed_load),
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setProviderFinancialSummaryBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canViewCompanyFinance,
+    detailOpen,
+    detailPageMode,
+    detailVersion,
+    selectedId,
+    t.common_failed_load,
   ]);
 
   useEffect(() => {
@@ -3373,6 +3421,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
                   <ProviderOverviewSection
                     detail={detail}
+                    financialSummary={providerFinancialSummary}
+                    financialSummaryBusy={providerFinancialSummaryBusy}
+                    financialSummaryError={providerFinancialSummaryError}
+                    onOpenFinancialStatement={canViewCompanyFinance ? () => {
+                      staffGo(`/company-finance?provider=${detail.id}&statement=1`);
+                    } : undefined}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
@@ -4052,6 +4106,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
                   <ProviderOverviewSection
                     detail={detail}
+                    financialSummary={providerFinancialSummary}
+                    financialSummaryBusy={providerFinancialSummaryBusy}
+                    financialSummaryError={providerFinancialSummaryError}
+                    onOpenFinancialStatement={canViewCompanyFinance ? () => {
+                      staffGo(`/company-finance?provider=${detail.id}&statement=1`);
+                    } : undefined}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
@@ -6182,15 +6242,44 @@ function ProvidersPage(...args: Parameters<typeof useProvidersPageContent>) {
 
 function ProviderOverviewSection({
   detail,
+  financialSummary,
+  financialSummaryBusy,
+  financialSummaryError,
+  onOpenFinancialStatement,
   onOpenPatients,
   onOpenAppointments,
 }: {
   detail: ProviderDetail;
+  financialSummary: CompanyProviderFinancialSummary | null;
+  financialSummaryBusy: boolean;
+  financialSummaryError: string;
+  onOpenFinancialStatement?: () => void;
   onOpenPatients: () => void;
   onOpenAppointments: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
+  const financialText = lang === "de"
+    ? {
+        title: "Finanzübersicht mit Partner / Leistungserbringer",
+        payable: "Noch an Partner / Leistungserbringer zu zahlen",
+        paid: "Bereits vom Unternehmen bezahlt",
+        expected: "Erwartete, noch nicht freigegebene Kosten",
+        invoices: "Rechnungen des Partners / Leistungserbringers",
+        open: "Zahlungen und offene Beträge anzeigen",
+        loading: "Finanzübersicht wird berechnet…",
+        unavailable: "Finanzdaten sind derzeit nicht verfügbar",
+      }
+    : {
+        title: "Взаиморасчёты с партнёром / исполнителем",
+        payable: "Осталось выплатить партнёру / исполнителю",
+        paid: "Уже оплачено компанией",
+        expected: "Ожидаемые расходы, ещё не подтверждённые",
+        invoices: "Счета партнёра / исполнителя",
+        open: "Показать выплаты и открытые суммы",
+        loading: "Финансовые данные рассчитываются…",
+        unavailable: "Финансовые данные сейчас недоступны",
+      };
 
   const overviewRows = [
     {
@@ -6238,6 +6327,75 @@ function ProviderOverviewSection({
           ))}
         </div>
         <div className="grid h-full gap-3 sm:grid-cols-2">
+          {onOpenFinancialStatement ? (
+            <div className="sm:col-span-2 rounded-xl border border-border/70 bg-muted/20 p-4">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{financialText.title}</p>
+                  {financialSummaryBusy ? (
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                      {financialText.loading}
+                    </p>
+                  ) : financialSummary ? (
+                    <button
+                      type="button"
+                      className="mt-2 block text-left text-2xl font-semibold tracking-tight tabular-nums text-foreground hover:text-orange-700"
+                      onClick={onOpenFinancialStatement}
+                    >
+                      {formatMoneyAmount(
+                        financialSummary.payable_remaining_gross,
+                        financialSummary.currency,
+                      )}
+                      <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                        {financialText.payable}
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground" title={financialSummaryError}>
+                      {financialText.unavailable}
+                    </p>
+                  )}
+                </div>
+                {financialSummary ? (
+                  <div className="grid min-w-0 flex-1 gap-3 text-xs sm:max-w-xl sm:grid-cols-3">
+                    <div>
+                      <p className="text-muted-foreground">{financialText.paid}</p>
+                      <p className="mt-1 font-semibold tabular-nums text-foreground">
+                        {formatMoneyAmount(
+                          financialSummary.company_paid_gross,
+                          financialSummary.currency,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{financialText.expected}</p>
+                      <p className="mt-1 font-semibold tabular-nums text-foreground">
+                        {formatMoneyAmount(
+                          financialSummary.expected_remaining_gross,
+                          financialSummary.currency,
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{financialText.invoices}</p>
+                      <p className="mt-1 font-semibold tabular-nums text-foreground">
+                        {financialSummary.invoice_count}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-orange-700 hover:text-orange-800 hover:underline"
+                onClick={onOpenFinancialStatement}
+              >
+                {financialText.open}
+                <ArrowUpRight className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
           <button
             type="button"
             className="group relative h-full min-h-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 p-4 pr-14 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:bg-orange-50/30"
