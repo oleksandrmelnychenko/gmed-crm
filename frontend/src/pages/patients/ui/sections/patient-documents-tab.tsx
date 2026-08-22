@@ -1,4 +1,10 @@
-import { Download, Eye, FileWarning, LoaderCircle } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileWarning,
+  LoaderCircle,
+  PencilLine,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -18,10 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
-import {
-  EmptyCell,
-  TabLoader,
-} from "@/components/ui-shell";
+import { EmptyCell, TabLoader } from "@/components/ui-shell";
 import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
@@ -36,8 +39,12 @@ import {
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
 
-import type { DocumentAlerts, DocumentItem } from "../../model/detail-tab-types";
+import type {
+  DocumentAlerts,
+  DocumentItem,
+} from "../../model/detail-tab-types";
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
+import { PatientDocumentEditSheet } from "../sheets/patient-document-edit-sheet";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -177,6 +184,7 @@ export function PatientDocumentsTab({
 }: PatientDocumentsTabProps) {
   const { lang, t } = useLang();
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [editDocumentId, setEditDocumentId] = useState<string | null>(null);
   const [documentPreview, setDocumentPreview] =
     useState<PatientDocumentPreview | null>(null);
   const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
@@ -287,7 +295,10 @@ export function PatientDocumentsTab({
         required: true,
         width: 280,
         render: (doc) => (
-          <span className="block truncate font-mono text-xs text-foreground" title={doc.filename ?? undefined}>
+          <span
+            className="block truncate font-mono text-xs text-foreground"
+            title={doc.filename ?? undefined}
+          >
             {doc.filename}
           </span>
         ),
@@ -305,7 +316,9 @@ export function PatientDocumentsTab({
               {formatBusinessDocumentNumber(doc.document_number)}
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground">{commonNotSet}</span>
+            <span className="text-xs text-muted-foreground">
+              {commonNotSet}
+            </span>
           ),
       },
       {
@@ -324,12 +337,17 @@ export function PatientDocumentsTab({
           doc.category ? (
             <Badge
               variant="outline"
-              className={cn("rounded-full", documentCategoryChipTone(doc.category))}
+              className={cn(
+                "rounded-full",
+                documentCategoryChipTone(doc.category),
+              )}
             >
               {localizeDocumentCode(doc.category, l)}
             </Badge>
           ) : (
-            <span className="text-xs text-muted-foreground">{commonNotSet}</span>
+            <span className="text-xs text-muted-foreground">
+              {commonNotSet}
+            </span>
           ),
       },
       {
@@ -418,7 +436,6 @@ export function PatientDocumentsTab({
 
   return (
     <TabsContent value="documents" className="space-y-4 mt-4 min-h-[400px]">
-
       {!tabLoading &&
       documentAlerts &&
       documentAlerts.configured_rule_count > 0 &&
@@ -437,8 +454,12 @@ export function PatientDocumentsTab({
               variant="outline"
               className="rounded-full border-amber-200 bg-amber-100 text-[10px] text-amber-800"
             >
-              {documentAlerts.required_documents.filter((item) => item.fulfilled).length}/
-              {documentAlerts.configured_rule_count} {l("patients_fulfilled")}
+              {
+                documentAlerts.required_documents.filter(
+                  (item) => item.fulfilled,
+                ).length
+              }
+              /{documentAlerts.configured_rule_count} {l("patients_fulfilled")}
             </Badge>
           </div>
           {documentAlerts.missing_count > 0 ? (
@@ -456,141 +477,162 @@ export function PatientDocumentsTab({
           ) : null}
           {documentAlerts.out_of_sync ? (
             <p className="mt-3 text-xs text-muted-foreground">
-              {l("patients_the_stored_compliance_flag_for_document_pack_complete_is")}
+              {l(
+                "patients_the_stored_compliance_flag_for_document_pack_complete_is",
+              )}
             </p>
           ) : null}
         </div>
       ) : null}
 
-        {tabLoading ? (
-          <TabLoader />
-        ) : documents.length === 0 ? (
-          <EmptyCell>
-            {l("patients_no_documents_have_been_uploaded_for_this_patient_yet")}
-          </EmptyCell>
-        ) : (
-          <DataTableSurface
-            rows={documentPagination.pagedRows}
-            columns={documentColumns}
-            rowId={(doc) => doc.id}
-            defaultDensity="comfortable"
-            onRowClick={(doc) => void openPatientDocumentPreview(doc)}
-            rowActions={(doc) => (
-              <>
+      {tabLoading ? (
+        <TabLoader />
+      ) : documents.length === 0 ? (
+        <EmptyCell>
+          {l("patients_no_documents_have_been_uploaded_for_this_patient_yet")}
+        </EmptyCell>
+      ) : (
+        <DataTableSurface
+          rows={documentPagination.pagedRows}
+          columns={documentColumns}
+          rowId={(doc) => doc.id}
+          defaultDensity="comfortable"
+          onRowClick={(doc) => void openPatientDocumentPreview(doc)}
+          rowActions={(doc) => (
+            <>
+              {canManageDocuments ? (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  title={t.documents_preview}
-                  aria-label={t.documents_preview}
-                  onClick={() => void openPatientDocumentPreview(doc)}
+                  title={lang === "de" ? "Bearbeiten" : "Редактировать"}
+                  aria-label={
+                    lang === "de"
+                      ? "Dokument bearbeiten"
+                      : "Редактировать документ"
+                  }
+                  onClick={() => setEditDocumentId(doc.id)}
                 >
-                  <Eye className="size-3.5" />
+                  <PencilLine className="size-3.5" />
                 </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  title={t.documents_download}
-                  aria-label={t.documents_download}
-                  onClick={() =>
-                    void downloadDocumentFile(
-                      doc.id,
-                      doc.filename || "document",
-                    )
-                  }
-                >
-                  <Download className="size-3.5" />
-                </Button>
-              </>
-            )}
-            rowActionsWidth={82}
-            emptyState={
-              <EmptyCell>
-                {l("patients_no_document_matches_the_current_filters")}
-              </EmptyCell>
-            }
-            toolbarStart={
-              <>
-                {canManageDocuments ? (
-                  <>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 shrink-0 rounded-lg gap-1.5"
-                      onClick={() => setGenerateOpen(true)}
-                    >
-                      {l("documents_generate_from_template")}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="h-8 shrink-0 rounded-lg gap-1.5"
-                      onClick={onOpenUpload}
-                    >
-                      {l("patients_upload_document")}
-                    </Button>
-                  </>
-                ) : null}
-                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
-                <NativeComboboxSelect
-                  value={documentStatusFilter}
-                  aria-label={usersStatusLabel}
-                  onChange={(event) =>
-                    onDocumentStatusFilterChange(event.target.value ?? "all")
-                  }
-                  className="h-8 w-[170px] shrink-0 rounded-lg bg-field text-[13px]"
-                >
-                  <option value="all">{l("patients_all_statuses")}</option>
-                  {documentStatusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {statusLabel(status)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-                <NativeComboboxSelect
-                  value={documentCategoryFilter}
-                  aria-label={appointmentsTypeLabel}
-                  onChange={(event) =>
-                    onDocumentCategoryFilterChange(event.target.value ?? "all")
-                  }
-                  className="h-8 w-[200px] shrink-0 rounded-lg bg-field text-[13px]"
-                >
-                  <option value="all">{l("patients_all_document_types")}</option>
-                  {documentCategoryOptions.map((category) => (
-                    <option key={category} value={category}>
-                      {localizeDocumentCode(category, l)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-                {hasDocumentFilters ? (
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title={t.documents_preview}
+                aria-label={t.documents_preview}
+                onClick={() => void openPatientDocumentPreview(doc)}
+              >
+                <Eye className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                title={t.documents_download}
+                aria-label={t.documents_download}
+                onClick={() =>
+                  void downloadDocumentFile(doc.id, doc.filename || "document")
+                }
+              >
+                <Download className="size-3.5" />
+              </Button>
+            </>
+          )}
+          rowActionsWidth={canManageDocuments ? 116 : 82}
+          emptyState={
+            <EmptyCell>
+              {l("patients_no_document_matches_the_current_filters")}
+            </EmptyCell>
+          }
+          toolbarStart={
+            <>
+              {canManageDocuments ? (
+                <>
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="shrink-0"
-                    onClick={onResetDocumentFilters}
+                    size="sm"
+                    variant="outline"
+                    className="h-8 shrink-0 rounded-lg gap-1.5"
+                    onClick={() => setGenerateOpen(true)}
                   >
-                    {l("patients_reset_filters")}
+                    {l("documents_generate_from_template")}
                   </Button>
-                ) : null}
-                <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
-              </>
-            }
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={documentPagination.pageIndex}
-                pageSize={documentPagination.pageSize}
-                totalPages={documentPagination.totalPages}
-                totalRows={documentPagination.totalRows}
-                previousLabel={t.pagination_previous}
-                nextLabel={t.pagination_next}
-                onPageChange={documentPagination.onPageChange}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-lg gap-1.5"
+                    onClick={onOpenUpload}
+                  >
+                    {l("patients_upload_document")}
+                  </Button>
+                </>
+              ) : null}
+              <span
+                aria-hidden
+                className="mx-1 h-4 w-px shrink-0 self-center bg-border"
               />
-            }
-          />
-        )}
+              <NativeComboboxSelect
+                value={documentStatusFilter}
+                aria-label={usersStatusLabel}
+                onChange={(event) =>
+                  onDocumentStatusFilterChange(event.target.value ?? "all")
+                }
+                className="h-8 w-[170px] shrink-0 rounded-lg bg-field text-[13px]"
+              >
+                <option value="all">{l("patients_all_statuses")}</option>
+                {documentStatusOptions.map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(status)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+              <NativeComboboxSelect
+                value={documentCategoryFilter}
+                aria-label={appointmentsTypeLabel}
+                onChange={(event) =>
+                  onDocumentCategoryFilterChange(event.target.value ?? "all")
+                }
+                className="h-8 w-[200px] shrink-0 rounded-lg bg-field text-[13px]"
+              >
+                <option value="all">{l("patients_all_document_types")}</option>
+                {documentCategoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {localizeDocumentCode(category, l)}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+              {hasDocumentFilters ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="shrink-0"
+                  onClick={onResetDocumentFilters}
+                >
+                  {l("patients_reset_filters")}
+                </Button>
+              ) : null}
+              <span
+                aria-hidden
+                className="mx-1 h-4 w-px shrink-0 self-center bg-border"
+              />
+            </>
+          }
+          toolbarAfter={
+            <DataTablePager
+              pageIndex={documentPagination.pageIndex}
+              pageSize={documentPagination.pageSize}
+              totalPages={documentPagination.totalPages}
+              totalRows={documentPagination.totalRows}
+              previousLabel={t.pagination_previous}
+              nextLabel={t.pagination_next}
+              onPageChange={documentPagination.onPageChange}
+            />
+          }
+        />
+      )}
       <Dialog
         open={Boolean(documentPreview)}
         onOpenChange={(open) => {
@@ -664,13 +706,23 @@ export function PatientDocumentsTab({
         </DialogContent>
       </Dialog>
       {canManageDocuments ? (
-        <PatientDocumentGenerateDialog
-          open={generateOpen}
-          patientId={patientId}
-          patient={generatePatient}
-          onOpenChange={setGenerateOpen}
-          onGenerated={onDocumentGenerated}
-        />
+        <>
+          <PatientDocumentGenerateDialog
+            open={generateOpen}
+            patientId={patientId}
+            patient={generatePatient}
+            onOpenChange={setGenerateOpen}
+            onGenerated={onDocumentGenerated}
+          />
+          <PatientDocumentEditSheet
+            open={Boolean(editDocumentId)}
+            documentId={editDocumentId}
+            onOpenChange={(open) => {
+              if (!open) setEditDocumentId(null);
+            }}
+            onSaved={onDocumentGenerated}
+          />
+        </>
       ) : null}
     </TabsContent>
   );

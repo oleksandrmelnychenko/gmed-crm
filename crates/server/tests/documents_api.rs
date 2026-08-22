@@ -1160,7 +1160,7 @@ async fn document_text_extraction_can_prefill_translation_request_workspace() {
 }
 
 #[tokio::test]
-async fn patient_document_without_manual_name_is_queued_for_background_naming() {
+async fn patient_document_without_manual_name_is_queued_and_manual_edit_takes_priority() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -1214,6 +1214,46 @@ async fn patient_document_without_manual_name_is_queued_for_background_naming() 
             .await
             .unwrap();
     assert_eq!(extraction_status, "not_started");
+
+    let manual_name = format!("KARDIO-Arztbrief-manuell-{tag}");
+    let (update_status, update_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "auto_name": manual_name,
+            "art": "Arztbrief",
+            "category": "medical_kardio",
+            "status": "active",
+            "visibility": "internal",
+            "is_medical": true
+        })),
+    )
+    .await;
+    assert_eq!(update_status, StatusCode::OK, "{update_body}");
+    assert_eq!(update_body["ok"], true);
+
+    let overridden = sqlx::query(
+        r#"SELECT status, result
+           FROM document_auto_naming_jobs
+           WHERE document_id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(overridden.get::<String, _>("status"), "completed");
+    assert_eq!(
+        overridden.get::<serde_json::Value, _>("result")["manual_override"],
+        true
+    );
+    let stored_name: String = sqlx::query_scalar("SELECT auto_name FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_name, manual_name);
 }
 
 #[tokio::test]

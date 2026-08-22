@@ -20661,6 +20661,30 @@ async fn update_document(
     .await
     {
         Ok(_) => {
+            if let Err(error) = sqlx::query(
+                r#"UPDATE document_auto_naming_jobs
+                   SET status = 'completed',
+                       result = result || jsonb_build_object(
+                           'manual_override', true,
+                           'manual_override_by', $2,
+                           'manual_override_at', now()
+                       ),
+                       error_code = NULL,
+                       completed_at = now()
+                   WHERE document_id = $1
+                     AND status IN ('queued', 'processing')"#,
+            )
+            .bind(id)
+            .bind(auth.user_id)
+            .execute(&state.db)
+            .await
+            {
+                tracing::error!(
+                    error = %error,
+                    document_id = %id,
+                    "mark background document naming as manually overridden"
+                );
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "update_document",
                 Some(auth.user_id),

@@ -109,11 +109,17 @@ function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
 
 function downloadFilename(filename: string, contentType: string) {
   const normalizedFilename = filename.trim() || "document";
-  const normalizedContentType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  const normalizedContentType = contentType
+    .split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
   if (normalizedContentType !== "application/pdf") return normalizedFilename;
   if (/\.pdf$/i.test(normalizedFilename)) return normalizedFilename;
 
-  const filenameWithoutExtension = normalizedFilename.replace(/\.[a-z0-9]{1,10}$/i, "");
+  const filenameWithoutExtension = normalizedFilename.replace(
+    /\.[a-z0-9]{1,10}$/i,
+    "",
+  );
   return `${filenameWithoutExtension || "document"}.pdf`;
 }
 
@@ -176,7 +182,9 @@ export function revokeDocumentPreviewObjectUrl(url: string) {
   URL.revokeObjectURL(url);
 }
 
-export async function fetchDocumentLookups(canManage: boolean): Promise<DocumentLookups> {
+export async function fetchDocumentLookups(
+  canManage: boolean,
+): Promise<DocumentLookups> {
   const [
     patients,
     providers,
@@ -221,6 +229,12 @@ export async function fetchDocumentLookups(canManage: boolean): Promise<Document
   };
 }
 
+export function fetchDocumentCategories() {
+  return apiFetch<CategoriesResponse>("/documents/meta/categories", {
+    cacheTtlMs: DOCUMENT_STATIC_META_CACHE_TTL_MS,
+  });
+}
+
 export function fetchDocuments(path: string) {
   return apiFetch<DocumentItem[]>(path);
 }
@@ -243,9 +257,9 @@ export async function fetchDocumentDetailBundle(
       apiFetch<TranslationRequest[]>(
         `/documents/${id}/translation-requests`,
       ).catch(() => []),
-      apiFetch<DocumentTextExtraction>(`/documents/${id}/text-extraction`).catch(
-        () => null,
-      ),
+      apiFetch<DocumentTextExtraction>(
+        `/documents/${id}/text-extraction`,
+      ).catch(() => null),
     ]);
   return { detail, shares, versions, translationRequests, textExtraction };
 }
@@ -253,16 +267,22 @@ export async function fetchDocumentDetailBundle(
 export async function fetchPatientDocumentContext(
   patientId: string,
 ): Promise<PatientDocumentContext> {
-  const [orders, appointments, frameworkContracts, profile] = await Promise.all([
-    apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(() => []),
-    apiFetch<AppointmentOption[]>(`/appointments?patient_id=${patientId}`).catch(
-      () => [],
-    ),
-    apiFetch<FrameworkContractOption[]>(
-      `/patients/${patientId}/framework-contracts`,
-    ).catch(() => null),
-    apiFetch<PatientDocumentProfile>(`/patients/${patientId}`).catch(() => null),
-  ]);
+  const [orders, appointments, frameworkContracts, profile] = await Promise.all(
+    [
+      apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(
+        () => [],
+      ),
+      apiFetch<AppointmentOption[]>(
+        `/appointments?patient_id=${patientId}`,
+      ).catch(() => []),
+      apiFetch<FrameworkContractOption[]>(
+        `/patients/${patientId}/framework-contracts`,
+      ).catch(() => null),
+      apiFetch<PatientDocumentProfile>(`/patients/${patientId}`).catch(
+        () => null,
+      ),
+    ],
+  );
   return { orders, appointments, frameworkContracts, profile };
 }
 
@@ -327,7 +347,9 @@ export function fetchDocumentVersions(id: string) {
 }
 
 export function fetchTranslationRequests(documentId: string) {
-  return apiFetch<TranslationRequest[]>(`/documents/${documentId}/translation-requests`);
+  return apiFetch<TranslationRequest[]>(
+    `/documents/${documentId}/translation-requests`,
+  );
 }
 
 export function fetchTranslationRequestQueue() {
@@ -336,8 +358,14 @@ export function fetchTranslationRequestQueue() {
   );
 }
 
-export function createTranslationRequest(documentId: string, payload: JsonPayload) {
-  return postJson<void>(`/documents/${documentId}/translation-requests`, payload);
+export function createTranslationRequest(
+  documentId: string,
+  payload: JsonPayload,
+) {
+  return postJson<void>(
+    `/documents/${documentId}/translation-requests`,
+    payload,
+  );
 }
 
 export function runDocumentTextExtraction(documentId: string) {
@@ -347,14 +375,20 @@ export function runDocumentTextExtraction(documentId: string) {
   );
 }
 
-export function updateTranslationRequest(requestId: string, payload: JsonPayload) {
+export function updateTranslationRequest(
+  requestId: string,
+  payload: JsonPayload,
+) {
   return postJson<TranslationRequest>(
     `/documents/translation-requests/${requestId}/update`,
     payload,
   );
 }
 
-export function createBulkDocumentShares(documentIds: string[], payload: JsonPayload) {
+export function createBulkDocumentShares(
+  documentIds: string[],
+  payload: JsonPayload,
+) {
   return postJson<{ ok: boolean }>("/documents/shares/bulk", {
     document_ids: documentIds,
     ...payload,
