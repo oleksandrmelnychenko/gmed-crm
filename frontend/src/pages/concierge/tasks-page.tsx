@@ -9,7 +9,11 @@ import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
-import type { ConciergeAssignee, ConciergeTask } from "./model";
+import {
+  filterConciergeTaskAssignees,
+  type ConciergeAssignee,
+  type ConciergeTask,
+} from "./model";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
   ConciergeTaskEventDialog,
@@ -95,10 +99,10 @@ export function ConciergeTaskManagerPage() {
             forceFresh: version > 0,
           }),
           user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?role=concierge&active_only=true", {
+            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
                 cacheTtlMs: 30_000,
                 forceFresh: version > 0,
-              })
+              }).then(filterConciergeTaskAssignees)
             : Promise.resolve(
                 user
                   ? [{

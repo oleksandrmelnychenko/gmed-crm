@@ -24,7 +24,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import type { Translations } from "@/lib/i18n";
+import { getLang, type Translations } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -769,7 +769,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             onClick={openClinicalDocumentImport}
           >
             <FileUp className="size-3.5" />
-            {l("patients_upload_document")}
+            {getLang() === "de" ? "Scannen und erkennen" : "Сканировать и распознать"}
           </Button>
         ) : null}
         {canManageDocuments ? (

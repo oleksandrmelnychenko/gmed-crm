@@ -136,6 +136,12 @@ const ROLES_CONCIERGE_WORKSPACE = [
   "concierge",
 ] as const satisfies readonly StaffRole[];
 
+const ROLES_TASK_MANAGER = [
+  "ceo",
+  "concierge",
+  "billing",
+] as const satisfies readonly StaffRole[];
+
 type RouteRule = {
   id: string;
   match: "exact" | "prefix";
@@ -184,7 +190,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "task-manager",
     match: "exact",
     path: "/task-manager",
-    roles: ROLES_CONCIERGE_WORKSPACE,
+    roles: ROLES_TASK_MANAGER,
     nav: { section: "main", labelKey: "nav_task_manager", after: "concierge" },
   },
   {

@@ -675,8 +675,8 @@ test.describe("patient portal smoke flows", () => {
 
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
-    await expect(page.getByText("INV-PORTAL-1")).toBeVisible();
-    await expect(page.getByText("ORD-PORTAL-1")).toBeVisible();
+    await expect(page.getByText("INV-PORTAL-1").first()).toBeVisible();
+    await expect(page.getByText("ORD-PORTAL-1").first()).toBeVisible();
   });
 
   test("patient can upload payment proof from invoice detail", async ({ page }) => {
@@ -714,7 +714,7 @@ test.describe("patient portal smoke flows", () => {
       ),
     ).toBeVisible();
     await expect(
-      page.getByText(/Hochgeladen 10\. Apr\.? 2026|Uploaded 10 Apr 2026/i),
+      page.locator("td").getByText(/Hochgeladen 10\. Apr\.? 2026|Uploaded 10 Apr 2026/i),
     ).toBeVisible();
   });
 

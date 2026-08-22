@@ -257,6 +257,59 @@ async fn assigned_concierge_manages_only_own_non_clinical_tasks_and_events() {
 }
 
 #[tokio::test]
+async fn ceo_can_assign_operational_items_to_ceo_and_billing() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let billing_id = seed_user(&ctx.pool, "billing", &format!("billing-{tag}")).await;
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, billing_task) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Reconcile patient payment",
+            "assigned_to": billing_id,
+            "priority": "high"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{billing_task}");
+    assert_eq!(billing_task["assigned_to"], billing_id.to_string());
+
+    let (status, ceo_task) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "event",
+            "title": "Executive review",
+            "assigned_to": ctx.admin_id,
+            "starts_at": "2026-08-21T09:00:00Z",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{ceo_task}");
+    assert_eq!(ceo_task["assigned_to"], ctx.admin_id.to_string());
+
+    let (status, billing_items) = json_request(&ctx.app, "GET", path, &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{billing_items}");
+    let billing_items = billing_items.as_array().expect("billing operational list");
+    assert_eq!(billing_items.len(), 1);
+    assert_eq!(billing_items[0]["assigned_to"], billing_id.to_string());
+}
+
+#[tokio::test]
 async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;

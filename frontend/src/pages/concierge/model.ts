@@ -159,6 +159,15 @@ export type ConciergeAssignee = {
   is_active: boolean;
 };
 
+const CONCIERGE_TASK_ASSIGNEE_ROLES = new Set(["concierge", "ceo", "billing"]);
+
+/** Task manager assignees include operations, CEO and accounting staff. */
+export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
+  return users
+    .filter((user) => user.is_active && CONCIERGE_TASK_ASSIGNEE_ROLES.has(user.role))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 export type ConciergeTaskChecklistItem = {
   id: string;
   label: string;

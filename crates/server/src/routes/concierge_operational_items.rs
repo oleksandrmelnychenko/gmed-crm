@@ -178,7 +178,7 @@ async fn list_items(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid kind");
     }
 
-    let assignee_filter = if auth.role == Role::Concierge {
+    let assignee_filter = if is_operational_self_service_role(auth.role) {
         Some(auth.user_id)
     } else {
         query.assigned_to
@@ -310,7 +310,7 @@ async fn create_item(
         let replayed_item_id = replay
             .try_get::<Uuid, _>("task_id")
             .unwrap_or_else(|_| Uuid::nil());
-        if auth.role == Role::Concierge
+        if is_operational_self_service_role(auth.role)
             && replay.try_get::<Uuid, _>("assigned_to").ok() != Some(auth.user_id)
         {
             return err(StatusCode::FORBIDDEN, "Insufficient permissions");
@@ -326,7 +326,9 @@ async fn create_item(
         }
         return Json(replayed_item).into_response();
     }
-    if let Err(response) = validate_active_concierge_in_transaction(&mut tx, assigned_to).await {
+    if let Err(response) =
+        validate_active_operational_assignee_in_transaction(&mut tx, assigned_to).await
+    {
         return response;
     }
     if let Some(service_id) = fields.concierge_service_id
@@ -492,7 +494,7 @@ async fn update_item(
     let existing_reminder_at = existing
         .try_get::<Option<DateTime<Utc>>, _>("reminder_at")
         .unwrap_or_default();
-    if auth.role == Role::Concierge && existing_assignee != auth.user_id {
+    if is_operational_self_service_role(auth.role) && existing_assignee != auth.user_id {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     if existing.try_get::<DateTime<Utc>, _>("updated_at").ok() != Some(expected_updated_at) {
@@ -564,7 +566,7 @@ async fn update_item(
     .bind(fields.ends_at.as_ref())
     .bind(fields.location.as_deref())
     .bind(fields.reminder_at.as_ref())
-    .bind(auth.role == Role::Concierge)
+    .bind(is_operational_self_service_role(auth.role))
     .bind(auth.user_id)
     .execute(&mut *tx)
     .await;
@@ -1136,7 +1138,7 @@ async fn lock_item_access(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
-    if auth.role == Role::Concierge && assigned_to != auth.user_id {
+    if is_operational_self_service_role(auth.role) && assigned_to != auth.user_id {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
     Ok(assigned_to)
@@ -1216,8 +1218,8 @@ async fn resolve_assignee(
 ) -> Result<Uuid, axum::response::Response> {
     let assigned_to = requested_assignee(auth, requested)?;
 
-    let is_active_concierge = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role = 'concierge')",
+    let is_active_assignee = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role IN ('concierge', 'ceo', 'billing'))",
     )
     .bind(assigned_to)
     .fetch_one(&state.db)
@@ -1226,10 +1228,10 @@ async fn resolve_assignee(
         tracing::error!(error = %error, assigned_to = %assigned_to, "validate operational item assignee");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
-    if !is_active_concierge {
+    if !is_active_assignee {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "assigned_to must reference an active Concierge",
+            "assigned_to must reference an active Concierge, CEO, or Billing user",
         ));
     }
     Ok(assigned_to)
@@ -1240,11 +1242,11 @@ fn requested_assignee(
     auth: &AuthUser,
     requested: Option<Uuid>,
 ) -> Result<Uuid, axum::response::Response> {
-    let assigned_to = if auth.role == Role::Concierge {
+    let assigned_to = if is_operational_self_service_role(auth.role) {
         if requested.is_some_and(|value| value != auth.user_id) {
             return Err(err(
                 StatusCode::FORBIDDEN,
-                "Concierge can only manage own items",
+                "This role can only manage own operational items",
             ));
         }
         auth.user_id
@@ -1259,12 +1261,12 @@ fn requested_assignee(
     Ok(assigned_to)
 }
 
-async fn validate_active_concierge_in_transaction(
+async fn validate_active_operational_assignee_in_transaction(
     tx: &mut Transaction<'_, Postgres>,
     assigned_to: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let is_active_concierge = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role = 'concierge')",
+    let is_active_assignee = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active = true AND role IN ('concierge', 'ceo', 'billing'))",
     )
     .bind(assigned_to)
     .fetch_one(&mut **tx)
@@ -1273,10 +1275,10 @@ async fn validate_active_concierge_in_transaction(
         tracing::error!(error = %error, assigned_to = %assigned_to, "validate operational item assignee");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
-    if !is_active_concierge {
+    if !is_active_assignee {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "assigned_to must reference an active Concierge",
+            "assigned_to must reference an active Concierge, CEO, or Billing user",
         ));
     }
     Ok(())
@@ -1721,7 +1723,11 @@ pub fn spawn_concierge_task_reminder_scheduler(state: AppState) {
 
 #[allow(clippy::result_large_err)]
 fn require_operational_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::Concierge])
+    auth.require_any_role(&[Role::Ceo, Role::Concierge, Role::Billing])
+}
+
+fn is_operational_self_service_role(role: Role) -> bool {
+    matches!(role, Role::Concierge | Role::Billing)
 }
 
 fn is_valid_kind(value: &str) -> bool {

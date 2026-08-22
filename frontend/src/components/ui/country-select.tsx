@@ -121,6 +121,9 @@ export function CountrySelect({
   className,
   "aria-label": ariaLabel,
   includeEmpty = true,
+  emptyLabel = "—",
+  required = false,
+  disabled = false,
 }: {
   value: string | null;
   onChange: (code: string | null) => void;
@@ -128,6 +131,9 @@ export function CountrySelect({
   className?: string;
   "aria-label"?: string;
   includeEmpty?: boolean;
+  emptyLabel?: string;
+  required?: boolean;
+  disabled?: boolean;
 }) {
   const selectedValue = countryCodeFromStoredValue(value);
   const options = useMemo(() => {
@@ -147,9 +153,11 @@ export function CountrySelect({
       value={selectedValue}
       aria-label={ariaLabel}
       className={className}
+      required={required}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value || null)}
     >
-      {includeEmpty ? <option value="">—</option> : null}
+      {includeEmpty ? <option value="">{emptyLabel}</option> : null}
       {options.map((option) => (
         <option key={option.code} value={option.code}>
           {option.label}

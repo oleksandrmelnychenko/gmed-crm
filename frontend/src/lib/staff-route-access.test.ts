@@ -126,7 +126,7 @@ describe("first-release staff RBAC", () => {
     expect(billing).toContain("/company-finance");
     expect(billing).toContain("/finance-catalog");
     expect(billing).not.toContain("/concierge");
-    expect(billing).not.toContain("/task-manager");
+    expect(billing).toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([

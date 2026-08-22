@@ -38,6 +38,7 @@ import {
   conciergeServiceTaxonomyLabel,
   conciergeWorkspaceStats,
   filterConciergeServices,
+  filterConciergeTaskAssignees,
   isConciergeServiceOverdue,
   nextConciergeServiceStatus,
   nextConciergeTaskStatus,
@@ -534,10 +535,10 @@ export function ConciergeWorkspacePage() {
             forceFresh: version > 0,
           }).catch(() => []),
           user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?role=concierge&active_only=true", {
+            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
                 cacheTtlMs: 30_000,
                 forceFresh: version > 0,
-              })
+              }).then(filterConciergeTaskAssignees)
             : Promise.resolve(user ? [{ id: user.id, name: user.name, email: user.email, role: user.role, is_active: true }] : []),
         ]);
         if (!cancelled) {

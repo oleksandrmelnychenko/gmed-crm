@@ -33,7 +33,7 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("order"), "ceo")).toBe("/orders?order=entity-1");
     expect(notificationHrefForRole(notification("concierge_service"), "concierge")).toBe("/concierge");
     expect(notificationHrefForRole(notification("concierge_task"), "concierge")).toBe("/task-manager?task=entity-1");
-    expect(notificationHrefForRole(notification("concierge_task"), "billing")).toBeNull();
+    expect(notificationHrefForRole(notification("concierge_task"), "billing")).toBe("/task-manager?task=entity-1");
     expect(notificationHrefForRole(notification("concierge_expense"), "billing")).toBe(
       "/company-finance?tab=concierge-expenses&expense=entity-1",
     );

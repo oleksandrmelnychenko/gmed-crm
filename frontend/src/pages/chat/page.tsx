@@ -120,7 +120,10 @@ function createChatPageFieldPatch<K extends keyof ChatPageState>(
 
 function useChatPageContent() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const secureChannelPendingStatus = lang === "de"
+    ? "Textnachrichten sind bereits über den geschützten Serverkanal verfügbar. Ende-zu-Ende-Verschlüsselung und Anhänge werden aktiviert, sobald die andere Person den Chat öffnet."
+    : "Текстовые сообщения уже доступны через защищённый серверный канал. Сквозное шифрование и вложения включатся, когда собеседник откроет чат.";
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
   const canViewChat = canAccessChat(user?.role);
@@ -377,9 +380,9 @@ function useChatPageContent() {
     setSecureStatus(
       key
         ? null
-        : t.chat_secure_setup_pending,
+        : secureChannelPendingStatus,
     );
-  }, [t.chat_secure_setup_pending]);
+  }, [secureChannelPendingStatus]);
 
   const failActivePeerMessageKey = useCallback(() => {
     setActivePeerMessageKey(null);
@@ -750,7 +753,7 @@ function useChatPageContent() {
     // File upload
     if (pendingFile) {
       if (!activePeerMessageKey) {
-        setSecureStatus(t.chat_secure_setup_pending);
+        setSecureStatus(secureChannelPendingStatus);
         return;
       }
       setSending(true);
@@ -819,24 +822,24 @@ function useChatPageContent() {
 
     // Text message
     if (!input.trim()) return;
-    if (!activePeerMessageKey) {
-      setSecureStatus(t.chat_secure_setup_pending);
-      return;
-    }
     setSending(true);
     const msg = input.trim();
     setInput("");
     try {
-      const senderKey = await ensureServerMessageKey();
-      const payload = await encryptMessageForPeer(
-        msg,
-        senderKey,
-        activePeerMessageKey,
-      );
-      await sendPeerMessage(activePeer, payload);
+      if (activePeerMessageKey) {
+        const senderKey = await ensureServerMessageKey();
+        const payload = await encryptMessageForPeer(
+          msg,
+          senderKey,
+          activePeerMessageKey,
+        );
+        await sendPeerMessage(activePeer, payload);
+      } else {
+        await sendPeerMessage(activePeer, { message: msg });
+      }
       await loadMessagesForPeer(activePeer);
       void loadConversations();
-      setSecureStatus(null);
+      setSecureStatus(activePeerMessageKey ? null : secureChannelPendingStatus);
     } catch {
       setInput(msg);
       setSecureStatus(t.chat_secure_message_send_failed);
@@ -1166,7 +1169,7 @@ function useChatPageContent() {
                 className="hidden"
                 onChange={(e) => {
                   if (!activePeerMessageKey) {
-                    setSecureStatus(t.chat_secure_setup_pending);
+                    setSecureStatus(secureChannelPendingStatus);
                     e.target.value = "";
                     return;
                   }
@@ -1182,7 +1185,7 @@ function useChatPageContent() {
                 title={
                   activePeerMessageKey
                     ? t.chat_secure_attachment_label
-                    : t.chat_secure_setup_pending
+                    : secureChannelPendingStatus
                 }
                 className="flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
               >

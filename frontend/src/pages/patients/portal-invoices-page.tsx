@@ -522,7 +522,57 @@ function usePatientInvoicesPageContent() {
                 ))}
             </div>
           ) : null}
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 hidden overflow-x-auto rounded-xl border border-border/70 md:block">
+            <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+              <thead className="bg-muted/45 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">{lang === "de" ? "Dokument" : "Документ"}</th>
+                  <th className="px-4 py-3">{lang === "de" ? "Datum" : "Дата"}</th>
+                  <th className="px-4 py-3">{lang === "de" ? "Status" : "Статус"}</th>
+                  <th className="px-4 py-3 text-right">{lang === "de" ? "Gesamt" : "Всего"}</th>
+                  <th className="px-4 py-3 text-right">{lang === "de" ? "Bezahlt / verrechnet" : "Оплачено / зачтено"}</th>
+                  <th className="px-4 py-3 text-right">{lang === "de" ? "Offen / verfügbar" : "К доплате / доступно"}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {accountStatement.items.map((item) => {
+                  const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
+                  const kindLabel = isCreditAdjustment
+                    ? item.kind === "credit_note"
+                      ? lang === "de" ? "Gutschrift" : "Кредит-нота"
+                      : lang === "de" ? "Gutschrift storniert" : "Отмена кредит-ноты"
+                    : item.kind === "prepayment"
+                      ? lang === "de" ? "Vorauszahlung" : "Предоплата"
+                      : lang === "de" ? "Rechnung" : "Счёт";
+                  const hidden = t.portal_invoices_hidden;
+                  return (
+                    <tr key={`table:${item.kind}:${item.id}`} className="bg-card transition-colors hover:bg-muted/25">
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-foreground">{item.document_number || kindLabel}</div>
+                        <div className="mt-0.5 max-w-[260px] truncate text-xs text-muted-foreground">{item.order_number ?? item.description}</div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDate(item.entry_date)}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge tone={item.payment_state === "paid" ? "success" : item.payment_state === "partially_paid" ? "warning" : "neutral"}>
+                          {portalAccountStateLabel(item.payment_state, lang)}
+                        </StatusBadge>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
+                        {item.amounts_visible && item.amount_gross != null ? formatPortalCurrency(item.amount_gross, accountStatement.currency) : hidden}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">
+                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(Number(item.cash_paid ?? 0) + Number(item.prepayment_applied ?? 0), accountStatement.currency) : hidden}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
+                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(item.kind === "prepayment" ? item.prepayment_available : item.amount_due, accountStatement.currency) : hidden}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 space-y-2 md:hidden">
             {accountStatement.items.map((item) => {
               const isCreditAdjustment = item.kind === "credit_note" || item.kind === "credit_note_reversal";
               return (
@@ -585,7 +635,60 @@ function usePatientInvoicesPageContent() {
             </p>
           </EmptyCell>
         ) : (
-          <div className="grid gap-3 xl:grid-cols-2">
+          <>
+          <div className="hidden overflow-x-auto rounded-xl border border-border/70 md:block">
+            <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+              <thead className="bg-muted/45 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">{lang === "de" ? "Rechnung / Auftrag" : "Счёт / заказ"}</th>
+                  <th className="px-4 py-3">{t.portal_invoices_issued}</th>
+                  <th className="px-4 py-3">{lang === "de" ? "Status" : "Статус"}</th>
+                  <th className="px-4 py-3">{lang === "de" ? "Typ" : "Тип"}</th>
+                  <th className="px-4 py-3 text-right">{t.portal_invoices_total}</th>
+                  <th className="px-4 py-3 text-right">{t.portal_invoices_open}</th>
+                  <th className="px-4 py-3">{t.portal_invoices_payment_proof}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {invoices.map((invoice) => {
+                  const amountsVisible = invoiceAmountsVisible(invoice);
+                  const balanceDue = Number(invoice.balance_due ?? 0);
+                  const openInvoice = () => dispatchInvoicesState({ selectedInvoiceId: invoice.id });
+                  return (
+                    <tr
+                      key={`table:${invoice.id}`}
+                      tabIndex={0}
+                      onClick={openInvoice}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openInvoice();
+                        }
+                      }}
+                      className={cn(
+                        "cursor-pointer bg-card outline-none transition-colors hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40",
+                        selectedInvoiceId === invoice.id && "bg-primary/5",
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <button type="button" className="font-semibold text-foreground hover:underline" onClick={openInvoice}>
+                          {invoice.invoice_number}
+                        </button>
+                        <div className="mt-0.5 text-xs text-muted-foreground">{invoice.order_number}</div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDateTime(invoice.issued_at)}</td>
+                      <td className="px-4 py-3"><StatusBadge status={invoice.status}>{portalStatusLabel(invoice.status)}</StatusBadge></td>
+                      <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(invoice.total_gross) : t.portal_invoices_hidden}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue) : t.portal_invoices_hidden}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid gap-3 md:hidden">
             {invoices.map((invoice) => {
               const amountsVisible = invoiceAmountsVisible(invoice);
               const balanceDue = Number(invoice.balance_due ?? 0);
@@ -637,6 +740,7 @@ function usePatientInvoicesPageContent() {
               );
             })}
           </div>
+          </>
         )}
       </Section>
 

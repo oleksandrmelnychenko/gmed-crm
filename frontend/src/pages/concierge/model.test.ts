@@ -16,6 +16,7 @@ import {
   conciergeTaskDisplayTitle,
   filterConciergeServices,
   filterConciergeTasks,
+  filterConciergeTaskAssignees,
   filterConciergeProviders,
   eligibleConciergeServicesForProvider,
   googleMapsDirectionsUrl,
@@ -32,6 +33,24 @@ import {
   type ConciergeTask,
   type ConciergeAssignee,
 } from "./model";
+
+describe("filterConciergeTaskAssignees", () => {
+  it("keeps active Concierge, CEO and accounting users", () => {
+    const users: ConciergeAssignee[] = [
+      { id: "1", name: "Concierge", email: "c@test", role: "concierge", is_active: true },
+      { id: "2", name: "CEO", email: "ceo@test", role: "ceo", is_active: true },
+      { id: "3", name: "Billing", email: "b@test", role: "billing", is_active: true },
+      { id: "4", name: "Patient", email: "p@test", role: "patient", is_active: true },
+      { id: "5", name: "Inactive", email: "i@test", role: "billing", is_active: false },
+    ];
+
+    expect(filterConciergeTaskAssignees(users).map((user) => user.role).sort()).toEqual([
+      "billing",
+      "ceo",
+      "concierge",
+    ]);
+  });
+});
 
 function service(overrides: Partial<ConciergeService> = {}): ConciergeService {
   return {

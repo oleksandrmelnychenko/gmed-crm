@@ -47,3 +47,17 @@ export function cachedRegionDisplayNames(locale: string): Intl.DisplayNames | nu
   }
   return regionDisplayNames.get(locale) ?? null;
 }
+
+const languageDisplayNames = new Map<string, Intl.DisplayNames | null>();
+
+/** Returns null when localized language names are unavailable in this runtime. */
+export function cachedLanguageDisplayNames(locale: string): Intl.DisplayNames | null {
+  if (!languageDisplayNames.has(locale)) {
+    try {
+      languageDisplayNames.set(locale, new Intl.DisplayNames([locale], { type: "language" }));
+    } catch {
+      languageDisplayNames.set(locale, null);
+    }
+  }
+  return languageDisplayNames.get(locale) ?? null;
+}

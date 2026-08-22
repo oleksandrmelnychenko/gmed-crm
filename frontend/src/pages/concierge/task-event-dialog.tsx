@@ -38,7 +38,7 @@ const copy = {
     notePlaceholder: "Absprachen, Checkliste oder Übergabedetail",
     linkedService: "Zugewiesener Service",
     assignee: "Zuständig",
-    chooseAssignee: "Concierge auswählen",
+    chooseAssignee: "Zuständige Person auswählen",
     noService: "Ohne Servicebezug",
     dueAt: "Fällig am",
     startsAt: "Beginn",
@@ -77,7 +77,7 @@ const copy = {
     notePlaceholder: "Договорённости, чек-лист или детали передачи",
     linkedService: "Назначенная услуга",
     assignee: "Исполнитель",
-    chooseAssignee: "Выберите консьержа",
+    chooseAssignee: "Выберите исполнителя",
     noService: "Без привязки к услуге",
     dueAt: "Срок",
     startsAt: "Начало",
@@ -105,6 +105,16 @@ const copy = {
     assignmentSection: "Назначение",
   },
 } as const;
+
+function assigneeRoleLabel(role: string, lang: Lang) {
+  const labels: Record<string, [string, string]> = {
+    concierge: ["Concierge", "Консьерж"],
+    ceo: ["CEO", "CEO"],
+    billing: ["Buchhaltung", "Бухгалтерия"],
+  };
+  const label = labels[role];
+  return label ? (lang === "de" ? label[0] : label[1]) : role;
+}
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
@@ -284,7 +294,7 @@ export function ConciergeTaskEventDialog({
                       <ConciergeField label={labels.assignee}>
                         <select className={selectClass} value={assigneeId} required onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
                           <option value="" disabled>{labels.chooseAssignee}</option>
-                          {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
+                          {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name} · {assigneeRoleLabel(assignee.role, lang)}</option>)}
                         </select>
                       </ConciergeField>
                     ) : null}

@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useLang } from "@/lib/i18n";
+import { cachedLanguageDisplayNames } from "@/lib/intl-cache";
 import { cn } from "@/lib/utils";
 
 type LanguageOption = {
@@ -12,26 +13,42 @@ type LanguageOption = {
   labelRu: string;
 };
 
-export const LANGUAGE_OPTIONS: LanguageOption[] = [
-  { value: "de", labelDe: "Deutsch", labelRu: "Немецкий" },
-  { value: "uk", labelDe: "Ukrainisch", labelRu: "Украинский" },
-  { value: "ru", labelDe: "Russisch", labelRu: "Русский" },
-  { value: "en", labelDe: "Englisch", labelRu: "Английский" },
-  { value: "ar", labelDe: "Arabisch", labelRu: "Арабский" },
-  { value: "fa", labelDe: "Persisch", labelRu: "Персидский" },
-  { value: "pt", labelDe: "Portugiesisch", labelRu: "Португальский" },
-  { value: "fr", labelDe: "Französisch", labelRu: "Французский" },
-  { value: "es", labelDe: "Spanisch", labelRu: "Испанский" },
-  { value: "it", labelDe: "Italienisch", labelRu: "Итальянский" },
-  { value: "tr", labelDe: "Türkisch", labelRu: "Турецкий" },
-  { value: "pl", labelDe: "Polnisch", labelRu: "Польский" },
-  { value: "cs", labelDe: "Tschechisch", labelRu: "Чешский" },
-  { value: "da", labelDe: "Dänisch", labelRu: "Датский" },
-  { value: "el", labelDe: "Griechisch", labelRu: "Греческий" },
-  { value: "lv", labelDe: "Lettisch", labelRu: "Латышский" },
-  { value: "zh", labelDe: "Chinesisch", labelRu: "Китайский" },
-  { value: "ur", labelDe: "Urdu", labelRu: "Урду" },
+function displayLanguageLabel(value: string, lang: "de" | "ru") {
+  const display = cachedLanguageDisplayNames(lang);
+  if (!display) return value.toUpperCase();
+  try {
+    const label = display.of(value) ?? value.toUpperCase();
+    return label.charAt(0).toLocaleUpperCase(lang) + label.slice(1);
+  } catch {
+    return value.toUpperCase();
+  }
+}
+
+/** Comprehensive ISO 639-1 language codes. */
+export const LANGUAGE_CODES: readonly string[] = [
+  "aa", "ab", "ae", "af", "ak", "am", "an", "ar", "as", "av", "ay", "az",
+  "ba", "be", "bg", "bh", "bi", "bm", "bn", "bo", "br", "bs", "ca", "ce",
+  "ch", "co", "cr", "cs", "cu", "cv", "cy", "da", "de", "dv", "dz", "ee",
+  "el", "en", "eo", "es", "et", "eu", "fa", "ff", "fi", "fj", "fo", "fr",
+  "fy", "ga", "gd", "gl", "gn", "gu", "gv", "ha", "he", "hi", "ho", "hr",
+  "ht", "hu", "hy", "hz", "ia", "id", "ie", "ig", "ii", "ik", "io", "is",
+  "it", "iu", "ja", "jv", "ka", "kg", "ki", "kj", "kk", "kl", "km", "kn",
+  "ko", "kr", "ks", "ku", "kv", "kw", "ky", "la", "lb", "lg", "li", "ln",
+  "lo", "lt", "lu", "lv", "mg", "mh", "mi", "mk", "ml", "mn", "mr", "ms",
+  "mt", "my", "na", "nb", "nd", "ne", "ng", "nl", "nn", "no", "nr", "nv",
+  "ny", "oc", "oj", "om", "or", "os", "pa", "pi", "pl", "ps", "pt", "qu",
+  "rm", "rn", "ro", "ru", "rw", "sa", "sc", "sd", "se", "sg", "si", "sk",
+  "sl", "sm", "sn", "so", "sq", "sr", "ss", "st", "su", "sv", "sw", "ta",
+  "te", "tg", "th", "ti", "tk", "tl", "tn", "to", "tr", "ts", "tt", "tw",
+  "ty", "ug", "uk", "ur", "uz", "ve", "vi", "vo", "wa", "wo", "xh", "yi",
+  "yo", "za", "zh", "zu",
 ];
+
+export const LANGUAGE_OPTIONS: LanguageOption[] = LANGUAGE_CODES.map((value) => ({
+  value,
+  labelDe: displayLanguageLabel(value, "de"),
+  labelRu: displayLanguageLabel(value, "ru"),
+}));
 
 function normalizeLanguageKey(value: string) {
   return value.trim().toLowerCase();
