@@ -25,7 +25,7 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
     <>
       <div
         className={cn(
-          "flex flex-wrap items-start justify-between gap-3",
+          "flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between",
           topbarSlot && "lg:hidden",
         )}
       >
@@ -33,7 +33,7 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
           <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
         </div>
         {actions ? (
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          <div className="grid w-full grid-cols-2 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap max-sm:[&>*]:min-w-0 max-sm:[&>button:only-child]:col-span-2 max-sm:[&_:is(button,a)]:min-h-10">{actions}</div>
         ) : null}
       </div>
       {topbarSlot

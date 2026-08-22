@@ -10,9 +10,13 @@ import {
 } from "react";
 
 import {
+  CheckCircle2,
   CircleDollarSign,
+  Copy,
   Download,
   ExternalLink,
+  KeyRound,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -42,6 +46,7 @@ import {
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -57,6 +62,7 @@ import type {
   PatientServicePackageItem,
   OrderItem,
 } from "../../model/detail-tab-types";
+import type { PatientAssignment } from "../../model/list-model";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
 import {
@@ -116,6 +122,30 @@ type BalanceAdjustmentForm = {
   portalVisible: boolean;
 };
 
+type PortalAccountActivationForm = {
+  email: string;
+  password: string;
+  passwordConfirm: string;
+};
+
+type PortalAccountActivationResponse = {
+  user_id: string;
+  email: string;
+  name: string;
+  role: "patient";
+  is_active: boolean;
+  created: boolean;
+};
+
+const PATIENT_CHAT_STAFF_ROLES = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
 type FinanceFilters = {
   from: string;
   to: string;
@@ -165,6 +195,19 @@ const BLANK_CONSUMPTION_FORM: ConsumptionForm = {
   quantity: "1",
   notes: "",
 };
+
+function generateTemporaryPortalPassword() {
+  return `Gm!${crypto.randomUUID().replaceAll("-", "").slice(0, 14)}`;
+}
+
+function createPortalAccountForm(email = ""): PortalAccountActivationForm {
+  const password = generateTemporaryPortalPassword();
+  return {
+    email,
+    password,
+    passwordConfirm: password,
+  };
+}
 
 function createBlankBalanceAdjustmentForm(currency = "EUR"): BalanceAdjustmentForm {
   return {
@@ -233,6 +276,10 @@ type PatientInvoicesTabProps = {
   financialSummary: PatientFinancialSummary | null;
   financialLedger: PatientFinancialLedger | null;
   servicePackages: PatientServicePackageItem[];
+  patientId: string;
+  patientName: string;
+  patientEmail?: string | null;
+  assignments: PatientAssignment[];
   canManageInvoices: boolean;
   onOpenInvoice: (invoiceId: string) => void;
   onManageInvoice: (invoice: InvoiceItem) => void;
@@ -628,6 +675,10 @@ function usePatientInvoicesTabContent({
   financialSummary,
   financialLedger,
   servicePackages,
+  patientId,
+  patientName,
+  patientEmail,
+  assignments,
   canManageInvoices,
   onOpenInvoice,
   onManageInvoice,
@@ -641,7 +692,10 @@ function usePatientInvoicesTabContent({
 }: PatientInvoicesTabProps) {
   const { t, lang } = useLang();
   const { user } = useAuth();
+  const { staffGo } = useStaffNavigate();
   const canManageBalance = user?.role === "ceo" || user?.role === "billing";
+  const canManagePortalAccount =
+    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "it_admin";
   const [movementDirectionFilter, setMovementDirectionFilter] = useState<
     "all" | PatientAccountMovement["direction"]
   >("all");
@@ -658,7 +712,18 @@ function usePatientInvoicesTabContent({
   const [reversingBalanceAdjustmentId, setReversingBalanceAdjustmentId] = useState("");
   const [balanceAdjustmentReversalReason, setBalanceAdjustmentReversalReason] = useState("");
   const [balanceAdjustmentReversalRequestId, setBalanceAdjustmentReversalRequestId] = useState("");
-  const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
+  const linkedPortalAssignment = assignments.find(
+    (item) => item.user_role === "patient" && !item.revoked_at,
+  );
+  const [activatedPortalAccount, setActivatedPortalAccount] =
+    useState<PortalAccountActivationResponse | null>(null);
+  const [portalAccountOpen, setPortalAccountOpen] = useState(false);
+  const [portalAccountBusy, setPortalAccountBusy] = useState(false);
+  const [portalAccountError, setPortalAccountError] = useState("");
+  const [portalCredentialsCopied, setPortalCredentialsCopied] = useState(false);
+  const [portalAccountForm, setPortalAccountForm] = useState<PortalAccountActivationForm>(() =>
+    createPortalAccountForm(linkedPortalAssignment?.user_email ?? patientEmail ?? ""),
+  );
   const [financeState, dispatchFinanceState] = useReducer(
     patientInvoicesFinanceReducer,
     undefined,
@@ -990,6 +1055,80 @@ function usePatientInvoicesTabContent({
     }
   }
 
+  function openPortalAccountActivation() {
+    setPortalAccountError("");
+    setPortalCredentialsCopied(false);
+    setActivatedPortalAccount(null);
+    setPortalAccountForm(
+      createPortalAccountForm(linkedPortalAssignment?.user_email ?? patientEmail ?? ""),
+    );
+    setPortalAccountOpen(true);
+  }
+
+  function closePortalAccountActivation() {
+    setPortalAccountOpen(false);
+    setPortalAccountError("");
+    setPortalCredentialsCopied(false);
+    setPortalAccountForm((current) => ({
+      ...current,
+      password: "",
+      passwordConfirm: "",
+    }));
+  }
+
+  async function handleActivatePortalAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!patientId || portalAccountBusy) return;
+    if (!portalAccountForm.email.trim() || !portalAccountForm.email.includes("@")) {
+      setPortalAccountError(
+        lang === "de" ? "Bitte geben Sie eine gültige E-Mail-Adresse ein." : "Укажите корректный email.",
+      );
+      return;
+    }
+    if (portalAccountForm.password !== portalAccountForm.passwordConfirm) {
+      setPortalAccountError(
+        lang === "de" ? "Die Passwörter stimmen nicht überein." : "Пароли не совпадают.",
+      );
+      return;
+    }
+
+    setPortalAccountBusy(true);
+    setPortalAccountError("");
+    try {
+      const response = await apiFetch<PortalAccountActivationResponse>(
+        `/patients/${patientId}/portal-account/activate`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: portalAccountForm.email.trim(),
+            password: portalAccountForm.password,
+          }),
+        },
+      );
+      setActivatedPortalAccount(response);
+    } catch (error) {
+      setPortalAccountError(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Das Patientenkonto konnte nicht aktiviert werden."
+            : "Не удалось активировать аккаунт пациента.",
+      );
+    } finally {
+      setPortalAccountBusy(false);
+    }
+  }
+
+  async function copyPortalCredentials() {
+    const text = `${activatedPortalAccount?.email ?? portalAccountForm.email}\n${portalAccountForm.password}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setPortalCredentialsCopied(true);
+    } catch {
+      setPortalCredentialsCopied(false);
+    }
+  }
+
   async function handleConsumePackage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!patientId || !consumeTargetId) return;
@@ -1050,6 +1189,24 @@ function usePatientInvoicesTabContent({
   }
 
   const effectiveServicePackages = refreshedServicePackages ?? servicePackages;
+  const portalAccountEmail =
+    activatedPortalAccount?.email ?? linkedPortalAssignment?.user_email ?? patientEmail ?? "";
+  const portalAccountIsActive =
+    activatedPortalAccount?.is_active ?? linkedPortalAssignment?.user_active ?? false;
+  const portalAccountUserId =
+    activatedPortalAccount?.user_id ?? linkedPortalAssignment?.user_id ?? "";
+  const canOpenPatientChat = Boolean(
+    portalAccountIsActive &&
+      portalAccountUserId &&
+      user?.id &&
+      PATIENT_CHAT_STAFF_ROLES.has(user.role) &&
+      assignments.some(
+        (item) => item.user_id === user.id && item.user_role !== "patient" && !item.revoked_at,
+      ),
+  );
+  const hasEligiblePortalPackage = effectiveServicePackages.some((item) =>
+    ["draft", "active", "paused"].includes(item.status),
+  );
   const filteredServicePackages = useMemo(
     () =>
       effectiveServicePackages.filter((item) => {
@@ -2562,6 +2719,237 @@ function usePatientInvoicesTabContent({
         </FormSection>
       </PatientSheetScaffold>
 
+      <PatientSheetScaffold
+        open={portalAccountOpen && canManagePortalAccount}
+        onOpenChange={(open) => {
+          if (open) setPortalAccountOpen(true);
+          else closePortalAccountActivation();
+        }}
+        width="default"
+        onSubmit={activatedPortalAccount ? undefined : handleActivatePortalAccount}
+        title={lang === "de" ? "Patientenkonto aktivieren" : "Активировать аккаунт пациента"}
+        description={
+          lang === "de"
+            ? `Portalzugang für ${patientName}`
+            : `Доступ в портал для ${patientName}`
+        }
+        bodyClassName="space-y-4 px-5 py-4"
+        footer={
+          activatedPortalAccount ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={closePortalAccountActivation}
+            >
+              {lang === "de" ? "Fertig" : "Готово"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                onClick={closePortalAccountActivation}
+                disabled={portalAccountBusy}
+              >
+                {lang === "de" ? "Abbrechen" : "Отмена"}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={
+                  portalAccountBusy ||
+                  !portalAccountForm.email.trim() ||
+                  !portalAccountForm.password ||
+                  !portalAccountForm.passwordConfirm
+                }
+              >
+                {portalAccountBusy
+                  ? lang === "de"
+                    ? "Wird aktiviert…"
+                    : "Активация…"
+                  : lang === "de"
+                    ? "Konto aktivieren"
+                    : "Активировать аккаунт"}
+              </Button>
+            </>
+          )
+        }
+      >
+        {portalAccountError ? (
+          <Banner tone="error" withIcon>
+            {portalAccountError}
+          </Banner>
+        ) : null}
+
+        {activatedPortalAccount ? (
+          <>
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {activatedPortalAccount.created
+                    ? lang === "de"
+                      ? "Patientenkonto wurde erstellt"
+                      : "Аккаунт пациента создан"
+                    : lang === "de"
+                      ? "Patientenkonto wurde aktualisiert"
+                      : "Аккаунт пациента обновлён"}
+                </p>
+                <p className="mt-1 text-emerald-700">
+                  {lang === "de"
+                    ? "Übermitteln Sie diese Zugangsdaten sicher an den Patienten. Das temporäre Passwort wird nach dem Schließen nicht mehr angezeigt."
+                    : "Безопасно передайте эти данные пациенту. После закрытия временный пароль больше не будет показан."}
+                </p>
+              </div>
+            </div>
+
+            <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
+              <div className="space-y-3">
+                <Field label="Email" htmlFor="portal-account-result-email">
+                  <Input
+                    id="portal-account-result-email"
+                    value={activatedPortalAccount.email}
+                    className={inputClass}
+                    readOnly
+                  />
+                </Field>
+                <Field
+                  label={lang === "de" ? "Temporäres Passwort" : "Временный пароль"}
+                  htmlFor="portal-account-result-password"
+                >
+                  <Input
+                    id="portal-account-result-password"
+                    value={portalAccountForm.password}
+                    className={inputClass}
+                    readOnly
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={() => void copyPortalCredentials()}
+                >
+                  {portalCredentialsCopied ? (
+                    <CheckCircle2 className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                  {portalCredentialsCopied
+                    ? lang === "de"
+                      ? "Kopiert"
+                      : "Скопировано"
+                    : lang === "de"
+                      ? "Zugangsdaten kopieren"
+                      : "Скопировать данные"}
+                </Button>
+              </div>
+            </FormSection>
+          </>
+        ) : (
+          <>
+            <Banner tone="warning" withIcon>
+              {linkedPortalAssignment
+                ? lang === "de"
+                  ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
+                  : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
+                : lang === "de"
+                  ? "Ein Patientenkonto wird erstellt und mit dieser Patientenakte verknüpft."
+                  : "Будет создан аккаунт пациента и привязан к этой карточке."}
+            </Banner>
+
+            <FormSection title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
+              <div className="space-y-3">
+                <Field label="Email" htmlFor="portal-account-email">
+                  <Input
+                    id="portal-account-email"
+                    type="email"
+                    autoComplete="off"
+                    value={portalAccountForm.email}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <Field
+                  label={lang === "de" ? "Temporäres Passwort" : "Временный пароль"}
+                  htmlFor="portal-account-password"
+                >
+                  <Input
+                    id="portal-account-password"
+                    type="text"
+                    autoComplete="new-password"
+                    value={portalAccountForm.password}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <Field
+                  label={lang === "de" ? "Passwort bestätigen" : "Повторите пароль"}
+                  htmlFor="portal-account-password-confirm"
+                >
+                  <Input
+                    id="portal-account-password-confirm"
+                    type="text"
+                    autoComplete="new-password"
+                    value={portalAccountForm.passwordConfirm}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        passwordConfirm: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {lang === "de"
+                      ? "Mindestens 8 Zeichen mit Groß- und Kleinbuchstaben, Zahl und Sonderzeichen."
+                      : "Минимум 8 символов: большие и маленькие буквы, цифра и специальный символ."}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-lg px-2 text-xs"
+                    onClick={() =>
+                      setPortalAccountForm((current) => {
+                        const password = generateTemporaryPortalPassword();
+                        return { ...current, password, passwordConfirm: password };
+                      })
+                    }
+                    disabled={portalAccountBusy}
+                  >
+                    {lang === "de" ? "Neu generieren" : "Сгенерировать новый"}
+                  </Button>
+                </div>
+              </div>
+            </FormSection>
+          </>
+        )}
+      </PatientSheetScaffold>
+
 
       <PatientSheetScaffold
         open={assignOpen && canManageInvoices}
@@ -2905,6 +3293,44 @@ function usePatientInvoicesTabContent({
                 >
                   <Plus className="size-3.5" />
                   {t.patient_invoices_assign_package}
+                </Button>
+              ) : null}
+              {canManagePortalAccount && portalAccountIsActive ? (
+                <Badge className="h-7 max-w-64 gap-1.5 border border-emerald-200 bg-emerald-50 px-2.5 text-emerald-800 hover:bg-emerald-50">
+                  <CheckCircle2 className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    {lang === "de" ? "Konto aktiv" : "Аккаунт активен"}
+                    {portalAccountEmail ? ` · ${portalAccountEmail}` : ""}
+                  </span>
+                </Badge>
+              ) : null}
+              {canManagePortalAccount && hasEligiblePortalPackage && !portalAccountIsActive ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={openPortalAccountActivation}
+                  disabled={!patientId}
+                >
+                  <KeyRound className="size-3.5" />
+                  {lang === "de" ? "Konto aktivieren" : "Активировать аккаунт"}
+                </Button>
+              ) : null}
+              {canOpenPatientChat ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={() =>
+                    staffGo(
+                      `/chat?peer=${encodeURIComponent(portalAccountUserId)}&name=${encodeURIComponent(patientName)}&role=patient`,
+                    )
+                  }
+                >
+                  <MessageSquare className="size-3.5" />
+                  {lang === "de" ? "Chat öffnen" : "Открыть чат"}
                 </Button>
               ) : null}
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

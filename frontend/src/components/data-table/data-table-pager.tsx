@@ -58,7 +58,7 @@ export function DataTablePager({
   return (
     <div
       className={cn(
-        "flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5",
+        "flex min-h-10 flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-field px-3 py-1.5 sm:min-h-8 sm:flex-nowrap sm:px-4 sm:py-0.5",
         className,
       )}
     >

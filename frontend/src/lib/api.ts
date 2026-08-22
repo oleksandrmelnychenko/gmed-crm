@@ -1,10 +1,16 @@
 ﻿import { uiText } from "@/lib/i18n";
 
+import {
+  clearPersistedAuthTokens,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  hasStoredAuthTokens,
+  persistAuthTokens,
+} from "@/lib/auth-storage";
+
 const CLIENT_API_ORIGIN =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_PREFIX = "/api/v1";
-const ACCESS_TOKEN_KEY = "gmed_access_token";
-const REFRESH_TOKEN_KEY = "gmed_refresh_token";
 const AUTH_REFRESH_LOCK_NAME = "gmed-auth-refresh";
 export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";
 export const DEFAULT_API_TIMEOUT_MS = 20_000;
@@ -58,11 +64,11 @@ export class ApiRequestError extends Error {
 }
 
 export function getAccessToken() {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return getStoredAccessToken();
 }
 
 function getRefreshToken() {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  return getStoredRefreshToken();
 }
 
 function getBrowserLockManager() {
@@ -108,14 +114,14 @@ function dispatchAuthSessionExpired() {
   window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
 }
 
-function clearAuthTokens() {
-  const hadTokens =
-    Boolean(localStorage.getItem(ACCESS_TOKEN_KEY)) ||
-    Boolean(localStorage.getItem(REFRESH_TOKEN_KEY));
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  if (hadTokens) {
-    dispatchAuthSessionExpired();
+async function clearAuthTokens() {
+  const hadTokens = hasStoredAuthTokens();
+  try {
+    await clearPersistedAuthTokens();
+  } finally {
+    if (hadTokens) {
+      dispatchAuthSessionExpired();
+    }
   }
 }
 
@@ -126,7 +132,7 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
 
   const initialRefreshToken = getRefreshToken();
   if (!initialRefreshToken) {
-    clearAuthTokens();
+    await clearAuthTokens();
     jsonCache.clear();
     return null;
   }
@@ -135,7 +141,7 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
     try {
       const refreshToken = getRefreshToken();
       if (!refreshToken) {
-        clearAuthTokens();
+        await clearAuthTokens();
         jsonCache.clear();
         return null;
       }
@@ -150,13 +156,13 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
         body: JSON.stringify({ refresh_token: refreshToken }),
       }, timeoutMs);
       if (!res.ok) {
-        clearAuthTokens();
+        await clearAuthTokens();
         jsonCache.clear();
         return null;
       }
       const tokens = (await res.json()) as { access_token?: string; refresh_token?: string };
       if (!tokens.access_token || !tokens.refresh_token) {
-        clearAuthTokens();
+        await clearAuthTokens();
         jsonCache.clear();
         return null;
       }
@@ -164,8 +170,7 @@ async function tryRefreshAccessToken(timeoutMs = DEFAULT_API_TIMEOUT_MS): Promis
         jsonCache.clear();
         return getAccessToken();
       }
-      localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
-      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+      await persistAuthTokens(tokens.access_token, tokens.refresh_token);
       jsonCache.clear();
       return tokens.access_token;
     } catch {
@@ -559,7 +564,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
           timeoutMs,
         );
       } else {
-        clearAuthTokens();
+        await clearAuthTokens();
         jsonCache.clear();
       }
     }
@@ -629,7 +634,7 @@ export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {
         timeoutMs,
       );
     } else {
-      clearAuthTokens();
+      await clearAuthTokens();
       jsonCache.clear();
     }
   }

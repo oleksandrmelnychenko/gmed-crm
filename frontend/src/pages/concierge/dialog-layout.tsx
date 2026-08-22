@@ -5,7 +5,7 @@ import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/di
 import { cn } from "@/lib/utils";
 
 export const conciergeDialogContentClassName =
-  "grid max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
+  "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
 
 type DialogTone = "amber" | "indigo" | "orange" | "slate";
 
@@ -30,14 +30,14 @@ export function ConciergeDialogHeader({
   meta?: ReactNode;
 }) {
   return (
-    <DialogHeader className="border-b border-border/70 px-5 py-4 pr-14 sm:px-6 sm:py-5">
+    <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 sm:px-6 sm:py-5 sm:pr-14">
       <div className="flex min-w-0 items-start gap-3">
-        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg", iconToneClass[tone])}>
+        <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg sm:size-10", iconToneClass[tone])}>
           <Icon className="size-4.5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <DialogTitle className="text-lg leading-tight">{title}</DialogTitle>
+            <DialogTitle className="text-base leading-tight sm:text-lg">{title}</DialogTitle>
             {meta}
           </div>
           <DialogDescription className="mt-1 max-w-3xl text-xs leading-5 sm:text-sm">
@@ -83,7 +83,7 @@ export function ConciergeDialogSection({
   children: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-lg border border-border/70 bg-card p-4", className)}>
+    <section className={cn("rounded-lg border border-border/70 bg-card p-3 sm:p-4", className)}>
       <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {Icon ? <Icon className="size-3.5 text-primary" /> : null}
         {title}

@@ -51,6 +51,10 @@
 }
 
 :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
     --background: oklch(0.97 0 0);
     --foreground: oklch(0.17 0 0);
     --card: oklch(1 0 0);
@@ -87,6 +91,11 @@
     --sidebar-accent-foreground: var(--brand);
     --sidebar-border: oklch(0.92 0 0);
     --sidebar-ring: var(--brand-ring);
+}
+
+html[data-native-platform] {
+  overscroll-behavior: none;
+  -webkit-touch-callout: none;
 }
 
 .dark {

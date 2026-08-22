@@ -8,6 +8,13 @@ import {
   getAccessTokenExpiresAtMs,
   refreshAuthSession,
 } from "@/lib/api";
+import {
+  ACCESS_TOKEN_KEY,
+  REFRESH_TOKEN_KEY,
+  clearPersistedAuthTokens,
+  getStoredAccessToken,
+  persistAuthTokens,
+} from "@/lib/auth-storage";
 import { uiText } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
 
@@ -67,8 +74,6 @@ type AuthStatePatch =
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const ACCESS_TOKEN_KEY = "gmed_access_token";
-const REFRESH_TOKEN_KEY = "gmed_refresh_token";
 const SESSION_REFRESH_LEEWAY_MS = 2 * 60_000;
 const SESSION_REFRESH_RETRY_MS = 60_000;
 const SESSION_REFRESH_FALLBACK_MS = 10 * 60_000;
@@ -83,18 +88,16 @@ export function useAuth() {
 }
 
 function getAccessToken() {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return getStoredAccessToken();
 }
 
-function saveTokens(tokens: AuthTokens) {
-  localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+async function saveTokens(tokens: AuthTokens) {
+  await persistAuthTokens(tokens.access_token, tokens.refresh_token);
   clearApiCache();
 }
 
-function clearTokens() {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+async function clearTokens() {
+  await clearPersistedAuthTokens();
   clearApiCache();
   clearSecurePersistedState();
 }
@@ -195,7 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           nextUser = await fetchMe(refreshedAccessToken);
         } catch {
-          clearTokens();
+          await clearTokens();
         }
       }
 
@@ -213,7 +216,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleSessionExpired = () => {
-      clearTokens();
+      void clearTokens().catch(() => {
+        // The in-memory native session is already gone; keep the UI logged out.
+      });
       dispatchAuthState({ user: null, loading: false });
     };
 
@@ -329,7 +334,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new PendingLoginError(result.pending_id, result.message);
     }
 
-    saveTokens(result);
+    await saveTokens(result);
     const me = await fetchMe(result.access_token);
     dispatchAuthState({ user: me });
   };
@@ -341,7 +346,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { method: "GET" },
       );
       if (result.status === "approved" && result.access_token && result.refresh_token) {
-        saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
+        await saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
         const me = await fetchMe(result.access_token);
         dispatchAuthState({ user: me });
         return "approved";
@@ -366,8 +371,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore network errors on logout and clear local session anyway.
     } finally {
-      clearTokens();
-      dispatchAuthState({ user: null });
+      try {
+        await clearTokens();
+      } finally {
+        dispatchAuthState({ user: null });
+      }
     }
   };
 

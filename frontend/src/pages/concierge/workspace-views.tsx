@@ -262,14 +262,14 @@ export function ConciergeTaskQueue({
   const openCount = tasks.filter(isConciergeTaskActive).length;
 
   return (
-    <aside className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.tasks}>
+    <aside className="rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.035)]" aria-label={labels.tasks}>
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <ListTodo className="size-4 text-primary" />
           <h2 className="text-sm font-semibold">{labels.tasks}</h2>
         </div>
         <div className="flex items-center gap-1.5">
-          <Badge variant="secondary" className="rounded-full text-[10px]">{openCount} {labels.openTasks}</Badge>
+          <Badge variant="outline" className="rounded-full border-primary/15 bg-primary/8 text-[10px] text-primary">{openCount} {labels.openTasks}</Badge>
           <Button
             type="button"
             size="icon-sm"
@@ -294,7 +294,7 @@ export function ConciergeTaskQueue({
               <article
                 key={task.id}
                 className={cn(
-                  "rounded-lg border border-l-[3px] bg-background p-3 shadow-xs transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-sm",
+                  "rounded-xl border border-l-[3px] bg-card p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)]",
                   taskAccent(task.priority, overdue),
                   overdue ? "border-rose-200" : "border-border/70",
                   ["completed", "cancelled"].includes(task.status) && "opacity-65",
@@ -305,7 +305,7 @@ export function ConciergeTaskQueue({
                   <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>
                     {priorityLabel(task.priority, lang)}
                   </Badge>
-                  <Badge variant="secondary" className="rounded-full text-[10px]">
+                  <Badge variant="outline" className="rounded-full border-border/70 bg-card text-[10px] text-muted-foreground">
                     {task.kind === "event" ? <CalendarClock className="size-3" /> : <ListTodo className="size-3" />}
                     {labels[task.kind]}
                   </Badge>
@@ -320,7 +320,7 @@ export function ConciergeTaskQueue({
                   {conciergeTaskDisplayTitle(task, lang)}
                 </h3>
                 {task.note ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.note}</p> : null}
-                <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
+                <div className="mt-3 space-y-1.5 border-t border-border/60 pt-3 text-xs text-muted-foreground">
                   <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{labels.due}: {dateTime(scheduledAt, lang)}</p>
                   {task.location ? <p className="flex items-center gap-1.5"><MapPin className="size-3.5" />{task.location}</p> : null}
                   <p className="truncate border-t border-border/60 pt-1.5">{labels.assignedBy}: <span className="font-medium text-foreground">{task.assigned_by_name}</span></p>
@@ -334,7 +334,7 @@ export function ConciergeTaskQueue({
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="h-8 rounded-md text-xs"
+                      className="h-8 rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
                       disabled={updatingTaskId === task.id}
                       aria-label={labels.advanceTask.replace("{status}", taskStatusLabel(nextStatus, lang))}
                       onClick={() => onAdvance(task)}

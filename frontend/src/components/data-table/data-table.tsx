@@ -334,6 +334,25 @@ function useDataTableContent<T>({
 
   const showEmpty = !loading && rows.length === 0;
   const showLoading = loading;
+  const mobilePrimaryColumn = useMemo(() => {
+    const preferredIds = [
+      "filename",
+      "patient",
+      "provider",
+      "person",
+      "title",
+      "name",
+      "document",
+      "operation",
+    ];
+    return preferredIds
+      .map((id) => visibleCols.find((column) => column.id === id))
+      .find(Boolean) ?? visibleCols[0];
+  }, [visibleCols]);
+  const mobileDetailColumns = useMemo(
+    () => visibleCols.filter((column) => column.id !== mobilePrimaryColumn?.id).slice(0, 4),
+    [mobilePrimaryColumn?.id, visibleCols],
+  );
 
   useOutsideClose(columnMenuRef, closeColumnMenu, { enabled: Boolean(columnMenu) });
 
@@ -372,7 +391,7 @@ function useDataTableContent<T>({
     <div className={cn("flex flex-col overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm", className)}>
       <div
         ref={scrollRef}
-        className="relative flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="relative hidden flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:block"
         role="table"
         aria-rowcount={rows.length}
         tabIndex={0}
@@ -597,6 +616,104 @@ function useDataTableContent<T>({
           </div>
         )}
       </div>
+      <div className="flex-1 bg-muted/20 p-2 sm:hidden">
+        {showLoading ? (
+          <div className="space-y-2" aria-label={t.common_loading}>
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="h-32 animate-pulse rounded-xl border border-border/60 bg-card" />
+            ))}
+          </div>
+        ) : showEmpty ? (
+          <div className="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
+            {emptyState ?? t.common_no_results}
+          </div>
+        ) : (
+          <div className="space-y-2" role="list">
+            {rows.map((row, index) => {
+              const id = rowId(row);
+              const isActive = activeRowId === id;
+              const isSelected = selectedSet.has(id);
+              const accent = rowAccent?.(row);
+              return (
+                <article
+                  key={id}
+                  role="listitem"
+                  aria-current={isActive ? "true" : undefined}
+                  data-state={isSelected ? "selected" : undefined}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  onClick={() => onRowClick?.(row)}
+                  onDoubleClick={() => onRowDoubleClick?.(row)}
+                  onKeyDown={(event) => {
+                    if (!onRowClick || (event.key !== "Enter" && event.key !== " ")) return;
+                    event.preventDefault();
+                    onRowClick(row);
+                  }}
+                  className={cn(
+                    "relative overflow-hidden rounded-xl border border-border/70 bg-card p-3 shadow-xs transition-colors",
+                    onRowClick && "cursor-pointer active:bg-muted/45",
+                    isActive && "border-primary/50 bg-primary/[0.025] ring-1 ring-primary/15",
+                    isSelected && "bg-primary/[0.045]",
+                  )}
+                >
+                  {accent ? <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-0.5", accent)} /> : null}
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    {selectionEnabled ? (
+                      <div className="pt-0.5" onClick={(event) => event.stopPropagation()}>
+                        <SelectCheckbox
+                          checked={isSelected}
+                          onChange={(event) => toggleSelection(id, event)}
+                          ariaLabel={t.table_select_row}
+                        />
+                      </div>
+                    ) : null}
+                    <div className="min-w-0 flex-1">
+                      {mobilePrimaryColumn ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+                            {mobilePrimaryColumn.label}
+                          </p>
+                          <div className="min-w-0 text-sm font-semibold text-foreground [&_.truncate]:whitespace-normal">
+                            {mobilePrimaryColumn.render
+                              ? mobilePrimaryColumn.render(row)
+                              : defaultRender(mobilePrimaryColumn.accessor(row), t)}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      {index + 1}
+                    </span>
+                  </div>
+                  {mobileDetailColumns.length > 0 ? (
+                    <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border/60 pt-3">
+                      {mobileDetailColumns.map((column) => (
+                        <div key={column.id} className="min-w-0">
+                          <dt className="truncate text-[10px] text-muted-foreground">{column.label}</dt>
+                          <dd className={cn(
+                            "mt-0.5 min-w-0 break-words text-xs text-foreground [&_.flex]:flex-wrap [&_.truncate]:whitespace-normal [&_[data-slot=badge]]:max-w-full [&_[data-slot=badge]]:truncate",
+                            columnAlign(column) === "right" && "font-mono tabular-nums",
+                          )}>
+                            {column.render ? column.render(row) : defaultRender(column.accessor(row), t)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                  {rowActions ? (
+                    <div
+                      className="mt-3 flex items-center justify-end gap-1 border-t border-border/60 pt-2.5"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      {rowActions(row)}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
       {columnMenu && columnMenuColumn && onColumnFreezeChange ? (
         <ColumnHeaderContextMenu
           refEl={columnMenuRef}
@@ -616,7 +733,7 @@ function useDataTableContent<T>({
           onFreezeChange={onColumnFreezeChange}
         />
       ) : null}
-      {footer ? <div className="border-t border-border/60 bg-muted/15 px-3 py-1.5 text-xs text-muted-foreground">{footer}</div> : null}
+      {footer ? <div className="border-t border-border/60 bg-muted/15 px-3 py-2 text-xs text-muted-foreground sm:py-1.5">{footer}</div> : null}
     </div>
   );
 }
