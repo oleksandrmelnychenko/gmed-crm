@@ -88,7 +88,7 @@ const VALID_ROLES: &[&str] = &[
 const PASSWORD_POLICY_MESSAGE: &str =
     "Password must contain uppercase and lowercase letters, a number, and a symbol";
 
-fn validate_password_policy(password: &str) -> Result<(), &'static str> {
+pub(crate) fn validate_password_policy(password: &str) -> Result<(), &'static str> {
     if password.len() < 8 || password.len() > 256 {
         return Err("Password must be 8-256 characters");
     }

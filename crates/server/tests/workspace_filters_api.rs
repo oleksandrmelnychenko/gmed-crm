@@ -7,7 +7,7 @@ use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use gmed_server::auth::jwt;
+use gmed_server::auth::{jwt, password};
 use gmed_server::settings::{SettingsCache, TokenSettings};
 use gmed_server::state::AppState;
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
@@ -3478,6 +3478,131 @@ async fn approved_interpreter_report_without_order_exposes_missing_order_billing
     .await
     .unwrap();
     assert_eq!(synced_count, 0);
+}
+
+#[tokio::test]
+async fn patient_portal_account_activation_requires_membership_and_links_account() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("portal-account");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let email = format!("{tag}@portal.example");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/portal-account/activate"),
+        &bearer,
+        Some(json!({
+            "email": email,
+            "password": "Portal!1234",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Assign a service package before activating the patient account"
+    );
+
+    let package_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO service_packages (package_key, name, created_by)
+           VALUES ($1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("PKG-{tag}"))
+    .bind(format!("Membership {tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO patient_service_packages (
+               patient_id, package_id, status, assigned_by
+           ) VALUES ($1, $2, 'active', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(package_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/portal-account/activate"),
+        &bearer,
+        Some(json!({
+            "email": email,
+            "password": "Portal!1234",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["email"], email);
+    assert_eq!(body["role"], "patient");
+    assert_eq!(body["is_active"], true);
+    assert_eq!(body["created"], true);
+
+    let portal_user_id = Uuid::parse_str(body["user_id"].as_str().unwrap()).unwrap();
+    let user = sqlx::query(
+        "SELECT email, password_hash, role, is_active FROM users WHERE id = $1",
+    )
+    .bind(portal_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(user.get::<String, _>("email"), email);
+    assert_eq!(user.get::<String, _>("role"), "patient");
+    assert!(user.get::<bool, _>("is_active"));
+    assert!(
+        password::verify_password(
+            "Portal!1234",
+            &user.get::<String, _>("password_hash")
+        )
+        .unwrap()
+    );
+
+    let active_link_count = sqlx::query_scalar::<_, i64>(
+        r#"SELECT count(*)
+           FROM patient_assignments
+           WHERE patient_id = $1
+             AND user_id = $2
+             AND revoked_at IS NULL"#,
+    )
+    .bind(patient_id)
+    .bind(portal_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_link_count, 1);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/portal-account/activate"),
+        &bearer,
+        Some(json!({
+            "email": email,
+            "password": "Changed!5678",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["user_id"], portal_user_id.to_string());
+    assert_eq!(body["created"], false);
+
+    let refreshed_hash = sqlx::query_scalar::<_, String>(
+        "SELECT password_hash FROM users WHERE id = $1",
+    )
+    .bind(portal_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(password::verify_password("Changed!5678", &refreshed_hash).unwrap());
 }
 
 #[tokio::test]
