@@ -208,7 +208,7 @@ function DialogOverlay({
         // No backdrop-filter on the animated overlay: animating opacity over a
         // full-viewport blur layer flashes the whole page in Chrome on macOS
         // (compositor promote/demote glitch at animation start and end).
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 motion-reduce:animate-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-black/20 duration-100 motion-reduce:animate-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -281,7 +281,7 @@ function DialogContent({
         ref={contentRef}
         data-slot="dialog-content"
         className={cn(
-          "fixed left-2 right-2 bottom-2 z-50 grid max-h-[calc(100dvh-1rem)] w-auto max-w-none gap-4 overflow-y-auto overscroll-contain rounded-xl bg-popover p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none motion-reduce:animate-none sm:left-1/2 sm:right-auto sm:top-1/2 sm:bottom-auto sm:w-full sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:pb-4 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed left-2 right-2 bottom-2 z-50 grid max-h-[calc(100dvh-1rem)] w-auto max-w-none gap-4 overflow-y-auto overscroll-contain rounded-xl bg-popover p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/10 duration-100 outline-none motion-reduce:animate-none sm:left-1/2 sm:right-auto sm:top-1/2 sm:bottom-auto sm:w-full sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:pb-4 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         onChangeCapture={handleChangeCapture}

@@ -10,6 +10,7 @@ import {
   Download,
   MessageSquare,
   Shield,
+  ArrowLeft,
 } from "lucide-react";
 import {
   CHAT_E2E_PREVIEW,
@@ -875,9 +876,14 @@ function useChatPageContent() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] rounded-2xl border bg-card shadow-sm overflow-hidden">
+    <div className="flex h-[calc(100dvh-5.5rem)] min-h-[420px] overflow-hidden rounded-xl border bg-card shadow-sm sm:h-[calc(100vh-8rem)] sm:rounded-2xl">
       {/* ── Left: Conversations ── */}
-      <div className="flex flex-col w-80 min-w-[280px] border-r">
+      <div
+        className={cn(
+          "w-full min-w-0 flex-col md:w-80 md:min-w-[280px] md:border-r",
+          activePeer ? "hidden md:flex" : "flex",
+        )}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <h2 className="text-lg font-semibold">{t.chat_title}</h2>
@@ -981,7 +987,12 @@ function useChatPageContent() {
       </div>
 
       {/* ── Right: Messages ── */}
-      <div className="flex-1 flex flex-col">
+      <div
+        className={cn(
+          "min-w-0 flex-1 flex-col",
+          activePeer ? "flex" : "hidden md:flex",
+        )}
+      >
         {!activePeer ? (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
             <MessageSquare className="size-12 opacity-30" />
@@ -990,8 +1001,21 @@ function useChatPageContent() {
         ) : (
           <>
             {/* Chat header */}
-            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b">
+            <div className="flex items-center justify-between gap-3 border-b px-3 py-3 sm:px-5 sm:py-3.5">
               <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  aria-label={t.chat_title}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+                  onClick={() => {
+                    setActivePeer(null);
+                    setActiveName("");
+                    setActiveRole("");
+                    resetActivePeerSecurity();
+                  }}
+                >
+                  <ArrowLeft className="size-4" />
+                </button>
                 <div className="flex items-center justify-center size-9 rounded-full bg-primary/10 text-primary text-xs font-semibold">
                   {initials(activeName)}
                 </div>
@@ -1003,7 +1027,7 @@ function useChatPageContent() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="hidden items-center gap-2 shrink-0 sm:flex">
                 <input
                   ref={keyBackupInputRef}
                   type="file"
@@ -1036,7 +1060,7 @@ function useChatPageContent() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            <div className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5">
               {displayMsgs.map((m) => {
                 const mine = m.from_user === myId;
                 const hasText = !!m.message?.trim();
@@ -1097,7 +1121,7 @@ function useChatPageContent() {
                       <div
                         data-testid={`chat-message-text-${m.id}`}
                         className={cn(
-                          "max-w-[70%] rounded-2xl px-4 py-2 text-sm",
+                          "max-w-[85%] rounded-2xl px-4 py-2 text-sm sm:max-w-[70%]",
                           mine
                             ? "bg-foreground text-background rounded-br-md"
                             : "bg-muted text-foreground rounded-bl-md"
@@ -1135,7 +1159,7 @@ function useChatPageContent() {
             )}
 
             {/* Input */}
-            <form onSubmit={handleSend} className="flex items-center gap-2 px-4 py-3 border-t">
+            <form onSubmit={handleSend} className="flex items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
               <input
                 ref={fileInputRef}
                 type="file"

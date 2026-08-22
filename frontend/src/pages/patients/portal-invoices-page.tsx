@@ -956,14 +956,14 @@ function usePatientInvoicesPageContent() {
           });
         }}
       >
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="flex min-h-[min(560px,calc(100dvh-1rem))] flex-col bg-card sm:min-h-0 sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t.portal_invoices_upload_payment_proof}</DialogTitle>
             <DialogDescription>
               {t.portal_invoices_this_file_is_attached_internally_for_billing_follow_up_and_is_no}
             </DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
+          <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
             <Field label={t.portal_invoices_file} htmlFor="invoice-payment-proof">
               <input
                 id="invoice-payment-proof"
@@ -985,7 +985,7 @@ function usePatientInvoicesPageContent() {
               />
             </Field>
             {uploadError ? <Banner tone="error">{uploadError}</Banner> : null}
-            <DialogFooter>
+            <DialogFooter className="mt-auto">
               <Button type="button" variant="outline" className={tokens.control.primaryButton} onClick={() => dispatchInvoicesState({ uploadOpen: false })}>
                 {t.portal_invoices_cancel}
               </Button>

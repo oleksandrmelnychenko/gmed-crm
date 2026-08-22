@@ -416,6 +416,44 @@ async function installPatientPortalMocks(page: Page) {
       return json(route, [buildPortalInvoice()]);
     }
 
+    if (path === "/me/subscriptions") {
+      return json(route, { items: [], total: 0 });
+    }
+
+    if (path === "/me/account-statement") {
+      return json(route, {
+        patient_id: "00000000-0000-0000-0000-000000009001",
+        currency: "EUR",
+        available_currencies: ["EUR"],
+        scope: "patient_portal",
+        amounts_complete: true,
+        summary: {
+          invoiced_gross: "1000.00",
+          cash_paid: "0.00",
+          prepayment_applied: "0.00",
+          available_prepayment: "0.00",
+          invoice_due: "1000.00",
+          external_receivable: null,
+          total_due: "1000.00",
+          reconciliation_required: false,
+          opening_balance: "0.00",
+          debit_total: "1000.00",
+          credit_total: "0.00",
+          calculated_balance: "1000.00",
+          closing_balance: "1000.00",
+          balance_side: "debit",
+          unreconciled_external_debit: "0.00",
+        },
+        redaction: {
+          hidden_invoice_amount_count: 0,
+          external_expense_count: 0,
+          services_hidden: true,
+        },
+        movements: [],
+        items: [],
+      });
+    }
+
     if (path === "/me/invoices/00000000-0000-0000-0000-000000009501") {
       return json(route, {
         ...buildPortalInvoice(),
@@ -433,6 +471,18 @@ async function installPatientPortalMocks(page: Page) {
           },
         ],
       });
+    }
+
+    if (path === "/me/invoices/00000000-0000-0000-0000-000000009501/payments") {
+      return json(route, { items: [] });
+    }
+
+    if (path === "/me/invoices/00000000-0000-0000-0000-000000009501/credit-notes") {
+      return json(route, { items: [] });
+    }
+
+    if (path === "/me/invoices/00000000-0000-0000-0000-000000009501/refunds") {
+      return json(route, { items: [] });
     }
 
     if (path === "/me/documents/upload" && route.request().method() === "POST") {
@@ -712,7 +762,7 @@ test.describe("patient portal smoke flows", () => {
       ),
     ).toBeVisible();
     await expect(
-      page.getByText(/Offene Anfragen:\s*2|Open requests:\s*2/i),
+      page.locator("#topbar-page-slot").getByText(/Offene Anfragen:\s*2|Open requests:\s*2/i),
     ).toBeVisible();
   });
 
@@ -720,7 +770,7 @@ test.describe("patient portal smoke flows", () => {
     await page.goto("/documents");
     await expect(page).toHaveURL(/\/documents$/);
     await expect(
-      page.getByText(
+      page.locator("#topbar-page-slot").getByText(
         /Ausstehende Bestätigungen:\s*1|Pending confirmations:\s*1/i,
       ),
     ).toBeVisible();
@@ -741,7 +791,7 @@ test.describe("patient portal smoke flows", () => {
       ),
     ).toBeVisible();
     await expect(
-      page.getByText(
+      page.locator("#topbar-page-slot").getByText(
         /Ausstehende Bestätigungen:\s*0|Pending confirmations:\s*0/i,
       ),
     ).toBeVisible();
@@ -784,16 +834,18 @@ test.describe("patient portal smoke flows", () => {
       .fill("Front and back scanned.");
     await page
       .getByRole("button", {
-        name: /Upload senden|Отправить загрузку|Send upload/i,
+        name: /Datei senden|Upload senden|Отправить загрузку|Send upload/i,
       })
       .click();
 
     await expect(
       page.getByText(
-        /Upload wurde an das Betreuungsteam gesendet|Загрузка отправлена команде сопровождения|Upload sent to the care team/i,
+        /Datei wurde an das Betreuungsteam gesendet|Upload wurde an das Betreuungsteam gesendet|Загрузка отправлена команде сопровождения|Upload sent to the care team/i,
       ),
     ).toBeVisible();
-    await expect(page.getByText(/Meine Uploads:\s*2|My uploads:\s*2/i)).toBeVisible();
+    await expect(
+      page.locator("#topbar-page-slot").getByText(/Meine hochgeladenen Dateien:\s*2|Meine Uploads:\s*2|My uploads:\s*2/i),
+    ).toBeVisible();
 
     const uploadedCard = page
       .locator("article")
@@ -949,5 +1001,101 @@ test.describe("patient portal smoke flows", () => {
     await expect(feedbackCard).toBeVisible();
     await expect(feedbackCard.getByText("Clinic follow-up")).toBeVisible();
     await expect(feedbackCard.getByText(/Eingereicht|Submitted/i)).toBeVisible();
+  });
+
+  test("patient portal stays within a mobile viewport", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    const routes = [
+      ["dashboard", "/"],
+      ["notifications", "/notifications"],
+      ["chat", "/chat"],
+      ["appointments", "/appointments"],
+      ["recommendations", "/recommendations"],
+      ["documents", "/documents"],
+      ["services", "/services"],
+      ["subscriptions", "/subscriptions"],
+      ["invoices", "/invoices"],
+      ["feedback", "/feedback"],
+      ["privacy", "/privacy"],
+    ] as const;
+
+    for (const [name, route] of routes) {
+      await page.goto(route);
+      await page.waitForLoadState("networkidle");
+      await expect(page.locator("main")).toBeVisible();
+
+      const viewport = await page.evaluate(() => {
+        const main = document.querySelector("main");
+        return {
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          mainClientWidth: main?.clientWidth ?? 0,
+          mainScrollWidth: main?.scrollWidth ?? 0,
+          mainScrollLeft: main?.scrollLeft ?? 0,
+        };
+      });
+      expect(viewport.scrollWidth, `${name} should not overflow horizontally`).toBeLessThanOrEqual(
+        viewport.clientWidth + 1,
+      );
+      expect(
+        viewport.mainScrollWidth,
+        `${name} main should not overflow horizontally (scrollLeft ${viewport.mainScrollLeft})`,
+      ).toBeLessThanOrEqual(viewport.mainClientWidth + 1);
+
+      await page.screenshot({
+        path: testInfo.outputPath(`patient-mobile-${name}.png`),
+        fullPage: false,
+      });
+    }
+  });
+
+  test("patient mobile sheets and dialogs use the available viewport", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto("/appointments");
+    await page
+      .getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })
+      .click();
+    const appointmentSheet = page
+      .getByRole("dialog")
+      .filter({ hasText: /Termin anfragen|Request a visit/i });
+    await expect(appointmentSheet).toBeVisible();
+    await expect(appointmentSheet).toHaveCSS("width", "390px");
+    await page.screenshot({
+      path: testInfo.outputPath("patient-mobile-appointment-sheet.png"),
+      fullPage: false,
+    });
+    await page.keyboard.press("Escape");
+
+    await page.goto("/invoices");
+    await page.getByRole("button", { name: /INV-PORTAL-1/i }).click();
+    const invoiceSheet = page.getByRole("dialog").filter({ hasText: /INV-PORTAL-1/i });
+    await expect(invoiceSheet).toBeVisible();
+    await expect(invoiceSheet).toHaveCSS("width", "390px");
+    await page.screenshot({
+      path: testInfo.outputPath("patient-mobile-invoice-sheet.png"),
+      fullPage: false,
+    });
+
+    await invoiceSheet
+      .getByRole("button", {
+        name: /Zahlungsnachweis hochladen|Загрузить подтверждение оплаты|Upload payment proof/i,
+      })
+      .click();
+    const proofDialog = page
+      .getByRole("dialog")
+      .filter({ hasText: /Zahlungsnachweis hochladen|Upload payment proof/i });
+    await expect(proofDialog).toBeVisible();
+    const proofDialogBox = await proofDialog.boundingBox();
+    expect(proofDialogBox?.width ?? 0).toBeLessThanOrEqual(374);
+    expect(proofDialogBox?.height ?? 0).toBeLessThanOrEqual(828);
+    expect(proofDialogBox?.y ?? -1).toBeGreaterThanOrEqual(8);
+    expect((proofDialogBox?.y ?? 0) + (proofDialogBox?.height ?? 0)).toBeLessThanOrEqual(836);
+    await page.waitForTimeout(150);
+    await page.screenshot({
+      path: testInfo.outputPath("patient-mobile-payment-proof-dialog.png"),
+      fullPage: false,
+    });
   });
 });
