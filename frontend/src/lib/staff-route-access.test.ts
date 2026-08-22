@@ -129,12 +129,30 @@ describe("first-release staff RBAC", () => {
     expect(billing).not.toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
 
-    expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual(["/"]);
+    expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
+      "/chat",
+      "/patients",
+      "/",
+    ]);
   });
 
-  it("keeps signed-in legacy staff roles in a dashboard-only workspace", () => {
+  it("activates chat for care and support roles without opening unrelated workspaces", () => {
+    for (const role of [
+      "ceo_assistant",
+      "patient_manager",
+      "teamlead_interpreter",
+      "interpreter",
+      "it_admin",
+    ]) {
+      expect(canAccessStaffRoute(role, "/chat"), role).toBe(true);
+      expect(listStaffNavItems(role).map((item) => item.to), role).toContain("/chat");
+      expect(canAccessStaffRoute(role, "/patients/patient-1"), role).toBe(true);
+      expect(listStaffNavItems(role).map((item) => item.to), role).toContain("/patients");
+    }
+    expect(canAccessStaffRoute("sales", "/chat")).toBe(false);
+    expect(canAccessStaffRoute("sales", "/patients")).toBe(false);
+
     expect(canAccessStaffRoute("it_admin", "/admin/settings")).toBe(false);
-    expect(canAccessStaffRoute("patient_manager", "/patients")).toBe(false);
     expect(canAccessStaffRoute("sales", "/leads")).toBe(false);
     expect(staffHrefIfAllowed("it_admin", "/admin/users")).toBe("/");
   });

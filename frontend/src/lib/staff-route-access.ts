@@ -21,8 +21,13 @@ type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 
 const ROLES_CHAT = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
   "concierge",
   "billing",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_FEEDBACK = [
@@ -103,8 +108,13 @@ const ROLES_ORDERS = [
 /** `crates/server/src/routes/patients.rs:445` (`list_patients`) */
 const ROLES_PATIENTS = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
   "billing",
+  "teamlead_interpreter",
+  "interpreter",
   "concierge",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/providers.rs:132` (`list_providers`) */

@@ -6235,6 +6235,7 @@ async fn list_assignments(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? && auth.role != Role::Ceo {
