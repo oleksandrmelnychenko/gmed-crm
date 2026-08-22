@@ -105,6 +105,7 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
   treating_doctor_id: string | null;
   treating_doctor_name: string | null;
   treating_doctor_title: string | null;
+  treating_doctor_fachbereich?: string | null;
   treating_none: boolean;
   /** Legacy fields, kept optional for back-compat; the new UI ignores them. */
   status?: DiagnosisStatus;

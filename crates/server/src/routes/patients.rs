@@ -10762,7 +10762,8 @@ async fn get_patient_clinical(
                   COALESCE(dd.original_filename, dd.auto_name) AS source_document_name,
                   d.provider_id, p.name AS provider_name,
                   d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
-                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title,
+                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name,
+                  td.title AS treating_doctor_title, td.fachbereich AS treating_doctor_fachbereich,
                   COALESCE(ds.specialization_ids, ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(ds.specializations, '[]'::jsonb) AS specializations
            FROM patient_diagnoses d
@@ -10907,6 +10908,7 @@ async fn get_patient_clinical(
                 "treating_doctor_id": row.get::<Option<Uuid>, _>("treating_doctor_id"),
                 "treating_doctor_name": row.get::<Option<String>, _>("treating_doctor_name"),
                 "treating_doctor_title": row.get::<Option<String>, _>("treating_doctor_title"),
+                "treating_doctor_fachbereich": row.get::<Option<String>, _>("treating_doctor_fachbereich"),
                 "treating_none": row.get::<bool, _>("treating_none"),
             })
         })
