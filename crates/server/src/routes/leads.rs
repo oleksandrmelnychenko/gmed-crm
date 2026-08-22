@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{NewStoredDocument, persist_document_file};
 use crate::state::AppState;
-use crate::{access, audit};
+use crate::audit;
 use gmed_domain::role::Role;
 
 const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
