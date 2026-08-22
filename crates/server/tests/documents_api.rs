@@ -1160,6 +1160,63 @@ async fn document_text_extraction_can_prefill_translation_request_workspace() {
 }
 
 #[tokio::test]
+async fn patient_document_without_manual_name_is_queued_for_background_naming() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-auto-name");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let original_filename = format!("kardio-scan-{tag}.txt");
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("appointment_id", appointment_id.to_string()),
+            ("art", "report".to_string()),
+            ("category", "medical".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        &original_filename,
+        "text/plain",
+        b"Klinik fuer Kardiologie\nArztbrief vom 11.11.2020",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(upload_body["auto_naming_status"], "queued");
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    let queued = sqlx::query(
+        r#"SELECT status, provisional_auto_name
+           FROM document_auto_naming_jobs
+           WHERE document_id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued.get::<String, _>("status"), "queued");
+    assert_eq!(
+        queued.get::<String, _>("provisional_auto_name"),
+        original_filename
+    );
+
+    let extraction_status: String =
+        sqlx::query_scalar("SELECT text_extraction_status FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(extraction_status, "not_started");
+}
+
+#[tokio::test]
 async fn image_document_text_extraction_uses_ocr_or_reports_runtime_unavailable() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;

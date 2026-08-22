@@ -1900,6 +1900,9 @@ function StaffDocumentsPage({
           ),
         });
       if (uploadAutoName) formData.append("auto_name", uploadAutoName);
+      if (!uploadForm.autoName.trim()) {
+        formData.append("auto_name_generated", "true");
+      }
       if (uploadForm.art.trim()) formData.append("art", uploadForm.art.trim());
       if (uploadForm.category) formData.append("category", uploadForm.category);
       formData.append(
@@ -1955,6 +1958,10 @@ function StaffDocumentsPage({
       );
       setUploadOpen(false);
       refresh();
+      if (response.auto_naming_status === "queued") {
+        window.setTimeout(refresh, 3_500);
+        window.setTimeout(refresh, 10_000);
+      }
       if (response.id) openDocument(response.id);
     } catch (nextError) {
       setUploadError(

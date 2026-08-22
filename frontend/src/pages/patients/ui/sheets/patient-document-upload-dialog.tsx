@@ -61,6 +61,50 @@ type PatientDocumentUploadDialogProps = {
 type Localize = (key: string) => string;
 type DocumentUploadFormSetter = Dispatch<SetStateAction<DocumentUploadFormState>>;
 
+type RecognitionCopy = {
+  title: string;
+  description: string;
+  fileLabel: string;
+  nameLabel: string;
+  namePlaceholder: string;
+  recognitionHint: string;
+  submit: string;
+};
+
+function documentRecognitionCopy(lang: string): RecognitionCopy {
+  if (lang === "de") {
+    return {
+      title: "Patientendokument erfassen",
+      description: "Die Datei wird sofort gespeichert und im Hintergrund erkannt. Der Dokumentname wird danach automatisch vereinheitlicht.",
+      fileLabel: "Datei zum Erkennen",
+      nameLabel: "Dokumentname (optional)",
+      namePlaceholder: "Leer lassen für automatische Benennung",
+      recognitionHint: "Wir erkennen Fachgebiet, Dokumentart, Datum, Verfasser und Institution. Eine manuell eingegebene Bezeichnung bleibt unverändert.",
+      submit: "Hochladen und erkennen",
+    };
+  }
+  if (lang === "uk") {
+    return {
+      title: "Додати й розпізнати документ пацієнта",
+      description: "Файл збережеться одразу, а розпізнавання пройде у фоні. Після цього назва документа уніфікується автоматично.",
+      fileLabel: "Файл для розпізнавання",
+      nameLabel: "Назва документа (необов’язково)",
+      namePlaceholder: "Залиште порожнім для автоматичної назви",
+      recognitionHint: "Визначимо спеціалізацію, тип документа, дату, автора та установу. Назву, введену вручну, система не змінює.",
+      submit: "Завантажити й розпізнати",
+    };
+  }
+  return {
+    title: "Добавить и распознать документ пациента",
+    description: "Файл сохранится сразу, а распознавание пройдет в фоне. После этого название документа унифицируется автоматически.",
+    fileLabel: "Файл для распознавания",
+    nameLabel: "Название документа (необязательно)",
+    namePlaceholder: "Оставьте пустым для автоматического названия",
+    recognitionHint: "Определим специализацию, тип документа, дату, автора и учреждение. Название, введенное вручную, система не изменит.",
+    submit: "Загрузить и распознать",
+  };
+}
+
 function PatientDocumentUploadDialog({
   open,
   patientId,
@@ -68,6 +112,7 @@ function PatientDocumentUploadDialog({
   appointments,
   dictionary,
   l,
+  lang,
   textareaClassName,
   statusLabel,
   formatDate,
@@ -77,6 +122,7 @@ function PatientDocumentUploadDialog({
 }: PatientDocumentUploadDialogProps) {
   const [form, setForm] = useState<DocumentUploadFormState>(blankDocumentUploadForm);
   const [busy, setBusy] = useState(false);
+  const recognitionCopy = documentRecognitionCopy(lang);
 
   useEffect(() => {
     if (!open) {
@@ -119,6 +165,8 @@ function PatientDocumentUploadDialog({
         toast.success(dictionary.common_active);
         onOpenChange(false);
         onSaved();
+        window.setTimeout(onSaved, 3_500);
+        window.setTimeout(onSaved, 10_000);
       } catch (error) {
         onError(
           error instanceof Error ? error.message : dictionary.common_failed_create
@@ -144,18 +192,25 @@ function PatientDocumentUploadDialog({
       onOpenChange={onOpenChange}
       width="form-heavy"
       onSubmit={handleSubmit}
-      title={l("patients_upload_patient_document")}
-      description={l("patients_files_uploaded_here_are_linked_directly_to_this_patient")}
+      title={recognitionCopy.title}
+      description={recognitionCopy.description}
       bodyClassName="space-y-4 px-5 py-4"
       footer={
         <DocumentUploadFooter
           busy={busy}
           l={l}
+          submitLabel={recognitionCopy.submit}
           onCancel={() => onOpenChange(false)}
         />
       }
     >
-      <DocumentFileSection form={form} l={l} onFileChange={handleFileChange} setForm={setForm} />
+      <DocumentFileSection
+        copy={recognitionCopy}
+        form={form}
+        l={l}
+        onFileChange={handleFileChange}
+        setForm={setForm}
+      />
       <DocumentDetailsSection
         form={form}
         l={l}
@@ -183,10 +238,11 @@ function PatientDocumentUploadDialog({
 type DocumentUploadFooterProps = {
   busy: boolean;
   l: Localize;
+  submitLabel: string;
   onCancel: () => void;
 };
 
-function DocumentUploadFooter({ busy, l, onCancel }: DocumentUploadFooterProps) {
+function DocumentUploadFooter({ busy, l, submitLabel, onCancel }: DocumentUploadFooterProps) {
   return (
     <>
       <Button
@@ -205,13 +261,14 @@ function DocumentUploadFooter({ busy, l, onCancel }: DocumentUploadFooterProps) 
         disabled={busy}
       >
         {busy ? <span className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
-        {l("patients_upload_document")}
+        {submitLabel}
       </Button>
     </>
   );
 }
 
 type DocumentFileSectionProps = {
+  copy: RecognitionCopy;
   form: DocumentUploadFormState;
   l: Localize;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -219,6 +276,7 @@ type DocumentFileSectionProps = {
 };
 
 function DocumentFileSection({
+  copy,
   form,
   l,
   onFileChange,
@@ -227,7 +285,7 @@ function DocumentFileSection({
   return (
     <FormSection title={l("patients_file")}>
       <div className="grid gap-3 md:grid-cols-2">
-        <FormField label={l("patients_file")} htmlFor="document-file">
+        <FormField label={copy.fileLabel} htmlFor="document-file">
           <Input
             id="document-file"
             type="file"
@@ -236,7 +294,7 @@ function DocumentFileSection({
           />
         </FormField>
         <FormField
-          label={l("patients_display_name")}
+          label={copy.nameLabel}
           htmlFor="document-name"
         >
           <Input
@@ -246,9 +304,12 @@ function DocumentFileSection({
               setForm((current) => ({ ...current, autoName: event.target.value }))
             }
             className={inputClass}
-            placeholder={l("patients_optional_patient_facing_name")}
+            placeholder={copy.namePlaceholder}
           />
         </FormField>
+      </div>
+      <div className="mt-3 rounded-xl border border-primary/20 bg-primary/[0.045] px-3.5 py-3 text-xs leading-5 text-foreground/75">
+        {copy.recognitionHint}
       </div>
     </FormSection>
   );

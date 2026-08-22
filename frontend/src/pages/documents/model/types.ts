@@ -405,4 +405,5 @@ export type UploadDocumentResponse = {
   is_medical: boolean;
   needs_categorization: boolean;
   classification_suggestion?: DocumentClassificationSuggestion | null;
+  auto_naming_status?: "queued" | "not_queued" | "fallback_completed";
 };

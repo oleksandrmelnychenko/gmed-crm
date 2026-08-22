@@ -10020,6 +10020,38 @@ async fn best_effort_extract_document_text_and_store(
     }
 }
 
+async fn enqueue_document_auto_naming(
+    state: &AppState,
+    document_id: Uuid,
+    provisional_auto_name: &str,
+    requested_by: Uuid,
+) -> Result<(), axum::response::Response> {
+    sqlx::query(
+        r#"INSERT INTO document_auto_naming_jobs (
+                document_id, provisional_auto_name, requested_by
+           ) VALUES ($1, $2, $3)
+           ON CONFLICT (document_id) DO UPDATE
+           SET provisional_auto_name = EXCLUDED.provisional_auto_name,
+               requested_by = EXCLUDED.requested_by,
+               status = 'queued', result = '{}'::jsonb, error_code = NULL,
+               worker_id = NULL, locked_at = NULL, completed_at = NULL,
+               updated_at = now()"#,
+    )
+    .bind(document_id)
+    .bind(provisional_auto_name.trim())
+    .bind(requested_by)
+    .execute(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, document_id = %document_id, "queue document auto naming");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to queue document recognition",
+        )
+    })?;
+    Ok(())
+}
+
 async fn load_replacement_document_version(
     state: &AppState,
     document_id: Uuid,
@@ -19474,7 +19506,8 @@ async fn upload_my_document(
         );
     }
 
-    if auto_name.trim().is_empty() {
+    let auto_name_was_supplied = !auto_name.trim().is_empty();
+    if !auto_name_was_supplied {
         auto_name = file_name
             .clone()
             .unwrap_or_else(|| preset.default_title.to_string());
@@ -19539,15 +19572,41 @@ async fn upload_my_document(
             Err(resp) => return resp,
         };
 
-    best_effort_extract_document_text_and_store(
-        &state,
-        document_id,
-        Some(original_filename.as_str()),
-        Some(mime_type.as_str()),
-        storage_key.as_str(),
-        auth.user_id,
-    )
-    .await;
+    let auto_naming_queued = if auto_name_was_supplied {
+        best_effort_extract_document_text_and_store(
+            &state,
+            document_id,
+            Some(original_filename.as_str()),
+            Some(mime_type.as_str()),
+            storage_key.as_str(),
+            auth.user_id,
+        )
+        .await;
+        false
+    } else {
+        match enqueue_document_auto_naming(&state, document_id, auto_name.trim(), auth.user_id)
+            .await
+        {
+            Ok(()) => true,
+            Err(response) => {
+                tracing::warn!(
+                    document_id = %document_id,
+                    status = %response.status(),
+                    "falling back to inline document text extraction"
+                );
+                best_effort_extract_document_text_and_store(
+                    &state,
+                    document_id,
+                    Some(original_filename.as_str()),
+                    Some(mime_type.as_str()),
+                    storage_key.as_str(),
+                    auth.user_id,
+                )
+                .await;
+                false
+            }
+        }
+    };
 
     state.audit_sender.try_send(audit::domain_event(
         "patient_portal_upload_document",
@@ -19705,6 +19764,11 @@ async fn upload_my_document(
             "original_filename": original_filename,
             "mime_type": mime_type,
             "file_size": file_size,
+            "auto_naming_status": if auto_naming_queued {
+                "queued"
+            } else {
+                "fallback_completed"
+            },
         })),
     )
         .into_response()
@@ -19733,6 +19797,7 @@ async fn upload_document(
     let mut order_id: Option<Uuid> = None;
     let mut appointment_id: Option<Uuid> = None;
     let mut auto_name = String::new();
+    let mut auto_name_generated = false;
     let mut art = String::new();
     let mut category: Option<String> = None;
     let mut status = String::from("active");
@@ -19801,6 +19866,13 @@ async fn upload_document(
                 }
             }
             "auto_name" => auto_name = parse_text_field(field).await.unwrap_or_default(),
+            "auto_name_generated" => {
+                auto_name_generated = parse_optional_text_field(field)
+                    .await
+                    .as_deref()
+                    .map(parse_bool_flag)
+                    .unwrap_or(false)
+            }
             "art" => art = parse_text_field(field).await.unwrap_or_default(),
             "category" => category = parse_optional_text_field(field).await,
             "status" => {
@@ -19920,7 +19992,8 @@ async fn upload_document(
         }
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     }
-    if auto_name.trim().is_empty() {
+    let auto_name_was_supplied = !auto_name.trim().is_empty();
+    if !auto_name_was_supplied {
         auto_name = file_name
             .clone()
             .unwrap_or_else(|| "Uploaded document".to_string());
@@ -20092,15 +20165,42 @@ async fn upload_document(
             Err(resp) => return resp,
         };
 
-    best_effort_extract_document_text_and_store(
-        &state,
-        document_id,
-        Some(original_filename.as_str()),
-        Some(mime_type.as_str()),
-        storage_key.as_str(),
-        auth.user_id,
-    )
-    .await;
+    let should_auto_name = !auto_name_was_supplied || auto_name_generated;
+    let auto_naming_queued = if patient_id.is_some() && should_auto_name {
+        match enqueue_document_auto_naming(&state, document_id, auto_name.trim(), auth.user_id)
+            .await
+        {
+            Ok(()) => true,
+            Err(response) => {
+                tracing::warn!(
+                    document_id = %document_id,
+                    status = %response.status(),
+                    "falling back to inline document text extraction"
+                );
+                best_effort_extract_document_text_and_store(
+                    &state,
+                    document_id,
+                    Some(original_filename.as_str()),
+                    Some(mime_type.as_str()),
+                    storage_key.as_str(),
+                    auth.user_id,
+                )
+                .await;
+                false
+            }
+        }
+    } else {
+        best_effort_extract_document_text_and_store(
+            &state,
+            document_id,
+            Some(original_filename.as_str()),
+            Some(mime_type.as_str()),
+            storage_key.as_str(),
+            auth.user_id,
+        )
+        .await;
+        false
+    };
 
     state.audit_sender.try_send(audit::domain_event(
         "upload_document",
@@ -20229,6 +20329,11 @@ async fn upload_document(
         "is_medical": resolved_is_medical,
         "needs_categorization": needs_categorization,
         "classification_suggestion": classification_suggestion,
+        "auto_naming_status": if auto_naming_queued {
+            "queued"
+        } else {
+            "not_queued"
+        },
     }))
     .into_response()
 }

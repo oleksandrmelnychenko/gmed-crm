@@ -289,6 +289,14 @@ function usePatientDocumentsPageContent() {
         uploadBusy: false,
         version: current.version + 1,
       }));
+      window.setTimeout(
+        () => dispatchDocumentsState((current) => ({ version: current.version + 1 })),
+        3_500,
+      );
+      window.setTimeout(
+        () => dispatchDocumentsState((current) => ({ version: current.version + 1 })),
+        10_000,
+      );
     } catch (err) {
       dispatchDocumentsState({
         uploadError: err instanceof Error ? err.message : t.portal_documents_failed_to_upload_document,
