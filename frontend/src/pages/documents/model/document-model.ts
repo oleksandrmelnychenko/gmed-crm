@@ -629,6 +629,12 @@ export type GeneratedDocumentDraftLabels = {
   textBlocks: string;
 };
 
+export const FREE_TEXT_DOCUMENT_TEMPLATE_ID = "free_text_document";
+
+export function isFreeTextDocumentTemplate(templateId?: string | null): boolean {
+  return templateId === FREE_TEXT_DOCUMENT_TEMPLATE_ID;
+}
+
 export function buildGeneratedDocumentManualTextDraft(input: {
   template: DocumentTemplate;
   form: GenerateFormState;
@@ -641,6 +647,10 @@ export function buildGeneratedDocumentManualTextDraft(input: {
   labels: GeneratedDocumentDraftLabels;
   formatDisplayDate?: DraftFormatDate;
 }) {
+  if (isFreeTextDocumentTemplate(input.template.id)) {
+    return input.form.manualText;
+  }
+
   const formatDisplayDate = input.formatDisplayDate ?? fallbackDraftFormatDate;
   const patientLabel = input.patientLabel ?? "";
   const knownDraft = buildKnownGeneratedDocumentDraft(
@@ -796,7 +806,8 @@ export function buildGenerateDocumentPayload(input: {
 }): Record<string, unknown> {
   const { form, template } = input;
   const designedAgencyTemplate = isDesignedAgencyDocumentTemplate(template.id);
-  const manualText = !designedAgencyTemplate && form.manualTextDirty
+  const manualText = !designedAgencyTemplate &&
+    (form.manualTextDirty || isFreeTextDocumentTemplate(template.id))
     ? (input.displayedManualText ?? form.manualText).trim()
     : "";
   return {

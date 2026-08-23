@@ -3603,6 +3603,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     .await;
 
     let expected_template_ids = [
+        "free_text_document",
         "treatment_plan",
         "medication_summary",
         "framework_contract",
@@ -3651,6 +3652,17 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     }
 
     let cases = vec![
+        TemplateCase {
+            template_id: "free_text_document",
+            expected_art: "free_text_document",
+            expected_category: "administrative",
+            order_id: None,
+            appointment_id: None,
+            bindings: json!({}),
+            text_block_keys: vec![],
+            min_pdf_size: 800,
+            expected_pdf_text: "Individueller Freitext",
+        },
         TemplateCase {
             template_id: "treatment_plan",
             expected_art: "treatment_plan",
@@ -3854,6 +3866,22 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
 
     assert_eq!(cases.len(), expected_template_ids.len());
 
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "free_text_document",
+            "patient_id": patient_id,
+            "language": "de",
+            "manual_text": "   "
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "Free text document requires document text");
+
     for case in cases {
         let mut payload = json!({
             "template_id": case.template_id,
@@ -3868,6 +3896,10 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
         ) {
             payload["introduction"] = json!(format!("Intro for {}", case.template_id));
             payload["closing_note"] = json!(format!("Closing for {}", case.template_id));
+        }
+        if case.template_id == "free_text_document" {
+            payload["title_override"] = json!("Individuelles Dokument");
+            payload["manual_text"] = json!("Individueller Freitext für den Patienten.");
         }
         if let Some(order_id) = case.order_id {
             payload["order_id"] = json!(order_id);
@@ -4466,6 +4498,11 @@ async fn document_templates_are_german_only_even_when_patient_prefers_another_la
             assert_eq!(
                 template["supported_languages"],
                 json!(["de", "ru", "de-ru"])
+            );
+        } else if template["id"] == "free_text_document" {
+            assert_eq!(
+                template["supported_languages"],
+                json!(["de", "en", "uk", "ru"])
             );
         } else {
             assert_eq!(template["supported_languages"], json!(["de"]));
