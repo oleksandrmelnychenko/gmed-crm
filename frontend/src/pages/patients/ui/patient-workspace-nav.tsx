@@ -140,7 +140,7 @@ export function PatientWorkspaceNav() {
       data-workspace-rail="patient"
       className="hidden lg:flex lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
     >
-      <div className="px-4 pt-4">
+      <div className="px-6 pt-4">
         <StaffLink
           to="/patients"
           className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"

@@ -724,6 +724,26 @@ describe("PatientRecommendationOverviewItem", () => {
     expect(html).toContain("Назначил: Prof. Dr. med. Herr Philipp Niemeyer");
     expect(html).toContain("(Ортопедия и травматология)");
   });
+
+  it("renders document provenance as a clickable preview chip", () => {
+    const html = renderToStaticMarkup(
+      <ul>
+        <PatientRecommendationOverviewItem
+          rec={recommendation({
+            source_document_id: "document-1",
+            source_document_name: "Arztbrief Beispiel7.pdf",
+          })}
+          lang="ru"
+          tx={(ru) => ru}
+        />
+      </ul>,
+    );
+
+    expect(html).toContain('data-clinical-source="document"');
+    expect(html).toContain('type="button"');
+    expect(html).toContain("Из документа");
+    expect(html).toContain("Arztbrief Beispiel7.pdf");
+  });
 });
 
 describe("deriveDoctors", () => {

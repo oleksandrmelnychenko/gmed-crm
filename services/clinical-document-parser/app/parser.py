@@ -1276,6 +1276,11 @@ LAB_PANEL_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+LAB_ROW_LEADING_ARTIFACT_RE = re.compile(
+    r"^(?:[/\\|!√✓☑•.,:'`]|[NV]){1,3}$",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_lab_panel_heading(value: str) -> bool:
     return bool(LAB_PANEL_HEADING_RE.fullmatch(value.strip().rstrip(":")))
@@ -1286,6 +1291,21 @@ def _lab_row_metadata(
     metadata_headers: list[str],
 ) -> tuple[str, str | None, str | None] | None:
     cells = _lab_cells(prefix)
+    # Handwritten ticks in the margin are sometimes detected as their own
+    # table cell (for example ``/\tAP...``, ``√\tFT3...`` or
+    # ``N\tKreatinin...``). They are evidence attached to the row, not the
+    # analyte name. Drop only a short, known marker when a real textual cell
+    # and an explicit reference value follow it.
+    while (
+        len(cells) >= 3
+        and LAB_ROW_LEADING_ARTIFACT_RE.fullmatch(cells[0])
+        and len(re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ]", "", cells[1])) >= 2
+        and (
+            LAB_REFERENCE_RANGE_RE.search(" ".join(cells[2:]))
+            or LAB_REFERENCE_LIMIT_RE.search(" ".join(cells[2:]))
+        )
+    ):
+        cells.pop(0)
     if len(cells) == 1:
         inline_matches = list(LAB_REFERENCE_RANGE_RE.finditer(cells[0]))
         inline_matches.extend(LAB_REFERENCE_LIMIT_RE.finditer(cells[0]))
@@ -1335,6 +1355,73 @@ def _lab_row_metadata(
     if not analyte or len(analyte) > 160 or not any(character.isalpha() for character in analyte):
         return None
     return analyte, unit, reference_text or None
+
+
+def _repair_split_laboratory_result_rows(page: str) -> str:
+    """Join a result detected one line before its ruled-table metadata.
+
+    Dense scans can put the value box a few pixels above the analyte baseline.
+    Paddle then emits ``170.32`` followed by ``Ferritin\t68 - 434 (ng/ml)``.
+    The relationship is unambiguous only when the second line contains a
+    structured reference value, so narrative numbers remain untouched.
+    """
+
+    lines = page.splitlines()
+    repaired: list[str] = []
+    index = 0
+    while index < len(lines):
+        current = lines[index].strip()
+        if LAB_RESULT_RE.fullmatch(current) and index + 1 < len(lines):
+            following = lines[index + 1].strip()
+            following_cells = _lab_cells(following)
+            has_trailing_result = any(
+                LAB_RESULT_RE.fullmatch(cell) or LAB_TEXT_RESULT_RE.fullmatch(cell)
+                for cell in following_cells[1:]
+            )
+            if (
+                len(following_cells) >= 2
+                and not has_trailing_result
+                and _lab_row_metadata(
+                    following,
+                    ["Testbezeichnung", "Normwert"],
+                )
+                is not None
+            ):
+                repaired.append(f"{following}\t{current}")
+                index += 2
+                continue
+        repaired.append(lines[index])
+        index += 1
+    return "\n".join(repaired)
+
+
+def _looks_like_dated_normwert_body(page: str) -> bool:
+    """Recognize a dense Normwert table even when OCR misses its header."""
+
+    structured_rows = 0
+    for raw_line in page.splitlines():
+        cells = _lab_cells(raw_line)
+        if len(cells) < 3:
+            continue
+        result_index = next(
+            (
+                index
+                for index, cell in enumerate(cells[1:], start=1)
+                if LAB_RESULT_RE.fullmatch(cell) or LAB_TEXT_RESULT_RE.fullmatch(cell)
+            ),
+            None,
+        )
+        if result_index is None:
+            continue
+        if _lab_row_metadata(
+            "\t".join(cells[:result_index]),
+            ["Testbezeichnung", "Normwert"],
+        ) is None:
+            continue
+        structured_rows += 1
+        if structured_rows >= 3:
+            return True
+    return False
 
 
 def _trailing_lab_result_cells(
@@ -1681,11 +1768,28 @@ def _laboratory_candidates(
         "bundeseinheitlichermedikationsplan",
     )
 
-    for page_number, page in enumerate(text.split("\f"), start=1):
+    pages = text.split("\f")
+    document_table_date = next(
+        (
+            date
+            for page in pages
+            if (date := _dated_normwert_table_date(page)) is not None
+        ),
+        None,
+    )
+
+    for page_number, original_page in enumerate(pages, start=1):
+        page = _repair_split_laboratory_result_rows(original_page)
         split_header_date = _dated_normwert_table_date(page)
-        if split_header_date:
+        inherited_header_date = (
+            document_table_date
+            if split_header_date is None and _looks_like_dated_normwert_body(page)
+            else None
+        )
+        table_date = split_header_date or inherited_header_date
+        if table_date:
             laboratory_mode = True
-            column_dates = [split_header_date]
+            column_dates = [table_date]
             # The single-result parser below consumes OCR cells rather than
             # absolute positions; a sentinel keeps the shared table state on.
             column_positions = [0]

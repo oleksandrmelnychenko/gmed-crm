@@ -39,6 +39,38 @@ final result: passed
 
 ---
 
+# Design QA — Patient workspace submenu spacing
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-773603a9-eef3-4de7-96d2-da875c19bee2.png`
+- Implementation screenshot: `C:/Users/oleks/AppData/Local/Temp/gmed-patient-workspace-nav-spacing-after.png`
+- Source pixels: 1203 × 202; implementation pixels: 1280 × 720.
+- Implementation viewport: 1280 × 720 CSS px, device pixel ratio 1.5.
+- State: authenticated desktop patient profile with the patient workspace rail visible.
+
+## Comparison evidence
+
+The source crop showed the patient workspace back row offset from the submenu grid. After the fix, the browser-rendered back-arrow icon and first submenu icon share the same left coordinate (`264.67 px`). The 288 px rail width, typography, colors, borders, radius, elevation, copy, icons, and content layout remain unchanged. A separate focused crop was unnecessary because the complete rail is legible in the implementation screenshot.
+
+## Comparison history
+
+- Earlier P2: the back row started 8 px left of the submenu icon grid.
+- Fix: changed the patient workspace header horizontal padding from 16 px to 24 px.
+- Post-fix: both icon left edges measure `264.67 px`; no actionable P0, P1, or P2 differences remain.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged and passed.
+- Spacing and layout rhythm: passed; header and item icon grid are aligned.
+- Colors and visual tokens: unchanged and passed.
+- Image quality and asset fidelity: no image assets changed; existing logo and icon library remain intact.
+- Copy and content: unchanged and passed.
+- Interaction: patient workspace navigation remained usable.
+- Console: no errors after reload.
+
+final result: passed
+
+---
+
 # Design QA — Task title wrapping
 
 - Source visual truth: `C:/Users/oleks/Developer/gmed/artifacts/design-qa/task-title-wrap-reference.png`

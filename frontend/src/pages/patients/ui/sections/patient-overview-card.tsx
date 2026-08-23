@@ -16,6 +16,7 @@ import {
   type DiagnosisStatus,
   type PatientRecommendation,
 } from "../../data/patient-clinical";
+import { ClinicalRecordSource } from "./clinical-record-source";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -92,6 +93,18 @@ function splitLines(value: string | null): string[] {
     .split(/\r?\n/)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+const internalClinicalImportLinePattern = /^(?:Import:\s*.+|\[clinical-import:[^\]]+\])$/i;
+
+export function clinicalOverviewNoteLines(
+  value: string | null,
+  hasDocumentSource: boolean,
+): string[] {
+  const lines = splitLines(value);
+  return hasDocumentSource
+    ? lines.filter((line) => !internalClinicalImportLinePattern.test(line))
+    : lines;
 }
 
 /** A doctor surfaced in the patient overview. */
@@ -294,6 +307,9 @@ export function PatientRecommendationOverviewItem({
           ({tx("статус неизвестен", "unbekannt")})
         </span>
       ) : null}
+      {rec.source_document_id || rec.source_document_name ? (
+        <ClinicalRecordSource item={rec} tx={tx} className="mt-1" />
+      ) : null}
       <SubBullets items={sub} />
     </li>
   );
@@ -450,7 +466,10 @@ export function PatientOverviewCard({
     const sub: string[] = [];
     if (item.diagnosed_on) sub.push(`${isProzedur ? "" : "ED "}${item.diagnosed_on}`);
     if (item.grade) sub.push(item.grade);
-    sub.push(...splitLines(item.note));
+    const hasDocumentSource = Boolean(
+      item.source_document_id || item.source_document_name || item.source_import_id,
+    );
+    sub.push(...clinicalOverviewNoteLines(item.note, hasDocumentSource));
     const children = childrenOf(item);
     const prefix = certaintyPrefix(item.certainty);
     return (
@@ -481,6 +500,9 @@ export function PatientOverviewCard({
               </span>
             ) : null}
           </span>
+          {hasDocumentSource ? (
+            <ClinicalRecordSource item={item} tx={tx} className="mt-1" />
+          ) : null}
           <SubLines items={sub} />
         </div>
         {children.length > 0 ? (

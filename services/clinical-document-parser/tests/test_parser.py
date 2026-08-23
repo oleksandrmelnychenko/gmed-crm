@@ -383,6 +383,102 @@ Ausdruck vom 15.02.2023
     assert ptt.normalized["unit"] == "sec"
 
 
+def test_dated_normwert_scan_recovers_headerless_first_page_and_split_rows() -> None:
+    text = """
+Blutbild
+Erythrozyten\t4.54 - 5.77 (Mio./μl)\t5.02
+Hämoglobin\t13.5 - 17.5 (g/dl)\t15.1
+Hämatokrit\t40 - 51 (%)\t43
+MCH (HbE)\t27.6 - 32.8 (pg/Ery)\t30.1
+MCHC\t32.8 - 36.6 (g/dl)\t35.0
+MCV\t80 - 96 (fl)\t86.1
+Leukozyten\t3.9 - 9.8 (Tsd./μl)\t5.3
+Thrombozyten\t146 - 328 (Tsd./μl)\t214
+Differential Blutbild absolut
+neutrophile Granulozyten\t1.8 - 6.2 (Tsd./μl)\t3.370
+eosinophile Granulozyten\t0.03 - 0.44 (Tsd./μl)\t0.130
+basophile Granulozyten\t0.01 - 0.08 (Tsd./μl)\t0.020
+Lymphozyten\t1.1 - 3.2 (Tsd./μl)\t1.410
+Monozyten\t0.26 - 0.87 (Tsd./μl)\t0.330
+Differenzial Blutbild relativ
+neutrophile Granulozyten\t40 - 75 (%)\t64
+Monozyten\t4 - 12 (%)\t6
+Gerinnung
+Prothrombinzeit (Quick)\t>= 70 (%)\t106
+INR (internat. normal. ratio)\t<= 1.2 (keine Einheit)\t0.97
+PTT (part. Thromboplastinzeit)\t24.4 - 32.4 (sec)\t24.5
+Diabetologie
+Glucose venös (Plasma)\t65 - 100 (mg/dl)\t90
+Hämatologie
+Natrium\t135 - 145 (mmol/l)\t140
+Kalium\t3.5 - 5 (mmol/l)\t4.3
+Calcium\t2.2 - 2.65 (mmol/l)\t2.41
+Magnesium\t0.7 - 1.1 (mmol/l)\t0.87
+Eisen\t70 - 180 (μg/dl)\t112
+Phosphat, anorganisch\t2.5 - 4.5 (mg/dl)\t3.32
+N\tKreatinin\t<= 1.2 (mg/dl)\t0.9
+GFR (CKD-EPI-Formel)\t>= 60 (ml/min/1.73m2)\t116
+Harnstoff\t17 - 43 (mg/dl)\t36
+Harnsäure\t<= 7.2 (mg/dl)\t6.3
+Bilirubin\t<= 1.2 (mg/dl)\t0.7
+Eiweiß, Gesamt-\t64 - 83 (g/l)\t71
+Eiweiß-Elektrophorese
+alpha-1-Globulin\t2.9 - 4.9 (%)\t3.2
+alpha-2-Globulin\t7.1 - 11.8 (%)\t8.4
+
+Testbezeichnung\tNormwert\t13.02.23
+Eiweiß-Elektrophorese
+beta-1-Globulin\t4.7 - 7.2 (%)\t5.2
+beta-2-Globulin\t3.2 - 6.5 (%)\t3.7
+gamma-Globulin\t11.1 - 18.8 (%)\t13.5
+Cholesterin, Gesamt-\t<= 200 (mg/dl)\t209 (+)
+HDL-Cholesterin\t>= 40 (mg/dl)\t39 (-)
+LDL-Cholesterin\tZielwerte (nach ESC-Leitlini\t136
+Triglyceride\t<= 150 (mg/dl)\t297 (+)
+CK (Creatinkinase)\t<= 190 (U/l)\t120
+GOT (ASAT)\t<= 50 (U/l)\t19
+GPT (ALAT)\t<= 50 (U/l)\t37
+gamma-GT\t<= 60 (U/l)\t89 (+)
+/\tAP (Alkalische Phosphatase)\t40 - 130 (U/l)\t122
+CHE (Cholinesterase)\t4620 - 11500 (U/l)\t6488
+LDH (Lactat-Dehydrogenase)\t<= 250 (U/l)\t163
+Immunglobulin G\t7 - 16 (g/l)\t10.13
+Immunglobulin A\t0.7 - 4 (g/l)\t1.19
+Immunglobulin M\t0.4 - 2.3 (g/l)\t0.49
+Schilddrüse
+TSH\t0.25 - 5 (uUl/ml)\t1.08
+√\tFT3\t4 - 8.3 (pmol/l)\t3.98 (-)
+FT4\t10.6 - 19.4 (pmol/l)\t18.88
+Sonstiges
+170.32
+Ferritin\t68 - 434 (ng/ml)
+HbA1c (NGSP)\t<= 5.7 (%)\t5.2
+Erythrozytenverteilungsbreite\t<= 14.8 (%)\t11.9
+Vitamine
+25-OH-Vitamin D\t30 - 100 (ng/ml)\t36.8
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert len(rows) == 57
+    assert sum(row.source.page == 1 for row in rows) == 33
+    assert sum(row.source.page == 2 for row in rows) == 24
+    assert {row.normalized["measured_on"] for row in rows} == {"2023-02-13"}
+    assert next(
+        row for row in rows if row.normalized["analyte_name"] == "Kreatinin"
+    ).normalized["numeric_result"] == 0.9
+    assert next(
+        row for row in rows if row.normalized["analyte_name"] == "AP (Alkalische Phosphatase)"
+    ).normalized["unit"] == "U/l"
+    assert next(
+        row for row in rows if row.normalized["analyte_name"] == "FT3"
+    ).normalized["abnormal_flag"] == "low"
+    ferritin = next(row for row in rows if row.normalized["analyte_name"] == "Ferritin")
+    assert ferritin.normalized["numeric_result"] == 170.32
+    assert ferritin.normalized["reference_low"] == 68
+    assert ferritin.normalized["reference_high"] == 434
+
+
 def test_laboratory_report_attributes_explicit_organisation_to_every_observation() -> None:
     text = """
 SYNLAB Medizinisches Versorgungszentrum Berlin GmbH

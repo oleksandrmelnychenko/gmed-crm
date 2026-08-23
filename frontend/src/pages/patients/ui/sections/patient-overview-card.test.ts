@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveDoctors, deriveTreatingDoctors, mergePatientDoctors } from "./patient-overview-card";
+import {
+  clinicalOverviewNoteLines,
+  deriveDoctors,
+  deriveTreatingDoctors,
+  mergePatientDoctors,
+} from "./patient-overview-card";
+
+describe("clinicalOverviewNoteLines", () => {
+  it("removes legacy import metadata when structured document provenance exists", () => {
+    expect(clinicalOverviewNoteLines(
+      "Import: Arztbrief Beispiel7.pdf\n[clinical-import:import-1:candidate-1]\nKlinischer Hinweis",
+      true,
+    )).toEqual(["Klinischer Hinweis"]);
+  });
+
+  it("keeps legacy metadata when no structured document provenance is available", () => {
+    expect(clinicalOverviewNoteLines("Import: legacy.pdf", false)).toEqual(["Import: legacy.pdf"]);
+  });
+});
 
 describe("deriveTreatingDoctors", () => {
   it("uses the explicitly assigned treating doctor", () => {
