@@ -126,7 +126,7 @@ test.describe("P0 operations modules", () => {
 
     await page.goto("/notes");
     await page.getByText(noteTitle).first().click();
-    await expect(page.getByDisplayValue(noteTitle)).toBeVisible();
+    await expect(page.locator("main input").first()).toHaveValue(noteTitle);
     await expect(page.getByText(attachmentName)).toBeVisible();
   });
 
@@ -166,7 +166,7 @@ test.describe("P0 operations modules", () => {
     await expect(page.getByText(documentTitle).first()).toBeVisible();
     const documentRow = page.getByRole("row").filter({ hasText: documentTitle }).first();
     await expect(documentRow.getByText(scenario.patient.name)).toBeVisible();
-    await expect(documentRow.getByText(/Medizinisch|Medical/i)).toBeVisible();
+    await expect(documentRow.getByText(/^(Medizinisch|Medical)$/i)).toBeVisible();
 
     await page.goto(`/patients/${scenario.patient.id}?tab=invoices`);
     await expect(page.getByText(/Konto aktiv|Account active/i).first()).toBeVisible();
@@ -264,7 +264,11 @@ test.describe("P0 operations modules", () => {
     };
     expect(statement.movements).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "external_receivable", debit: "119" }),
+        expect.objectContaining({
+          kind: "external_receivable",
+          debit: "119",
+          description: vendor,
+        }),
       ]),
     );
 
