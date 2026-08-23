@@ -235,6 +235,7 @@ type PatientDetailWorkspaceContentProps = {
   assignments: PatientAssignment[];
   assignableStaff: StaffOption[];
   canCreateOrders: boolean;
+  canCreateTasks: boolean;
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
   canManage: boolean;
@@ -401,6 +402,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     assignments,
     assignableStaff,
     canCreateOrders,
+    canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
     canManage,
@@ -906,6 +908,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               <LazyPatientProfileTab
               profileControls={{
                 canCreateOrders,
+                canCreateTasks,
                 canEditPatientProfile,
                 canExportPatientCompliance,
                 canOpenComplianceWorkspace,

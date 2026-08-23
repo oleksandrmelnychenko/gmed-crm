@@ -43,6 +43,9 @@ const copy = {
     allStatuses: "Alle Status",
     allPriorities: "Alle Prioritäten",
     allKinds: "Aufgaben und Termine",
+    allAudiences: "Intern und extern",
+    internal: "Intern",
+    external: "Extern",
     allTiming: "Alle Zeiträume",
     today: "Heute",
     overdue: "Überfällig",
@@ -85,6 +88,9 @@ const copy = {
     allStatuses: "Все статусы",
     allPriorities: "Все приоритеты",
     allKinds: "Задачи и события",
+    allAudiences: "Внутренние и внешние",
+    internal: "Внутренняя",
+    external: "Внешняя",
     allTiming: "Все сроки",
     today: "Сегодня",
     overdue: "Просрочено",
@@ -207,12 +213,15 @@ function TaskCard({
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
+          <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
         </div>
         <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-foreground">{task.title}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
           <p className="truncate"><UsersRound className="mr-1.5 inline size-3.5" />{task.assigned_to_name}</p>
+          {task.patient_name ? <p className="truncate">{task.patient_name}</p> : null}
+          {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
           <span><ListChecks className="mr-1 inline size-3" />{labels.checklist}: {task.checklist_completed ?? 0}/{task.checklist_total ?? 0}</span>
@@ -244,6 +253,7 @@ export function ConciergeTaskManager({
   onEdit,
   onOpen,
   onStatusChange,
+  onCreateAt,
 }: {
   tasks: ConciergeTask[];
   assignees: ConciergeAssignee[];
@@ -254,13 +264,14 @@ export function ConciergeTaskManager({
   onEdit: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
+  onCreateAt?: (date: Date) => void;
 }) {
   const labels = copy[lang];
   const [view, setView] = useState<TaskView>("board");
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [clock, setClock] = useState(() => Date.now());
-  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", timing: "all" });
+  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
@@ -319,6 +330,7 @@ export function ConciergeTaskManager({
         <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
         <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
         <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.audience} onChange={(event) => setFilters((current) => ({ ...current, audience: event.target.value }))}><option value="all">{labels.allAudiences}</option><option value="internal">{labels.internal}</option><option value="external">{labels.external}</option></select>
         <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[125px] sm:shrink-0" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
       </div>
 
@@ -355,9 +367,9 @@ export function ConciergeTaskManager({
                 const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
                 return (
                   <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5", outsideMonth && "bg-muted/30 text-muted-foreground")}>
-                    <div className={cn("mb-1 text-xs font-medium", dateKey(day) === dateKey(effectiveNow) && "text-primary")}>
+                    <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
                       {new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { weekday: calendarScale === "month" ? undefined : "short", day: "2-digit", month: calendarScale === "day" ? "long" : undefined }).format(day)}
-                    </div>
+                    </button>
                     <div className="space-y-1">
                       {rows.slice(0, visibleLimit).map((task) => (
                         <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>

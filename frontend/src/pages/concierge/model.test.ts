@@ -115,6 +115,13 @@ function task(overrides: Partial<ConciergeTask> = {}): ConciergeTask {
     completed_at: null,
     created_at: "2026-08-18T08:00:00.000Z",
     updated_at: "2026-08-18T08:00:00.000Z",
+    task_audience: "internal",
+    patient_id: null,
+    patient_name: null,
+    external_assignee_type: null,
+    external_assignee_name: null,
+    external_assignee_phone: null,
+    external_assignee_email: null,
     ...overrides,
   };
 }
@@ -160,6 +167,7 @@ describe("concierge workspace model", () => {
       status: "all",
       priority: "all",
       kind: "all",
+      audience: "all",
       timing: "overdue",
     }, now).map((item) => item.id)).toEqual(["overdue"]);
   });
@@ -308,14 +316,20 @@ describe("concierge workspace model", () => {
     expect(agenda[1]).not.toHaveProperty("description");
   });
 
-  it("uses the dedicated operational title without introducing clinical links", () => {
+  it("uses the operational title and allows an optional patient link", () => {
     expect(conciergeTaskDisplayTitle(task({ title: "Sensitive medical detail" }), "de")).toBe(
       "Sensitive medical detail",
     );
     const operational = task();
-    expect(operational).not.toHaveProperty("patient_id");
+    expect(operational.patient_id).toBeNull();
     expect(operational).not.toHaveProperty("order_id");
     expect(operational).not.toHaveProperty("appointment_id");
+
+    const patientTask = task({ patient_id: "patient-1", patient_name: "Anna Weber" });
+    expect(patientTask).toMatchObject({
+      patient_id: "patient-1",
+      patient_name: "Anna Weber",
+    });
   });
 
   it("creates encoded Google Maps links without an API key", () => {

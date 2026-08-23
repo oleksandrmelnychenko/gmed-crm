@@ -149,6 +149,13 @@ export type ConciergeTask = {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
+  task_audience: "internal" | "external";
+  patient_id: string | null;
+  patient_name: string | null;
+  external_assignee_type: string | null;
+  external_assignee_name: string | null;
+  external_assignee_phone: string | null;
+  external_assignee_email: string | null;
 };
 
 export type ConciergeAssignee = {
@@ -212,6 +219,7 @@ export type ConciergeTaskFilters = {
   status: string;
   priority: string;
   kind: string;
+  audience: string;
   timing: "all" | "today" | "overdue" | "upcoming";
 };
 
@@ -488,12 +496,17 @@ export function filterConciergeTasks(
     if (filters.status !== "all" && task.status !== filters.status) return false;
     if (filters.priority !== "all" && task.priority !== filters.priority) return false;
     if (filters.kind !== "all" && task.kind !== filters.kind) return false;
+    if (filters.audience !== "all" && task.task_audience !== filters.audience) return false;
     if (query && ![
       task.title,
       task.note,
       task.location,
       task.assigned_to_name,
       task.assigned_by_name,
+      task.patient_name,
+      task.external_assignee_name,
+      task.external_assignee_phone,
+      task.external_assignee_email,
     ].some((value) => value?.toLocaleLowerCase().includes(query))) return false;
     const scheduled = conciergeTaskScheduledAt(task);
     if (filters.timing === "overdue" && !isConciergeTaskOverdue(task, now)) return false;
@@ -792,7 +805,6 @@ export function buildConciergeAgenda(
   patientNames: Map<string, string> = new Map(),
   lang: "de" | "ru" = "de",
 ): ConciergeAgendaItem[] {
-  void patientNames;
   const items: ConciergeAgendaItem[] = [];
   for (const service of services) {
     if (!service.starts_at) continue;
@@ -818,7 +830,9 @@ export function buildConciergeAgenda(
       date: scheduledAt,
       status: task.status,
       priority: task.priority,
-      patientName: null,
+      patientName:
+        task.patient_name ??
+        (task.patient_id ? patientNames.get(task.patient_id) ?? null : null),
       providerId: null,
       address: task.location,
     });

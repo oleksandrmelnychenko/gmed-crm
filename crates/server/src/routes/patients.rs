@@ -11177,12 +11177,15 @@ async fn list_all_doctors(
     auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
 
     let rows = sqlx::query(
-        r#"SELECT d.id, d.name, d.title, d.fachbereich, l.provider_id, p.name AS provider_name
+        r#"SELECT d.id, d.name, d.title, d.fachbereich,
+                  (array_agg(l.provider_id ORDER BY p.name, l.provider_id))[1] AS provider_id,
+                  string_agg(DISTINCT p.name, ', ' ORDER BY p.name) AS provider_name
            FROM provider_doctor_links l
            JOIN provider_doctors d ON d.id = l.doctor_id
            JOIN providers p ON p.id = l.provider_id
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
+           GROUP BY d.id, d.name, d.title, d.fachbereich
            ORDER BY d.name"#,
     )
     .fetch_all(&state.db)

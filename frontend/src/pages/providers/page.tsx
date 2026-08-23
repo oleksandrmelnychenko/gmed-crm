@@ -183,6 +183,7 @@ import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
 import { ProviderChildrenSection } from "./ui/provider-children-section";
 import { ProviderPeopleCatalog } from "./ui/provider-people-catalog";
 import { ProviderStatusPill } from "./ui/provider-status-pill";
+import { ProviderDocumentsSection } from "./ui/provider-documents-section";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
@@ -4133,6 +4134,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     } : undefined}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                  />
+
+                  <ProviderDocumentsSection
+                    detail={detail}
+                    canManage={permissions.canManageRegistry}
                   />
 
                   <ProviderChildrenSection onOpenProvider={openProvider}>

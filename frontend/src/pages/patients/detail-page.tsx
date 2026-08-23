@@ -199,18 +199,9 @@ type WorkflowChecklistFormState = {
   dueDate: string;
 };
 
-const PATIENT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-const PATIENT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+function patientDateLocale() {
+  return getLang() === "ru" ? "ru-RU" : "de-DE";
+}
 // de-DE keeps the app-wide money pattern: amount first, currency sign after.
 const PATIENT_MONEY_FORMATTERS: Record<string, Intl.NumberFormat> = {
   EUR: new Intl.NumberFormat("de-DE", {
@@ -245,14 +236,24 @@ function patientName(p: PatientDetail) {
 function fmtDate(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return PATIENT_DATE_FORMATTER.format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
+    return new Intl.DateTimeFormat(patientDateLocale(), {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
   } catch { return v; }
 }
 
 function fmtDateTime(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return PATIENT_DATE_TIME_FORMATTER.format(new Date(v));
+    return new Intl.DateTimeFormat(patientDateLocale(), {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(v));
   } catch { return v; }
 }
 
@@ -1151,6 +1152,7 @@ function usePatientDetailPageContent() {
 
   const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
   const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
+  const canCreateTasks = user?.role === "ceo" || user?.role === "concierge" || user?.role === "billing";
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
@@ -2053,6 +2055,7 @@ function usePatientDetailPageContent() {
         assignments={assignments}
         assignableStaff={assignableStaff}
         canCreateOrders={canCreateOrders}
+        canCreateTasks={canCreateTasks}
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}
         canManage={canManage}

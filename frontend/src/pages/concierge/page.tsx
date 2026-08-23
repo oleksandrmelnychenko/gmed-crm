@@ -815,6 +815,12 @@ export function ConciergeWorkspacePage() {
           status,
           assigned_to: task.assigned_to,
           reminder_at: task.reminder_at,
+          task_audience: task.task_audience,
+          patient_id: task.patient_id,
+          external_assignee_type: task.external_assignee_type,
+          external_assignee_name: task.external_assignee_name,
+          external_assignee_phone: task.external_assignee_phone,
+          external_assignee_email: task.external_assignee_email,
         }),
       });
       clearApiCache("/concierge-operational-items");

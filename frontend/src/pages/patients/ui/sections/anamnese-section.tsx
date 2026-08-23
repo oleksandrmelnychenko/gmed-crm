@@ -100,14 +100,22 @@ function versionSnippet(version: ClinicalNarrative): string {
   return "";
 }
 
-function formatTimestamp(value: string | null | undefined): string {
+function formatTimestamp(value: string | null | undefined, lang: string): string {
   if (!value) return "";
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(parsed);
 }
 
-function versionDate(version: ClinicalNarrative): string {
-  return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at) || "—";
+function versionDate(version: ClinicalNarrative, lang: string): string {
+  return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at, lang) || "—";
 }
 
 function toLocalDateTimeInput(value: string | null | undefined): string {
@@ -347,44 +355,44 @@ export function AnamneseSection({
       <div className="space-y-2.5 p-3">
         {active ? (
           <div className="space-y-3">
-            <div className="grid gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2.5 md:grid-cols-3">
-              <div className="min-w-0">
+            <div className="overflow-hidden rounded-lg border border-border/60 bg-white">
+              <div className="grid min-w-0 gap-1.5 border-b border-border/60 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)] sm:items-center">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                 </p>
-                <p className="mt-1">
+                <p>
                   <span className={datePillClass}>
-                    {versionDate(active)}
+                    {versionDate(active, lang)}
                   </span>
                 </p>
               </div>
-              <div className="min-w-0">
+              <div className="grid min-w-0 gap-1.5 border-b border-border/60 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)] sm:items-center">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Статус", "Status")}
                 </p>
-                <p className="mt-1">
+                <p>
                   <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                     {tx("Активная версия", "Aktive Version")}
                   </span>
                 </p>
               </div>
-              <div className="min-w-0">
+              <div className="grid min-w-0 gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)] sm:items-center">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Источник", "Quelle")}
                 </p>
-                <div className="mt-1">
+                <div>
                   <ClinicalRecordSource item={active} tx={tx} />
                 </div>
               </div>
             </div>
             {activeNonEmpty.length > 0 ? (
-              <dl className="grid gap-2 md:grid-cols-2">
+              <dl className="overflow-hidden rounded-lg border border-border/60 bg-white">
                 {activeNonEmpty.map((field) => (
                   <div
                     key={field.key}
-                    className="min-w-0 rounded-lg border border-border/40 bg-white px-3 py-2.5"
+                    className="grid min-w-0 gap-1.5 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)]"
                   >
-                    <dt className="mb-1 text-[11px] font-medium text-muted-foreground">{field.label}</dt>
+                    <dt className="text-[11px] font-medium text-muted-foreground">{field.label}</dt>
                     <dd className="whitespace-pre-line break-words text-sm text-foreground">
                       {active[field.key]}
                     </dd>
@@ -416,14 +424,14 @@ export function AnamneseSection({
                   .map((item) => (
                     <div
                       key={`${item.id}-details`}
-                      className="rounded-lg border border-border/40 bg-white p-3"
+                      className="overflow-hidden rounded-lg border border-border/60 bg-white"
                     >
-                      <p className="text-xs font-semibold text-foreground">
+                      <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs font-semibold text-foreground">
                         {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
                       </p>
-                      <dl className="mt-2 grid gap-2 md:grid-cols-2">
+                      <dl className="divide-y divide-border/60">
                         {item.narrative_text ? (
-                          <div>
+                          <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)]">
                             <dt className="text-[10px] font-medium text-muted-foreground">
                               {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
                             </dt>
@@ -433,7 +441,7 @@ export function AnamneseSection({
                           </div>
                         ) : null}
                         {item.assessment_text ? (
-                          <div>
+                          <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)]">
                             <dt className="text-[10px] font-medium text-muted-foreground">
                               {tx(
                                 "Оценка / заключение специалиста",
@@ -452,7 +460,9 @@ export function AnamneseSection({
             ) : null}
             {active.red_flags ? (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-                <p className="text-[11px] font-semibold text-rose-800">Red flags</p>
+                <p className="text-[11px] font-semibold text-rose-800">
+                  {tx("Тревожные признаки", "Warnzeichen")}
+                </p>
                 <p className="mt-1 whitespace-pre-line break-words text-sm text-rose-900">
                   {active.red_flags}
                 </p>
@@ -466,8 +476,8 @@ export function AnamneseSection({
         )}
 
         {historyOpen ? (
-          <div className="space-y-1.5 rounded-lg border border-border/40 bg-white p-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-white">
+            <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {tx("История версий", "Versionsverlauf")}
             </p>
             {historyLoading ? (
@@ -477,13 +487,13 @@ export function AnamneseSection({
                 {tx("Версий нет", "Keine Versionen")}
               </p>
             ) : (
-              <ul className="space-y-1.5">
+              <ul className="divide-y divide-border/60">
                 {history.map((version) => {
                   const snippet = versionSnippet(version);
                   return (
                     <li
                       key={version.id ?? `${version.updated_at}`}
-                      className="flex items-start justify-between gap-2.5 rounded-lg border border-border/40 bg-white px-3 py-2"
+                      className="flex items-start justify-between gap-2.5 bg-white px-3 py-2.5"
                     >
                       <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
                         <div className="min-w-0">
@@ -492,7 +502,7 @@ export function AnamneseSection({
                           </p>
                           <p className="mt-1">
                             <span className={datePillClass}>
-                              {versionDate(version)}
+                              {versionDate(version, lang)}
                             </span>
                           </p>
                           <span

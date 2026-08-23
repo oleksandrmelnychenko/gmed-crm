@@ -131,6 +131,7 @@ describe("first-release staff RBAC", () => {
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
       "/chat",
+      "/notes",
       "/patients",
       "/",
     ]);

@@ -586,7 +586,10 @@ function DiagnosisRow({
           ) : null}
           {node.red_flags ? (
             <p className="min-w-0 max-w-full break-words rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800">
-              <span className="font-semibold">Red flags:</span> {node.red_flags}
+              <span className="font-semibold">
+                {tx("Тревожные признаки", "Warnzeichen")}:
+              </span>{" "}
+              {node.red_flags}
             </p>
           ) : null}
           {attribution ? (
@@ -886,7 +889,7 @@ function DiagnosisForm({
       </Field>
 
       {isDiagnosis ? (
-        <Field label="Red flags">
+        <Field label={tx("Тревожные признаки", "Warnzeichen")}>
           <textarea
             value={draft.red_flags ?? ""}
             onChange={(e) => set({ red_flags: blankToNull(e.target.value) })}

@@ -663,20 +663,6 @@ export function CompanyFinancePage() {
             )}
           </select>
         </ToolbarField>
-        <ToolbarField label={text.movement} className="w-full sm:w-[150px]">
-          <select
-            className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
-            value={filters.movement}
-            onChange={(event) => setFilters((current) => ({
-              ...current,
-              movement: event.target.value as CompanyFinancialFilters["movement"],
-            }))}
-          >
-            <option value="all">{text.allMovements}</option>
-            <option value="inflow">{text.inflow}</option>
-            <option value="outflow">{text.outflow}</option>
-          </select>
-        </ToolbarField>
         <ToolbarField label={text.searchLabel} className="col-span-2 w-full sm:col-auto sm:w-[280px]">
           <span className="relative block">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -876,7 +862,33 @@ export function CompanyFinancePage() {
 
           <TabsContent value="cash" className="space-y-2">
             {assignmentError ? <ShellBanner tone="error">{assignmentError}</ShellBanner> : null}
-            <DataTableSurface rows={position.cash_movements} columns={cashColumns} rowId={(row) => row.id} storageKey="company-finance-cash" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} defaultFrozenColumns={["date"]} emptyState={text.noRows} pagination={{ pageSize: 50 }} />
+            <DataTableSurface
+              rows={position.cash_movements}
+              columns={cashColumns}
+              rowId={(row) => row.id}
+              storageKey="company-finance-cash"
+              defaultDensity="compact"
+              defaultSort={[{ field: "date", dir: "desc" }]}
+              defaultFrozenColumns={["date"]}
+              emptyState={text.noRows}
+              pagination={{ pageSize: 50, resetKey: filters.movement }}
+              toolbarStart={(
+                <ToolbarField label={text.movement} className="w-full shrink-0 sm:w-[180px]">
+                  <select
+                    className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
+                    value={filters.movement}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      movement: event.target.value as CompanyFinancialFilters["movement"],
+                    }))}
+                  >
+                    <option value="all">{text.allMovements}</option>
+                    <option value="inflow">{text.inflow}</option>
+                    <option value="outflow">{text.outflow}</option>
+                  </select>
+                </ToolbarField>
+              )}
+            />
             {position.cash_movements_truncated ? (
               <p className="text-xs text-muted-foreground">{text.shown(position.cash_movements.length, position.cash_movement_count)}</p>
             ) : null}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin } from "lucide-react";
+import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,22 @@ const copy = {
     detailsSection: "Details",
     planningSection: "Planung und Status",
     assignmentSection: "Zuordnung",
+    audience: "Kategorie",
+    internal: "Intern",
+    external: "Extern",
+    patient: "Patient / Kunde",
+    noPatient: "Ohne Patientenzuordnung",
+    internalOwner: "Verantwortlich in GMED",
+    externalType: "Externer Ausführender",
+    externalName: "Name / Unternehmen",
+    externalNamePlaceholder: "z. B. Fahrer Müller oder Hotel Adlon",
+    externalPhone: "Telefon",
+    externalEmail: "E-Mail",
+    driver: "Fahrer",
+    hotel: "Hotel",
+    clinic: "Klinik",
+    partner: "Partner",
+    other: "Andere",
   },
   ru: {
     createTitle: "Создать задачу или событие",
@@ -103,6 +119,22 @@ const copy = {
     detailsSection: "Основные данные",
     planningSection: "Планирование и статус",
     assignmentSection: "Назначение",
+    audience: "Категория",
+    internal: "Внутренняя",
+    external: "Внешняя",
+    patient: "Пациент / клиент",
+    noPatient: "Без привязки к пациенту",
+    internalOwner: "Ответственный в GMED",
+    externalType: "Внешний исполнитель",
+    externalName: "Имя / компания",
+    externalNamePlaceholder: "Например, водитель Мюллер или Hotel Adlon",
+    externalPhone: "Телефон",
+    externalEmail: "Электронная почта",
+    driver: "Водитель",
+    hotel: "Отель",
+    clinic: "Клиника",
+    partner: "Партнёр",
+    other: "Другое",
   },
 } as const;
 
@@ -134,6 +166,17 @@ export type SaveConciergeOperationalItemInput = {
   status: string;
   assigned_to: string | null;
   reminder_at: string | null;
+  task_audience: "internal" | "external";
+  patient_id: string | null;
+  external_assignee_type: string | null;
+  external_assignee_name: string | null;
+  external_assignee_phone: string | null;
+  external_assignee_email: string | null;
+};
+
+export type ConciergeTaskPatientOption = {
+  id: string;
+  name: string;
 };
 
 function localDateTimeValue(value: Date | string | null) {
@@ -166,6 +209,9 @@ export function ConciergeTaskEventDialog({
   currentUserId,
   canAssign,
   showServiceLink = true,
+  patients = [],
+  initialPatientId = null,
+  initialDate = null,
   lang,
   open,
   submitting,
@@ -179,6 +225,9 @@ export function ConciergeTaskEventDialog({
   currentUserId: string | null;
   canAssign: boolean;
   showServiceLink?: boolean;
+  patients?: ConciergeTaskPatientOption[];
+  initialPatientId?: string | null;
+  initialDate?: Date | null;
   lang: Lang;
   open: boolean;
   submitting: boolean;
@@ -199,6 +248,12 @@ export function ConciergeTaskEventDialog({
   const [status, setStatus] = useState("open");
   const [assigneeId, setAssigneeId] = useState("");
   const [reminderAt, setReminderAt] = useState("");
+  const [audience, setAudience] = useState<"internal" | "external">("internal");
+  const [patientId, setPatientId] = useState("");
+  const [externalType, setExternalType] = useState("driver");
+  const [externalName, setExternalName] = useState("");
+  const [externalPhone, setExternalPhone] = useState("");
+  const [externalEmail, setExternalEmail] = useState("");
 
   const sortedServices = useMemo(
     () => services
@@ -209,7 +264,8 @@ export function ConciergeTaskEventDialog({
 
   useEffect(() => {
     if (!open) return;
-    const start = new Date(Date.now() + 60 * 60_000);
+    const start = initialDate ? new Date(initialDate) : new Date(Date.now() + 60 * 60_000);
+    if (initialDate) start.setHours(9, 0, 0, 0);
     const end = new Date(start.getTime() + 60 * 60_000);
     setKind(item?.kind ?? "task");
     setTitle(item?.title ?? "");
@@ -223,7 +279,13 @@ export function ConciergeTaskEventDialog({
     setStatus(item?.status ?? "open");
     setAssigneeId(selectTaskAssigneeId(item?.assigned_to, currentUserId, assignees));
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
-  }, [assignees, currentUserId, item, open]);
+    setAudience(item?.task_audience ?? "internal");
+    setPatientId(item?.patient_id ?? initialPatientId ?? "");
+    setExternalType(item?.external_assignee_type ?? "driver");
+    setExternalName(item?.external_assignee_name ?? "");
+    setExternalPhone(item?.external_assignee_phone ?? "");
+    setExternalEmail(item?.external_assignee_email ?? "");
+  }, [assignees, currentUserId, initialDate, initialPatientId, item, open]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -245,6 +307,12 @@ export function ConciergeTaskEventDialog({
         status,
         assigned_to: canAssign ? assigneeId || null : null,
         reminder_at: toIso(reminderAt),
+        task_audience: audience,
+        patient_id: patientId || null,
+        external_assignee_type: audience === "external" ? externalType : null,
+        external_assignee_name: audience === "external" ? externalName.trim() || null : null,
+        external_assignee_phone: audience === "external" ? externalPhone.trim() || null : null,
+        external_assignee_email: audience === "external" ? externalEmail.trim() || null : null,
       });
     } catch {
       // Preserve the form so the Concierge can correct or retry the request.
@@ -279,6 +347,37 @@ export function ConciergeTaskEventDialog({
               </ConciergeDialogSection>
 
               <div className="space-y-4">
+                <ConciergeDialogSection title={labels.audience} icon={UsersRound}>
+                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
+                    {(["internal", "external"] as const).map((value) => (
+                      <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={audience === value ? "default" : "ghost"} onClick={() => setAudience(value)}>
+                        {labels[value]}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <ConciergeField label={labels.patient} className="sm:col-span-2">
+                      <select className={selectClass} value={patientId} onChange={(event) => setPatientId(event.target.value)}>
+                        <option value="">{labels.noPatient}</option>
+                        {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
+                      </select>
+                    </ConciergeField>
+                    {audience === "external" ? (
+                      <>
+                        <ConciergeField label={labels.externalType}>
+                          <select className={selectClass} value={externalType} onChange={(event) => setExternalType(event.target.value)}>
+                            {(["driver", "hotel", "clinic", "partner", "other"] as const).map((value) => <option key={value} value={value}>{labels[value]}</option>)}
+                          </select>
+                        </ConciergeField>
+                        <ConciergeField label={labels.externalName}>
+                          <Input value={externalName} required maxLength={255} placeholder={labels.externalNamePlaceholder} onChange={(event) => setExternalName(event.target.value)} />
+                        </ConciergeField>
+                        <ConciergeField label={labels.externalPhone}><Input value={externalPhone} maxLength={100} onChange={(event) => setExternalPhone(event.target.value)} /></ConciergeField>
+                        <ConciergeField label={labels.externalEmail}><Input type="email" value={externalEmail} maxLength={255} onChange={(event) => setExternalEmail(event.target.value)} /></ConciergeField>
+                      </>
+                    ) : null}
+                  </div>
+                </ConciergeDialogSection>
                 {showServiceLink || canAssign ? (
                   <ConciergeDialogSection title={labels.assignmentSection} icon={Link2}>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
@@ -291,7 +390,7 @@ export function ConciergeTaskEventDialog({
                         </ConciergeField>
                       ) : null}
                     {canAssign ? (
-                      <ConciergeField label={labels.assignee}>
+                      <ConciergeField label={audience === "external" ? labels.internalOwner : labels.assignee}>
                         <select className={selectClass} value={assigneeId} required onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
                           <option value="" disabled>{labels.chooseAssignee}</option>
                           {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name} · {assigneeRoleLabel(assignee.role, lang)}</option>)}
@@ -334,7 +433,7 @@ export function ConciergeTaskEventDialog({
 
           <ConciergeDialogFooter>
             <Button type="button" className="h-9 rounded-lg" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
-            <Button type="submit" className="h-9 rounded-lg px-4" disabled={submitting || !title.trim() || (kind === "event" && !startsAt) || (canAssign && !assigneeId)}>
+            <Button type="submit" className="h-9 rounded-lg px-4" disabled={submitting || !title.trim() || (kind === "event" && !startsAt) || (canAssign && !assigneeId) || (audience === "external" && !externalName.trim())}>
               {submitting ? <LoaderCircle className="animate-spin" /> : null}{submitting ? labels.saving : item ? labels.save : labels.create}
             </Button>
           </ConciergeDialogFooter>

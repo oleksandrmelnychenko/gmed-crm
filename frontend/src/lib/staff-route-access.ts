@@ -30,6 +30,8 @@ const ROLES_CHAT = [
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 
+const ROLES_NOTES = ALL_STAFF_ROLES;
+
 const ROLES_FEEDBACK = [
   "ceo",
 ] as const satisfies readonly StaffRole[];
@@ -308,6 +310,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/chat",
     roles: ROLES_CHAT,
     nav: { section: "main", labelKey: "nav_chat" },
+  },
+  {
+    id: "notes",
+    match: "exact",
+    path: "/notes",
+    roles: ROLES_NOTES,
+    nav: { section: "main", labelKey: "nav_notes", after: "chat" },
   },
   {
     id: "feedback",

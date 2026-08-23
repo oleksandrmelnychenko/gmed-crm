@@ -19,6 +19,7 @@ export const ru = {
   nav_dashboard: "Панель управления",
   nav_concierge_workspace: "Рабочее место консьержа",
   nav_task_manager: "Менеджер задач",
+  nav_notes: "Заметки",
   nav_main: "Главное",
   nav_documents: "Документы",
   nav_specializations: "Специализации",

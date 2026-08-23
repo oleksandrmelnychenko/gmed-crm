@@ -621,6 +621,39 @@ function accountMovementDirectionLabel(
   return lang === "de" ? "Zahlung oder Gutschrift" : "Оплата или уменьшение долга";
 }
 
+function localizeFinancialDescription(value: string, lang: string) {
+  const exact: Record<string, [string, string]> = {
+    "Patient invoice": ["Patientenrechnung", "Счёт пациента"],
+    "Advance payment": ["Vorauszahlung", "Предоплата"],
+    "Payment received": ["Zahlung erhalten", "Оплата получена"],
+    "Advance payment received": ["Vorauszahlung erhalten", "Предоплата получена"],
+    "Payment reversal": ["Zahlungsstorno", "Сторно оплаты"],
+    "Invoice adjustment": ["Rechnungskorrektur", "Корректировка счёта"],
+    "Account adjustment": ["Kontokorrektur", "Корректировка баланса"],
+    "Payment opening balance": ["Zahlungsanfangsbestand", "Начальный остаток оплаты"],
+    "Advance payment opening balance": ["Anfangsbestand Vorauszahlung", "Начальный остаток предоплаты"],
+    "Patient invoice cancelled; external receivable reopened": [
+      "Patientenrechnung storniert; externe Forderung wieder geöffnet",
+      "Счёт пациента отменён; внешний долг снова открыт",
+    ],
+    "External provider": ["Externer Anbieter", "Внешний поставщик"],
+  };
+  const direct = exact[value];
+  if (direct) return lang === "de" ? direct[0] : direct[1];
+
+  const prefixes: Array<[string, [string, string]]> = [
+    ["Concierge partner payment reversal", ["Storno der Zahlung an Concierge-Partner", "Сторно оплаты партнёру консьержа"]],
+    ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
+  ];
+  for (const [prefix, labels] of prefixes) {
+    if (value.startsWith(prefix)) {
+      return `${lang === "de" ? labels[0] : labels[1]}${value.slice(prefix.length)}`;
+    }
+  }
+
+  return value;
+}
+
 function accountBalanceLabel(
   value: string | null | undefined,
   currency: string,
@@ -653,7 +686,7 @@ function balanceAdjustmentCategoryLabel(
     : {
         opening_balance: "Перенесённый остаток",
         fee: "Комиссия",
-        goodwill: "Компенсация / goodwill",
+        goodwill: "Компенсация",
         correction: "Корректировка",
         other: "Другое",
       };
@@ -1524,12 +1557,15 @@ function usePatientInvoicesTabContent({
       {
         id: "description",
         label: t.contracts_notes,
-        accessor: (entry) => entry.description,
+        accessor: (entry) => localizeFinancialDescription(entry.description, lang),
         filterType: "text",
         width: 300,
         render: (entry) => (
-          <span className="block truncate text-xs text-foreground" title={entry.description}>
-            {entry.description}
+          <span
+            className="block truncate text-xs text-foreground"
+            title={localizeFinancialDescription(entry.description, lang)}
+          >
+            {localizeFinancialDescription(entry.description, lang)}
           </span>
         ),
       },
@@ -1576,7 +1612,7 @@ function usePatientInvoicesTabContent({
         ),
       },
     ],
-    [commonNotSet, formatDate, formatMoney, ledgerEntries, ledgerLabels, t],
+    [commonNotSet, formatDate, formatMoney, lang, ledgerEntries, ledgerLabels, t],
   );
   const accountMovementColumns = useMemo<ColumnDef<PatientAccountMovement>[]>(
     () => [
@@ -1632,13 +1668,16 @@ function usePatientInvoicesTabContent({
         id: "description",
         label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
         accessor: (movement) =>
-          `${movement.description} ${movement.document_number ?? ""} ${movement.order_number ?? ""}`,
+          `${localizeFinancialDescription(movement.description, lang)} ${movement.document_number ?? ""} ${movement.order_number ?? ""}`,
         searchable: true,
         width: 280,
         render: (movement) => (
           <div className="min-w-0">
-            <div className="truncate text-xs text-foreground" title={movement.description}>
-              {movement.description}
+            <div
+              className="truncate text-xs text-foreground"
+              title={localizeFinancialDescription(movement.description, lang)}
+            >
+              {localizeFinancialDescription(movement.description, lang)}
             </div>
             <div className="truncate font-mono text-[10px] text-muted-foreground">
               {[movement.order_number, movement.document_number].filter(Boolean).join(" · ") || "—"}
@@ -1739,13 +1778,17 @@ function usePatientInvoicesTabContent({
       {
         id: "description",
         label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
-        accessor: (item) => `${item.description} ${item.document_number ?? ""}`,
+        accessor: (item) =>
+          `${localizeFinancialDescription(item.description, lang)} ${item.document_number ?? ""}`,
         searchable: true,
         width: 260,
         render: (item) => (
           <div className="min-w-0">
-            <div className="truncate text-xs text-foreground" title={item.description}>
-              {item.description}
+            <div
+              className="truncate text-xs text-foreground"
+              title={localizeFinancialDescription(item.description, lang)}
+            >
+              {localizeFinancialDescription(item.description, lang)}
             </div>
             <div className="truncate font-mono text-[10px] text-muted-foreground">
               {[item.order_number, item.document_number].filter(Boolean).join(" · ") || "—"}
@@ -1940,7 +1983,10 @@ function usePatientInvoicesTabContent({
         filterType: "date",
         width: 180,
         render: (item) => {
-          const range = [item.starts_on, item.ends_on].filter(Boolean).join(" – ");
+          const range = [
+            item.starts_on ? formatDate(item.starts_on) : null,
+            item.ends_on ? formatDate(item.ends_on) : null,
+          ].filter(Boolean).join(" – ");
           return range ? (
             <span className="font-mono text-xs tabular-nums text-foreground">{range}</span>
           ) : (
@@ -2060,6 +2106,7 @@ function usePatientInvoicesTabContent({
       canManageInvoices,
       commonNotSet,
       effectiveServicePackages,
+      formatDate,
       handleOverageDecision,
       moneyValueNumber,
       statusColors,
@@ -2197,7 +2244,7 @@ function usePatientInvoicesTabContent({
 
       {accountStatement ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
             {[
               [
                 lang === "de" ? "Anfangssaldo" : "Входящее сальдо",
@@ -2242,28 +2289,34 @@ function usePatientInvoicesTabContent({
                 ),
               ],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-border/70 bg-card px-4 py-3">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div
+                key={label}
+                className="grid min-w-0 gap-1.5 border-b border-border/60 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_auto] sm:items-center sm:gap-4"
+              >
+                <div className="text-xs font-medium text-muted-foreground sm:text-[13px]">
                   {label}
                 </div>
-                <div className="mt-2 font-mono text-base font-semibold tabular-nums text-foreground">
+                <div className="font-mono text-sm font-semibold tabular-nums text-foreground sm:text-right">
                   {value}
                 </div>
               </div>
             ))}
           </section>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
             {[
               [lang === "de" ? "Offene Rechnungen" : "Открытые счета", accountStatement.summary.invoice_due],
               [lang === "de" ? "Zahlungen erhalten" : "Получено оплат", accountStatement.summary.cash_paid],
               [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
               [lang === "de" ? "Externe Restforderung" : "Остаток внешнего долга", accountStatement.summary.external_receivable],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-border/60 bg-muted/15 px-4 py-2.5">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div
+                key={label}
+                className="grid min-w-0 gap-1.5 border-b border-border/60 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_auto] sm:items-center sm:gap-4"
+              >
+                <div className="text-xs font-medium text-muted-foreground sm:text-[13px]">
                   {label}
                 </div>
-                <div className="mt-1.5 font-mono text-sm font-semibold tabular-nums text-foreground">
+                <div className="font-mono text-sm font-semibold tabular-nums text-foreground sm:text-right">
                   {value == null ? "—" : formatMoney(value, accountStatement.currency)}
                 </div>
               </div>
@@ -2444,7 +2497,7 @@ function usePatientInvoicesTabContent({
                       event.target.value as "all" | PatientAccountMovement["direction"],
                     )
                   }
-                  className={cn(selectClass, "h-8 min-w-36")}
+                  className={cn(selectClass, "h-8 !w-56 max-w-full shrink-0")}
                 >
                   <option value="all">{lang === "de" ? "Belastungen und Zahlungen" : "Начисления и оплаты"}</option>
                   <option value="debit">{lang === "de" ? "Nur Belastungen" : "Только начисления"}</option>
@@ -2458,7 +2511,7 @@ function usePatientInvoicesTabContent({
                       event.target.value as "all" | PatientAccountMovement["kind"],
                     )
                   }
-                  className={cn(selectClass, "h-8 min-w-44")}
+                  className={cn(selectClass, "h-8 !w-52 max-w-full shrink-0")}
                 >
                   <option value="all">{lang === "de" ? "Alle Buchungen" : "Все операции"}</option>
                   <option value="invoice">{accountMovementKindLabel("invoice", lang)}</option>
@@ -2727,7 +2780,15 @@ function usePatientInvoicesTabContent({
         }}
         width="default"
         onSubmit={activatedPortalAccount ? undefined : handleActivatePortalAccount}
-        title={lang === "de" ? "Patientenkonto aktivieren" : "Активировать аккаунт пациента"}
+        title={
+          portalAccountIsActive
+            ? lang === "de"
+              ? "Patientenkonto bearbeiten"
+              : "Редактировать аккаунт пациента"
+            : lang === "de"
+              ? "Patientenkonto aktivieren"
+              : "Активировать аккаунт пациента"
+        }
         description={
           lang === "de"
             ? `Portalzugang für ${patientName}`
@@ -2768,12 +2829,20 @@ function usePatientInvoicesTabContent({
                 }
               >
                 {portalAccountBusy
-                  ? lang === "de"
-                    ? "Wird aktiviert…"
-                    : "Активация…"
-                  : lang === "de"
-                    ? "Konto aktivieren"
-                    : "Активировать аккаунт"}
+                  ? portalAccountIsActive
+                    ? lang === "de"
+                      ? "Wird gespeichert…"
+                      : "Сохранение…"
+                    : lang === "de"
+                      ? "Wird aktiviert…"
+                      : "Активация…"
+                  : portalAccountIsActive
+                    ? lang === "de"
+                      ? "Änderungen speichern"
+                      : "Сохранить изменения"
+                    : lang === "de"
+                      ? "Konto aktivieren"
+                      : "Активировать аккаунт"}
               </Button>
             </>
           )
@@ -2809,7 +2878,10 @@ function usePatientInvoicesTabContent({
 
             <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
               <div className="space-y-3">
-                <Field label="Email" htmlFor="portal-account-result-email">
+                <Field
+                  label={lang === "de" ? "E-Mail" : "Электронная почта"}
+                  htmlFor="portal-account-result-email"
+                >
                   <Input
                     id="portal-account-result-email"
                     value={activatedPortalAccount.email}
@@ -2818,7 +2890,15 @@ function usePatientInvoicesTabContent({
                   />
                 </Field>
                 <Field
-                  label={lang === "de" ? "Temporäres Passwort" : "Временный пароль"}
+                  label={
+                    portalAccountIsActive
+                      ? lang === "de"
+                        ? "Neues Passwort"
+                        : "Новый пароль"
+                      : lang === "de"
+                        ? "Temporäres Passwort"
+                        : "Временный пароль"
+                  }
                   htmlFor="portal-account-result-password"
                 >
                   <Input
@@ -2854,10 +2934,14 @@ function usePatientInvoicesTabContent({
         ) : (
           <>
             <Banner tone="warning" withIcon>
-              {linkedPortalAssignment
+              {portalAccountIsActive
                 ? lang === "de"
-                  ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
-                  : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
+                  ? "Ändern Sie die E-Mail-Adresse oder vergeben Sie ein neues Passwort. Aktive Sitzungen werden nach dem Speichern beendet."
+                  : "Измените email или задайте новый пароль. После сохранения активные сессии будут завершены."
+                : linkedPortalAssignment
+                  ? lang === "de"
+                    ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
+                    : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
                 : lang === "de"
                   ? "Ein Patientenkonto wird erstellt und mit dieser Patientenakte verknüpft."
                   : "Будет создан аккаунт пациента и привязан к этой карточке."}
@@ -2865,7 +2949,10 @@ function usePatientInvoicesTabContent({
 
             <FormSection title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
               <div className="space-y-3">
-                <Field label="Email" htmlFor="portal-account-email">
+                <Field
+                  label={lang === "de" ? "E-Mail" : "Электронная почта"}
+                  htmlFor="portal-account-email"
+                >
                   <Input
                     id="portal-account-email"
                     type="email"
@@ -2883,7 +2970,15 @@ function usePatientInvoicesTabContent({
                   />
                 </Field>
                 <Field
-                  label={lang === "de" ? "Temporäres Passwort" : "Временный пароль"}
+                  label={
+                    portalAccountIsActive
+                      ? lang === "de"
+                        ? "Neues Passwort"
+                        : "Новый пароль"
+                      : lang === "de"
+                        ? "Temporäres Passwort"
+                        : "Временный пароль"
+                  }
                   htmlFor="portal-account-password"
                 >
                   <Input
@@ -3296,13 +3391,21 @@ function usePatientInvoicesTabContent({
                 </Button>
               ) : null}
               {canManagePortalAccount && portalAccountIsActive ? (
-                <Badge className="h-7 max-w-64 gap-1.5 border border-emerald-200 bg-emerald-50 px-2.5 text-emerald-800 hover:bg-emerald-50">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 max-w-72 shrink-0 gap-1.5 rounded-lg border-emerald-200 bg-emerald-50 px-2.5 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                  onClick={openPortalAccountActivation}
+                  disabled={!patientId}
+                  title={lang === "de" ? "Patientenkonto bearbeiten" : "Редактировать аккаунт пациента"}
+                >
                   <CheckCircle2 className="size-3.5 shrink-0" />
                   <span className="truncate">
                     {lang === "de" ? "Konto aktiv" : "Аккаунт активен"}
                     {portalAccountEmail ? ` · ${portalAccountEmail}` : ""}
                   </span>
-                </Badge>
+                </Button>
               ) : null}
               {canManagePortalAccount && hasEligiblePortalPackage && !portalAccountIsActive ? (
                 <Button

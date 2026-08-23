@@ -23,11 +23,19 @@ const AGENCY_SERVICE_DESCRIPTION_LABEL_KEYS: Partial<Record<string, TranslationK
 };
 
 const AGENCY_SERVICE_UNIT_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
+  unit: "revenue_unit_default",
+  einheit: "revenue_unit_default",
+  "ед.": "revenue_unit_default",
   package: "revenue_unit_package",
+  paket: "revenue_unit_package",
   hour: "revenue_unit_hour",
+  stunde: "revenue_unit_hour",
   ride: "revenue_unit_ride",
+  fahrt: "revenue_unit_ride",
   day: "revenue_unit_day",
+  tag: "revenue_unit_day",
   appointment: "revenue_unit_appointment",
+  termin: "revenue_unit_appointment",
 };
 
 function normalizedKey(value?: string | null) {

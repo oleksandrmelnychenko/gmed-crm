@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   BarChart3,
+  ChevronRight,
   ClipboardPen,
   LoaderCircle,
   MessageSquare,
@@ -519,6 +520,182 @@ function ScoreGrid({
   );
 }
 
+function PatientRatingScale({
+  label,
+  value,
+  options,
+  onChange,
+  prominent = false,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  prominent?: boolean;
+}) {
+  const isNpsScale = options.length > 5;
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border p-3.5",
+        prominent
+          ? "border-orange-200 bg-orange-50/45"
+          : "border-border/70 bg-card",
+      )}
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="rounded-full bg-background px-2 py-0.5 font-mono text-sm font-semibold text-foreground shadow-sm ring-1 ring-border/70">
+          {value}
+        </span>
+      </div>
+      <div
+        className={cn(
+          "grid gap-1.5",
+          isNpsScale ? "grid-cols-6 sm:grid-cols-11" : "grid-cols-5",
+        )}
+      >
+        {options.map((option) => {
+          const selected = option === value;
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={selected}
+              aria-label={`${label}: ${option}`}
+              className={cn(
+                "flex h-9 min-w-0 items-center justify-center rounded-lg border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2",
+                selected
+                  ? "border-orange-500 bg-orange-500 text-white shadow-sm"
+                  : "border-border bg-background text-muted-foreground hover:border-orange-300 hover:bg-orange-50 hover:text-foreground",
+              )}
+              onClick={() => onChange(option)}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PatientScoreGrid({
+  t,
+  form,
+  setForm,
+}: {
+  t: Translations;
+  form: FeedbackFormState;
+  setForm: SetFeedbackForm;
+}) {
+  const detailedScores = [
+    [t.feedback_patient_manager, "patientManagerScore"],
+    [t.feedback_interpreter, "interpreterScore"],
+    [t.feedback_concierge, "conciergeScore"],
+    [t.feedback_treatment_quality, "treatmentScore"],
+    [t.feedback_doctors, "doctorScore"],
+    [t.feedback_organization, "organizationScore"],
+    [t.feedback_service_quality, "serviceScore"],
+    [t.feedback_infrastructure_ambience, "infrastructureScore"],
+    [t.feedback_price_value, "priceValueScore"],
+  ] as const;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <PatientRatingScale
+          prominent
+          label={t.feedback_overall}
+          value={form.overallScore}
+          options={scoreOptions}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, overallScore: value }))
+          }
+        />
+        <PatientRatingScale
+          prominent
+          label={`${t.uiText.feedback_nps_label} 0–10`}
+          value={form.npsScore}
+          options={npsOptions}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, npsScore: value }))
+          }
+        />
+      </div>
+
+      <section className="rounded-xl border border-border/70 bg-muted/15 p-3.5">
+        <h3 className="mb-3 text-sm font-semibold text-foreground">
+          {t.feedback_scores}
+        </h3>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {detailedScores.map(([label, field]) => (
+            <PatientRatingScale
+              key={field}
+              label={label}
+              value={form[field]}
+              options={scoreOptions}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, [field]: value }))
+              }
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border/70 bg-card p-3.5">
+        <span className="text-sm font-medium text-foreground">
+          {t.feedback_treatment_success}
+        </span>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {([
+            ["yes", t.feedback_treatment_success_yes],
+            ["partial", t.feedback_treatment_success_partial],
+            ["no", t.feedback_treatment_success_no],
+          ] as const).map(([option, label]) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={form.treatmentSuccess === option}
+              className={cn(
+                "min-h-10 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 focus-visible:ring-offset-2",
+                form.treatmentSuccess === option
+                  ? "border-orange-500 bg-orange-500 text-white"
+                  : "border-border bg-background text-muted-foreground hover:border-orange-300 hover:bg-orange-50 hover:text-foreground",
+              )}
+              onClick={() =>
+                setForm((current) => ({
+                  ...current,
+                  treatmentSuccess: option,
+                }))
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
+          <input
+            type="checkbox"
+            checked={form.complicationReported}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                complicationReported: event.target.checked,
+              }))
+            }
+            className={checkboxClass}
+          />
+          <span className="text-sm text-foreground">
+            {t.feedback_complication_after_visit}
+          </span>
+        </label>
+      </section>
+    </div>
+  );
+}
+
 function FeedbackFormNotes({
   t,
   form,
@@ -673,7 +850,6 @@ type PatientFeedbackContentProps = {
   feedbackColumns: ColumnDef<PortalFeedbackItem>[];
   form: FeedbackFormState;
   notice: string;
-  promoters: number;
   refreshing: boolean;
   submitting: boolean;
   t: ReturnType<typeof useLang>["t"];
@@ -693,7 +869,6 @@ function PatientFeedbackContent({
   feedbackColumns,
   form,
   notice,
-  promoters,
   refreshing,
   submitting,
   t,
@@ -718,11 +893,10 @@ function PatientFeedbackContent({
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+      <div className="grid overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 sm:grid-cols-3 [&>article:not(:last-child)_.admin-inline-metric-separator]:sm:block">
         <AdminInlineMetric icon={MessageSquare} label={t.feedback_submitted_feedback_metric} value={feedback.length} tone="sky" />
-        <AdminInlineMetric icon={Star} label={null} value={promoters} tone="emerald" />
         <AdminInlineMetric
-          icon={BarChart3}
+          icon={Star}
           label={t.feedback_average_overall_metric}
           value={averageOverall === null ? portalNotSetLabel() : formatPortalAverage(averageOverall)}
           tone="amber"
@@ -730,12 +904,12 @@ function PatientFeedbackContent({
         <AdminInlineMetric icon={Users} label={t.feedback_available_visits_metric} value={availableAppointments.length} tone="slate" />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.8fr)]">
         <AdminTableCard
           title={titleWithDot(t.feedback_new_survey_title)}
           description={t.feedback_new_survey_description}
         >
-          <form className="space-y-3 p-4" onSubmit={(event) => void onSubmit(event)}>
+          <form className="space-y-4 p-4 sm:p-5" onSubmit={(event) => void onSubmit(event)}>
             <Field label={t.feedback_visit}>
               <NativeComboboxSelect
                 value={form.appointmentId || "__general__"}
@@ -759,10 +933,13 @@ function PatientFeedbackContent({
               </NativeComboboxSelect>
             </Field>
 
-            <ScoreGrid t={t} form={form} setForm={setForm} />
-            <FeedbackFormNotes t={t} form={form} setForm={setForm} />
+            <PatientScoreGrid t={t} form={form} setForm={setForm} />
 
-            <Button type="submit" className="h-9 rounded-lg" disabled={submitting}>
+            <section className="space-y-3 rounded-xl border border-border/70 bg-card p-3.5">
+              <FeedbackFormNotes t={t} form={form} setForm={setForm} />
+            </section>
+
+            <Button type="submit" className="h-11 w-full rounded-lg" disabled={submitting}>
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               {t.feedback_submit_button}
             </Button>
@@ -774,20 +951,53 @@ function PatientFeedbackContent({
           description={t.feedback_history_description}
           count={feedback.length}
         >
-          <div className="p-3">
-            <DataTable
-              rows={feedback}
-              columns={feedbackColumns}
-              rowId={(row) => row.id}
-              activeRowId={activeFeedbackId || null}
-              onRowClick={(row) => setActiveFeedbackId(row.id)}
-              emptyState={
-                <EmptyState
-                  title={t.feedback_empty_title}
-                  description={t.feedback_empty_description}
-                />
-              }
-            />
+          <div className="p-3 sm:p-4">
+            {feedback.length === 0 ? (
+              <EmptyState
+                title={t.feedback_empty_title}
+                description={t.feedback_empty_description}
+              />
+            ) : (
+              <>
+                <div className="space-y-2 md:hidden">
+                  {feedback.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card p-3.5 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                      onClick={() => setActiveFeedbackId(item.id)}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge tone={feedbackStatusTone(item.status)}>
+                            {feedbackReviewStatusLabel(item.status, t)}
+                          </StatusBadge>
+                          <span className="text-xs text-muted-foreground">
+                            {formatPortalDateTime(item.submitted_at)}
+                          </span>
+                        </div>
+                        <p className="mt-2 truncate text-sm font-medium text-foreground">
+                          {item.appointment_title || t.feedback_general_feedback}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {t.feedback_overall}: {item.overall_score} · {t.uiText.feedback_nps_label}: {item.nps_score}
+                        </p>
+                      </div>
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+                <div className="hidden md:block">
+                  <DataTable
+                    rows={feedback}
+                    columns={feedbackColumns}
+                    rowId={(row) => row.id}
+                    activeRowId={activeFeedbackId || null}
+                    onRowClick={(row) => setActiveFeedbackId(row.id)}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </AdminTableCard>
       </div>
@@ -930,11 +1140,6 @@ function PatientFeedbackWorkspace() {
     const total = feedback.reduce((sum, item) => sum + item.overall_score, 0);
     return total / feedback.length;
   }, [feedback]);
-
-  const promoters = useMemo(
-    () => feedback.filter((item) => item.nps_score >= 9).length,
-    [feedback],
-  );
 
   const activeFeedback = useMemo(
     () => feedback.find((item) => item.id === activeFeedbackId) ?? null,
@@ -1088,7 +1293,6 @@ function PatientFeedbackWorkspace() {
       feedbackColumns={feedbackColumns}
       form={form}
       notice={notice}
-      promoters={promoters}
       refreshing={refreshing}
       submitting={submitting}
       t={t}

@@ -1,0 +1,2 @@
+export { InternalNotesPage } from "./page";
+
