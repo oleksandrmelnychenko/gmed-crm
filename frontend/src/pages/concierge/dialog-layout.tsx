@@ -105,8 +105,8 @@ export function ConciergeField({
   children: ReactNode;
 }) {
   return (
-    <label className={cn("grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground", className)}>
-      {label}
+    <label className={cn("grid min-w-0 gap-1.5 text-xs font-normal text-muted-foreground", className)}>
+      <span className="font-medium">{label}</span>
       {children}
     </label>
   );
