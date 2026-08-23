@@ -71,6 +71,12 @@ const ChatPage = lazy(() =>
   })),
 );
 
+const InternalNotesPage = lazy(() =>
+  import("@/pages/notes").then((module) => ({
+    default: module.InternalNotesPage,
+  })),
+);
+
 const AppointmentsPage = lazy(() =>
   import("@/pages/appointments").then((module) => ({
     default: module.AppointmentsPage,
@@ -369,6 +375,7 @@ function AppRoutes() {
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />
             <Route path="chat" element={<ChatPage />} />
+            <Route path="notes" element={<InternalNotesPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="sops" element={<SopsPage />} />
             <Route path="leads" element={<LeadsPage />} />

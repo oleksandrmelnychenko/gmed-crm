@@ -38,11 +38,14 @@ const copy = {
     title: "Aufgabenmanager",
     subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
     newTask: "Aufgabe oder Termin",
-    search: "Aufgabe, Ort oder Concierge suchen",
-    allAssignees: "Alle Concierge",
+    search: "Aufgabe, Ort oder zuständige Person suchen",
+    allAssignees: "Alle Zuständigen",
     allStatuses: "Alle Status",
     allPriorities: "Alle Prioritäten",
     allKinds: "Aufgaben und Termine",
+    allAudiences: "Intern und extern",
+    internal: "Intern",
+    external: "Extern",
     allTiming: "Alle Zeiträume",
     today: "Heute",
     overdue: "Überfällig",
@@ -80,11 +83,14 @@ const copy = {
     title: "Менеджер задач",
     subtitle: "Распределение задач, календарь событий и контроль сроков",
     newTask: "Задача или событие",
-    search: "Поиск по задаче, адресу или консьержу",
-    allAssignees: "Все консьержи",
+    search: "Поиск по задаче, адресу или исполнителю",
+    allAssignees: "Все исполнители",
     allStatuses: "Все статусы",
     allPriorities: "Все приоритеты",
     allKinds: "Задачи и события",
+    allAudiences: "Внутренние и внешние",
+    internal: "Внутренняя",
+    external: "Внешняя",
     allTiming: "Все сроки",
     today: "Сегодня",
     overdue: "Просрочено",
@@ -202,17 +208,20 @@ function TaskCard({
   const scheduled = conciergeTaskScheduledAt(task);
   const overdue = isConciergeTaskOverdue(task, now);
   return (
-    <article className={cn("rounded-lg border border-l-[3px] bg-card p-3 shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-md", taskAccent(task.priority, overdue), overdue ? "border-rose-200" : "border-border/70", compact && "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
-      <button type="button" className="min-w-0 text-left" onClick={() => onOpen(task)}>
+    <article className={cn("rounded-lg border border-l-[3px] bg-card p-3 shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-md", taskAccent(task.priority, overdue), overdue ? "border-rose-200" : "border-border/70", compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
+      <button type="button" className={cn("min-w-0 text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
+          <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
         </div>
         <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-foreground">{task.title}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
           <p className="truncate"><UsersRound className="mr-1.5 inline size-3.5" />{task.assigned_to_name}</p>
+          {task.patient_name ? <p className="truncate">{task.patient_name}</p> : null}
+          {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
           <span><ListChecks className="mr-1 inline size-3" />{labels.checklist}: {task.checklist_completed ?? 0}/{task.checklist_total ?? 0}</span>
@@ -244,6 +253,7 @@ export function ConciergeTaskManager({
   onEdit,
   onOpen,
   onStatusChange,
+  onCreateAt,
 }: {
   tasks: ConciergeTask[];
   assignees: ConciergeAssignee[];
@@ -254,13 +264,14 @@ export function ConciergeTaskManager({
   onEdit: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
+  onCreateAt?: (date: Date) => void;
 }) {
   const labels = copy[lang];
   const [view, setView] = useState<TaskView>("board");
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [clock, setClock] = useState(() => Date.now());
-  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", timing: "all" });
+  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
@@ -313,17 +324,18 @@ export function ConciergeTaskManager({
         </div>
       ) : null}
 
-      <div className="relative z-20 flex flex-nowrap items-center gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
-        <div className="relative min-w-[240px] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 rounded-md bg-field pl-8 text-xs" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
-        {canManageTeam ? <select className="h-8 w-[145px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select> : null}
-        <select className="h-8 w-[130px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
-        <select className="h-8 w-[140px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
-        <select className="h-8 w-[145px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
-        <select className="h-8 w-[125px] shrink-0 rounded-md border border-input bg-field px-2 text-xs" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
+      <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:items-center sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+        <div className="relative col-span-2 min-w-0 sm:col-auto sm:min-w-[240px] sm:flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-10 rounded-md bg-field pl-8 text-xs sm:h-8" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
+        {canManageTeam ? <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select> : null}
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.audience} onChange={(event) => setFilters((current) => ({ ...current, audience: event.target.value }))}><option value="all">{labels.allAudiences}</option><option value="internal">{labels.internal}</option><option value="external">{labels.external}</option></select>
+        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[125px] sm:shrink-0" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
       </div>
 
-      <div className="mx-auto flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
-        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} className="h-8 rounded-md px-3 text-xs" onClick={() => setView(value)}><Icon />{label}</Button>)}
+      <div className="mx-auto grid w-full grid-cols-3 gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs sm:flex sm:w-fit">
+        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
       {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}
@@ -355,9 +367,9 @@ export function ConciergeTaskManager({
                 const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
                 return (
                   <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5", outsideMonth && "bg-muted/30 text-muted-foreground")}>
-                    <div className={cn("mb-1 text-xs font-medium", dateKey(day) === dateKey(effectiveNow) && "text-primary")}>
+                    <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
                       {new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { weekday: calendarScale === "month" ? undefined : "short", day: "2-digit", month: calendarScale === "day" ? "long" : undefined }).format(day)}
-                    </div>
+                    </button>
                     <div className="space-y-1">
                       {rows.slice(0, visibleLimit).map((task) => (
                         <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>

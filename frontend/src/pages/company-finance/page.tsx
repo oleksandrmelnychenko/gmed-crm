@@ -250,17 +250,17 @@ function SummaryCard({
   return (
     <div
       className={cn(
-        "min-w-0 rounded-lg border border-border/70 border-l-[3px] bg-card px-3 py-2.5 shadow-xs",
+        "min-w-0 rounded-lg border border-border/70 border-l-[3px] bg-card px-2.5 py-2 shadow-xs sm:px-3 sm:py-2.5",
         tone === "default" && "border-l-slate-300",
         tone === "positive" && "border-l-emerald-400",
         tone === "negative" && "border-l-rose-400",
         tone === "warning" && "border-l-amber-400",
       )}
     >
-      <p className="truncate text-[11px] font-medium text-muted-foreground" title={label}>{label}</p>
+      <p className="line-clamp-2 min-h-7 text-[10px] font-medium leading-3.5 text-muted-foreground sm:min-h-0 sm:truncate sm:text-[11px]" title={label}>{label}</p>
       <p
         className={cn(
-          "mt-1 truncate text-base font-semibold tracking-tight tabular-nums",
+          "mt-0.5 truncate text-sm font-semibold tracking-tight tabular-nums sm:mt-1 sm:text-base",
           tone === "positive" && "text-emerald-700 dark:text-emerald-400",
           tone === "negative" && "text-rose-700 dark:text-rose-400",
           tone === "warning" && "text-amber-700 dark:text-amber-400",
@@ -470,11 +470,12 @@ export function CompanyFinancePage() {
           <StaffLink className="truncate font-medium text-foreground hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>
             {row.patient_name || row.patient_pid}
           </StaffLink>
+          {!row.is_active || row.reconciliation_required ? (
           <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span>{row.patient_pid}</span>
             {!row.is_active ? <Badge variant="outline" className="rounded-full text-[10px]">{text.inactive}</Badge> : null}
             {row.reconciliation_required ? <Badge className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" variant="outline">{text.reconciliation}</Badge> : null}
           </div>
+          ) : null}
         </div>
       ),
     },
@@ -634,8 +635,8 @@ export function CompanyFinancePage() {
         )}
       />
 
-      <section className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
-        <ToolbarField label={text.from} className="w-[150px]">
+      <section className="relative z-30 grid grid-cols-2 items-end gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+        <ToolbarField label={text.from} className="w-full sm:w-[150px]">
           <Input
             type="date"
             className="h-8 rounded-md bg-field text-xs"
@@ -643,7 +644,7 @@ export function CompanyFinancePage() {
             onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
           />
         </ToolbarField>
-        <ToolbarField label={text.to} className="w-[150px]">
+        <ToolbarField label={text.to} className="w-full sm:w-[150px]">
           <Input
             type="date"
             className="h-8 rounded-md bg-field text-xs"
@@ -651,7 +652,7 @@ export function CompanyFinancePage() {
             onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
           />
         </ToolbarField>
-        <ToolbarField label={text.currency} className="w-[96px]">
+        <ToolbarField label={text.currency} className="w-full sm:w-[96px]">
           <select
             className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
             value={filters.currency || currency}
@@ -662,21 +663,7 @@ export function CompanyFinancePage() {
             )}
           </select>
         </ToolbarField>
-        <ToolbarField label={text.movement} className="w-[150px]">
-          <select
-            className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
-            value={filters.movement}
-            onChange={(event) => setFilters((current) => ({
-              ...current,
-              movement: event.target.value as CompanyFinancialFilters["movement"],
-            }))}
-          >
-            <option value="all">{text.allMovements}</option>
-            <option value="inflow">{text.inflow}</option>
-            <option value="outflow">{text.outflow}</option>
-          </select>
-        </ToolbarField>
-        <ToolbarField label={text.searchLabel} className="w-[280px]">
+        <ToolbarField label={text.searchLabel} className="col-span-2 w-full sm:col-auto sm:w-[280px]">
           <span className="relative block">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -694,7 +681,7 @@ export function CompanyFinancePage() {
 
       {summary ? (
         <>
-          <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <section className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
             <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone="positive" />
             <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone="negative" />
             <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone="negative" />
@@ -739,8 +726,9 @@ export function CompanyFinancePage() {
       ) : null}
 
       {position && accounts ? (
-        <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="gap-3">
-          <TabsList className="mx-auto h-auto max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
+        <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="min-w-0 gap-3">
+          <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
+          <TabsList className="mx-auto h-auto w-max max-w-none flex-nowrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
             {([
               ["patients", text.patients, position.patient_positions.length],
               ["providers", text.providers, position.provider_positions.length],
@@ -760,6 +748,7 @@ export function CompanyFinancePage() {
               </TabsTrigger>
             ))}
           </TabsList>
+          </div>
 
           <TabsContent value="patients">
             <DataTableSurface
@@ -873,7 +862,33 @@ export function CompanyFinancePage() {
 
           <TabsContent value="cash" className="space-y-2">
             {assignmentError ? <ShellBanner tone="error">{assignmentError}</ShellBanner> : null}
-            <DataTableSurface rows={position.cash_movements} columns={cashColumns} rowId={(row) => row.id} storageKey="company-finance-cash" defaultDensity="compact" defaultSort={[{ field: "date", dir: "desc" }]} defaultFrozenColumns={["date"]} emptyState={text.noRows} pagination={{ pageSize: 50 }} />
+            <DataTableSurface
+              rows={position.cash_movements}
+              columns={cashColumns}
+              rowId={(row) => row.id}
+              storageKey="company-finance-cash"
+              defaultDensity="compact"
+              defaultSort={[{ field: "date", dir: "desc" }]}
+              defaultFrozenColumns={["date"]}
+              emptyState={text.noRows}
+              pagination={{ pageSize: 50, resetKey: filters.movement }}
+              toolbarStart={(
+                <ToolbarField label={text.movement} className="w-full shrink-0 sm:w-[180px]">
+                  <select
+                    className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
+                    value={filters.movement}
+                    onChange={(event) => setFilters((current) => ({
+                      ...current,
+                      movement: event.target.value as CompanyFinancialFilters["movement"],
+                    }))}
+                  >
+                    <option value="all">{text.allMovements}</option>
+                    <option value="inflow">{text.inflow}</option>
+                    <option value="outflow">{text.outflow}</option>
+                  </select>
+                </ToolbarField>
+              )}
+            />
             {position.cash_movements_truncated ? (
               <p className="text-xs text-muted-foreground">{text.shown(position.cash_movements.length, position.cash_movement_count)}</p>
             ) : null}

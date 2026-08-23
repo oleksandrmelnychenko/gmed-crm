@@ -21,9 +21,16 @@ type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 
 const ROLES_CHAT = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
   "concierge",
   "billing",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
+
+const ROLES_NOTES = ALL_STAFF_ROLES;
 
 const ROLES_FEEDBACK = [
   "ceo",
@@ -103,8 +110,13 @@ const ROLES_ORDERS = [
 /** `crates/server/src/routes/patients.rs:445` (`list_patients`) */
 const ROLES_PATIENTS = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
   "billing",
+  "teamlead_interpreter",
+  "interpreter",
   "concierge",
+  "it_admin",
 ] as const satisfies readonly StaffRole[];
 
 /** `crates/server/src/routes/providers.rs:132` (`list_providers`) */
@@ -124,6 +136,12 @@ const ROLES_SERVICES = [
 const ROLES_CONCIERGE_WORKSPACE = [
   "ceo",
   "concierge",
+] as const satisfies readonly StaffRole[];
+
+const ROLES_TASK_MANAGER = [
+  "ceo",
+  "concierge",
+  "billing",
 ] as const satisfies readonly StaffRole[];
 
 type RouteRule = {
@@ -174,7 +192,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "task-manager",
     match: "exact",
     path: "/task-manager",
-    roles: ROLES_CONCIERGE_WORKSPACE,
+    roles: ROLES_TASK_MANAGER,
     nav: { section: "main", labelKey: "nav_task_manager", after: "concierge" },
   },
   {
@@ -292,6 +310,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/chat",
     roles: ROLES_CHAT,
     nav: { section: "main", labelKey: "nav_chat" },
+  },
+  {
+    id: "notes",
+    match: "exact",
+    path: "/notes",
+    roles: ROLES_NOTES,
+    nav: { section: "main", labelKey: "nav_notes", after: "chat" },
   },
   {
     id: "feedback",

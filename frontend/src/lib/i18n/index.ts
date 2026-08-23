@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { de } from "./de";
 import { ru } from "./ru";
 import { resolveDefaultLanguage } from "./default-language";
@@ -28,6 +28,7 @@ export interface Translations
   nav_dashboard: string;
   nav_concierge_workspace: string;
   nav_task_manager: string;
+  nav_notes: string;
   nav_main: string;
   nav_documents: string;
   nav_specializations: string;
@@ -1611,6 +1612,10 @@ function subscribe(onStoreChange: () => void) {
 
 export function useLang() {
   const lang = useSyncExternalStore<Lang>(subscribe, getLang, () => "ru");
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const changeLang = useCallback((newLang: Lang) => {
     setLang(newLang);

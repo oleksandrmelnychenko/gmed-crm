@@ -32,6 +32,7 @@ import {
   Search,
   Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Undo2,
   UserRound,
@@ -1025,6 +1026,7 @@ function StaffDocumentsPage({
     financialStatus: searchParams.get("financial_status") ?? "",
   }));
   const deferredSearch = useDeferredValue(filters.search);
+  const [mobileDocumentFiltersOpen, setMobileDocumentFiltersOpen] = useState(false);
   const legacyQueryDocumentId = searchParams.get("document") ?? "";
   const isIntakeRoute = routeMode === "intake";
   const isTranslationRequestsRoute = routeMode === "translation-requests";
@@ -1898,6 +1900,9 @@ function StaffDocumentsPage({
           ),
         });
       if (uploadAutoName) formData.append("auto_name", uploadAutoName);
+      if (!uploadForm.autoName.trim()) {
+        formData.append("auto_name_generated", "true");
+      }
       if (uploadForm.art.trim()) formData.append("art", uploadForm.art.trim());
       if (uploadForm.category) formData.append("category", uploadForm.category);
       formData.append(
@@ -1953,6 +1958,10 @@ function StaffDocumentsPage({
       );
       setUploadOpen(false);
       refresh();
+      if (response.auto_naming_status === "queued") {
+        window.setTimeout(refresh, 3_500);
+        window.setTimeout(refresh, 10_000);
+      }
       if (response.id) openDocument(response.id);
     } catch (nextError) {
       setUploadError(
@@ -2926,8 +2935,8 @@ function StaffDocumentsPage({
         className={documentSectionClassName}
       >
         <div className="relative z-30 space-y-1.5">
-          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-6">
-            <div className="relative xl:col-span-2">
+          <div className="grid grid-cols-2 gap-2 md:gap-1.5 xl:grid-cols-6">
+            <div className="relative col-span-2 xl:col-span-2">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
@@ -2937,7 +2946,7 @@ function StaffDocumentsPage({
                     search: event.target.value,
                   }))
                 }
-                className="h-8 rounded-lg bg-field pl-8 text-[13px]"
+                className="h-10 rounded-lg bg-field pl-8 text-[13px] md:h-8"
                 placeholder={t.common_search}
               />
             </div>
@@ -2951,7 +2960,7 @@ function StaffDocumentsPage({
                   appointmentId: "",
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "col-span-2 h-10 bg-background text-[13px] md:col-span-1 md:h-8")}
             >
               <option value="">{text.allPatients}</option>
               {patients.map((patient) => (
@@ -2968,7 +2977,7 @@ function StaffDocumentsPage({
                   status: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{text.allStatuses}</option>
               {STATUS_OPTIONS.map((status) => (
@@ -2985,7 +2994,7 @@ function StaffDocumentsPage({
                   visibility: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{text.allVisibility}</option>
               {VISIBILITY_OPTIONS.map((value) => (
@@ -3000,11 +3009,22 @@ function StaffDocumentsPage({
                 setFilters((current) => ({ ...current, art: event.target.value }))
               }
               list="documents-art-options"
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="col-span-2 h-10 rounded-lg bg-field text-[13px] md:col-span-1 md:h-8"
               placeholder={t.operations_document_type}
             />
           </div>
-          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+          <Button
+            type="button"
+            variant={mobileDocumentFiltersOpen ? "secondary" : "outline"}
+            className="h-10 w-full md:hidden"
+            aria-expanded={mobileDocumentFiltersOpen}
+            onClick={() => setMobileDocumentFiltersOpen((current) => !current)}
+          >
+            <SlidersHorizontal className="size-4" />
+            {t.table_filter}
+          </Button>
+          <div className={cn("space-y-2 md:block", !mobileDocumentFiltersOpen && "hidden md:block")}>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-2 md:gap-1.5 xl:grid-cols-4">
             <Input
               value={filters.orderId}
               onChange={(event) =>
@@ -3013,7 +3033,7 @@ function StaffDocumentsPage({
                   orderId: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
               placeholder={t.orders_title}
             />
             <Input
@@ -3024,7 +3044,7 @@ function StaffDocumentsPage({
                   appointmentId: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
               placeholder={t.appointments_title}
             />
             <Input
@@ -3037,7 +3057,7 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_from}
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
             />
             <Input
               type="date"
@@ -3049,10 +3069,10 @@ function StaffDocumentsPage({
                 }))
               }
               aria-label={t.documents_date_to}
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
             />
           </div>
-          <div className="grid gap-1.5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-2 md:gap-1.5 xl:grid-cols-4">
             <NativeComboboxSelect
               value={filters.category}
               onChange={(event) =>
@@ -3061,7 +3081,7 @@ function StaffDocumentsPage({
                   category: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{text.allCategories}</option>
               {categories.map((category) => (
@@ -3078,7 +3098,7 @@ function StaffDocumentsPage({
                   klinik: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
               placeholder={t.documents_clinic}
             />
             <Input
@@ -3089,7 +3109,7 @@ function StaffDocumentsPage({
                   ursprung: event.target.value,
                 }))
               }
-              className="h-8 rounded-lg bg-field text-[13px]"
+              className="h-10 rounded-lg bg-field text-[13px] md:h-8"
               placeholder={t.documents_source}
             />
             <NativeComboboxSelect
@@ -3100,7 +3120,7 @@ function StaffDocumentsPage({
                   documentDirection: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{metaText.allDirections}</option>
               {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
@@ -3117,7 +3137,7 @@ function StaffDocumentsPage({
                   documentVariant: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{metaText.allVariants}</option>
               {DOCUMENT_VARIANT_OPTIONS.map((option) => (
@@ -3134,7 +3154,7 @@ function StaffDocumentsPage({
                   accessCategory: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{metaText.allAccessCategories}</option>
               {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
@@ -3151,7 +3171,7 @@ function StaffDocumentsPage({
                   financialStatus: event.target.value,
                 }))
               }
-              className={cn(selectClassName, "h-8 bg-background text-[13px]")}
+              className={cn(selectClassName, "h-10 bg-background text-[13px] md:h-8")}
             >
               <option value="">{metaText.allFinancialStatuses}</option>
               {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
@@ -3163,7 +3183,7 @@ function StaffDocumentsPage({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 rounded-lg px-3 text-[13px]"
+              className="col-span-2 h-10 rounded-lg px-3 text-[13px] md:col-span-1 md:h-8"
               onClick={() =>
                 setFilters({
                   search: "",
@@ -3187,6 +3207,7 @@ function StaffDocumentsPage({
             >
               {text.resetFilters}
             </Button>
+          </div>
           </div>
         </div>
         <datalist id="documents-art-options">

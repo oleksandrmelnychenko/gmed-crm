@@ -288,7 +288,7 @@ export function ProviderSettlementDialog({
 
   return (
     <Dialog open={Boolean(liability)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{text.title}</DialogTitle>
           <DialogDescription>
@@ -301,16 +301,16 @@ export function ProviderSettlementDialog({
           <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : settlement ? (
           <div className="space-y-5">
-            <dl className="grid gap-2 sm:grid-cols-3">
+            <dl className="grid grid-cols-3 gap-1.5 sm:gap-2">
               {([
                 [text.invoiceAmount, settlement.amount_gross, "default"],
                 [text.paid, settlement.company_paid_gross, "positive"],
                 [text.remaining, settlement.remaining_provider_liability_gross, remaining > 0 ? "negative" : "positive"],
               ] as const).map(([label, value, tone]) => (
-                <div key={label} className="rounded-lg border border-border/70 bg-muted/20 p-3">
-                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                <div key={label} className="min-w-0 rounded-lg border border-border/70 bg-muted/20 p-2 sm:p-3">
+                  <dt className="line-clamp-2 min-h-7 text-[10px] leading-3.5 text-muted-foreground sm:min-h-0 sm:text-xs">{label}</dt>
                   <dd className={cn(
-                    "mt-1 text-lg font-semibold tabular-nums",
+                    "mt-1 truncate text-xs font-semibold tabular-nums sm:text-lg",
                     tone === "positive" && "text-emerald-700 dark:text-emerald-400",
                     tone === "negative" && "text-rose-700 dark:text-rose-400",
                   )}>{formatMoney(value, currency, locale)}</dd>
@@ -344,8 +344,8 @@ export function ProviderSettlementDialog({
                 </div>
                 <label className="block space-y-1.5 text-sm"><span>{text.reference}</span><Input maxLength={200} value={paymentForm.reference} onChange={(event) => setPaymentForm((current) => ({ ...current, reference: event.target.value }))} /></label>
                 <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
-                <div className="flex justify-end">
-                  <Button type="submit" disabled={paymentBusy || !paymentForm.accountId || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
+                <div className="flex justify-stretch sm:justify-end">
+                  <Button type="submit" className="w-full sm:w-auto" disabled={paymentBusy || !paymentForm.accountId || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
                     {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.record}
                   </Button>
                 </div>
@@ -396,11 +396,11 @@ export function ProviderSettlementDialog({
                   <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
                   <label className="block space-y-1.5 text-sm"><span>{text.reversalReason}</span><Input required maxLength={1000} value={reversalForm.note} onChange={(event) => setReversalForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
-                <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setReversal(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end"><Button type="button" variant="outline" onClick={() => setReversal(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
               </form>
             ) : null}
 
-            <div className="flex justify-end"><Button type="button" variant="outline" onClick={onClose}>{text.close}</Button></div>
+            <div className="flex justify-stretch sm:justify-end"><Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onClose}>{text.close}</Button></div>
           </div>
         ) : null}
       </DialogContent>

@@ -14,6 +14,7 @@ import {
   localizeTimelineCategory,
   localizeTimelineEntityType,
   localizeTimelineSource,
+  localizeTimelineTitle,
   timelineEntityTypeBadgeClass,
 } from "@/lib/timeline-labels";
 import { cn } from "@/lib/utils";
@@ -297,7 +298,7 @@ export function PatientTimelineTab({
                           {statusLabel(item.status)}
                         </Badge>
                         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                          {item.title}
+                          {localizeTimelineTitle(item.title, l)}
                         </span>
                         <span className="hidden shrink-0 truncate text-xs text-muted-foreground lg:block lg:max-w-[260px]">
                           {localizeTimelineCategory(item.category, l)}

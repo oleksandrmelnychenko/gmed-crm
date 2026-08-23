@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GMED Console</string>
+    <string name="title_activity_main">GMED Console</string>
+    <string name="package_name">com.gmedhealth.console</string>
+    <string name="custom_url_scheme">com.gmedhealth.console</string>
+</resources>

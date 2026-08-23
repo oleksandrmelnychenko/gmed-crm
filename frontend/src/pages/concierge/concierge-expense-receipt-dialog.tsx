@@ -45,12 +45,8 @@ const copy = {
   de: {
     title: "Ausgabe und Beleg erfassen",
     description: "Der Beleg wird intern zur Finanzprüfung eingereicht. Erst die Freigabe durch CEO oder Abrechnung verändert Salden.",
-    context: "Zuordnung",
-    patient: "Patient",
-    order: "Auftrag",
-    orderService: "Auftragsposition",
-    mappingPending: "Noch keine eindeutige Zuordnung. Die Finanzabteilung ordnet die Ausgabe bei der Prüfung einem Auftrag zu.",
-    mappingPendingShort: "Zuordnung durch Finanzprüfung",
+    context: "Kunde",
+    patient: "Kunde",
     receipt: "Beleg",
     camera: "Foto aufnehmen",
     chooseFile: "Foto oder PDF wählen",
@@ -90,17 +86,13 @@ const copy = {
     reversed: "Storniert",
     download: "Beleg herunterladen",
     submittedBy: "Eingereicht von {name}",
-    loading: "Finanzkontext wird geladen",
+    loading: "Kundendaten werden geladen",
   },
   ru: {
     title: "Расход и подтверждение",
     description: "Документ отправляется на внутреннюю финансовую проверку. Баланс изменится только после подтверждения CEO или бухгалтерией.",
-    context: "Привязка",
-    patient: "Пациент",
-    order: "Заказ",
-    orderService: "Позиция заказа",
-    mappingPending: "Точной привязки пока нет. Финансовая команда свяжет расход с заказом во время проверки.",
-    mappingPendingShort: "Привязка при финансовой проверке",
+    context: "Клиент",
+    patient: "Клиент",
     receipt: "Подтверждение расхода",
     camera: "Сфотографировать",
     chooseFile: "Выбрать фото или PDF",
@@ -140,7 +132,7 @@ const copy = {
     reversed: "Отменено",
     download: "Скачать документ",
     submittedBy: "Отправил(а): {name}",
-    loading: "Загрузка финансовой привязки",
+    loading: "Загрузка данных клиента",
   },
 } as const;
 
@@ -233,10 +225,8 @@ export function ConciergeExpenseReceiptDialog({
 
   const amountGross = calculateConciergeExpenseGross(amountNet, amountVat);
   const consequence = conciergeExpenseConsequencePreview(paidBy, serviceDelivered, amountGross);
-  const mappedOrder = context?.mapped_order ?? null;
-  const mappedLeistung = mappedOrder?.mapped_leistung ?? null;
   const currency = context?.service.currency || service?.currency || "EUR";
-  const providerMissing = paidBy !== "patient" && !context?.service.provider_id && !mappedLeistung?.provider_id;
+  const providerMissing = paidBy !== "patient" && !context?.service.provider_id;
   const validMoney = moneyStringToMinorUnits(amountGross) !== null && (moneyStringToMinorUnits(amountGross) ?? 0) > 0;
   const canSubmit = Boolean(
       service &&
@@ -305,8 +295,8 @@ export function ConciergeExpenseReceiptDialog({
     try {
       await onSubmit({
         requestId,
-        orderId: mappedOrder?.id ?? null,
-        orderLeistungId: mappedLeistung?.id ?? null,
+        orderId: null,
+        orderLeistungId: null,
         vendor: vendor.trim(),
         expenseDate,
         amountNet: amountNet.replace(",", "."),
@@ -364,20 +354,10 @@ export function ConciergeExpenseReceiptDialog({
               <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.86fr)]">
                 <div className="space-y-4">
                   <ConciergeDialogSection title={labels.context} icon={WalletCards}>
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3">
                       <ConciergeField label={labels.patient}>
                         <Input readOnly value={context ? `${context.patient.display_name} · ${context.patient.pid}` : service.patient_name} />
                       </ConciergeField>
-                      <ConciergeField label={labels.order}>
-                        <Input readOnly value={mappedOrder ? `${mappedOrder.order_number} · ${mappedOrder.currency}` : "—"} />
-                      </ConciergeField>
-                      {mappedOrder ? (
-                        <ConciergeField label={labels.orderService} className="sm:col-span-2">
-                          <Input readOnly value={mappedLeistung ? `${mappedLeistung.name}${mappedLeistung.description ? ` · ${mappedLeistung.description}` : ""}` : "—"} />
-                        </ConciergeField>
-                      ) : (
-                        <p className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-800 sm:col-span-2">{labels.mappingPending}</p>
-                      )}
                     </div>
                   </ConciergeDialogSection>
 
@@ -422,7 +402,7 @@ export function ConciergeExpenseReceiptDialog({
                               <div className="flex items-center gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(item.status))}>{labels[item.status]}</Badge><span className="text-xs font-medium">{item.vendor}</span></div>
                               <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency, lang)}</span>
                             </div>
-                            <p className="mt-1 text-[11px] text-muted-foreground">{item.order_number || labels.mappingPendingShort} · {formatDate(item.submitted_at, lang)}</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient.display_name || service.patient_name} · {formatDate(item.submitted_at, lang)}</p>
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                               <p className="text-[10px] text-muted-foreground">{labels.submittedBy.replace("{name}", item.submitted_by.display_name)}</p>
                               <Button type="button" size="sm" variant="ghost" className="h-7 text-[11px]" disabled={downloadingId === item.id} onClick={() => void download(item)}>

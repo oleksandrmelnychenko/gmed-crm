@@ -283,7 +283,7 @@ export function DataTableSurface<T>({
     >
       <div
         className={cn(
-          "relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2 [&>button]:shrink-0",
+          "relative z-30 flex flex-wrap items-end gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2 [&>button]:shrink-0",
           toolbarClassName,
         )}
       >

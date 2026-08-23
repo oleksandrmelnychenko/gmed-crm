@@ -105,6 +105,7 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
   treating_doctor_id: string | null;
   treating_doctor_name: string | null;
   treating_doctor_title: string | null;
+  treating_doctor_fachbereich?: string | null;
   treating_none: boolean;
   /** Legacy fields, kept optional for back-compat; the new UI ignores them. */
   status?: DiagnosisStatus;
@@ -327,8 +328,31 @@ export type AllDoctorOption = {
   provider_name: string | null;
 };
 
+export function deduplicateAllDoctorOptions(doctors: AllDoctorOption[]): AllDoctorOption[] {
+  const byId = new Map<string, { doctor: AllDoctorOption; providerNames: string[] }>();
+  for (const doctor of doctors) {
+    const providerName = doctor.provider_name?.trim();
+    const existing = byId.get(doctor.id);
+    if (!existing) {
+      byId.set(doctor.id, {
+        doctor,
+        providerNames: providerName ? [providerName] : [],
+      });
+      continue;
+    }
+    if (providerName && !existing.providerNames.includes(providerName)) {
+      existing.providerNames.push(providerName);
+    }
+  }
+  return Array.from(byId.values()).map(({ doctor, providerNames }) => ({
+    ...doctor,
+    provider_name: providerNames.length > 0 ? providerNames.join(", ") : doctor.provider_name,
+  }));
+}
+
 export function fetchAllDoctors() {
-  return apiFetch<AllDoctorOption[]>("/doctors", { cacheTtlMs: 60_000 });
+  return apiFetch<AllDoctorOption[]>("/doctors", { cacheTtlMs: 60_000 })
+    .then(deduplicateAllDoctorOptions);
 }
 
 export function fetchPatientClinical(patientId: string) {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
@@ -10,7 +10,7 @@ import {
   FileUp,
   History,
   LoaderCircle,
-  RefreshCcw,
+  Plus,
   SquarePen,
 } from "lucide-react";
 
@@ -19,13 +19,12 @@ import { StatusActionPill } from "@/components/status-action-pill";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { toast } from "@/components/ui/toast";
 import {
   Tabs,
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import type { Translations } from "@/lib/i18n";
+import { getLang, type Translations } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +59,7 @@ import {
   type ClinicalDocumentImportStatus,
   type ClinicalDocumentImportSummary,
 } from "../../data/clinical-document-import";
-import { createRepeatPatientIntake } from "../../data/patient-detail-mutations";
+import { buildPatientOrderCreateHref } from "../../model/patient-order-navigation";
 import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
@@ -236,6 +235,7 @@ type PatientDetailWorkspaceContentProps = {
   assignments: PatientAssignment[];
   assignableStaff: StaffOption[];
   canCreateOrders: boolean;
+  canCreateTasks: boolean;
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
   canManage: boolean;
@@ -245,7 +245,6 @@ type PatientDetailWorkspaceContentProps = {
   canManageRelations: boolean;
   canManageWorkflowChecklist: boolean;
   canOpenComplianceWorkspace: boolean;
-  canOpenLeadWizard: boolean;
   canOpenDocumentsWorkspace: boolean;
   canPrintPatientLabel: boolean;
   canViewClinical: boolean;
@@ -403,6 +402,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     assignments,
     assignableStaff,
     canCreateOrders,
+    canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
     canManage,
@@ -412,7 +412,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canManageRelations,
     canManageWorkflowChecklist,
     canOpenComplianceWorkspace,
-    canOpenLeadWizard,
     canOpenDocumentsWorkspace,
     canPrintPatientLabel,
     canViewClinical,
@@ -561,8 +560,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImportsError, setClinicalImportsError] = useState(false);
   const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
   const [accountStatementLoading, setAccountStatementLoading] = useState(false);
-  const [repeatIntakeBusy, setRepeatIntakeBusy] = useState(false);
-  const repeatIntakeRequestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!id || !canViewInvoices) {
@@ -649,27 +646,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   function handleWorkspaceTabChange(nextTab: string) {
     preloadPatientWorkspaceTab(nextTab);
     handleTabChange(nextTab);
-  }
-
-  async function handleCreateRepeatIntake() {
-    if (!id || repeatIntakeBusy) return;
-    const requestId = repeatIntakeRequestIdRef.current ?? crypto.randomUUID();
-    repeatIntakeRequestIdRef.current = requestId;
-    setRepeatIntakeBusy(true);
-    try {
-      const created = await createRepeatPatientIntake(id, requestId);
-      repeatIntakeRequestIdRef.current = null;
-      toast.success(l("patients_repeat_intake_created"));
-      staffGo(`/leads?lead=${encodeURIComponent(created.id)}&view=wizard`);
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : l("patients_repeat_intake_create_failed"),
-      );
-    } finally {
-      setRepeatIntakeBusy(false);
-    }
   }
 
   function openClinicalDocumentImport() {
@@ -769,21 +745,16 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               ))}
             </NativeComboboxSelect>
         ) : null}
-        {canOpenLeadWizard && id ? (
+        {canCreateOrders && id ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
             className="h-9 rounded-lg gap-1.5 px-3.5 whitespace-nowrap"
-            disabled={repeatIntakeBusy}
-            onClick={() => void handleCreateRepeatIntake()}
+            onClick={() => staffGo(buildPatientOrderCreateHref(id))}
           >
-            {repeatIntakeBusy ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="size-3.5" />
-            )}
-            {l("patients_open_the_intake_wizard_again")}
+            <Plus className="size-3.5" />
+            {l("patients_new_order")}
           </Button>
         ) : null}
         {canEditPatientProfile ? (
@@ -800,7 +771,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             onClick={openClinicalDocumentImport}
           >
             <FileUp className="size-3.5" />
-            {l("patients_upload_document")}
+            {getLang() === "de" ? "Scannen und erkennen" : "Сканировать и распознать"}
           </Button>
         ) : null}
         {canManageDocuments ? (
@@ -937,6 +908,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               <LazyPatientProfileTab
               profileControls={{
                 canCreateOrders,
+                canCreateTasks,
                 canEditPatientProfile,
                 canExportPatientCompliance,
                 canOpenComplianceWorkspace,
@@ -1011,7 +983,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               emptyLabel={emptyOrdersLabel}
               formatDate={formatDate}
               onCreateOrder={canCreateOrders && id
-                ? () => staffGo(`/orders?create=1&patient=${encodeURIComponent(id)}`)
+                ? () => staffGo(buildPatientOrderCreateHref(id))
                 : undefined}
               onOpenOrder={onOpenOrder}
               orderPhaseLabel={orderPhaseLabel}
@@ -1125,6 +1097,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               financialSummary={financialSummary}
               financialLedger={financialLedger}
               servicePackages={servicePackages}
+              patientId={detail.id}
+              patientName={patientName(detail)}
+              patientEmail={detail.email}
+              assignments={assignments}
               canManageInvoices={canManageInvoices}
               onOpenInvoice={onOpenInvoice}
               onManageInvoice={onManageInvoice}

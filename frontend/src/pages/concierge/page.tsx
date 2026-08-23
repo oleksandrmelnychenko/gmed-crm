@@ -11,7 +11,6 @@ import {
   ListChecks,
   LoaderCircle,
   MapPinned,
-  KeyRound,
   MessageSquareText,
   Plus,
   ReceiptText,
@@ -39,6 +38,7 @@ import {
   conciergeServiceTaxonomyLabel,
   conciergeWorkspaceStats,
   filterConciergeServices,
+  filterConciergeTaskAssignees,
   isConciergeServiceOverdue,
   nextConciergeServiceStatus,
   nextConciergeTaskStatus,
@@ -46,20 +46,13 @@ import {
   type ApplyPartnerQuoteResponse,
   type ConciergeAssignee,
   type ConciergeBoardColumnId,
-  type ConciergeKeyAction,
-  type ConciergeKeyEvent,
   type ConciergePartnerInteraction,
   type ConciergeProvider,
-  type RecordConciergeKeyEventResponse,
   type ConciergeService,
   type ConciergeTask,
 } from "./model";
 import { ConciergeTaskManager } from "./task-manager";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
-import {
-  ConciergeKeyHandoverDialog,
-  conciergeKeyActionLabel,
-} from "./key-handover-dialog";
 import {
   ConciergePartnerInteractionDialog,
   type RecordPartnerInteractionInput,
@@ -160,7 +153,6 @@ const text = {
     status_in_service: "In Durchführung",
     status_completed: "Abgeschlossen",
     cancelled: "Storniert",
-    key: "Schlüssel",
     partner: "Partner",
     expenseReceipt: "Ausgabe / Beleg",
   },
@@ -209,7 +201,6 @@ const text = {
     status_in_service: "Выполняется",
     status_completed: "Завершено",
     cancelled: "Отменено",
-    key: "Ключ",
     partner: "Партнёр",
     expenseReceipt: "Расход / документ",
   },
@@ -276,7 +267,6 @@ function ServiceCard({
   updating,
   now,
   onAdvance,
-  onOpenKey,
   onOpenPartner,
   onOpenExpense,
   compact = false,
@@ -287,7 +277,6 @@ function ServiceCard({
   updating: boolean;
   now: Date;
   onAdvance: (service: ConciergeService) => void;
-  onOpenKey: (service: ConciergeService) => void;
   onOpenPartner?: (service: ConciergeService) => void;
   onOpenExpense: (service: ConciergeService) => void;
   compact?: boolean;
@@ -304,10 +293,10 @@ function ServiceCard({
   return (
     <article
       className={cn(
-        "rounded-lg border border-l-[3px] bg-card p-3 shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-border hover:shadow-md",
+        "rounded-xl border border-l-[3px] bg-card p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-border hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)]",
         serviceAccent(service.status, overdue),
         overdue ? "border-rose-200" : "border-border/70",
-        compact && "sm:grid sm:grid-cols-[minmax(220px,1.4fr)_minmax(170px,1fr)_minmax(180px,1fr)_auto] sm:items-center sm:gap-4",
+        compact && "lg:grid lg:grid-cols-[minmax(180px,1.2fr)_minmax(160px,1fr)_minmax(170px,1fr)] lg:items-center lg:gap-4 2xl:grid-cols-[minmax(180px,1.2fr)_minmax(160px,1fr)_minmax(170px,1fr)_minmax(180px,1.15fr)]",
       )}
       data-testid={`concierge-service-${service.id}`}
     >
@@ -326,12 +315,6 @@ function ServiceCard({
               {labels.overdue}
             </Badge>
           ) : null}
-          {service.key_status ? (
-            <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700">
-              <KeyRound className="size-3" />
-              {conciergeKeyActionLabel(service.key_status, lang)}
-            </Badge>
-          ) : null}
         </div>
         <h3 className="mt-2 truncate text-sm font-semibold text-foreground" title={displayTitle}>
           {displayTitle}
@@ -339,7 +322,7 @@ function ServiceCard({
         {taxonomy ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{taxonomy}</p> : null}
       </div>
 
-      <div className={cn("mt-3 space-y-2 rounded-md bg-muted/30 p-2.5", compact && "sm:mt-0")}>
+      <div className={cn("mt-3 min-w-0 space-y-2.5 border-t border-border/60 pt-3", compact && "lg:mt-0 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0")}>
         <ServiceFact icon={UserRound} label={labels.patient}>
           <span className="truncate">{service.patient_name}</span>
           <span className="font-mono text-[10px] text-muted-foreground">{service.patient_pid}</span>
@@ -349,7 +332,7 @@ function ServiceCard({
         </ServiceFact>
       </div>
 
-      <div className={cn("mt-3 space-y-2 rounded-md bg-muted/30 p-2.5", compact && "sm:mt-0")}>
+      <div className={cn("mt-3 min-w-0 space-y-2.5 border-t border-border/60 pt-3", compact && "lg:mt-0 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0")}>
         <ServiceFact icon={Clock3} label={labels.provider}>
           <span className="truncate">{provider || labels.notSet}</span>
           {service.vendor_contact ? (
@@ -376,23 +359,16 @@ function ServiceCard({
         ) : null}
       </div>
 
-      <div className={cn("mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3", compact && "sm:mt-0 sm:flex sm:justify-self-end sm:border-0 sm:pt-0")}>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 w-full rounded-md text-xs sm:w-auto"
-          onClick={() => onOpenKey(service)}
-        >
-          <KeyRound />
-          {labels.key}
-        </Button>
+      <div className={cn(
+        "mt-3 grid min-w-0 grid-cols-2 gap-2 border-t border-border/60 pt-3",
+        compact && "lg:col-span-3 lg:flex lg:max-w-full lg:flex-wrap lg:justify-end lg:justify-self-stretch 2xl:col-span-1 2xl:mt-0 2xl:border-t-0 2xl:pt-0",
+      )}>
         {onOpenPartner ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 w-full rounded-md text-xs sm:w-auto"
+            className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
             onClick={() => onOpenPartner(service)}
           >
             <MessageSquareText />
@@ -403,7 +379,7 @@ function ServiceCard({
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 w-full rounded-md text-xs sm:w-auto"
+          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
           onClick={() => onOpenExpense(service)}
         >
           <ReceiptText />
@@ -414,7 +390,7 @@ function ServiceCard({
             type="button"
             size="sm"
             variant="outline"
-            className="col-span-2 h-8 w-full rounded-md text-xs sm:col-span-1 sm:w-auto"
+            className="col-span-2 h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:col-span-1 sm:w-auto"
             disabled={updating}
             aria-label={labels.advance.replace("{status}", serviceStatusLabel(nextStatus, labels))}
             onClick={() => onAdvance(service)}
@@ -439,7 +415,7 @@ function ServiceFact({
 }) {
   return (
     <div className="grid min-w-0 grid-cols-[1.1rem_minmax(0,1fr)] gap-1.5 text-xs">
-      <Icon aria-hidden="true" className="mt-3.5 size-3.5 shrink-0 text-muted-foreground" />
+      <Icon aria-hidden="true" className="mt-3.5 size-3.5 shrink-0 text-primary/75" />
       <div className="min-w-0">
         <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">{label}</p>
         <div className="flex min-w-0 items-center justify-between gap-2 text-foreground">{children}</div>
@@ -460,13 +436,13 @@ function MetricCard({
   icon: typeof CalendarDays;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 shadow-sm">
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-border/70 bg-card px-2.5 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.035)] sm:gap-3 sm:px-3 sm:py-2.5">
       <div className="min-w-0">
-        <p className="truncate text-[11px] font-medium text-muted-foreground">{label}</p>
-        <p className={cn("mt-0.5 font-mono text-xl font-semibold tabular-nums text-foreground", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>{value}</p>
+        <p className="truncate text-[10px] font-medium text-muted-foreground sm:text-[11px]">{label}</p>
+        <p className={cn("mt-0.5 font-mono text-lg font-semibold tabular-nums text-foreground sm:text-xl", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>{value}</p>
       </div>
-      <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground", tone === "danger" && value > 0 && "bg-rose-500/10 text-rose-600", tone === "success" && value > 0 && "bg-emerald-500/10 text-emerald-600")}>
-        <Icon className="size-3.5" />
+      <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/8 text-primary sm:size-8", tone === "danger" && value > 0 && "bg-rose-500/10 text-rose-600", tone === "success" && value > 0 && "bg-emerald-500/10 text-emerald-600")}>
+        <Icon className="size-3 sm:size-3.5" />
       </span>
     </div>
   );
@@ -495,11 +471,6 @@ export function ConciergeWorkspacePage() {
   const [taskError, setTaskError] = useState("");
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const createTaskRequestIdRef = useRef<string | null>(null);
-  const [keyServiceId, setKeyServiceId] = useState<string | null>(null);
-  const [keyEvents, setKeyEvents] = useState<ConciergeKeyEvent[]>([]);
-  const [loadingKeyEvents, setLoadingKeyEvents] = useState(false);
-  const [keyError, setKeyError] = useState("");
-  const [submittingKeyAction, setSubmittingKeyAction] = useState<ConciergeKeyAction | null>(null);
   const [partnerServiceId, setPartnerServiceId] = useState<string | null>(null);
   const [partnerEvents, setPartnerEvents] = useState<ConciergePartnerInteraction[]>([]);
   const [partnerError, setPartnerError] = useState("");
@@ -564,10 +535,10 @@ export function ConciergeWorkspacePage() {
             forceFresh: version > 0,
           }).catch(() => []),
           user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?role=concierge&active_only=true", {
+            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
                 cacheTtlMs: 30_000,
                 forceFresh: version > 0,
-              })
+              }).then(filterConciergeTaskAssignees)
             : Promise.resolve(user ? [{ id: user.id, name: user.name, email: user.email, role: user.role, is_active: true }] : []),
         ]);
         if (!cancelled) {
@@ -613,10 +584,6 @@ export function ConciergeWorkspacePage() {
   const providersById = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider])),
     [providers],
-  );
-  const keyService = useMemo(
-    () => services.find((service) => service.id === keyServiceId) ?? null,
-    [keyServiceId, services],
   );
   const partnerService = useMemo(
     () => services.find((service) => service.id === partnerServiceId) ?? null,
@@ -805,63 +772,6 @@ export function ConciergeWorkspacePage() {
     }
   }
 
-  async function openKeyHandover(service: ConciergeService) {
-    setKeyServiceId(service.id);
-    setKeyEvents([]);
-    setLoadingKeyEvents(true);
-    setKeyError("");
-    try {
-      const rows = await apiFetch<ConciergeKeyEvent[]>(
-        `/concierge-services/${service.id}/key-events`,
-        { forceFresh: true },
-      );
-      setKeyEvents(rows);
-    } catch (loadError) {
-      setKeyError(loadError instanceof Error ? loadError.message : labels.loadFailed);
-    } finally {
-      setLoadingKeyEvents(false);
-    }
-  }
-
-  async function recordKeyEvent(action: ConciergeKeyAction, occurredAt: string, note: string) {
-    if (!keyService || submittingKeyAction) return;
-    setSubmittingKeyAction(action);
-    setKeyError("");
-    try {
-      const response = await apiFetch<RecordConciergeKeyEventResponse>(
-        `/concierge-services/${keyService.id}/key-events`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            action,
-            occurred_at: new Date(occurredAt).toISOString(),
-            note: note.trim() || null,
-          }),
-        },
-      );
-      clearApiCache("/concierge-services");
-      setServices((current) =>
-        current.map((service) =>
-          service.id === keyService.id
-            ? {
-                ...service,
-                key_status: response.key_status,
-                key_responsible_user_id: response.key_responsible_user_id,
-                key_responsible_user_name: response.key_responsible_user_name,
-                key_status_at: response.key_status_at,
-              }
-            : service,
-        ),
-      );
-      setKeyEvents((current) => [...current, response.event]);
-    } catch (recordError) {
-      setKeyError(recordError instanceof Error ? recordError.message : labels.updateFailed);
-      throw recordError;
-    } finally {
-      setSubmittingKeyAction(null);
-    }
-  }
-
   async function advanceService(service: ConciergeService) {
     const status = nextConciergeServiceStatus(service.status);
     if (!status || updatingId) return;
@@ -905,6 +815,12 @@ export function ConciergeWorkspacePage() {
           status,
           assigned_to: task.assigned_to,
           reminder_at: task.reminder_at,
+          task_audience: task.task_audience,
+          patient_id: task.patient_id,
+          external_assignee_type: task.external_assignee_type,
+          external_assignee_name: task.external_assignee_name,
+          external_assignee_phone: task.external_assignee_phone,
+          external_assignee_email: task.external_assignee_email,
         }),
       });
       clearApiCache("/concierge-operational-items");
@@ -1040,7 +956,8 @@ export function ConciergeWorkspacePage() {
         </div>
       ) : null}
 
-      <div className="mx-auto flex w-fit max-w-full flex-wrap rounded-lg border border-border bg-card p-1">
+      <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
+      <div className="mx-auto flex w-max flex-nowrap rounded-lg border border-border bg-card p-1">
         {([
           ["board", Columns3, labels.board],
           ["list", List, labels.list],
@@ -1054,8 +971,9 @@ export function ConciergeWorkspacePage() {
           </Button>
         ))}
       </div>
+      </div>
 
-      {viewMode !== "tasks" ? <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm">
+      {viewMode !== "tasks" ? <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-xl border border-border/70 bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.035)]">
         <ToolbarField label={labels.searchLabel} className="w-full">
           <div className="relative min-w-0">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1065,7 +983,7 @@ export function ConciergeWorkspacePage() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={labels.search}
             aria-label={labels.search}
-            className="h-8 rounded-md bg-field pl-8 text-xs"
+            className="h-9 rounded-lg bg-card pl-8 text-xs shadow-none focus-visible:border-primary/40"
           />
           </div>
         </ToolbarField>
@@ -1111,16 +1029,16 @@ export function ConciergeWorkspacePage() {
                 {CONCIERGE_BOARD_COLUMNS.map((column) => {
                   const rows = servicesByColumn.get(column.id) ?? [];
                   return (
-                    <div key={column.id} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2">
-                      <div className="flex items-center justify-between gap-2 px-1 pb-2">
+                    <div key={column.id} className="min-w-0 rounded-xl border border-border/70 bg-card p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.035)]">
+                      <div className="flex items-center justify-between gap-2 px-1 pb-2.5 pt-0.5">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           {labels[column.id]}
                         </h2>
-                        <Badge variant="secondary" className="rounded-full text-[10px]">{rows.length}</Badge>
+                        <Badge variant="outline" className="rounded-full border-primary/15 bg-primary/8 text-[10px] text-primary">{rows.length}</Badge>
                       </div>
                       <div className="space-y-2">
                         {rows.length === 0 ? (
-                          <p className="rounded-lg border border-dashed border-border bg-card/60 px-3 py-8 text-center text-xs text-muted-foreground">
+                          <p className="rounded-lg border border-dashed border-border/80 bg-card px-3 py-8 text-center text-xs text-muted-foreground">
                             {labels.emptyColumn}
                           </p>
                         ) : (
@@ -1133,7 +1051,6 @@ export function ConciergeWorkspacePage() {
                               updating={updatingId === service.id}
                               now={now}
                               onAdvance={advanceService}
-                              onOpenKey={openKeyHandover}
                               onOpenExpense={(item) => void openExpenseReceipt(item)}
                               onOpenPartner={
                                 service.provider_id && providersById.has(service.provider_id)
@@ -1159,7 +1076,6 @@ export function ConciergeWorkspacePage() {
                     updating={updatingId === service.id}
                     now={now}
                     onAdvance={advanceService}
-                    onOpenKey={openKeyHandover}
                     onOpenExpense={(item) => void openExpenseReceipt(item)}
                     onOpenPartner={
                       service.provider_id && providersById.has(service.provider_id)
@@ -1182,19 +1098,6 @@ export function ConciergeWorkspacePage() {
           />
         </div>
       )}
-      <ConciergeKeyHandoverDialog
-        service={keyService}
-        lang={lang}
-        open={Boolean(keyServiceId)}
-        events={keyEvents}
-        error={keyError}
-        loading={loadingKeyEvents}
-        submittingAction={submittingKeyAction}
-        onOpenChange={(open) => {
-          if (!open) setKeyServiceId(null);
-        }}
-        onRecord={recordKeyEvent}
-      />
       <ConciergePartnerInteractionDialog
         service={partnerService}
         provider={partnerProvider}

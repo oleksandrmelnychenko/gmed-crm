@@ -8,7 +8,6 @@ import {
   useLang,
 } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { cachedRegionDisplayNames } from "@/lib/intl-cache";
 import {
   Field,
   Section as ShellSection,
@@ -16,6 +15,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { CountrySelect as ComprehensiveCountrySelect } from "@/components/ui/country-select";
 import { LanguageMultiSelect } from "@/components/ui/language-multi-select";
 
 // Re-export shell primitives so existing screens keep working.
@@ -32,33 +32,8 @@ export const textareaClassName = textareaClass;
 type PatientSelectOption = {
   value: string;
   fallbackLabel: string;
-  countryCode?: string;
   labelKey?: string;
 };
-
-const COUNTRY_OPTIONS: PatientSelectOption[] = [
-  { value: "Germany", fallbackLabel: "Germany", countryCode: "DE" },
-  { value: "Ukraine", fallbackLabel: "Ukraine", countryCode: "UA" },
-  { value: "Austria", fallbackLabel: "Austria", countryCode: "AT" },
-  { value: "Switzerland", fallbackLabel: "Switzerland", countryCode: "CH" },
-  { value: "Poland", fallbackLabel: "Poland", countryCode: "PL" },
-  { value: "Czech Republic", fallbackLabel: "Czech Republic", countryCode: "CZ" },
-  { value: "Denmark", fallbackLabel: "Denmark", countryCode: "DK" },
-  { value: "Latvia", fallbackLabel: "Latvia", countryCode: "LV" },
-  { value: "Greece", fallbackLabel: "Greece", countryCode: "GR" },
-  { value: "Turkey", fallbackLabel: "Turkey", countryCode: "TR" },
-  { value: "United Arab Emirates", fallbackLabel: "United Arab Emirates", countryCode: "AE" },
-  { value: "Saudi Arabia", fallbackLabel: "Saudi Arabia", countryCode: "SA" },
-  { value: "Egypt", fallbackLabel: "Egypt", countryCode: "EG" },
-  { value: "Nigeria", fallbackLabel: "Nigeria", countryCode: "NG" },
-  { value: "Ghana", fallbackLabel: "Ghana", countryCode: "GH" },
-  { value: "Brazil", fallbackLabel: "Brazil", countryCode: "BR" },
-  { value: "China", fallbackLabel: "China", countryCode: "CN" },
-  { value: "Russia", fallbackLabel: "Russia", countryCode: "RU" },
-  { value: "Pakistan", fallbackLabel: "Pakistan", countryCode: "PK" },
-  { value: "United Kingdom", fallbackLabel: "United Kingdom", countryCode: "GB" },
-  { value: "United States", fallbackLabel: "United States", countryCode: "US" },
-];
 
 const NATIONALITY_OPTIONS: PatientSelectOption[] = [
   { value: "German", fallbackLabel: "German", labelKey: "patients_nationality_german" },
@@ -99,17 +74,6 @@ function optionsWithCurrent(options: PatientSelectOption[], value: string) {
   return [{ value: trimmed, fallbackLabel: trimmed }, ...options];
 }
 
-function countryOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
-  if (!option.countryCode) return option.fallbackLabel;
-  const display = cachedRegionDisplayNames(lang);
-  if (!display) return option.fallbackLabel;
-  try {
-    return display.of(option.countryCode) ?? option.fallbackLabel;
-  } catch {
-    return option.fallbackLabel;
-  }
-}
-
 function nationalityOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
   return option.labelKey ? uiText(option.labelKey, lang) : option.fallbackLabel;
 }
@@ -129,20 +93,15 @@ export function CountrySelect({
 }) {
   const { lang } = useLang();
   return (
-    <NativeComboboxSelect
+    <ComprehensiveCountrySelect
       value={value}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={(next) => onChange(next ?? "")}
+      lang={lang}
       className={cn("w-full", formInputClassName)}
+      emptyLabel={placeholder}
       required={required}
       disabled={disabled}
-    >
-      <option value="">{placeholder}</option>
-      {optionsWithCurrent(COUNTRY_OPTIONS, value).map((option) => (
-        <option key={option.value} value={option.value}>
-          {countryOptionLabel(option, lang)}
-        </option>
-      ))}
-    </NativeComboboxSelect>
+    />
   );
 }
 

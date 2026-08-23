@@ -21,6 +21,7 @@ from .extraction import (
     extract_document,
 )
 from .models import ClinicalCandidate, DraftExtractionMetadata, ParseDraft
+from .naming import DocumentNameSuggestion, suggest_document_name
 from .parser import parse_clinical_text
 
 
@@ -161,6 +162,175 @@ def fail_job(connection: Any, job_id: str, error: Exception) -> None:
             (PUBLIC_ERROR, job_id, WORKER_ID, LEASE_SECONDS),
         )
         _require_guarded_update(cursor.rowcount, job_id, "fail")
+
+
+def claim_naming_job(connection: Any) -> dict[str, Any] | None:
+    from psycopg.rows import dict_row
+
+    with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            """
+            WITH next_job AS (
+                SELECT id
+                FROM document_auto_naming_jobs
+                WHERE status = 'queued'
+                   OR (status = 'processing' AND locked_at < now() - (%s * interval '1 second'))
+                ORDER BY CASE WHEN status = 'queued' THEN 0 ELSE 1 END, created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE document_auto_naming_jobs AS job
+            SET status = 'processing', worker_id = %s, locked_at = now(), updated_at = now()
+            FROM next_job
+            WHERE job.id = next_job.id
+            RETURNING job.id, job.document_id, job.provisional_auto_name, job.requested_by
+            """,
+            (LEASE_SECONDS, WORKER_ID),
+        )
+        claimed = cursor.fetchone()
+        if not claimed:
+            return None
+        cursor.execute(
+            """
+            SELECT d.storage_key, d.mime_type, d.original_filename, d.extracted_text,
+                   d.art, d.category, d.is_medical,
+                   NULLIF(trim(concat_ws(' ', p.first_name, p.last_name)), '') AS patient_name,
+                   p.patient_id AS patient_number
+            FROM documents d
+            LEFT JOIN patients p ON p.id = d.patient_id
+            WHERE d.id = %s AND d.file_deleted_at IS NULL
+            """,
+            (claimed["document_id"],),
+        )
+        document = cursor.fetchone()
+        if not document:
+            return {**claimed, "storage_key": None}
+        return {**claimed, **document}
+
+
+def finish_naming_job(
+    connection: Any,
+    job: dict[str, Any],
+    extracted_text: str,
+    extraction: ExtractionMetadata,
+    suggestion: DocumentNameSuggestion,
+) -> None:
+    extraction_method = "parser_ocr" if extraction.used_ocr else "parser_native"
+    with connection.transaction(), connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE documents
+            SET extracted_text = %s,
+                text_extraction_status = 'completed',
+                text_extraction_method = %s,
+                text_extracted_at = now(),
+                text_extracted_by = %s
+            WHERE id = %s
+            """,
+            (
+                extracted_text,
+                extraction_method,
+                job["requested_by"],
+                job["document_id"],
+            ),
+        )
+        cursor.execute(
+            """
+            UPDATE documents
+            SET auto_name = %s,
+                art = CASE
+                    WHEN lower(trim(art)) IN (
+                        '', 'report', 'document', 'uploaded_document',
+                        'patient_upload', 'patient_medical_upload',
+                        'patient_correspondence_upload', 'patient_analysis_upload',
+                        'patient_conclusion_upload'
+                    ) THEN %s
+                    ELSE art
+                END,
+                category = CASE
+                    WHEN category IS NULL OR lower(trim(category)) IN (
+                        '', 'medical', 'medical_report', 'lab_analysis',
+                        'portal_upload', 'clinic_correspondence'
+                    ) THEN %s
+                    ELSE category
+                END,
+                is_medical = is_medical OR %s,
+                access_category = CASE WHEN %s THEN 'medical' ELSE access_category END,
+                document_date = COALESCE(%s, document_date),
+                source_person = CASE
+                    WHEN %s IS NOT NULL AND lower(COALESCE(trim(source_person), '')) IN (
+                        '', 'patient_portal', 'interpreter_upload', 'teamlead_upload'
+                    ) THEN %s
+                    ELSE source_person
+                END,
+                source_institution = CASE
+                    WHEN %s IS NOT NULL AND COALESCE(trim(source_institution), '') = '' THEN %s
+                    ELSE source_institution
+                END
+            WHERE id = %s AND auto_name = %s
+            """,
+            (
+                suggestion.auto_name,
+                suggestion.document_type,
+                suggestion.category,
+                suggestion.is_medical,
+                suggestion.is_medical,
+                suggestion.document_date,
+                suggestion.source_person,
+                suggestion.source_person,
+                suggestion.source_institution,
+                suggestion.source_institution,
+                job["document_id"],
+                job["provisional_auto_name"],
+            ),
+        )
+        rename_applied = cursor.rowcount == 1
+        result = json.dumps(
+            {
+                "specialty_code": suggestion.specialty_code,
+                "document_type": suggestion.document_type,
+                "document_date": suggestion.document_date.isoformat() if suggestion.document_date else None,
+                "used_ocr": extraction.used_ocr,
+                "rename_applied": rename_applied,
+            },
+            ensure_ascii=False,
+        )
+        cursor.execute(
+            """
+            UPDATE document_auto_naming_jobs
+            SET status = 'completed', result = %s::jsonb, error_code = NULL,
+                completed_at = now(), updated_at = now()
+            WHERE id = %s AND status = 'processing' AND worker_id = %s
+              AND locked_at >= now() - (%s * interval '1 second')
+            """,
+            (result, job["id"], WORKER_ID, LEASE_SECONDS),
+        )
+        _require_guarded_update(cursor.rowcount, str(job["id"]), "finish naming")
+
+
+def fail_naming_job(connection: Any, job: dict[str, Any], error: Exception) -> None:
+    del error
+    with connection.transaction(), connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE documents
+            SET text_extraction_status = 'failed', text_extraction_method = 'parser',
+                text_extracted_at = now(), text_extracted_by = %s
+            WHERE id = %s AND text_extraction_status = 'not_started'
+            """,
+            (job["requested_by"], job["document_id"]),
+        )
+        cursor.execute(
+            """
+            UPDATE document_auto_naming_jobs
+            SET status = 'failed', error_code = 'DOCUMENT_AUTO_NAMING_FAILED',
+                completed_at = now(), updated_at = now()
+            WHERE id = %s AND status = 'processing' AND worker_id = %s
+              AND locked_at >= now() - (%s * interval '1 second')
+            """,
+            (job["id"], WORKER_ID, LEASE_SECONDS),
+        )
+        _require_guarded_update(cursor.rowcount, str(job["id"]), "fail naming")
 
 
 def _serialize_draft(draft: dict[str, Any]) -> str:
@@ -629,8 +799,49 @@ def run() -> None:
     with psycopg.connect(DATABASE_URL) as connection:
         LOGGER.info("parser worker %s started", WORKER_ID)
         while True:
+            naming_job: dict[str, Any] | None = None
             job: dict[str, Any] | None = None
             try:
+                naming_job = claim_naming_job(connection)
+                if naming_job:
+                    if not naming_job.get("storage_key"):
+                        raise RuntimeError("Source document is unavailable")
+                    upload_root = UPLOAD_DIR.resolve()
+                    path = (upload_root / str(naming_job["storage_key"])).resolve()
+                    if not path.is_relative_to(upload_root):
+                        raise RuntimeError("Invalid source document storage path")
+                    if path.stat().st_size > MAX_FILE_BYTES:
+                        raise ValueError("Document exceeds the parser size limit")
+                    data = path.read_bytes()
+                    extraction_started = time.monotonic()
+                    extracted = extract_document(
+                        data,
+                        naming_job.get("mime_type"),
+                        naming_job.get("extracted_text"),
+                    )
+                    log_extraction_metrics(
+                        extracted.metadata, time.monotonic() - extraction_started
+                    )
+                    suggestion = suggest_document_name(
+                        extracted_text=extracted.text,
+                        original_filename=naming_job.get("original_filename"),
+                        art=naming_job.get("art"),
+                        category=naming_job.get("category"),
+                        is_medical=bool(naming_job.get("is_medical")),
+                        patient_name=(
+                            naming_job.get("patient_name")
+                            or naming_job.get("patient_number")
+                        ),
+                    )
+                    finish_naming_job(
+                        connection,
+                        naming_job,
+                        extracted.text,
+                        extracted.metadata,
+                        suggestion,
+                    )
+                    LOGGER.info("named uploaded patient document")
+                    continue
                 job = claim_job(connection)
                 if not job:
                     time.sleep(POLL_SECONDS)
@@ -666,10 +877,24 @@ def run() -> None:
                 LOGGER.warning("parser lease lost; result discarded")
             except Exception as exc:  # keep the queue alive after a bad document
                 connection.rollback()
-                LOGGER.error(
-                    "clinical document parsing failed (%s)", type(exc).__name__
-                )
-                if job and job.get("id"):
+                if naming_job and naming_job.get("id"):
+                    LOGGER.error("document auto naming failed (%s)", type(exc).__name__)
+                    try:
+                        fail_naming_job(connection, naming_job, exc)
+                    except LeaseLostError:
+                        connection.rollback()
+                        LOGGER.warning("parser lease lost; naming failure not persisted")
+                    except Exception as persist_exc:
+                        connection.rollback()
+                        LOGGER.error(
+                            "could not persist document naming failure (%s)",
+                            type(persist_exc).__name__,
+                        )
+                        time.sleep(POLL_SECONDS)
+                elif job and job.get("id"):
+                    LOGGER.error(
+                        "clinical document parsing failed (%s)", type(exc).__name__
+                    )
                     try:
                         fail_job(connection, str(job["id"]), exc)
                     except LeaseLostError:

@@ -6,8 +6,12 @@ vi.mock("@/lib/api", () => ({
   apiFetch: apiFetchMock,
 }));
 
-import type { ClinicalNarrative } from "./patient-clinical";
-import { savePatientNarrative } from "./patient-clinical";
+import type { AllDoctorOption, ClinicalNarrative } from "./patient-clinical";
+import {
+  deduplicateAllDoctorOptions,
+  fetchAllDoctors,
+  savePatientNarrative,
+} from "./patient-clinical";
 
 function narrative(): ClinicalNarrative {
   return {
@@ -124,5 +128,38 @@ describe("savePatientNarrative", () => {
         specializations: [],
       }),
     );
+  });
+});
+
+describe("doctor options", () => {
+  const doctor = (overrides: Partial<AllDoctorOption> = {}): AllDoctorOption => ({
+    id: "doctor-1",
+    name: "Florian Straube",
+    title: "Prof. Dr. med.",
+    fachbereich: "Kardiologie",
+    provider_id: "provider-1",
+    provider_name: "München Klinik Bogenhausen",
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+  });
+
+  it("keeps one option per doctor id and merges distinct provider labels", () => {
+    expect(deduplicateAllDoctorOptions([
+      doctor(),
+      doctor(),
+      doctor({ provider_id: "provider-2", provider_name: "Herzzentrum München" }),
+    ])).toEqual([
+      doctor({ provider_name: "München Klinik Bogenhausen, Herzzentrum München" }),
+    ]);
+  });
+
+  it("deduplicates the response before exposing doctor options to forms", async () => {
+    apiFetchMock.mockResolvedValue([doctor(), doctor()]);
+
+    await expect(fetchAllDoctors()).resolves.toEqual([doctor()]);
+    expect(apiFetchMock).toHaveBeenCalledWith("/doctors", { cacheTtlMs: 60_000 });
   });
 });

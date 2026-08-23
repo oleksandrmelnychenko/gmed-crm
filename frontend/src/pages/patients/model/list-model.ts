@@ -51,6 +51,7 @@ export type PatientDetail = PatientSummary & {
 export type PatientAssignment = {
   user_id: string;
   user_name: string;
+  user_email?: string;
   user_role: string;
   user_active: boolean;
   assigned_by_name: string | null;
@@ -197,6 +198,7 @@ export function patientPermissions(role?: string): PatientPermissions {
       "teamlead_interpreter",
       "interpreter",
       "concierge",
+      "it_admin",
     ].includes(role ?? ""),
     canCreateEdit: role === "ceo" || role === "patient_manager",
     canFilterLifecycle:
@@ -207,6 +209,7 @@ export function patientPermissions(role?: string): PatientPermissions {
       "teamlead_interpreter",
       "interpreter",
       "concierge",
+      "it_admin",
     ].includes(role ?? ""),
     canManageAssignments:
       role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",

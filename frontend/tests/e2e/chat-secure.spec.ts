@@ -112,6 +112,7 @@ async function installSecureChatApiMocks(
     peerName?: string;
     peerEmail?: string;
     peerRole?: string;
+    peerHasKey?: boolean;
   },
 ) {
   const myId = options?.meId ?? "00000000-0000-0000-0000-000000000001";
@@ -252,6 +253,9 @@ async function installSecureChatApiMocks(
     }
 
     if (path === `/messages/e2e-key/${peerId}`) {
+      if (options?.peerHasKey === false) {
+        return json(route, { message: "Not found" }, 404);
+      }
       return json(route, {
         id: "key-peer",
         user_id: peerId,
@@ -306,6 +310,7 @@ async function installSecureChatApiMocks(
 
     if (path === `/messages/${peerId}` && route.request().method() === "POST") {
       const payload = JSON.parse(route.request().postData() ?? "{}") as {
+        message?: string;
         e2e_algorithm?: string;
         e2e_ciphertext?: string;
         e2e_nonce?: string;
@@ -319,8 +324,8 @@ async function installSecureChatApiMocks(
           id: "00000000-0000-0000-0000-000000001002",
           from_user: myId,
           to_user: peerId,
-          message: null,
-          is_e2e: true,
+          message: payload.message ?? null,
+          is_e2e: !payload.message,
           e2e_algorithm: payload.e2e_algorithm ?? null,
           e2e_ciphertext: payload.e2e_ciphertext ?? null,
           e2e_nonce: payload.e2e_nonce ?? null,
@@ -401,6 +406,35 @@ async function installSecureChatApiMocks(
 }
 
 test.describe("chat secure flows", () => {
+  test("staff can send the first text before the peer creates an E2E key", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
+
+    await installSecureChatApiMocks(page, myKey, peerKey, { peerHasKey: false });
+
+    await page.goto("/login");
+    await page.locator("#email").fill("admin@gmed.de");
+    await page.locator("#password").fill("admin123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+
+    await page.goto("/chat");
+    await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
+    await expect(page.getByText(/geschützten Serverkanal|защищённый серверный канал/i)).toBeVisible();
+
+    const sendRequest = page.waitForRequest((request) => {
+      if (request.method() !== "POST" || !request.url().endsWith("/api/v1/messages/00000000-0000-0000-0000-000000000777")) return false;
+      return JSON.parse(request.postData() ?? "{}").message === "First protected hello";
+    });
+    await page.getByPlaceholder(/Nachricht eingeben/i).fill("First protected hello");
+    await page.locator("form button[type='submit']").click();
+    await sendRequest;
+
+    await expect(page.getByText("First protected hello")).toBeVisible();
+  });
+
   test("staff can send a secure text message in browser E2E", async ({
     page,
   }) => {

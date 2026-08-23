@@ -22,6 +22,7 @@ pub mod drug_products;
 pub mod e2e_support;
 pub mod feedback;
 pub mod health;
+pub mod internal_notes;
 pub mod interpreter_patient_history;
 pub mod interpreters;
 pub mod invoices;
@@ -37,6 +38,7 @@ pub mod patient_financials;
 pub mod patient_next_actions;
 pub mod patient_recommendations;
 pub mod patients;
+pub mod provider_documents;
 pub mod provider_people;
 pub mod providers;
 pub mod realtime;
@@ -61,6 +63,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(access_policies::router())
         .merge(patients::router())
         .merge(provider_people::router())
+        .merge(provider_documents::router())
         .merge(providers::router())
         .merge(sops::router())
         .merge(cases::router())
@@ -82,6 +85,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(service_packages::router())
         .merge(tax_profiles::router())
         .merge(interpreters::router())
+        .merge(internal_notes::router())
         .merge(interpreter_patient_history::router())
         .merge(order_service_groups::router())
         .merge(drug_products::router())

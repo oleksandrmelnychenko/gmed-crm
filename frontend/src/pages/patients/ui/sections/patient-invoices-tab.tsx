@@ -10,9 +10,13 @@ import {
 } from "react";
 
 import {
+  CheckCircle2,
   CircleDollarSign,
+  Copy,
   Download,
   ExternalLink,
+  KeyRound,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -42,6 +46,7 @@ import {
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -57,6 +62,7 @@ import type {
   PatientServicePackageItem,
   OrderItem,
 } from "../../model/detail-tab-types";
+import type { PatientAssignment } from "../../model/list-model";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
 import {
@@ -116,6 +122,30 @@ type BalanceAdjustmentForm = {
   portalVisible: boolean;
 };
 
+type PortalAccountActivationForm = {
+  email: string;
+  password: string;
+  passwordConfirm: string;
+};
+
+type PortalAccountActivationResponse = {
+  user_id: string;
+  email: string;
+  name: string;
+  role: "patient";
+  is_active: boolean;
+  created: boolean;
+};
+
+const PATIENT_CHAT_STAFF_ROLES = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
 type FinanceFilters = {
   from: string;
   to: string;
@@ -165,6 +195,19 @@ const BLANK_CONSUMPTION_FORM: ConsumptionForm = {
   quantity: "1",
   notes: "",
 };
+
+function generateTemporaryPortalPassword() {
+  return `Gm!${crypto.randomUUID().replaceAll("-", "").slice(0, 14)}`;
+}
+
+function createPortalAccountForm(email = ""): PortalAccountActivationForm {
+  const password = generateTemporaryPortalPassword();
+  return {
+    email,
+    password,
+    passwordConfirm: password,
+  };
+}
 
 function createBlankBalanceAdjustmentForm(currency = "EUR"): BalanceAdjustmentForm {
   return {
@@ -233,6 +276,10 @@ type PatientInvoicesTabProps = {
   financialSummary: PatientFinancialSummary | null;
   financialLedger: PatientFinancialLedger | null;
   servicePackages: PatientServicePackageItem[];
+  patientId: string;
+  patientName: string;
+  patientEmail?: string | null;
+  assignments: PatientAssignment[];
   canManageInvoices: boolean;
   onOpenInvoice: (invoiceId: string) => void;
   onManageInvoice: (invoice: InvoiceItem) => void;
@@ -574,6 +621,39 @@ function accountMovementDirectionLabel(
   return lang === "de" ? "Zahlung oder Gutschrift" : "Оплата или уменьшение долга";
 }
 
+function localizeFinancialDescription(value: string, lang: string) {
+  const exact: Record<string, [string, string]> = {
+    "Patient invoice": ["Patientenrechnung", "Счёт пациента"],
+    "Advance payment": ["Vorauszahlung", "Предоплата"],
+    "Payment received": ["Zahlung erhalten", "Оплата получена"],
+    "Advance payment received": ["Vorauszahlung erhalten", "Предоплата получена"],
+    "Payment reversal": ["Zahlungsstorno", "Сторно оплаты"],
+    "Invoice adjustment": ["Rechnungskorrektur", "Корректировка счёта"],
+    "Account adjustment": ["Kontokorrektur", "Корректировка баланса"],
+    "Payment opening balance": ["Zahlungsanfangsbestand", "Начальный остаток оплаты"],
+    "Advance payment opening balance": ["Anfangsbestand Vorauszahlung", "Начальный остаток предоплаты"],
+    "Patient invoice cancelled; external receivable reopened": [
+      "Patientenrechnung storniert; externe Forderung wieder geöffnet",
+      "Счёт пациента отменён; внешний долг снова открыт",
+    ],
+    "External provider": ["Externer Anbieter", "Внешний поставщик"],
+  };
+  const direct = exact[value];
+  if (direct) return lang === "de" ? direct[0] : direct[1];
+
+  const prefixes: Array<[string, [string, string]]> = [
+    ["Concierge partner payment reversal", ["Storno der Zahlung an Concierge-Partner", "Сторно оплаты партнёру консьержа"]],
+    ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
+  ];
+  for (const [prefix, labels] of prefixes) {
+    if (value.startsWith(prefix)) {
+      return `${lang === "de" ? labels[0] : labels[1]}${value.slice(prefix.length)}`;
+    }
+  }
+
+  return value;
+}
+
 function accountBalanceLabel(
   value: string | null | undefined,
   currency: string,
@@ -606,7 +686,7 @@ function balanceAdjustmentCategoryLabel(
     : {
         opening_balance: "Перенесённый остаток",
         fee: "Комиссия",
-        goodwill: "Компенсация / goodwill",
+        goodwill: "Компенсация",
         correction: "Корректировка",
         other: "Другое",
       };
@@ -628,6 +708,10 @@ function usePatientInvoicesTabContent({
   financialSummary,
   financialLedger,
   servicePackages,
+  patientId,
+  patientName,
+  patientEmail,
+  assignments,
   canManageInvoices,
   onOpenInvoice,
   onManageInvoice,
@@ -641,7 +725,10 @@ function usePatientInvoicesTabContent({
 }: PatientInvoicesTabProps) {
   const { t, lang } = useLang();
   const { user } = useAuth();
+  const { staffGo } = useStaffNavigate();
   const canManageBalance = user?.role === "ceo" || user?.role === "billing";
+  const canManagePortalAccount =
+    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "it_admin";
   const [movementDirectionFilter, setMovementDirectionFilter] = useState<
     "all" | PatientAccountMovement["direction"]
   >("all");
@@ -658,7 +745,18 @@ function usePatientInvoicesTabContent({
   const [reversingBalanceAdjustmentId, setReversingBalanceAdjustmentId] = useState("");
   const [balanceAdjustmentReversalReason, setBalanceAdjustmentReversalReason] = useState("");
   const [balanceAdjustmentReversalRequestId, setBalanceAdjustmentReversalRequestId] = useState("");
-  const patientId = financialSummary?.patient_id ?? invoices.find((item) => item.patient_id)?.patient_id ?? "";
+  const linkedPortalAssignment = assignments.find(
+    (item) => item.user_role === "patient" && !item.revoked_at,
+  );
+  const [activatedPortalAccount, setActivatedPortalAccount] =
+    useState<PortalAccountActivationResponse | null>(null);
+  const [portalAccountOpen, setPortalAccountOpen] = useState(false);
+  const [portalAccountBusy, setPortalAccountBusy] = useState(false);
+  const [portalAccountError, setPortalAccountError] = useState("");
+  const [portalCredentialsCopied, setPortalCredentialsCopied] = useState(false);
+  const [portalAccountForm, setPortalAccountForm] = useState<PortalAccountActivationForm>(() =>
+    createPortalAccountForm(linkedPortalAssignment?.user_email ?? patientEmail ?? ""),
+  );
   const [financeState, dispatchFinanceState] = useReducer(
     patientInvoicesFinanceReducer,
     undefined,
@@ -990,6 +1088,80 @@ function usePatientInvoicesTabContent({
     }
   }
 
+  function openPortalAccountActivation() {
+    setPortalAccountError("");
+    setPortalCredentialsCopied(false);
+    setActivatedPortalAccount(null);
+    setPortalAccountForm(
+      createPortalAccountForm(linkedPortalAssignment?.user_email ?? patientEmail ?? ""),
+    );
+    setPortalAccountOpen(true);
+  }
+
+  function closePortalAccountActivation() {
+    setPortalAccountOpen(false);
+    setPortalAccountError("");
+    setPortalCredentialsCopied(false);
+    setPortalAccountForm((current) => ({
+      ...current,
+      password: "",
+      passwordConfirm: "",
+    }));
+  }
+
+  async function handleActivatePortalAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!patientId || portalAccountBusy) return;
+    if (!portalAccountForm.email.trim() || !portalAccountForm.email.includes("@")) {
+      setPortalAccountError(
+        lang === "de" ? "Bitte geben Sie eine gültige E-Mail-Adresse ein." : "Укажите корректный email.",
+      );
+      return;
+    }
+    if (portalAccountForm.password !== portalAccountForm.passwordConfirm) {
+      setPortalAccountError(
+        lang === "de" ? "Die Passwörter stimmen nicht überein." : "Пароли не совпадают.",
+      );
+      return;
+    }
+
+    setPortalAccountBusy(true);
+    setPortalAccountError("");
+    try {
+      const response = await apiFetch<PortalAccountActivationResponse>(
+        `/patients/${patientId}/portal-account/activate`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: portalAccountForm.email.trim(),
+            password: portalAccountForm.password,
+          }),
+        },
+      );
+      setActivatedPortalAccount(response);
+    } catch (error) {
+      setPortalAccountError(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Das Patientenkonto konnte nicht aktiviert werden."
+            : "Не удалось активировать аккаунт пациента.",
+      );
+    } finally {
+      setPortalAccountBusy(false);
+    }
+  }
+
+  async function copyPortalCredentials() {
+    const text = `${activatedPortalAccount?.email ?? portalAccountForm.email}\n${portalAccountForm.password}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setPortalCredentialsCopied(true);
+    } catch {
+      setPortalCredentialsCopied(false);
+    }
+  }
+
   async function handleConsumePackage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!patientId || !consumeTargetId) return;
@@ -1050,6 +1222,24 @@ function usePatientInvoicesTabContent({
   }
 
   const effectiveServicePackages = refreshedServicePackages ?? servicePackages;
+  const portalAccountEmail =
+    activatedPortalAccount?.email ?? linkedPortalAssignment?.user_email ?? patientEmail ?? "";
+  const portalAccountIsActive =
+    activatedPortalAccount?.is_active ?? linkedPortalAssignment?.user_active ?? false;
+  const portalAccountUserId =
+    activatedPortalAccount?.user_id ?? linkedPortalAssignment?.user_id ?? "";
+  const canOpenPatientChat = Boolean(
+    portalAccountIsActive &&
+      portalAccountUserId &&
+      user?.id &&
+      PATIENT_CHAT_STAFF_ROLES.has(user.role) &&
+      assignments.some(
+        (item) => item.user_id === user.id && item.user_role !== "patient" && !item.revoked_at,
+      ),
+  );
+  const hasEligiblePortalPackage = effectiveServicePackages.some((item) =>
+    ["draft", "active", "paused"].includes(item.status),
+  );
   const filteredServicePackages = useMemo(
     () =>
       effectiveServicePackages.filter((item) => {
@@ -1367,12 +1557,15 @@ function usePatientInvoicesTabContent({
       {
         id: "description",
         label: t.contracts_notes,
-        accessor: (entry) => entry.description,
+        accessor: (entry) => localizeFinancialDescription(entry.description, lang),
         filterType: "text",
         width: 300,
         render: (entry) => (
-          <span className="block truncate text-xs text-foreground" title={entry.description}>
-            {entry.description}
+          <span
+            className="block truncate text-xs text-foreground"
+            title={localizeFinancialDescription(entry.description, lang)}
+          >
+            {localizeFinancialDescription(entry.description, lang)}
           </span>
         ),
       },
@@ -1419,7 +1612,7 @@ function usePatientInvoicesTabContent({
         ),
       },
     ],
-    [commonNotSet, formatDate, formatMoney, ledgerEntries, ledgerLabels, t],
+    [commonNotSet, formatDate, formatMoney, lang, ledgerEntries, ledgerLabels, t],
   );
   const accountMovementColumns = useMemo<ColumnDef<PatientAccountMovement>[]>(
     () => [
@@ -1475,13 +1668,16 @@ function usePatientInvoicesTabContent({
         id: "description",
         label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
         accessor: (movement) =>
-          `${movement.description} ${movement.document_number ?? ""} ${movement.order_number ?? ""}`,
+          `${localizeFinancialDescription(movement.description, lang)} ${movement.document_number ?? ""} ${movement.order_number ?? ""}`,
         searchable: true,
         width: 280,
         render: (movement) => (
           <div className="min-w-0">
-            <div className="truncate text-xs text-foreground" title={movement.description}>
-              {movement.description}
+            <div
+              className="truncate text-xs text-foreground"
+              title={localizeFinancialDescription(movement.description, lang)}
+            >
+              {localizeFinancialDescription(movement.description, lang)}
             </div>
             <div className="truncate font-mono text-[10px] text-muted-foreground">
               {[movement.order_number, movement.document_number].filter(Boolean).join(" · ") || "—"}
@@ -1582,13 +1778,17 @@ function usePatientInvoicesTabContent({
       {
         id: "description",
         label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
-        accessor: (item) => `${item.description} ${item.document_number ?? ""}`,
+        accessor: (item) =>
+          `${localizeFinancialDescription(item.description, lang)} ${item.document_number ?? ""}`,
         searchable: true,
         width: 260,
         render: (item) => (
           <div className="min-w-0">
-            <div className="truncate text-xs text-foreground" title={item.description}>
-              {item.description}
+            <div
+              className="truncate text-xs text-foreground"
+              title={localizeFinancialDescription(item.description, lang)}
+            >
+              {localizeFinancialDescription(item.description, lang)}
             </div>
             <div className="truncate font-mono text-[10px] text-muted-foreground">
               {[item.order_number, item.document_number].filter(Boolean).join(" · ") || "—"}
@@ -1783,7 +1983,10 @@ function usePatientInvoicesTabContent({
         filterType: "date",
         width: 180,
         render: (item) => {
-          const range = [item.starts_on, item.ends_on].filter(Boolean).join(" – ");
+          const range = [
+            item.starts_on ? formatDate(item.starts_on) : null,
+            item.ends_on ? formatDate(item.ends_on) : null,
+          ].filter(Boolean).join(" – ");
           return range ? (
             <span className="font-mono text-xs tabular-nums text-foreground">{range}</span>
           ) : (
@@ -1903,6 +2106,7 @@ function usePatientInvoicesTabContent({
       canManageInvoices,
       commonNotSet,
       effectiveServicePackages,
+      formatDate,
       handleOverageDecision,
       moneyValueNumber,
       statusColors,
@@ -2040,7 +2244,7 @@ function usePatientInvoicesTabContent({
 
       {accountStatement ? (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
             {[
               [
                 lang === "de" ? "Anfangssaldo" : "Входящее сальдо",
@@ -2085,28 +2289,34 @@ function usePatientInvoicesTabContent({
                 ),
               ],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-border/70 bg-card px-4 py-3">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div
+                key={label}
+                className="grid min-w-0 gap-1.5 border-b border-border/60 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_auto] sm:items-center sm:gap-4"
+              >
+                <div className="text-xs font-medium text-muted-foreground sm:text-[13px]">
                   {label}
                 </div>
-                <div className="mt-2 font-mono text-base font-semibold tabular-nums text-foreground">
+                <div className="font-mono text-sm font-semibold tabular-nums text-foreground sm:text-right">
                   {value}
                 </div>
               </div>
             ))}
           </section>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
             {[
               [lang === "de" ? "Offene Rechnungen" : "Открытые счета", accountStatement.summary.invoice_due],
               [lang === "de" ? "Zahlungen erhalten" : "Получено оплат", accountStatement.summary.cash_paid],
               [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
               [lang === "de" ? "Externe Restforderung" : "Остаток внешнего долга", accountStatement.summary.external_receivable],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-border/60 bg-muted/15 px-4 py-2.5">
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div
+                key={label}
+                className="grid min-w-0 gap-1.5 border-b border-border/60 px-3.5 py-2.5 last:border-b-0 sm:grid-cols-[minmax(12rem,1fr)_auto] sm:items-center sm:gap-4"
+              >
+                <div className="text-xs font-medium text-muted-foreground sm:text-[13px]">
                   {label}
                 </div>
-                <div className="mt-1.5 font-mono text-sm font-semibold tabular-nums text-foreground">
+                <div className="font-mono text-sm font-semibold tabular-nums text-foreground sm:text-right">
                   {value == null ? "—" : formatMoney(value, accountStatement.currency)}
                 </div>
               </div>
@@ -2287,7 +2497,7 @@ function usePatientInvoicesTabContent({
                       event.target.value as "all" | PatientAccountMovement["direction"],
                     )
                   }
-                  className={cn(selectClass, "h-8 min-w-36")}
+                  className={cn(selectClass, "h-8 !w-56 max-w-full shrink-0")}
                 >
                   <option value="all">{lang === "de" ? "Belastungen und Zahlungen" : "Начисления и оплаты"}</option>
                   <option value="debit">{lang === "de" ? "Nur Belastungen" : "Только начисления"}</option>
@@ -2301,7 +2511,7 @@ function usePatientInvoicesTabContent({
                       event.target.value as "all" | PatientAccountMovement["kind"],
                     )
                   }
-                  className={cn(selectClass, "h-8 min-w-44")}
+                  className={cn(selectClass, "h-8 !w-52 max-w-full shrink-0")}
                 >
                   <option value="all">{lang === "de" ? "Alle Buchungen" : "Все операции"}</option>
                   <option value="invoice">{accountMovementKindLabel("invoice", lang)}</option>
@@ -2560,6 +2770,279 @@ function usePatientInvoicesTabContent({
             </label>
           </div>
         </FormSection>
+      </PatientSheetScaffold>
+
+      <PatientSheetScaffold
+        open={portalAccountOpen && canManagePortalAccount}
+        onOpenChange={(open) => {
+          if (open) setPortalAccountOpen(true);
+          else closePortalAccountActivation();
+        }}
+        width="default"
+        onSubmit={activatedPortalAccount ? undefined : handleActivatePortalAccount}
+        title={
+          portalAccountIsActive
+            ? lang === "de"
+              ? "Patientenkonto bearbeiten"
+              : "Редактировать аккаунт пациента"
+            : lang === "de"
+              ? "Patientenkonto aktivieren"
+              : "Активировать аккаунт пациента"
+        }
+        description={
+          lang === "de"
+            ? `Portalzugang für ${patientName}`
+            : `Доступ в портал для ${patientName}`
+        }
+        bodyClassName="space-y-4 px-5 py-4"
+        footer={
+          activatedPortalAccount ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 rounded-lg"
+              onClick={closePortalAccountActivation}
+            >
+              {lang === "de" ? "Fertig" : "Готово"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg"
+                onClick={closePortalAccountActivation}
+                disabled={portalAccountBusy}
+              >
+                {lang === "de" ? "Abbrechen" : "Отмена"}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={
+                  portalAccountBusy ||
+                  !portalAccountForm.email.trim() ||
+                  !portalAccountForm.password ||
+                  !portalAccountForm.passwordConfirm
+                }
+              >
+                {portalAccountBusy
+                  ? portalAccountIsActive
+                    ? lang === "de"
+                      ? "Wird gespeichert…"
+                      : "Сохранение…"
+                    : lang === "de"
+                      ? "Wird aktiviert…"
+                      : "Активация…"
+                  : portalAccountIsActive
+                    ? lang === "de"
+                      ? "Änderungen speichern"
+                      : "Сохранить изменения"
+                    : lang === "de"
+                      ? "Konto aktivieren"
+                      : "Активировать аккаунт"}
+              </Button>
+            </>
+          )
+        }
+      >
+        {portalAccountError ? (
+          <Banner tone="error" withIcon>
+            {portalAccountError}
+          </Banner>
+        ) : null}
+
+        {activatedPortalAccount ? (
+          <>
+            <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {activatedPortalAccount.created
+                    ? lang === "de"
+                      ? "Patientenkonto wurde erstellt"
+                      : "Аккаунт пациента создан"
+                    : lang === "de"
+                      ? "Patientenkonto wurde aktualisiert"
+                      : "Аккаунт пациента обновлён"}
+                </p>
+                <p className="mt-1 text-emerald-700">
+                  {lang === "de"
+                    ? "Übermitteln Sie diese Zugangsdaten sicher an den Patienten. Das temporäre Passwort wird nach dem Schließen nicht mehr angezeigt."
+                    : "Безопасно передайте эти данные пациенту. После закрытия временный пароль больше не будет показан."}
+                </p>
+              </div>
+            </div>
+
+            <FormSection title={lang === "de" ? "Zugangsdaten" : "Данные для входа"}>
+              <div className="space-y-3">
+                <Field
+                  label={lang === "de" ? "E-Mail" : "Электронная почта"}
+                  htmlFor="portal-account-result-email"
+                >
+                  <Input
+                    id="portal-account-result-email"
+                    value={activatedPortalAccount.email}
+                    className={inputClass}
+                    readOnly
+                  />
+                </Field>
+                <Field
+                  label={
+                    portalAccountIsActive
+                      ? lang === "de"
+                        ? "Neues Passwort"
+                        : "Новый пароль"
+                      : lang === "de"
+                        ? "Temporäres Passwort"
+                        : "Временный пароль"
+                  }
+                  htmlFor="portal-account-result-password"
+                >
+                  <Input
+                    id="portal-account-result-password"
+                    value={portalAccountForm.password}
+                    className={inputClass}
+                    readOnly
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 rounded-lg gap-1.5"
+                  onClick={() => void copyPortalCredentials()}
+                >
+                  {portalCredentialsCopied ? (
+                    <CheckCircle2 className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                  {portalCredentialsCopied
+                    ? lang === "de"
+                      ? "Kopiert"
+                      : "Скопировано"
+                    : lang === "de"
+                      ? "Zugangsdaten kopieren"
+                      : "Скопировать данные"}
+                </Button>
+              </div>
+            </FormSection>
+          </>
+        ) : (
+          <>
+            <Banner tone="warning" withIcon>
+              {portalAccountIsActive
+                ? lang === "de"
+                  ? "Ändern Sie die E-Mail-Adresse oder vergeben Sie ein neues Passwort. Aktive Sitzungen werden nach dem Speichern beendet."
+                  : "Измените email или задайте новый пароль. После сохранения активные сессии будут завершены."
+                : linkedPortalAssignment
+                  ? lang === "de"
+                    ? "Das bestehende Patientenkonto wird aktiviert und erhält ein neues Passwort. Aktive Sitzungen werden beendet."
+                    : "Существующий аккаунт пациента будет активирован и получит новый пароль. Активные сессии будут завершены."
+                : lang === "de"
+                  ? "Ein Patientenkonto wird erstellt und mit dieser Patientenakte verknüpft."
+                  : "Будет создан аккаунт пациента и привязан к этой карточке."}
+            </Banner>
+
+            <FormSection title={lang === "de" ? "Patientenzugang" : "Доступ пациента"}>
+              <div className="space-y-3">
+                <Field
+                  label={lang === "de" ? "E-Mail" : "Электронная почта"}
+                  htmlFor="portal-account-email"
+                >
+                  <Input
+                    id="portal-account-email"
+                    type="email"
+                    autoComplete="off"
+                    value={portalAccountForm.email}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <Field
+                  label={
+                    portalAccountIsActive
+                      ? lang === "de"
+                        ? "Neues Passwort"
+                        : "Новый пароль"
+                      : lang === "de"
+                        ? "Temporäres Passwort"
+                        : "Временный пароль"
+                  }
+                  htmlFor="portal-account-password"
+                >
+                  <Input
+                    id="portal-account-password"
+                    type="text"
+                    autoComplete="new-password"
+                    value={portalAccountForm.password}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <Field
+                  label={lang === "de" ? "Passwort bestätigen" : "Повторите пароль"}
+                  htmlFor="portal-account-password-confirm"
+                >
+                  <Input
+                    id="portal-account-password-confirm"
+                    type="text"
+                    autoComplete="new-password"
+                    value={portalAccountForm.passwordConfirm}
+                    onChange={(event) =>
+                      setPortalAccountForm((current) => ({
+                        ...current,
+                        passwordConfirm: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                    disabled={portalAccountBusy}
+                    required
+                  />
+                </Field>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {lang === "de"
+                      ? "Mindestens 8 Zeichen mit Groß- und Kleinbuchstaben, Zahl und Sonderzeichen."
+                      : "Минимум 8 символов: большие и маленькие буквы, цифра и специальный символ."}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 rounded-lg px-2 text-xs"
+                    onClick={() =>
+                      setPortalAccountForm((current) => {
+                        const password = generateTemporaryPortalPassword();
+                        return { ...current, password, passwordConfirm: password };
+                      })
+                    }
+                    disabled={portalAccountBusy}
+                  >
+                    {lang === "de" ? "Neu generieren" : "Сгенерировать новый"}
+                  </Button>
+                </div>
+              </div>
+            </FormSection>
+          </>
+        )}
       </PatientSheetScaffold>
 
 
@@ -2905,6 +3388,52 @@ function usePatientInvoicesTabContent({
                 >
                   <Plus className="size-3.5" />
                   {t.patient_invoices_assign_package}
+                </Button>
+              ) : null}
+              {canManagePortalAccount && portalAccountIsActive ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 max-w-72 shrink-0 gap-1.5 rounded-lg border-emerald-200 bg-emerald-50 px-2.5 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900"
+                  onClick={openPortalAccountActivation}
+                  disabled={!patientId}
+                  title={lang === "de" ? "Patientenkonto bearbeiten" : "Редактировать аккаунт пациента"}
+                >
+                  <CheckCircle2 className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    {lang === "de" ? "Konto aktiv" : "Аккаунт активен"}
+                    {portalAccountEmail ? ` · ${portalAccountEmail}` : ""}
+                  </span>
+                </Button>
+              ) : null}
+              {canManagePortalAccount && hasEligiblePortalPackage && !portalAccountIsActive ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={openPortalAccountActivation}
+                  disabled={!patientId}
+                >
+                  <KeyRound className="size-3.5" />
+                  {lang === "de" ? "Konto aktivieren" : "Активировать аккаунт"}
+                </Button>
+              ) : null}
+              {canOpenPatientChat ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 rounded-lg gap-1.5"
+                  onClick={() =>
+                    staffGo(
+                      `/chat?peer=${encodeURIComponent(portalAccountUserId)}&name=${encodeURIComponent(patientName)}&role=patient`,
+                    )
+                  }
+                >
+                  <MessageSquare className="size-3.5" />
+                  {lang === "de" ? "Chat öffnen" : "Открыть чат"}
                 </Button>
               ) : null}
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

@@ -217,7 +217,7 @@ function PaginatedDocumentsTable({
 
   return (
     <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <FilterBuilder
           columns={enhancedColumns}
           rows={documents}

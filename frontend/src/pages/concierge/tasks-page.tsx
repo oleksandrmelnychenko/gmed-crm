@@ -9,13 +9,19 @@ import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
-import type { ConciergeAssignee, ConciergeTask } from "./model";
+import {
+  filterConciergeTaskAssignees,
+  type ConciergeAssignee,
+  type ConciergeTask,
+} from "./model";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
   ConciergeTaskEventDialog,
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
 import { ConciergeTaskManager } from "./task-manager";
+import type { PatientSummary } from "@/pages/patients/model/list-model";
+import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
 const REALTIME_EVENTS = [
   "concierge_operational_item.created",
@@ -64,6 +70,8 @@ export function ConciergeTaskManagerPage() {
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
+  const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
+  const [initialTaskDate, setInitialTaskDate] = useState<Date | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const hasLoadedRef = useRef(false);
   const createTaskRequestIdRef = useRef<string | null>(null);
@@ -89,16 +97,16 @@ export function ConciergeTaskManagerPage() {
       if (!hasLoadedRef.current) setLoading(true);
       setError("");
       try {
-        const [taskRows, assigneeRows] = await Promise.all([
+        const [taskRows, assigneeRows, patientRows] = await Promise.all([
           apiFetch<ConciergeTask[]>("/concierge-operational-items", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
           user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?role=concierge&active_only=true", {
+            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
                 cacheTtlMs: 30_000,
                 forceFresh: version > 0,
-              })
+              }).then(filterConciergeTaskAssignees)
             : Promise.resolve(
                 user
                   ? [{
@@ -110,10 +118,18 @@ export function ConciergeTaskManagerPage() {
                     }]
                   : [],
               ),
+          apiFetch<PatientSummary[]>("/patients?active_only=true", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }),
         ]);
         if (!cancelled) {
           setTasks(taskRows);
           setAssignees(assigneeRows);
+          setPatients(patientRows.map((patient) => ({
+            id: patient.id,
+            name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
+          })).sort((left, right) => left.name.localeCompare(right.name)));
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -154,6 +170,12 @@ export function ConciergeTaskManagerPage() {
           status,
           assigned_to: task.assigned_to,
           reminder_at: task.reminder_at,
+          task_audience: task.task_audience,
+          patient_id: task.patient_id,
+          external_assignee_type: task.external_assignee_type,
+          external_assignee_name: task.external_assignee_name,
+          external_assignee_phone: task.external_assignee_phone,
+          external_assignee_email: task.external_assignee_email,
         }),
       });
       clearApiCache("/concierge-operational-items");
@@ -165,18 +187,25 @@ export function ConciergeTaskManagerPage() {
     }
   }
 
-  function openCreateTask() {
+  function openCreateTask(date: Date | null = null) {
     setTaskError("");
     setEditingTask(null);
     createTaskRequestIdRef.current = crypto.randomUUID();
+    setInitialTaskDate(date);
     setTaskDialogOpen(true);
   }
 
   function openEditTask(task: ConciergeTask) {
     setTaskError("");
     setEditingTask(task);
+    setInitialTaskDate(null);
     setTaskDialogOpen(true);
   }
+
+  useEffect(() => {
+    if (loading || searchParams.get("create") !== "1" || taskDialogOpen) return;
+    openCreateTask();
+  }, [loading, searchParams, taskDialogOpen]);
 
   function openTaskDetail(task: ConciergeTask) {
     setDetailTaskId(task.id);
@@ -244,7 +273,7 @@ export function ConciergeTaskManagerPage() {
         description={labels.subtitle}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
+            <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
               <Plus />{labels.newTask}
             </Button>
             <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={requestRefresh}>
@@ -273,6 +302,7 @@ export function ConciergeTaskManagerPage() {
         onEdit={openEditTask}
         onOpen={openTaskDetail}
         onStatusChange={(task, status) => void changeTaskStatus(task, status)}
+        onCreateAt={(date) => openCreateTask(date)}
       />
 
       <ConciergeTaskEventDialog
@@ -282,6 +312,9 @@ export function ConciergeTaskManagerPage() {
         currentUserId={user?.id ?? null}
         canAssign={user?.role === "ceo"}
         showServiceLink={false}
+        patients={patients}
+        initialPatientId={searchParams.get("patient")}
+        initialDate={initialTaskDate}
         lang={lang}
         open={taskDialogOpen}
         submitting={submittingTask}
@@ -290,7 +323,12 @@ export function ConciergeTaskManagerPage() {
           setTaskDialogOpen(open);
           if (!open) {
             setEditingTask(null);
+            setInitialTaskDate(null);
             createTaskRequestIdRef.current = null;
+            const next = new URLSearchParams(searchParams);
+            next.delete("create");
+            next.delete("patient");
+            setSearchParams(next, { replace: true });
           }
         }}
         onSave={saveTask}

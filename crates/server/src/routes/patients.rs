@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::access;
 use crate::audit;
-use crate::auth::middleware::AuthUser;
+use crate::auth::{middleware::AuthUser, password};
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::documents::is_iso_country_code;
 use crate::state::AppState;
@@ -119,6 +119,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/patients/{patient_id}/recheck", get(get_patient_recheck))
         .route("/patients/{patient_id}/assignments", get(list_assignments))
+        .route(
+            "/patients/{patient_id}/portal-account/activate",
+            post(activate_patient_portal_account),
+        )
         .route("/patients/{patient_id}/cases", get(list_patient_cases))
         .route("/patients/{patient_id}/orders", get(list_patient_orders))
         .route(
@@ -178,6 +182,12 @@ pub fn router() -> Router<AppState> {
 struct FieldPolicy {
     access_level: String,
     condition_type: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ActivatePatientPortalAccountRequest {
+    email: String,
+    password: String,
 }
 
 #[derive(Deserialize)]
@@ -5885,6 +5895,335 @@ fn extract_optional_string_field(
     }
 }
 
+async fn activate_patient_portal_account(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Json(body): Json<ActivatePatientPortalAccountRequest>,
+) -> Result<(StatusCode, Json<Value>), axum::response::Response> {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])?;
+
+    if !has_patient_access(&state, &auth, patient_uuid).await? && auth.role != Role::Ceo {
+        return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+    }
+
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() || email.len() > 320 || !email.contains('@') {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
+    }
+    if let Err(message) = crate::routes::users::validate_password_policy(&body.password) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
+    }
+
+    let patient = sqlx::query(
+        r#"SELECT first_name, last_name, is_active
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "load patient for portal activation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
+
+    if !patient.try_get::<bool, _>("is_active").unwrap_or(false) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient must be active before portal activation",
+        ));
+    }
+
+    let has_package = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM patient_service_packages
+               WHERE patient_id = $1
+                 AND status IN ('draft', 'active', 'paused')
+           )"#,
+    )
+    .bind(patient_uuid)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "check patient membership before portal activation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    if !has_package {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Assign a service package before activating the patient account",
+        ));
+    }
+
+    let first_name = patient
+        .try_get::<String, _>("first_name")
+        .unwrap_or_default();
+    let last_name = patient
+        .try_get::<String, _>("last_name")
+        .unwrap_or_default();
+    let patient_name = format!("{first_name} {last_name}").trim().to_string();
+    let password_hash = password::hash_password(&body.password).map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "hash patient portal password");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    let mut tx = state.db.begin().await.map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "begin patient portal activation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    let linked_accounts = sqlx::query(
+        r#"SELECT u.id
+           FROM patient_assignments assignment
+           JOIN users u ON u.id = assignment.user_id
+           WHERE assignment.patient_id = $1
+             AND assignment.revoked_at IS NULL
+             AND u.role = 'patient'
+           ORDER BY assignment.assigned_at DESC
+           LIMIT 2"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "inspect linked patient portal account");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    if linked_accounts.len() > 1 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Patient is linked to multiple portal accounts",
+        ));
+    }
+
+    let mut created = false;
+    let user_id = if let Some(linked) = linked_accounts.first() {
+        let linked_user_id = linked.try_get::<Uuid, _>("id").map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, "decode linked portal account");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+        let conflicting_owner = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM users WHERE lower(trim(email)) = $1 AND id <> $2 LIMIT 1",
+        )
+        .bind(&email)
+        .bind(linked_user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, "check portal email ownership");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+        if conflicting_owner.is_some() {
+            return Err(err(StatusCode::CONFLICT, "Email already exists"));
+        }
+        linked_user_id
+    } else if let Some(existing) = sqlx::query(
+        "SELECT id, role FROM users WHERE lower(trim(email)) = $1 LIMIT 1",
+    )
+    .bind(&email)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, "inspect portal account by email");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })? {
+        let existing_user_id = existing.try_get::<Uuid, _>("id").map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, "decode portal account by email");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+        if existing.try_get::<String, _>("role").unwrap_or_default() != "patient" {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Email belongs to a non-patient account",
+            ));
+        }
+        let linked_elsewhere = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1
+                   FROM patient_assignments
+                   WHERE user_id = $1
+                     AND revoked_at IS NULL
+                     AND patient_id <> $2
+               )"#,
+        )
+        .bind(existing_user_id)
+        .bind(patient_uuid)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, user_id = %existing_user_id, "check portal account patient link");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+        if linked_elsewhere {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Patient account is linked to another patient record",
+            ));
+        }
+        existing_user_id
+    } else {
+        created = true;
+        sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO users (email, password_hash, name, role, is_active)
+               VALUES ($1, $2, $3, 'patient', true)
+               RETURNING id"#,
+        )
+        .bind(&email)
+        .bind(&password_hash)
+        .bind(&patient_name)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, "create patient portal account");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?
+    };
+
+    if !created {
+        sqlx::query(
+            r#"UPDATE users
+               SET email = $2,
+                   name = $3,
+                   password_hash = $4,
+                   is_active = true,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(user_id)
+        .bind(&email)
+        .bind(&patient_name)
+        .bind(&password_hash)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "reactivate patient portal account");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+    }
+
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (patient_id, user_id)
+           DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()"#,
+    )
+    .bind(patient_uuid)
+    .bind(user_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "link patient portal account");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    sqlx::query("UPDATE patients SET email = $2, updated_at = now() WHERE id = $1")
+        .bind(patient_uuid)
+        .bind(&email)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, patient_id = %patient_uuid, "sync patient portal email");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to activate patient account",
+            )
+        })?;
+
+    tx.commit().await.map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "commit patient portal activation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
+
+    if !created {
+        crate::auth::tokens::revoke_all_families(&state.db, user_id, "patient_account_activated")
+            .await;
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "activate_patient_portal_account",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({
+            "portal_user_id": user_id,
+            "email": email,
+            "created": created,
+        }),
+    ));
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "patient.portal_account_activated",
+        patient_uuid,
+        json!({ "portal_user_id": user_id, "created": created }),
+    )
+    .await;
+
+    Ok((
+        if created {
+            StatusCode::CREATED
+        } else {
+            StatusCode::OK
+        },
+        Json(json!({
+            "user_id": user_id,
+            "email": email,
+            "name": patient_name,
+            "role": "patient",
+            "is_active": true,
+            "created": created,
+        })),
+    ))
+}
+
 async fn list_assignments(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -5896,6 +6235,7 @@ async fn list_assignments(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
+        Role::ItAdmin,
     ])?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? && auth.role != Role::Ceo {
@@ -5904,7 +6244,7 @@ async fn list_assignments(
 
     let rows = sqlx::query(
         r#"SELECT pa.user_id, pa.assigned_at, pa.revoked_at,
-                  u.name AS user_name, u.role AS user_role, u.is_active,
+                  u.name AS user_name, u.email AS user_email, u.role AS user_role, u.is_active,
                   pa.assigned_by, assigned_by_user.name AS assigned_by_name
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
@@ -5928,6 +6268,7 @@ async fn list_assignments(
         items.push(serde_json::json!({
             "user_id": row.try_get::<Uuid, _>("user_id").unwrap_or_else(|_| Uuid::nil()),
             "user_name": row.try_get::<String, _>("user_name").unwrap_or_default(),
+            "user_email": row.try_get::<String, _>("user_email").unwrap_or_default(),
             "user_role": row.try_get::<String, _>("user_role").unwrap_or_default(),
             "user_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
             "assigned_by": row.try_get::<Uuid, _>("assigned_by").unwrap_or_else(|_| Uuid::nil()),
@@ -10421,7 +10762,8 @@ async fn get_patient_clinical(
                   COALESCE(dd.original_filename, dd.auto_name) AS source_document_name,
                   d.provider_id, p.name AS provider_name,
                   d.doctor_id, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich,
-                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name, td.title AS treating_doctor_title,
+                  d.treating_doctor_id, d.treating_none, td.name AS treating_doctor_name,
+                  td.title AS treating_doctor_title, td.fachbereich AS treating_doctor_fachbereich,
                   COALESCE(ds.specialization_ids, ARRAY[]::uuid[]) AS specialization_ids,
                   COALESCE(ds.specializations, '[]'::jsonb) AS specializations
            FROM patient_diagnoses d
@@ -10566,6 +10908,7 @@ async fn get_patient_clinical(
                 "treating_doctor_id": row.get::<Option<Uuid>, _>("treating_doctor_id"),
                 "treating_doctor_name": row.get::<Option<String>, _>("treating_doctor_name"),
                 "treating_doctor_title": row.get::<Option<String>, _>("treating_doctor_title"),
+                "treating_doctor_fachbereich": row.get::<Option<String>, _>("treating_doctor_fachbereich"),
                 "treating_none": row.get::<bool, _>("treating_none"),
             })
         })
@@ -10834,12 +11177,15 @@ async fn list_all_doctors(
     auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
 
     let rows = sqlx::query(
-        r#"SELECT d.id, d.name, d.title, d.fachbereich, l.provider_id, p.name AS provider_name
+        r#"SELECT d.id, d.name, d.title, d.fachbereich,
+                  (array_agg(l.provider_id ORDER BY p.name, l.provider_id))[1] AS provider_id,
+                  string_agg(DISTINCT p.name, ', ' ORDER BY p.name) AS provider_name
            FROM provider_doctor_links l
            JOIN provider_doctors d ON d.id = l.doctor_id
            JOIN providers p ON p.id = l.provider_id
            WHERE p.is_active = true
              AND p.provider_type = 'medical'
+           GROUP BY d.id, d.name, d.title, d.fachbereich
            ORDER BY d.name"#,
     )
     .fetch_all(&state.db)

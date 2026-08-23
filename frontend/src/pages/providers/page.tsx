@@ -24,6 +24,7 @@ import {
   Phone,
   Plus,
   Search,
+  SlidersHorizontal,
   ShieldCheck,
   Star,
   Stethoscope,
@@ -182,6 +183,7 @@ import { ProviderHierarchyTimeline } from "./ui/provider-hierarchy-timeline";
 import { ProviderChildrenSection } from "./ui/provider-children-section";
 import { ProviderPeopleCatalog } from "./ui/provider-people-catalog";
 import { ProviderStatusPill } from "./ui/provider-status-pill";
+import { ProviderDocumentsSection } from "./ui/provider-documents-section";
 import { useProvidersListTableModel } from "./ui/hooks/use-providers-list-table-model";
 import {
   PageHeader,
@@ -1745,6 +1747,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   const [catalogMode, setCatalogModeState] = useState<ProviderCatalogMode>(() =>
     searchParams.get("mode") === "people" ? "people" : "providers",
   );
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [catalogPersonContext, setCatalogPersonContext] = useState<CatalogPersonContext | null>(null);
   const [providerEditOpen, setProviderEditOpen] = useState(false);
   const [doctorDetailView, setDoctorDetailView] = useState<DoctorDetailView | null>(null);
@@ -3734,8 +3737,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
         {catalogMode === "providers" ? (
           <>
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-        <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
-            <ToolbarField label={t.common_search} className="w-[220px]">
+        <div className="relative z-30 grid grid-cols-2 items-end gap-2 border-b border-border/70 bg-card p-2.5 sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+            <ToolbarField label={t.common_search} className="col-span-2 w-full sm:col-auto sm:w-[220px]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -3748,11 +3751,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   }
                 }}
                 placeholder={t.common_search}
-                className="h-8 w-full rounded-md bg-field pl-8 text-xs"
+                className="h-10 w-full rounded-md bg-field pl-8 text-xs sm:h-8"
               />
             </div>
             </ToolbarField>
-              <ToolbarField label={t.providers_type}>
+              <ToolbarField label={t.providers_type} className="w-full sm:w-auto">
               <NativeComboboxSelect
                 value={filters.providerType}
                 onChange={(event) => {
@@ -3776,7 +3779,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   });
                 }}
                 disabled={permissions.forceNonMedical}
-                className={cn(selectClassName, "h-8 rounded-md w-[170px] bg-field text-xs")}
+                className={cn(selectClassName, "h-10 w-full rounded-md bg-field text-xs sm:h-8 sm:w-[170px]")}
               >
                 <option value="">{t.providers_all}</option>
                 <option value="medical">{t.providers_type_medical}</option>
@@ -3784,7 +3787,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               </NativeComboboxSelect>
               </ToolbarField>
 
-              <ToolbarField label={t.providers_category} className="w-[200px]">
+              <ToolbarField label={t.providers_category} className="w-full sm:w-[200px]">
               <div>
                 <ProviderTaxonomyCascadeSelect
                   value={filters.taxonomyNodeId}
@@ -3800,7 +3803,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   placeholder={t.providers_category}
                   allLabel={t.providers_all}
                   containerClassName="w-full"
-                  selectClassName={cn(selectClassName, "h-8 rounded-md w-full bg-field text-xs")}
+                  selectClassName={cn(selectClassName, "h-10 w-full rounded-md bg-field text-xs sm:h-8")}
                   onChange={(nextValue) => {
                     setFilters((current) => ({
                       ...current,
@@ -3817,6 +3820,22 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 />
               </div>
               </ToolbarField>
+
+              <Button
+                type="button"
+                variant={mobileFiltersOpen ? "secondary" : "outline"}
+                className="col-span-2 h-10 w-full justify-center sm:hidden"
+                aria-expanded={mobileFiltersOpen}
+                onClick={() => setMobileFiltersOpen((current) => !current)}
+              >
+                <SlidersHorizontal className="size-4" />
+                {t.table_filter}
+              </Button>
+
+              <div className={cn(
+                "col-span-2 grid grid-cols-2 gap-2 max-sm:[&_input]:h-10 max-sm:[&_input]:w-full max-sm:[&_label]:w-full max-sm:[&_select]:h-10 max-sm:[&_select]:w-full sm:contents",
+                !mobileFiltersOpen && "hidden sm:contents",
+              )}>
 
               {filterAttributeKeys.length > 0 ? (
                 <>
@@ -3940,6 +3959,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 />
               </div>
               </ToolbarField>
+              </div>
         </div>
 
         {listError ? (
@@ -4114,6 +4134,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     } : undefined}
                     onOpenPatients={() => window.open(`/patients?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
+                  />
+
+                  <ProviderDocumentsSection
+                    detail={detail}
+                    canManage={permissions.canManageRegistry}
                   />
 
                   <ProviderChildrenSection onOpenProvider={openProvider}>

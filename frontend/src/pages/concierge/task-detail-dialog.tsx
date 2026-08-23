@@ -53,6 +53,11 @@ const copy = {
     location: "Ort oder Adresse",
     status: "Status",
     priority: "Priorität",
+    category: "Kategorie",
+    internal: "Intern",
+    external: "Extern",
+    patient: "Patient / Kunde",
+    externalAssignee: "Externer Ausführender",
     open: "Offen",
     in_progress: "In Arbeit",
     completed: "Erledigt",
@@ -91,6 +96,11 @@ const copy = {
     location: "Место или адрес",
     status: "Статус",
     priority: "Приоритет",
+    category: "Категория",
+    internal: "Внутренняя",
+    external: "Внешняя",
+    patient: "Пациент / клиент",
+    externalAssignee: "Внешний исполнитель",
     open: "Открыта",
     in_progress: "В работе",
     completed: "Выполнена",
@@ -318,7 +328,10 @@ export function ConciergeTaskDetailDialog({
                 <div className="flex flex-wrap items-end gap-2">
                   <Badge variant="outline">{labels.status}: {labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
                   <Badge variant="outline">{labels.priority}: {labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>
+                  <Badge variant="outline">{labels.category}: {detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>
                 </div>
+                {detail.item.patient_name ? <div><p className="text-xs font-medium text-muted-foreground">{labels.patient}</p><p className="mt-1">{detail.item.patient_name}</p></div> : null}
+                {detail.item.task_audience === "external" ? <div><p className="text-xs font-medium text-muted-foreground">{labels.externalAssignee}</p><p className="mt-1 font-medium">{detail.item.external_assignee_name || "—"}</p><p className="text-xs text-muted-foreground">{[detail.item.external_assignee_phone, detail.item.external_assignee_email].filter(Boolean).join(" · ")}</p></div> : null}
               </section>
 
             <div className="grid gap-4 lg:grid-cols-2">

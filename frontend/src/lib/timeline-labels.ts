@@ -90,6 +90,20 @@ const SOURCE_MAP: Record<string, string> = {
   portal: "timeline_source_portal",
   clinic: "timeline_source_clinic",
   doctor: "timeline_source_doctor",
+  internal: "timeline_source_internal",
+  medical: "timeline_source_medical",
+  payment: "timeline_source_payment",
+  "medical report": "timeline_source_medical_report",
+  "patient visible": "timeline_source_patient_visible",
+  "finance cost estimate": "timeline_source_finance_cost_estimate",
+  "patient intake": "timeline_source_patient_intake",
+  "patient custom": "timeline_source_patient_custom",
+  "order discovery": "timeline_source_order_discovery",
+  contract: "timeline_entity_contract",
+  care: "timeline_category_care",
+  allergie: "timeline_source_allergy",
+  parent: "timeline_source_parent",
+  self: "timeline_source_self",
 };
 
 function humanizeFallback(value: string): string {
@@ -106,7 +120,7 @@ function lookupOrHumanize(
   l: L,
 ): string {
   if (!value) return "";
-  const trimmed = value.trim();
+  const trimmed = value.normalize("NFKC").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
   const key = trimmed.toLowerCase();
   const entry = map[key];
@@ -134,7 +148,41 @@ export function localizeTimelineSource(
   value: string | null | undefined,
   l: L,
 ): string {
-  return lookupOrHumanize(SOURCE_MAP, value, l);
+  if (!value) return "";
+  return value
+    .split("·")
+    .map((part) => lookupOrHumanize(SOURCE_MAP, part, l))
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function localizeTimelineTitle(
+  value: string | null | undefined,
+  l: L,
+): string {
+  if (!value) return "";
+
+  const exactKey = {
+    "Prepare provider and doctor shortlist for execution":
+      "workflow_item_provider_shortlist",
+    "Review order scope and convert needs into service blocks":
+      "workflow_item_scope_review",
+  }[value];
+  if (exactKey) return l(exactKey);
+
+  const prefixes: Array<[string, string]> = [
+    ["Dunning first:", "timeline_title_dunning_first"],
+    ["Dunning second:", "timeline_title_dunning_second"],
+    ["Dunning final:", "timeline_title_dunning_final"],
+    ["Anamnese:", "timeline_title_anamnesis"],
+  ];
+  for (const [prefix, key] of prefixes) {
+    if (value.startsWith(prefix)) {
+      return `${l(key)}: ${value.slice(prefix.length).trim()}`;
+    }
+  }
+
+  return value;
 }
 
 const ENTITY_TYPE_BADGE_CLASS: Record<string, string> = {

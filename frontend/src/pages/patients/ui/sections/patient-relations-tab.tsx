@@ -33,6 +33,18 @@ type PatientRelationsTabProps = {
   tabLoading: boolean;
 };
 
+function localizeRelationNotes(value: string | null | undefined, lang: "de" | "ru") {
+  if (!value) return "";
+  const labels =
+    lang === "de"
+      ? { email: "E-Mail:", birthDate: "Geburtsdatum:", address: "Adresse:" }
+      : { email: "Электронная почта:", birthDate: "Дата рождения:", address: "Адрес:" };
+  return value
+    .replace(/\bEmail:/gi, labels.email)
+    .replace(/\bGeburtsdatum:/gi, labels.birthDate)
+    .replace(/\bAdresse:/gi, labels.address);
+}
+
 export function PatientRelationsTab({
   canManageRelations,
   formatDateTime,
@@ -45,7 +57,7 @@ export function PatientRelationsTab({
   relations,
   tabLoading,
 }: PatientRelationsTabProps) {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const pagination = useDataTablePagination(
     relations,
     relations.map((item) => item.id).join(":"),
@@ -122,12 +134,15 @@ export function PatientRelationsTab({
       {
         id: "notes",
         label: t.patients_notes,
-        accessor: (relation) => relation.notes ?? "",
+        accessor: (relation) => localizeRelationNotes(relation.notes, lang),
         searchable: true,
         width: 240,
         render: (relation) => (
-          <span className="block truncate text-xs text-muted-foreground" title={relation.notes ?? undefined}>
-            {relation.notes || t.common_not_set}
+          <span
+            className="block truncate text-xs text-muted-foreground"
+            title={localizeRelationNotes(relation.notes, lang) || undefined}
+          >
+            {localizeRelationNotes(relation.notes, lang) || t.common_not_set}
           </span>
         ),
       },
@@ -145,7 +160,7 @@ export function PatientRelationsTab({
         ),
       },
     ],
-    [formatDateTime, l, relationTypeLabel, t],
+    [formatDateTime, l, lang, relationTypeLabel, t],
   );
 
   return (

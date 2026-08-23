@@ -437,10 +437,10 @@ function validationErrorLabel(error: PatientLabCorrectionValidationError, tx: Bi
   return labels[error];
 }
 
-function formatCorrectionTimestamp(value: string) {
+function formatCorrectionTimestamp(value: string, tx: Bilingual) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return cachedDateTimeFormat("en-GB", {
+  return cachedDateTimeFormat(tx("ru-RU", "de-DE"), {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -467,7 +467,7 @@ export function PatientLabCorrectionMetadata({
         {tx("Исправлено", "Korrigiert")}
       </Badge>
       <span>
-        {formatCorrectionTimestamp(item.corrected_at)}
+        {formatCorrectionTimestamp(item.corrected_at, tx)}
         {item.corrected_by_name ? ` · ${item.corrected_by_name}` : ""}
       </span>
       {item.correction_note ? (

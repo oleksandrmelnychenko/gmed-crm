@@ -125,7 +125,7 @@ describe("AnamneseSection", () => {
       />,
     );
 
-    expect(html).toContain("Red flags");
+    expect(html).toContain("Warnzeichen");
     expect(html).toContain("Synkope bei Belastung");
     expect(html).toContain("Kardiologie");
     expect(html).toContain("Fachspezifische Anamnese");

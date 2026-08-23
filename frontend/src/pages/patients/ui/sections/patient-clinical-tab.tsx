@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 // import { downloadApiFile } from "@/lib/api"; // PDF-Export (Medikationsplan / Arztbrief) тимчасово вимкнено
-import { useLang } from "@/lib/i18n";
+import { getLang, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
@@ -50,6 +50,7 @@ import {
   createPatientRecommendation,
   deletePatientNarrative,
   deletePatientRecommendation,
+  deduplicateAllDoctorOptions,
   fetchAllDoctors,
   fetchNarrativeHistory,
   fetchPatientClinical,
@@ -188,14 +189,14 @@ export function patientVitalDateTime(
     if (precision === "date") {
       const datePart = value.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return fallback;
-      return cachedDateTimeFormat("en-GB", {
+      return cachedDateTimeFormat(getLang() === "ru" ? "ru-RU" : "de-DE", {
         day: "2-digit",
         month: "short",
         year: "numeric",
         timeZone: "UTC",
       }).format(new Date(`${datePart}T00:00:00Z`));
     }
-    return cachedDateTimeFormat("en-GB", {
+    return cachedDateTimeFormat(getLang() === "ru" ? "ru-RU" : "de-DE", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -587,29 +588,6 @@ function recommendationDoctorLabel(
   return [doctorWithFachbereich || null, option?.provider_name ?? null]
     .filter(Boolean)
     .join(" · ") || null;
-}
-
-function uniqueAllDoctorOptions(doctors: AllDoctorOption[]): AllDoctorOption[] {
-  const byId = new Map<string, { doctor: AllDoctorOption; providers: string[] }>();
-  doctors.forEach((doctor) => {
-    const existing = byId.get(doctor.id);
-    const providerName = doctor.provider_name?.trim();
-    if (!existing) {
-      byId.set(doctor.id, {
-        doctor,
-        providers: providerName ? [providerName] : [],
-      });
-      return;
-    }
-    if (providerName && !existing.providers.includes(providerName)) {
-      existing.providers.push(providerName);
-    }
-  });
-
-  return Array.from(byId.values()).map(({ doctor, providers }) => ({
-    ...doctor,
-    provider_name: providers.length > 0 ? providers.join(", ") : doctor.provider_name,
-  }));
 }
 
 function groupedClinicalItems<T>(
@@ -1412,7 +1390,7 @@ export function PatientRecommendationsSection({
     const option = RECOMMENDATION_TYPE_OPTIONS.find((o) => o.value === value);
     return option ? tx(option.ru, option.de) : null;
   };
-  const doctorOptions = uniqueAllDoctorOptions(allDoctors);
+  const doctorOptions = deduplicateAllDoctorOptions(allDoctors);
   const lifecycleLabel = (value: RecommendationLifecycleStatus) => {
     const option = LIFECYCLE_OPTIONS.find((o) => o.value === value);
     return option ? tx(option.ru, option.de) : value;
@@ -2232,7 +2210,7 @@ function medicationHistoryText(snapshot: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function medicationHistoryRegimen(snapshot: Record<string, unknown>) {
+function medicationHistoryRegimen(snapshot: Record<string, unknown>, tx: Bilingual) {
   const dose = ["dose_morgens", "dose_mittags", "dose_abends", "dose_nachts"]
     .map((key) => medicationHistoryText(snapshot, key) ?? "0")
     .join("-");
@@ -2241,11 +2219,64 @@ function medicationHistoryRegimen(snapshot: Record<string, unknown>) {
   return [
     medicationHistoryText(snapshot, "staerke"),
     medicationHistoryText(snapshot, "form"),
-    medicationHistoryText(snapshot, "einnahmeform"),
+    localizedMedicationRoute(medicationHistoryText(snapshot, "einnahmeform"), tx),
     hasDose
       ? `${dose}${medicationHistoryText(snapshot, "einheit") ? ` ${medicationHistoryText(snapshot, "einheit")}` : ""}`
       : null,
   ].filter((value): value is string => Boolean(value)).join(" · ");
+}
+
+function localizedMedicationStatus(status: string | null | undefined, tx: Bilingual) {
+  switch (status?.trim().toLowerCase()) {
+    case "aktiv":
+    case "active":
+      return tx("Активен", "Aktiv");
+    case "pausiert":
+    case "paused":
+      return tx("Приостановлен", "Pausiert");
+    case "abgesetzt":
+    case "stopped":
+      return tx("Отменён", "Abgesetzt");
+    case "geplant":
+    case "planned":
+      return tx("Запланирован", "Geplant");
+    default:
+      return status ?? "";
+  }
+}
+
+function localizedMedicationRoute(route: string | null | undefined, tx: Bilingual) {
+  switch (route?.trim().toLowerCase()) {
+    case "oral":
+      return tx("Перорально", "Oral");
+    case "intravenous":
+    case "iv":
+      return tx("Внутривенно", "Intravenös");
+    case "subcutaneous":
+      return tx("Подкожно", "Subkutan");
+    case "topical":
+      return tx("Наружно", "Topisch");
+    case "inhalation":
+      return tx("Ингаляционно", "Inhalativ");
+    default:
+      return route ?? "";
+  }
+}
+
+function localizedClinicalSeverity(severity: string | null | undefined, tx: Bilingual) {
+  switch (severity?.trim().toLowerCase()) {
+    case "leicht":
+    case "mild":
+      return tx("Лёгкая", "Leicht");
+    case "mittel":
+    case "moderate":
+      return tx("Средняя", "Mittel");
+    case "schwer":
+    case "severe":
+      return tx("Тяжёлая", "Schwer");
+    default:
+      return severity ?? "";
+  }
 }
 
 function MedicationHistoryTree({
@@ -2263,18 +2294,18 @@ function MedicationHistoryTree({
 }) {
   const actionMeta = (action: MedicationImportHistoryEvent["event_type"]) => {
     if (action === "deduplicated") {
-      return { label: tx("Підтверджено повторним документом", "Durch weiteres Dokument bestätigt"), tone: "border-slate-200 bg-slate-50 text-slate-700" };
+      return { label: tx("Подтверждено повторным документом", "Durch weiteres Dokument bestätigt"), tone: "border-slate-200 bg-slate-50 text-slate-700" };
     }
     if (action === "regimen_changed") {
-      return { label: tx("Зміна схеми", "Schemaänderung"), tone: "border-sky-200 bg-sky-50 text-sky-800" };
+      return { label: tx("Изменение схемы", "Schemaänderung"), tone: "border-sky-200 bg-sky-50 text-sky-800" };
     }
     if (action === "status_transition") {
-      return { label: tx("Зміна статусу", "Statuswechsel"), tone: "border-amber-200 bg-amber-50 text-amber-800" };
+      return { label: tx("Изменение статуса", "Statuswechsel"), tone: "border-amber-200 bg-amber-50 text-amber-800" };
     }
     if (action === "historical_observation") {
-      return { label: tx("Історичне спостереження", "Historische Beobachtung"), tone: "border-violet-200 bg-violet-50 text-violet-800" };
+      return { label: tx("Историческое наблюдение", "Historische Beobachtung"), tone: "border-violet-200 bg-violet-50 text-violet-800" };
     }
-    return { label: tx("Створено", "Erstellt"), tone: "border-emerald-200 bg-emerald-50 text-emerald-800" };
+    return { label: tx("Создано", "Erstellt"), tone: "border-emerald-200 bg-emerald-50 text-emerald-800" };
   };
 
   return (
@@ -2284,19 +2315,19 @@ function MedicationHistoryTree({
           <div className="flex flex-wrap items-center gap-2">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">
-              {tx("Дерево історії медикаментів", "Medikationsverlauf")}
+              {tx("История медикаментов", "Medikationsverlauf")}
             </h3>
-            <CountBadge>{series.length} {tx("ліній", "Serien")}</CountBadge>
+            <CountBadge>{series.length} {tx("линий", "Serien")}</CountBadge>
           </div>
           <p className="mt-0.5 max-w-3xl text-xs leading-4 text-muted-foreground">
             {tx(
-              "Кожна лінія показує поточний стан і незмінну хронологію OCR-документів, схем та статусів.",
+              "Каждая линия показывает текущее состояние и неизменяемую хронологию OCR-документов, схем и статусов.",
               "Jede Serie zeigt den aktuellen Stand und die unveränderliche Chronologie aus OCR-Dokumenten, Schemata und Statuswechseln.",
             )}
           </p>
         </div>
         <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-800">
-          {total} {tx("подій", "Ereignisse")}
+          {total} {tx("событий", "Ereignisse")}
         </Badge>
       </header>
 
@@ -2304,7 +2335,7 @@ function MedicationHistoryTree({
         {series.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-5 py-8 text-sm text-muted-foreground">
             {tx(
-              "Історія з’явиться після підтвердженого OCR-імпорту медикаментів.",
+              "История появится после подтверждённого OCR-импорта медикаментов.",
               "Der Verlauf erscheint nach einem bestätigten OCR-Medikamentenimport.",
             )}
           </div>
@@ -2315,7 +2346,7 @@ function MedicationHistoryTree({
             ? [
                 current.staerke,
                 current.form,
-                current.einnahmeform,
+                localizedMedicationRoute(current.einnahmeform, tx),
                 [current.dose_morgens, current.dose_mittags, current.dose_abends, current.dose_nachts]
                   .some(Boolean)
                   ? `${[current.dose_morgens ?? "0", current.dose_mittags ?? "0", current.dose_abends ?? "0", current.dose_nachts ?? "0"].join("-")}${current.einheit ? ` ${current.einheit}` : ""}`
@@ -2339,17 +2370,17 @@ function MedicationHistoryTree({
                     ) : null}
                     {current?.status ? (
                       <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800">
-                        {current.status}
+                        {localizedMedicationStatus(current.status, tx)}
                       </Badge>
                     ) : null}
                   </div>
                   <p className="mt-0.5 break-words text-xs leading-4 text-muted-foreground">
-                    {currentRegimen || tx("Поточна схема відсутня", "Kein aktuelles Schema")}
+                    {currentRegimen || tx("Текущая схема отсутствует", "Kein aktuelles Schema")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 sm:justify-end">
                   <span className="text-xs text-muted-foreground">
-                    {group.events.length} {tx("подій", "Ereignisse")}
+                    {group.events.length} {tx("событий", "Ereignisse")}
                   </span>
                   <span aria-hidden className="text-base text-muted-foreground transition-transform group-open:rotate-90">›</span>
                 </div>
@@ -2357,33 +2388,33 @@ function MedicationHistoryTree({
 
               <div className="border-t border-border/50 p-3">
                 {current ? (
-                  <div className="mb-2.5 grid gap-2 rounded-lg border border-emerald-200/80 bg-emerald-50/40 p-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Поточний стан", "Aktueller Stand")}</p>
-                      <p className="mt-0.5 text-xs font-semibold text-foreground">{current.status}</p>
+                  <div className="mb-2.5 overflow-hidden rounded-lg border border-emerald-200/80 bg-emerald-50/25">
+                    <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Текущее состояние", "Aktueller Stand")}</p>
+                      <p className="text-xs font-semibold text-foreground">{localizedMedicationStatus(current.status, tx)}</p>
                     </div>
-                    <div>
+                    <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Схема", "Schema")}</p>
-                      <p className="mt-0.5 break-words text-xs text-foreground">{currentRegimen || "—"}</p>
+                      <p className="break-words text-xs text-foreground">{currentRegimen || "—"}</p>
                     </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Дата джерела", "Quelldatum")}</p>
-                      <p className="mt-0.5 text-xs text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
+                    <div className="grid gap-1.5 border-b border-emerald-200/70 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Дата источника", "Quelldatum")}</p>
+                      <p className="text-xs text-foreground">{current.source_date || current.einnahme_von || "—"}</p>
                     </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Країна", "Land")}</p>
-                      <p className="mt-0.5 text-xs text-foreground">{current.source_country || "—"}</p>
+                    <div className="grid gap-1.5 px-3 py-2.5 sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,1fr)] sm:items-center">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{tx("Страна", "Land")}</p>
+                      <p className="text-xs text-foreground">{current.source_country || "—"}</p>
                     </div>
                   </div>
                 ) : null}
 
-                <div className="space-y-2">
+                <div className="overflow-hidden rounded-lg border border-border/50 bg-white">
                   {group.events.map((event) => {
                     const action = actionMeta(event.event_type);
-                    const regimen = medicationHistoryRegimen(event.new_value);
+                    const regimen = medicationHistoryRegimen(event.new_value, tx);
                     const status = medicationHistoryText(event.new_value, "status");
                     return (
-                      <article key={event.id} className="rounded-lg border border-border/50 bg-white px-3 py-2.5">
+                      <article key={event.id} className="border-b border-border/50 bg-white px-3 py-2.5 last:border-b-0">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -2391,12 +2422,12 @@ function MedicationHistoryTree({
                                 {action.label}
                               </Badge>
                               <span className="text-xs font-semibold text-foreground">
-                                {event.source_date || new Date(event.created_at).toLocaleDateString()}
+                              {event.source_date || new Intl.DateTimeFormat(tx("ru-RU", "de-DE")).format(new Date(event.created_at))}
                               </span>
-                              {status ? <span className="text-xs text-muted-foreground">{status}</span> : null}
+                              {status ? <span className="text-xs text-muted-foreground">{localizedMedicationStatus(status, tx)}</span> : null}
                             </div>
                             <p className="mt-1 break-words text-xs font-medium leading-5 text-foreground">
-                              {regimen || tx("Схема не вказана", "Kein Schema angegeben")}
+                              {regimen || tx("Схема не указана", "Kein Schema angegeben")}
                             </p>
                           </div>
                           <div className="max-w-full text-right text-[11px] leading-5 text-muted-foreground">
@@ -2404,14 +2435,14 @@ function MedicationHistoryTree({
                               {event.source_document_name ?? tx("Документ", "Dokument")}
                             </p>
                             <p>
-                              {[event.source_country, event.source_page ? `S. ${event.source_page}` : null]
+                              {[event.source_country, event.source_page ? `${tx("стр.", "S.")} ${event.source_page}` : null]
                                 .filter(Boolean).join(" · ") || "—"}
                             </p>
                           </div>
                         </div>
                         {event.reviewed_by_name ? (
                             <p className="mt-1.5 text-[11px] text-muted-foreground">
-                            {tx("Перевірив", "Geprüft von")}: {event.reviewed_by_name}
+                            {tx("Проверил", "Geprüft von")}: {event.reviewed_by_name}
                           </p>
                         ) : null}
                         {event.source_raw_text ? (
@@ -2429,7 +2460,7 @@ function MedicationHistoryTree({
                   })}
                   {group.events.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-border/60 px-4 py-5 text-sm text-muted-foreground">
-                      {tx("Для поточного запису ще немає OCR-подій.", "Für den aktuellen Eintrag gibt es noch keine OCR-Ereignisse.")}
+                      {tx("Для текущей записи ещё нет OCR-событий.", "Für den aktuellen Eintrag gibt es noch keine OCR-Ereignisse.")}
                     </p>
                   ) : null}
                 </div>
@@ -2441,7 +2472,7 @@ function MedicationHistoryTree({
           <div className="flex justify-center pt-2">
             <Button type="button" variant="outline" disabled={loadingMore} onClick={onLoadMore}>
               {loadingMore ? <LoaderCircle className="size-4 animate-spin" /> : null}
-              {tx("Завантажити старіші події", "Ältere Ereignisse laden")}
+              {tx("Загрузить более ранние события", "Ältere Ereignisse laden")}
             </Button>
           </div>
         ) : null}
@@ -3175,7 +3206,7 @@ export function PatientClinicalTab({
               <span className="min-w-0 max-w-full break-words text-sm font-medium text-orange-950">{w.label}</span>
               {w.severity ? (
                 <span className="min-w-0 max-w-full break-words text-[11px] text-orange-800">
-                  {w.severity}
+                  {localizedClinicalSeverity(w.severity, tx)}
                 </span>
               ) : null}
             </div>
@@ -3919,7 +3950,10 @@ export function PatientClinicalTab({
             ) : null}
             {e.red_flags ? (
               <p className="min-w-0 max-w-full break-words rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-800">
-                <span className="font-semibold">Red flags:</span> {e.red_flags}
+                <span className="font-semibold">
+                  {tx("Тревожные признаки", "Warnzeichen")}:
+                </span>{" "}
+                {e.red_flags}
               </p>
             ) : null}
             <ClinicalRecordSource item={e} tx={tx} />
@@ -4000,7 +4034,7 @@ export function PatientClinicalTab({
                 }
               />
             </Field>
-            <Field label="Red flags">
+            <Field label={tx("Тревожные признаки", "Warnzeichen")}>
               <textarea
                 value={draft.red_flags ?? ""}
                 onChange={(e) => set({ red_flags: blankToNull(e.target.value) })}

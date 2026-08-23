@@ -9,6 +9,12 @@ export default defineConfig(({ mode }) => {
   const proxyTarget = process.env.VITE_PROXY_TARGET ?? env.VITE_PROXY_TARGET ?? 'http://localhost:3000'
   const buildTimestamp = process.env.VITE_BUILD_TIMESTAMP || env.VITE_BUILD_TIMESTAMP || new Date().toISOString()
 
+  if (mode.startsWith('mobile') && !env.VITE_API_BASE_URL && !process.env.VITE_API_BASE_URL) {
+    throw new Error(
+      'VITE_API_BASE_URL is required for mobile builds because packaged assets cannot use the Vite API proxy.',
+    )
+  }
+
   return {
     plugins: [
       react(),

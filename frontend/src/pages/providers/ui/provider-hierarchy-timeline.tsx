@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type CSSProperties } from "react";
 import { Building2, ChevronLeft, ChevronRight, Stethoscope, UserRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -313,7 +313,7 @@ export function ProviderHierarchyTimeline({
           {tr.providers_hierarchy_timeline_empty ?? tr.common_no_results}
         </div>
       ) : (
-        <div className="p-3.5">
+        <div className="p-2 sm:p-3.5">
           <div className="space-y-1.5">
             {timelineItems.map((item) => (
               <Fragment key={item.node.provider.id}>
@@ -453,7 +453,10 @@ function TimelineNode({
 
   return (
     <div className="relative flex min-w-0 items-stretch">
-      <div className="relative shrink-0" style={{ width: connectorWidth }}>
+      <div
+        className="relative w-2 shrink-0 sm:w-[var(--connector-width)]"
+        style={{ "--connector-width": `${connectorWidth}px` } as CSSProperties}
+      >
         {item.ancestorHasNext.map((hasNext, levelDepth) => {
           if (!hasNext || levelDepth === 0 || levelDepth >= depth) return null;
 
@@ -464,7 +467,7 @@ function TimelineNode({
             <span
               key={levelDepth}
               aria-hidden="true"
-              className={cn("absolute w-px", railClassForDepth(levelDepth))}
+              className={cn("absolute hidden w-px sm:block", railClassForDepth(levelDepth))}
               style={{
                 left: levelDepth * CONNECTOR_STEP + CONNECTOR_CENTER,
                 top: -6,
@@ -478,7 +481,7 @@ function TimelineNode({
             {/* Own rail: elbow for the last sibling, tee otherwise. */}
             <span
               aria-hidden="true"
-              className={cn("absolute w-px", tone.rail)}
+              className={cn("absolute hidden w-px sm:block", tone.rail)}
               style={
                 isLast
                   ? { left: currentCenter, top: -6, height: "calc(50% + 6px)" }
@@ -488,7 +491,7 @@ function TimelineNode({
             {/* Horizontal stub from the rail to the row card. */}
             <span
               aria-hidden="true"
-              className={cn("absolute h-px", tone.rail)}
+              className={cn("absolute hidden h-px sm:block", tone.rail)}
               style={{
                 left: currentCenter,
                 top: "50%",
@@ -500,7 +503,7 @@ function TimelineNode({
       </div>
       <div
         className={cn(
-          "group flex min-h-14 min-w-0 flex-1 items-center justify-between gap-3 rounded-lg border border-border/60 bg-white/95 px-3 py-2 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-primary/35 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+          "group flex min-h-14 min-w-0 flex-1 items-start justify-between gap-2 rounded-lg border border-border/60 bg-white/95 px-2.5 py-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-colors hover:border-primary/35 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:items-center sm:gap-3 sm:px-3 sm:py-2",
           active && "border-primary/55 bg-white shadow-[inset_3px_0_0_var(--primary),0_1px_3px_rgba(15,23,42,0.08)]",
         )}
       >
@@ -553,7 +556,7 @@ function TimelineNode({
         <button
           type="button"
           onClick={() => onProviderClick(provider.id)}
-          className="flex min-w-0 flex-1 items-start justify-between gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          className="flex min-w-0 flex-1 flex-col items-start gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:flex-row sm:justify-between sm:gap-3"
         >
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-start gap-1">
@@ -597,7 +600,7 @@ function TimelineNode({
               ) : null}
             </span>
           </span>
-          <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+          <span className="flex max-w-full flex-wrap items-center justify-start gap-1.5 text-[11px] text-muted-foreground sm:shrink-0 sm:justify-end">
             {locationText ? (
               <span
                 title={`${tr.providers_city} / ${tr.providers_country}`}

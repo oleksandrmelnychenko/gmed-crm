@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
+import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import {
   useDebouncedRealtimeSubscription,
@@ -227,12 +228,15 @@ export function Topbar() {
             <PanelLeft className="size-[17px]" />
           </TopbarIconButton>
           <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
-          <div className="flex min-w-0 items-center gap-2 px-2">
+          <div className="flex min-w-0 items-center gap-2 px-1.5 sm:px-2">
             <span className="sr-only">{t.app_name}</span>
             <GmedWordmark className="h-6 w-auto shrink-0 text-[#04060c]" />
             <span
               aria-hidden="true"
-              className="self-end truncate text-[12px] font-semibold leading-none tracking-normal text-foreground"
+              className={cn(
+                "self-end truncate text-[12px] font-semibold leading-none tracking-normal text-foreground",
+                isPatientPortal && "hidden sm:inline",
+              )}
             >
               CONSOLE
             </span>
@@ -246,18 +250,22 @@ export function Topbar() {
         />
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-          <BuildReleaseWidget
-            onOpen={() => {
-              setNotifOpen(false);
-              setUsersOpen(false);
-            }}
-          />
+          {!isPatientPortal ? (
+            <BuildReleaseWidget
+              onOpen={() => {
+                setNotifOpen(false);
+                setUsersOpen(false);
+              }}
+            />
+          ) : null}
 
-          <RealtimeConnectionIndicator
-            status={realtimeConnection.status}
-            attempt={realtimeConnection.attempt}
-            translations={t}
-          />
+          {!isPatientPortal ? (
+            <RealtimeConnectionIndicator
+              status={realtimeConnection.status}
+              attempt={realtimeConnection.attempt}
+              translations={t}
+            />
+          ) : null}
 
           {/* Online users avatars */}
           {!isPatientPortal && onlineUsers.length > 0 && (

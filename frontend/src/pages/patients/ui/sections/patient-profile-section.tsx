@@ -11,7 +11,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { AdminInlineMetric } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Translations } from "@/lib/i18n";
@@ -127,6 +126,22 @@ function intakeDiscoverySourceLabel(value: string | null, t: Translations) {
   return labels[value] ?? humanizeFunctionalLabel(value);
 }
 
+function intakeFlowDisplay(value: string | null, t: Translations) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const german = t.lead_type_questionnaire === "Fragebogen";
+  const labels: Record<string, string> = {
+    eu: t.lead_option_location_eu,
+    germany: t.lead_option_location_germany,
+    eu_not_germany: t.lead_option_location_eu_not_germany,
+    outside_eu: t.lead_option_location_outside_eu,
+    medical: german ? "Medizinisch" : "Медицинский",
+    contact: german ? "Kontaktformular" : "Контактная форма",
+    standard: german ? "Standard" : "Стандартный",
+  };
+  return labels[normalized] ?? humanizeFunctionalLabel(value);
+}
+
 function selectedWorkTypeName(item: LeadOriginSelectedWorkType, lang: "de" | "ru") {
   const names = lang === "de"
     ? [item.nameDe, item.nameEn, item.nameRu, item.nameEs]
@@ -162,29 +177,21 @@ function ProfileDetailTile({
   return (
     <article
       className={cn(
-        "group relative min-h-[118px] overflow-hidden rounded-xl border border-border bg-white px-3.5 py-2.5 transition-colors hover:border-slate-300",
+        "group grid min-w-0 gap-2 border-b border-border/60 bg-white px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/20 sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center",
       )}
     >
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="min-w-0">
-          <span className="block h-px w-8 bg-border" />
-          <p className="mt-2.5 break-words text-sm font-semibold leading-5 text-foreground">
-            {label}
-          </p>
-        </div>
-        {children ? (
-          <div
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-lg bg-white",
-              done ? "text-emerald-700" : "text-amber-700",
-            )}
-          >
-            {children}
-          </div>
-        ) : null}
+      <div
+        className={cn(
+          "hidden size-7 shrink-0 items-center justify-center rounded-md sm:flex",
+          done ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
+        )}
+      >
+        {children}
       </div>
-      <div className="absolute bottom-2.5 left-3.5 right-3.5 flex items-center gap-2">
-        <span className="h-px min-w-6 flex-1 bg-border/70" />
+      <p className="min-w-0 break-words text-sm font-medium leading-5 text-foreground">
+        {label}
+      </p>
+      <div className="flex items-center justify-start sm:justify-end">
         <Badge
           variant="outline"
           className={cn(
@@ -204,19 +211,17 @@ function ProfileDetailTile({
 function ProfileSummaryCard({
   title,
   children,
-  contentClassName,
   className,
   action,
 }: {
   title: ReactNode;
   children: ReactNode;
-  contentClassName?: string;
   className?: string;
   action?: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-lg border border-border/70 bg-card p-3.5", className)}>
-      <div className="flex min-w-0 items-center justify-between gap-3">
+    <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">
@@ -225,7 +230,7 @@ function ProfileSummaryCard({
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className={cn("mt-2.5 grid gap-1", contentClassName)}>
+      <div className="divide-y divide-border/60">
         {children}
       </div>
     </section>
@@ -244,15 +249,14 @@ function ProfileSummaryLine({
   editLabel?: string;
 }) {
   return (
-    <div className="group relative flex min-w-0 items-center gap-2 rounded-lg px-2 py-1">
-      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
+    <div className="group relative grid min-w-0 gap-1.5 px-3.5 py-2.5 sm:grid-cols-[minmax(10rem,0.4fr)_minmax(0,1fr)_1.75rem] sm:items-center sm:gap-3">
+      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground sm:text-[13px]">
         {label}
       </span>
-      <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
       <span
         className={cn(
-          "min-w-0 max-w-[58%] break-words text-right text-sm font-semibold leading-snug text-foreground",
-          onEdit ? "pr-5" : undefined,
+          "min-w-0 break-words text-sm font-medium leading-snug text-foreground",
+          !onEdit && "sm:col-span-2",
         )}
       >
         {value}
@@ -262,7 +266,7 @@ function ProfileSummaryLine({
           type="button"
           onClick={onEdit}
           aria-label={editLabel}
-          className="absolute right-1 top-1/2 rounded-md p-1 text-muted-foreground/70 opacity-0 transition -translate-y-1/2 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="absolute right-2 top-1/2 rounded-md p-1 text-muted-foreground/70 opacity-0 transition -translate-y-1/2 hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 sm:static sm:translate-y-0"
         >
           <Pencil className="size-3.5" />
         </button>
@@ -405,16 +409,14 @@ function ProfileActionCard({
     <button
       type="button"
       disabled={disabled}
-      className="group relative min-h-[128px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 pb-12 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-slate-200 disabled:hover:bg-slate-50/80"
+      className="group grid w-full min-w-0 gap-2 border-b border-border/60 bg-white px-3.5 py-3 text-left transition-colors last:border-b-0 hover:bg-orange-50/40 disabled:cursor-not-allowed disabled:opacity-60 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)_2rem] sm:items-center"
       onClick={onClick}
     >
-      <div className="relative z-10">
-        <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
-        <p className="mt-1.5 text-xs leading-tight text-muted-foreground">
-          {description}
-        </p>
-      </div>
-      <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800 group-disabled:size-12 group-disabled:bg-orange-100 group-disabled:text-orange-700">
+      <h3 className="min-w-0 text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+      <p className="min-w-0 text-xs leading-5 text-muted-foreground">
+        {description}
+      </p>
+      <span className="flex size-8 items-center justify-center rounded-md bg-orange-50 text-orange-700 transition-colors group-hover:bg-orange-100 group-hover:text-orange-800">
         {busy ? (
           <LoaderCircle className="size-4 animate-spin" />
         ) : (
@@ -449,6 +451,7 @@ function ProfileRecordShell({
 type PatientProfileTabProps = {
   profileControls: {
     canCreateOrders: boolean;
+    canCreateTasks: boolean;
     canEditPatientProfile: boolean;
     canExportPatientCompliance: boolean;
     canOpenComplianceWorkspace: boolean;
@@ -512,6 +515,7 @@ function usePatientProfileTabContent({
 }: PatientProfileTabProps) {
   const {
     canCreateOrders,
+    canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
     canOpenComplianceWorkspace,
@@ -580,7 +584,7 @@ function usePatientProfileTabContent({
     .join(", ");
   const intakeSourceValue = [
     intakeSource ? leadSourceLabel(intakeSource, t) : null,
-    intakeFlow ? intakeFlow.replaceAll("_", " ") : null,
+    intakeFlowDisplay(intakeFlow, t),
   ].filter(Boolean).join(" · ");
   const intakeLocationValue = [
     locationDetailed
@@ -602,10 +606,9 @@ function usePatientProfileTabContent({
 
   return (
     <div className="space-y-5 mt-4 min-h-[400px]">
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className="space-y-3">
         <ProfileSummaryCard
           title={t.patient_profile_personal_data}
-          contentClassName="md:grid-cols-2"
         >
           <ProfileSummaryLine
             label={t.patients_nationality}
@@ -687,7 +690,6 @@ function usePatientProfileTabContent({
 
         <ProfileSummaryCard
           title={t.patient_profile_address}
-          contentClassName="md:grid-cols-2"
         >
           <ProfileSummaryLine
             label={t.patients_address_street}
@@ -729,8 +731,6 @@ function usePatientProfileTabContent({
         {hasIntakeProfile ? (
           <ProfileSummaryCard
             title={t.patient_profile_intake_data}
-            className="xl:col-span-2"
-            contentClassName="md:grid-cols-2 md:gap-x-5"
             action={leadOrigin.sourceLeadId ? (
               <Button
                 type="button"
@@ -890,26 +890,25 @@ function usePatientProfileTabContent({
                     <p className="px-2 pb-1 text-[11px] font-medium text-muted-foreground">
                       {profileLang === "de" ? "Ausgewählte Leistungsarten" : "Выбранные виды работ"}
                     </p>
-                    <div className="grid gap-1.5 md:grid-cols-2 md:gap-x-3">
+                    <div className="overflow-hidden rounded-md border border-border/60 bg-white">
                       {selectedWorkTypes.map((workType) => {
                         const priceRange = selectedWorkTypePriceRange(workType, profileLang);
                         return (
-                          <article key={workType.id} className="border-b border-border/60 px-2 py-2 last:border-b-0">
-                            <p className="break-words text-sm font-semibold leading-5 text-foreground">
+                          <article
+                            key={workType.id}
+                            className="grid min-w-0 gap-1.5 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+                          >
+                            <p className="min-w-0 break-words text-sm font-semibold leading-5 text-foreground">
                               {selectedWorkTypeName(workType, profileLang)}
                             </p>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                              {workType.durationHours != null ? (
-                                <span>
-                                  {profileLang === "de" ? "Dauer" : "Длительность"}: {selectedWorkTypeNumber(workType.durationHours, profileLang)} {profileLang === "de" ? "Std." : "ч"}
-                                </span>
-                              ) : null}
-                              {priceRange ? (
-                                <span className="font-mono font-medium tabular-nums text-foreground">
-                                  {priceRange}
-                                </span>
-                              ) : null}
-                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {workType.durationHours != null
+                                ? `${profileLang === "de" ? "Dauer" : "Длительность"}: ${selectedWorkTypeNumber(workType.durationHours, profileLang)} ${profileLang === "de" ? "Std." : "ч"}`
+                                : "—"}
+                            </span>
+                            <span className="font-mono text-xs font-medium tabular-nums text-foreground">
+                              {priceRange ?? "—"}
+                            </span>
                           </article>
                         );
                       })}
@@ -917,7 +916,7 @@ function usePatientProfileTabContent({
                   </div>
                 ) : null}
                 {leadOrigin.serviceRequests.length > 0 ? (
-                  <div className="mt-1 grid gap-1 md:grid-cols-2 md:gap-x-5">
+                  <div className="mt-1 divide-y divide-border/60">
                     {leadOrigin.serviceRequests.map((service) => (
                       <ProfileSummaryLine
                         key={service.value}
@@ -983,46 +982,57 @@ function usePatientProfileTabContent({
           ) : null
         }
       >
-        <div className="grid gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-3.5 pt-3.5 md:grid-cols-2 xl:grid-cols-4 [&>article:not(:last-child):not(:nth-child(4n))_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={ShieldCheck}
-            label={t.patient_profile_contract_status}
-            value={patientDetailStatusLabel(legalStatus.contractStatus)}
-            description={l("patients_contract_readiness")}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={CheckCircle2}
-            label={t.patient_profile_done}
-            value={`${legalStatusCompletion.completed}/${legalStatusCompletion.total}`}
-            description={l("patients_required_checks")}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={ClipboardCheck}
-            label={l("patients_compliance")}
-            value={legalStatus.complianceCompleted ? t.common_completed : t.common_pending}
-            description={l("patients_internal_approval")}
-            tone={legalStatus.complianceCompleted ? "emerald" : "amber"}
-          />
-          <AdminInlineMetric
-            icon={NotebookText}
-            label={t.patient_profile_notes}
-            value={legalStatus.notes ? l("patients_yes") : l("patients_no")}
-            description={l("patients_legal_note")}
-            tone="slate"
-          />
+        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+          {[
+            {
+              icon: ShieldCheck,
+              label: t.patient_profile_contract_status,
+              value: patientDetailStatusLabel(legalStatus.contractStatus),
+              description: l("patients_contract_readiness"),
+              iconClass: "bg-sky-50 text-sky-700",
+            },
+            {
+              icon: CheckCircle2,
+              label: t.patient_profile_done,
+              value: `${legalStatusCompletion.completed}/${legalStatusCompletion.total}`,
+              description: l("patients_required_checks"),
+              iconClass: "bg-emerald-50 text-emerald-700",
+            },
+            {
+              icon: ClipboardCheck,
+              label: l("patients_compliance"),
+              value: legalStatus.complianceCompleted ? t.common_completed : t.common_pending,
+              description: l("patients_internal_approval"),
+              iconClass: legalStatus.complianceCompleted
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-amber-50 text-amber-700",
+            },
+            {
+              icon: NotebookText,
+              label: t.patient_profile_notes,
+              value: legalStatus.notes ? l("patients_yes") : l("patients_no"),
+              description: l("patients_legal_note"),
+              iconClass: "bg-slate-100 text-slate-700",
+            },
+          ].map((metric) => {
+            const Icon = metric.icon;
+            return (
+              <div
+                key={String(metric.label)}
+                className="grid min-w-0 gap-2 border-b border-border/60 px-3 py-2.5 last:border-b-0 sm:grid-cols-[2rem_minmax(10rem,0.42fr)_minmax(8rem,0.3fr)_minmax(0,1fr)] sm:items-center"
+              >
+                <span className={cn("hidden size-7 items-center justify-center rounded-md sm:flex", metric.iconClass)}>
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="text-xs font-medium text-muted-foreground sm:text-[13px]">{metric.label}</span>
+                <span className="text-sm font-semibold text-foreground">{metric.value}</span>
+                <span className="text-xs leading-5 text-muted-foreground">{metric.description}</span>
+              </div>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-2" aria-hidden>
-          <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-          <span className="size-1.5 rounded-full bg-orange-400" />
-          <span className="size-1.5 rounded-full bg-orange-300" />
-          <span className="size-1.5 rounded-full bg-orange-200" />
-          <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-        </div>
-
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
           {legalStatusChecklist.map((item) => (
             <ProfileDetailTile
               key={item.key}
@@ -1053,20 +1063,19 @@ function usePatientProfileTabContent({
           </ProfileRecordShell>
         ) : null}
 
-        <div className="flex items-center gap-2" aria-hidden>
-          <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-          <span className="size-1.5 rounded-full bg-orange-400" />
-          <span className="size-1.5 rounded-full bg-orange-300" />
-          <span className="size-1.5 rounded-full bg-orange-200" />
-          <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-        </div>
-
-        <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
+        <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
           {canCreateOrders && id ? (
             <ProfileActionCard
               title={t.orders_create_title}
               description={t.orders_create_description}
               onClick={() => staffGo(`/orders?create=1&patient=${encodeURIComponent(id)}`)}
+            />
+          ) : null}
+          {canCreateTasks && id ? (
+            <ProfileActionCard
+              title={l("patients_create_task_for_this_patient")}
+              description={l("patients_create_internal_or_external_task_linked_to_this_patient")}
+              onClick={() => staffGo(`/task-manager?create=1&patient=${encodeURIComponent(id)}`)}
             />
           ) : null}
           {canExportPatientCompliance ? (
