@@ -38,7 +38,6 @@ import {
 
 const copy = {
   de: {
-    description: "Operative Details, Checkliste, Kommentare und unveränderlicher Verlauf",
     loading: "Aufgabe wird geladen",
     checklist: "Checkliste",
     addChecklist: "Checklistenpunkt hinzufügen",
@@ -83,7 +82,6 @@ const copy = {
     checklist_item_toggled: "Checklistenpunkt aktualisiert",
   },
   ru: {
-    description: "Операционные детали, чек-лист, комментарии и неизменяемая история",
     loading: "Загрузка задачи",
     checklist: "Чек-лист",
     addChecklist: "Добавить пункт",
@@ -317,7 +315,6 @@ export function ConciergeTaskDetailDialog({
           icon={ListChecks}
           tone="indigo"
           title={detail?.item.title ?? labels.loading}
-          description={labels.description}
           meta={detail ? <Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge> : undefined}
         />
         <ConciergeDialogBody>
