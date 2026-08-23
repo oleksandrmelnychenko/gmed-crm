@@ -251,6 +251,7 @@ function Input({
           readOnly={props.readOnly}
           format={DATETIME_LOCAL_FORMAT}
           ampm={false}
+          displayWeekNumber
           slotProps={{
             textField: sharedTextFieldProps,
           }}
@@ -308,6 +309,7 @@ function Input({
         disabled={disabled}
         readOnly={props.readOnly}
         format={DATE_FORMAT}
+        displayWeekNumber
         slotProps={{
           textField: sharedTextFieldProps,
         }}

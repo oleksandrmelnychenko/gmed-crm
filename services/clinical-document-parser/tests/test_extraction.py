@@ -20,6 +20,7 @@ from app.extraction import (
     _ocr_pil_image,
     _outcome_from_paddle_results,
     _outcome_from_tesseract_data,
+    _remove_table_rules,
     _run_tesseract,
     _scale_paddle_outcome,
     _select_ocr_languages,
@@ -473,6 +474,24 @@ class ExtractionLimitsTest(unittest.TestCase):
 
         self.assertEqual(outcome.text, strong.text)
         self.assertEqual(run.call_count, 2)
+
+    def test_table_rule_cleanup_preserves_short_content_strokes(self) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("L", (200, 120), "white")
+        draw = ImageDraw.Draw(image)
+        draw.line((10, 20, 190, 20), fill=0, width=1)
+        draw.line((40, 5, 40, 115), fill=0, width=1)
+        draw.rectangle((70, 60, 82, 72), fill=0)
+        cleaned, removed_rule_count = _remove_table_rules(image)
+        try:
+            self.assertGreaterEqual(removed_rule_count, 2)
+            self.assertEqual(cleaned.getpixel((100, 20)), 255)
+            self.assertEqual(cleaned.getpixel((40, 90)), 255)
+            self.assertEqual(cleaned.getpixel((76, 66)), 0)
+        finally:
+            cleaned.close()
+            image.close()
 
     def test_cyrillic_osd_selects_cyrillic_fallback_languages_first(self) -> None:
         rendered_page = FakeRenderedPage()

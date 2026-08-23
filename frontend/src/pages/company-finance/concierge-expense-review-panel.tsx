@@ -130,6 +130,7 @@ const textByLanguage = {
     contextLoading: "Загрузка финансового контекста…",
     contextFailed: "Не удалось загрузить финансовый контекст. Решение заблокировано.",
     receipt: "Чек",
+    noReceipt: "Подтверждающего документа нет",
     preview: "Открыть предпросмотр",
     previewLoading: "Загрузка чека…",
     previewUnavailable: "Для этого формата доступно только скачивание.",
@@ -245,6 +246,7 @@ const textByLanguage = {
     contextLoading: "Finanzkontext wird geladen…",
     contextFailed: "Der Finanzkontext konnte nicht geladen werden. Die Entscheidung ist gesperrt.",
     receipt: "Beleg",
+    noReceipt: "Kein Beleg vorhanden",
     preview: "Vorschau öffnen",
     previewLoading: "Beleg wird geladen…",
     previewUnavailable: "Für dieses Format ist nur der Download verfügbar.",
@@ -623,7 +625,8 @@ export function ConciergeExpenseReviewPanel({
   }
 
   async function loadReceiptPreview() {
-    if (!selected) return;
+    const receipt = selected?.receipt;
+    if (!selected || !receipt) return;
     const request = ++previewRequestRef.current;
     setPreviewBusy(true);
     setReceiptError(null);
@@ -638,8 +641,8 @@ export function ConciergeExpenseReviewPanel({
       previewUrlRef.current = url;
       setPreview({
         url,
-        contentType: result.contentType || selected.receipt.mime_type || "",
-        filename: result.filename || selected.receipt.original_filename || "receipt",
+        contentType: result.contentType || receipt.mime_type || "",
+        filename: result.filename || receipt.original_filename || "receipt",
       });
     } catch (error) {
       if (previewRequestRef.current === request) {
@@ -651,13 +654,14 @@ export function ConciergeExpenseReviewPanel({
   }
 
   async function downloadReceipt() {
-    if (!selected) return;
+    const receipt = selected?.receipt;
+    if (!selected || !receipt) return;
     setReceiptError(null);
     try {
       await downloadCompanyConciergeExpenseReceipt(
         selected.concierge_service_id,
         selected.id,
-        selected.receipt.original_filename || "receipt",
+        receipt.original_filename || "receipt",
       );
     } catch (error) {
       setReceiptError(error instanceof Error ? error.message : text.downloadFailed);
@@ -962,24 +966,31 @@ export function ConciergeExpenseReviewPanel({
                 <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(20rem,.95fr)]">
                   <div className="min-w-0 space-y-4">
                     <section className="min-w-0 rounded-lg border border-border/70 bg-muted/20 p-3">
-                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0">
+                      {selected.receipt ? (
+                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-semibold">{text.receipt}</h3>
+                            <p className="truncate text-xs text-muted-foreground" title={selected.receipt.original_filename ?? undefined}>
+                              {selected.receipt.original_filename || "receipt"} · {text.fileSize}: {formatFileSize(selected.receipt.file_size)}
+                            </p>
+                          </div>
+                          <div className="flex w-full gap-2 sm:w-auto">
+                            <Button type="button" size="sm" variant="outline" className="min-w-0 flex-1 sm:flex-none" disabled={previewBusy} onClick={() => void loadReceiptPreview()}>
+                              {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+                              {text.preview}
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" className="min-w-0 flex-1 sm:flex-none" onClick={() => void downloadReceipt()}>
+                              <Download className="size-4" />
+                              {text.download}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
                           <h3 className="text-sm font-semibold">{text.receipt}</h3>
-                          <p className="truncate text-xs text-muted-foreground" title={selected.receipt.original_filename ?? undefined}>
-                            {selected.receipt.original_filename || "receipt"} · {text.fileSize}: {formatFileSize(selected.receipt.file_size)}
-                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">{text.noReceipt}</p>
                         </div>
-                        <div className="flex w-full gap-2 sm:w-auto">
-                          <Button type="button" size="sm" variant="outline" className="min-w-0 flex-1 sm:flex-none" disabled={previewBusy} onClick={() => void loadReceiptPreview()}>
-                            {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-                            {text.preview}
-                          </Button>
-                          <Button type="button" size="sm" variant="outline" className="min-w-0 flex-1 sm:flex-none" onClick={() => void downloadReceipt()}>
-                            <Download className="size-4" />
-                            {text.download}
-                          </Button>
-                        </div>
-                      </div>
+                      )}
                       {receiptError ? <div className="mt-3"><ShellBanner tone="error">{receiptError}</ShellBanner></div> : null}
                       {preview ? (
                         <div className="mt-3 min-w-0 overflow-hidden rounded-md border border-border bg-background">

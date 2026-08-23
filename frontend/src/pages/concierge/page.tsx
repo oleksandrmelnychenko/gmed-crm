@@ -717,7 +717,7 @@ export function ConciergeWorkspacePage() {
   }
 
   async function downloadExpenseReceipt(item: ConciergeExpenseItem) {
-    if (!expenseService) return;
+    if (!expenseService || !item.receipt) return;
     setExpenseError("");
     try {
       await downloadConciergeExpenseReceipt(

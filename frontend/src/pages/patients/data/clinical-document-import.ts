@@ -320,6 +320,13 @@ export function retryClinicalDocumentImport(patientId: string, importId: string)
   );
 }
 
+export function rescanClinicalDocumentImport(patientId: string, importId: string) {
+  return apiFetch<ClinicalDocumentImport>(
+    `/patients/${patientId}/clinical-document-imports/${importId}/rescan`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
 export function persistClinicalDocumentMedication(
   patientId: string,
   importId: string,

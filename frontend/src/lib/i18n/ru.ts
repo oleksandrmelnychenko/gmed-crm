@@ -1070,7 +1070,7 @@ export const ru = {
   appt_in_progress: "Выполняется",
   appt_completed: "Завершён",
   appt_cancelled: "Отменён",
-  cal_weekdays: ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"] as const,
+  cal_weekdays: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const,
   cal_months: [
     "Январь",
     "Февраль",

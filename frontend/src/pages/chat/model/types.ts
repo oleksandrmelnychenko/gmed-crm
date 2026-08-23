@@ -27,6 +27,10 @@ export interface Message {
   is_read: boolean;
   read_at: string | null;
   created_at: string;
+  expires_at?: string | null;
+  client_message_id?: string | null;
+  delivery_state?: "sending" | "failed";
+  retry_expires_in_seconds?: number;
   attachment_filename: string | null;
   attachment_mime: string | null;
   attachment_size: number | null;
@@ -46,7 +50,7 @@ export interface UserItem {
 }
 
 export interface ChatStreamEvent {
-  type: "message_created" | "conversation_read";
+  type: "message_created" | "message_deleted" | "conversation_read";
   user_id: string;
   peer_id: string;
   message_id?: string | null;

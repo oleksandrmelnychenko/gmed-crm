@@ -95,6 +95,44 @@ async fn multipart_request(
     )
 }
 
+async fn multipart_fields_request(
+    app: &axum::Router,
+    path: &str,
+    bearer: &str,
+    fields: &[(String, String)],
+) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-expense-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
 async fn seed_user(pool: &PgPool, role: &str, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO users (email, password_hash, name, role)
@@ -235,6 +273,48 @@ async fn submit_fixture_expense(
         &pdf_receipt(receipt_tag),
     )
     .await
+}
+
+#[tokio::test]
+async fn assigned_concierge_can_submit_expense_without_document_when_declared_missing() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("missing-{tag}")).await;
+    let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    let bearer = auth_header(concierge_id, "concierge");
+    let mut fields = submission_fields(
+        Uuid::new_v4(),
+        "unpaid",
+        true,
+        Utc::now().date_naive() - Duration::days(1),
+    );
+    fields.push(("document_missing".to_string(), "true".to_string()));
+
+    let (status, body) = multipart_fields_request(
+        &context.app,
+        &format!("/api/v1/concierge-services/{service_id}/expenses"),
+        &bearer,
+        &fields,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["item"]["document_missing"], json!(true));
+    assert!(body["item"]["receipt"].is_null());
+    let expense_id = Uuid::parse_str(body["item"]["id"].as_str().unwrap()).unwrap();
+    let stored = sqlx::query(
+        r#"SELECT receipt_document_id, receipt_sha256
+           FROM concierge_expense_submissions WHERE id = $1"#,
+    )
+    .bind(expense_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert!(stored.try_get::<Option<Uuid>, _>("receipt_document_id").unwrap().is_none());
+    assert!(stored.try_get::<Option<String>, _>("receipt_sha256").unwrap().is_none());
 }
 
 #[tokio::test]

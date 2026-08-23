@@ -16,6 +16,10 @@ import {
   type RefObject,
 } from "react";
 
+import {
+  CALENDAR_FIRST_DAY,
+  CALENDAR_WEEK_NUMBER_CALCULATION,
+} from "@/lib/calendar-standards";
 import { AppointmentCalendarQuickActionsMenu } from "@/pages/appointments/ui/scheduler/appointment-calendar-quick-actions-menu";
 import type {
   AppointmentListItem,
@@ -322,7 +326,10 @@ export function DesktopCalendarSurface({
           headerToolbar={headerToolbar}
           buttonText={buttonText}
           height="auto"
-          firstDay={1}
+          firstDay={CALENDAR_FIRST_DAY}
+          weekNumbers
+          weekNumberCalculation={CALENDAR_WEEK_NUMBER_CALCULATION}
+          weekText={lang === "de" ? "KW" : "Нед."}
           slotDuration="00:30:00"
           slotMinTime="06:00:00"
           slotMaxTime="22:00:00"

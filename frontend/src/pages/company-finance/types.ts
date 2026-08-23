@@ -316,7 +316,8 @@ export type CompanyConciergeExpenseItem = {
     mime_type: string | null;
     file_size: number | null;
     download_url: string;
-  };
+  } | null;
+  document_missing: boolean;
   external_invoice: {
     id: string;
     status: string | null;

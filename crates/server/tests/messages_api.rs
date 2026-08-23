@@ -931,6 +931,195 @@ async fn send_long_message() {
 }
 
 #[tokio::test]
+async fn retry_with_same_client_message_id_is_idempotent() {
+    let Some(app) = test_app().await else { return };
+    let sender = seed_user(app.pool(), &unique_tag("messages-idempotent-a"), "ceo").await;
+    let peer = seed_user(app.pool(), &unique_tag("messages-idempotent-b"), "billing").await;
+    let auth = auth_header_with_id("ceo", sender);
+    let client_message_id = Uuid::new_v4();
+
+    for attempt in 0..2 {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/messages/{peer}"),
+            &auth,
+            Some(json!({
+                "message": "sent once",
+                "client_message_id": client_message_id,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["duplicate"], attempt == 1);
+    }
+
+    let (_, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{peer}"),
+        &auth,
+        None,
+    )
+    .await;
+    let matching = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["client_message_id"] == client_message_id.to_string())
+        .count();
+    assert_eq!(matching, 1);
+}
+
+#[tokio::test]
+async fn sender_can_delete_own_message_for_both_participants() {
+    let Some(app) = test_app().await else { return };
+    let sender = seed_user(app.pool(), &unique_tag("messages-delete-a"), "ceo").await;
+    let peer = seed_user(app.pool(), &unique_tag("messages-delete-b"), "billing").await;
+    let sender_auth = auth_header_with_id("ceo", sender);
+    let peer_auth = auth_header_with_id("billing", peer);
+
+    let (_, sent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{peer}"),
+        &sender_auth,
+        Some(json!({"message": "remove me", "client_message_id": Uuid::new_v4()})),
+    )
+    .await;
+    let message_id = Uuid::parse_str(sent["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/messages/{peer}/{message_id}"),
+        &sender_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (_, sender_view) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{peer}"),
+        &sender_auth,
+        None,
+    )
+    .await;
+    let (_, peer_view) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{sender}"),
+        &peer_auth,
+        None,
+    )
+    .await;
+    assert!(sender_view.as_array().unwrap().is_empty());
+    assert!(peer_view.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn recipient_cannot_delete_message_from_sender() {
+    let Some(app) = test_app().await else { return };
+    let sender = seed_user(app.pool(), &unique_tag("messages-delete-owner"), "ceo").await;
+    let peer = seed_user(
+        app.pool(),
+        &unique_tag("messages-delete-recipient"),
+        "billing",
+    )
+    .await;
+    let sender_auth = auth_header_with_id("ceo", sender);
+    let peer_auth = auth_header_with_id("billing", peer);
+
+    let (_, sent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{peer}"),
+        &sender_auth,
+        Some(json!({"message": "owner only", "client_message_id": Uuid::new_v4()})),
+    )
+    .await;
+    let message_id = Uuid::parse_str(sent["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/messages/{sender}/{message_id}"),
+        &peer_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (_, conversation) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{sender}"),
+        &peer_auth,
+        None,
+    )
+    .await;
+    assert!(
+        conversation
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["id"] == message_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn expired_message_is_hidden_and_not_unread() {
+    let Some(app) = test_app().await else { return };
+    let sender = seed_user(app.pool(), &unique_tag("messages-expire-a"), "ceo").await;
+    let peer = seed_user(app.pool(), &unique_tag("messages-expire-b"), "billing").await;
+    let sender_auth = auth_header_with_id("ceo", sender);
+    let peer_auth = auth_header_with_id("billing", peer);
+
+    let (status, sent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{peer}"),
+        &sender_auth,
+        Some(json!({
+            "message": "temporary",
+            "client_message_id": Uuid::new_v4(),
+            "expires_in_seconds": 60,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let message_id = Uuid::parse_str(sent["id"].as_str().unwrap()).unwrap();
+    sqlx::query(
+        "UPDATE direct_messages SET expires_at = now() - interval '1 second' WHERE id = $1",
+    )
+    .bind(message_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+
+    let (_, conversation) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/{sender}"),
+        &peer_auth,
+        None,
+    )
+    .await;
+    let (_, unread) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/unread-total",
+        &peer_auth,
+        None,
+    )
+    .await;
+    assert!(conversation.as_array().unwrap().is_empty());
+    assert_eq!(unread["count"], 0);
+}
+
+#[tokio::test]
 async fn send_message_over_limit_is_rejected() {
     let Some(app) = test_app().await else { return };
     let peer = seed_user(app.pool(), &unique_tag("messages-too-long-peer"), "billing").await;

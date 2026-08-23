@@ -14,6 +14,8 @@ import {
 } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import "dayjs/locale/de";
+import "dayjs/locale/ru";
 import { AuthProvider } from "@/lib/auth";
 import { RealtimeProvider } from "@/lib/realtime";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -447,8 +449,10 @@ function StaffRouteRedirect({ to }: { to: string }) {
 }
 
 export default function App() {
+  const { lang } = useLang();
+
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs}>
+    <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale={lang}>
       <BrowserRouter>
         <AuthProvider>
           <RealtimeProvider>

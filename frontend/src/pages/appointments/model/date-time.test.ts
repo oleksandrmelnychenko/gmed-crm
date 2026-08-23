@@ -6,6 +6,8 @@ import {
   serializeAppointmentTimes,
   inclusiveCalendarVisibleRange,
   initialCalendarVisibleRange,
+  endOfWeekInput,
+  startOfWeekInput,
 } from "./date-time";
 
 describe("appointment time serialization", () => {
@@ -53,5 +55,10 @@ describe("appointment calendar date ranges", () => {
       dateFrom: "2026-07-01",
       dateTo: "2026-07-31",
     });
+  });
+
+  it("uses Monday through Sunday for every weekly range", () => {
+    expect(startOfWeekInput("2026-08-23")).toBe("2026-08-17");
+    expect(endOfWeekInput("2026-08-23")).toBe("2026-08-23");
   });
 });

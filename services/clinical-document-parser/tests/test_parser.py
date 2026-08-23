@@ -333,6 +333,56 @@ Nierenfunktion\nGeschätzte GFR\t> 60\tml/min\t(> 60)
     assert rows[3].source.page == 1
 
 
+def test_dated_normwert_laboratory_form_creates_one_candidate_per_row() -> None:
+    text = """
+Testbezeichnung
+13.02.23
+Normwert
+Blutbild
+PTT (part. Thromboplastinzeit) 24.4 - 32.4 (sec)\t24.5
+Erythrozyten\t4.54 - 5.77 (Mio./ul)\t5.02
+Leukozyten\t3.9 - 9.8 (Tsd./ul)\t5.3
+Differential Blutbild absolut
+neutrophile Granulozyten\t1.8 - 6.2 (Tsd./ul)\t3.370
+Ausdru:kvom 15.02.2023
+\f
+Testbezeichnung
+13.0223
+Normwert
+Eiweiß-Elektrophorese
+Cholesterin, Gesamt-\t<= 200 (mg/dl)\t209 (+)
+HDL-Cholesterin\t>= 40 (mg/dl)\t39 (-)
+Ausdruck vom 15.02.2023
+"""
+
+    draft = parse_clinical_text(text)
+    rows = [item for item in draft.candidates if item.target == "lab_result"]
+
+    assert draft.document_type == "laboratory_report"
+    assert len(rows) == 6
+    assert {row.normalized["measured_on"] for row in rows} == {"2023-02-13"}
+    erythrocytes = next(row for row in rows if row.normalized["analyte_name"] == "Erythrozyten")
+    assert erythrocytes.normalized["numeric_result"] == 5.02
+    assert erythrocytes.normalized["reference_low"] == 4.54
+    assert erythrocytes.normalized["reference_high"] == 5.77
+    assert erythrocytes.normalized["unit"] == "Mio./ul"
+    assert erythrocytes.normalized["panel"] == "Blutbild"
+    neutrophils = next(
+        row for row in rows if row.normalized["analyte_name"] == "neutrophile Granulozyten"
+    )
+    assert neutrophils.normalized["panel"] == "Differential Blutbild absolut"
+    cholesterol = next(
+        row for row in rows if row.normalized["analyte_name"] == "Cholesterin, Gesamt"
+    )
+    assert cholesterol.normalized["abnormal_flag"] == "high"
+    hdl = next(row for row in rows if row.normalized["analyte_name"] == "HDL-Cholesterin")
+    assert hdl.normalized["abnormal_flag"] == "low"
+    ptt = next(row for row in rows if row.normalized["analyte_name"].startswith("PTT"))
+    assert ptt.normalized["result_text"] == "24.5"
+    assert ptt.normalized["reference_text"] == "24.4 - 32.4"
+    assert ptt.normalized["unit"] == "sec"
+
+
 def test_laboratory_report_attributes_explicit_organisation_to_every_observation() -> None:
     text = """
 SYNLAB Medizinisches Versorgungszentrum Berlin GmbH

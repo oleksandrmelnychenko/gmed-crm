@@ -535,6 +535,8 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
     oriented = None
     deskewed = None
     thresholded = None
+    table_cleaned = None
+    table_layout_selected = False
     try:
         page_deadline = min(deadline, time.monotonic() + OCR_PAGE_TIMEOUT_SECONDS)
         try:
@@ -578,6 +580,39 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
 
         if (
             OCR_MULTIPASS_ENABLED
+            and primary.engine == "tesseract"
+            and time.monotonic() < page_deadline
+        ):
+            try:
+                table_cleaned, removed_rule_count = _remove_table_rules(deskewed)
+                if removed_rule_count >= 4:
+                    table_outcome = _run_tesseract(
+                        table_cleaned,
+                        primary_languages,
+                        page_deadline,
+                    )
+                    table_outcome = _replace_ocr_geometry(
+                        table_outcome, rotation, deskew_angle
+                    )
+                    primary_table_score = (
+                        primary.word_count + primary.text.count("\t") * 2
+                    )
+                    alternate_table_score = (
+                        table_outcome.word_count + table_outcome.text.count("\t") * 2
+                    )
+                    if (
+                        alternate_table_score > primary_table_score * 1.15
+                        and table_outcome.combined_quality
+                        >= primary.combined_quality - 0.12
+                    ):
+                        primary = table_outcome
+                        table_layout_selected = True
+            except Exception:
+                LOGGER.warning("Ruled-table OCR preprocessing failed", exc_info=False)
+
+        if (
+            OCR_MULTIPASS_ENABLED
+            and not table_layout_selected
             and _should_retry_preprocessing(primary)
             and time.monotonic() < page_deadline
         ):
@@ -606,7 +641,7 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
         return primary
     finally:
         closed_resources: set[int] = set()
-        for resource in (thresholded, deskewed, oriented, prepared):
+        for resource in (table_cleaned, thresholded, deskewed, oriented, prepared):
             if resource is None or resource is image or id(resource) in closed_resources:
                 continue
             closed_resources.add(id(resource))
@@ -670,6 +705,51 @@ def _binarize_image(image: object) -> object:
                 best_variance = variance
                 threshold = value
         return grayscale.point(lambda pixel: 255 if pixel > threshold else 0)
+    finally:
+        grayscale.close()
+
+
+def _remove_table_rules(image: object) -> tuple[object, int]:
+    """Remove long table borders while preserving text and short glyph strokes.
+
+    Scanned laboratory forms often contain continuous horizontal and vertical
+    rules. Tesseract otherwise treats the bordered cells as separate graphics
+    and can omit the value column entirely. The thresholds deliberately target
+    only lines spanning a substantial part of the page.
+    """
+
+    from PIL import ImageDraw, ImageOps
+
+    grayscale = ImageOps.grayscale(image)  # type: ignore[arg-type]
+    cleaned = grayscale.copy()
+    try:
+        width, height = grayscale.size
+        pixels = grayscale.load()
+        if width < 1 or height < 1 or pixels is None:
+            return cleaned, 0
+
+        dark_threshold = 180
+        horizontal_min = max(1, round(width * 0.35))
+        vertical_min = max(1, round(height * 0.35))
+        horizontal_rows = [
+            y
+            for y in range(height)
+            if sum(1 for x in range(width) if pixels[x, y] < dark_threshold)
+            >= horizontal_min
+        ]
+        vertical_columns = [
+            x
+            for x in range(width)
+            if sum(1 for y in range(height) if pixels[x, y] < dark_threshold)
+            >= vertical_min
+        ]
+
+        draw = ImageDraw.Draw(cleaned)
+        for y in horizontal_rows:
+            draw.line((0, y, width - 1, y), fill=255, width=3)
+        for x in vertical_columns:
+            draw.line((x, 0, x, height - 1), fill=255, width=3)
+        return cleaned, len(horizontal_rows) + len(vertical_columns)
     finally:
         grayscale.close()
 
@@ -1247,7 +1327,13 @@ def _paddle_block_separator(
     return "\n\n" if gap > typical_height * 1.5 else "\n"
 
 
-def _run_tesseract(image: object, languages: str, deadline: float) -> _OcrOutcome:
+def _run_tesseract(
+    image: object,
+    languages: str,
+    deadline: float,
+    *,
+    page_segmentation_mode: int = 3,
+) -> _OcrOutcome:
     import pytesseract
 
     remaining = deadline - time.monotonic()
@@ -1261,7 +1347,10 @@ def _run_tesseract(image: object, languages: str, deadline: float) -> _OcrOutcom
             data = image_to_data(
                 image,
                 lang=languages,
-                config="--oem 1 --psm 3 -c preserve_interword_spaces=1",
+                config=(
+                    f"--oem 1 --psm {page_segmentation_mode} "
+                    "-c preserve_interword_spaces=1"
+                ),
                 output_type=output,
                 timeout=timeout,
             )

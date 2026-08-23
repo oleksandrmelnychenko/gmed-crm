@@ -343,6 +343,45 @@ async fn patient_medication_requires_active_ingredient_but_allows_no_trade_name(
 }
 
 #[tokio::test]
+async fn ceo_can_rescan_review_ready_import_and_clear_previous_draft() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-import-rescan");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "rescan-med", &tag).await;
+    sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET document_type = 'laboratory_report', source_language = 'de',
+               parser_version = 'old-parser', error_message = 'old warning'
+           WHERE id = $1"#,
+    )
+    .bind(import_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}/rescan"),
+        &auth_header_for(admin_id, "ceo"),
+        Some(json!({})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["status"], "queued");
+    assert_eq!(body["draft"], json!({ "candidates": [], "warnings": [] }));
+    assert!(body["reviewed_draft"].is_null());
+    assert!(body["document_type"].is_null());
+    assert!(body["source_language"].is_null());
+    assert!(body["parser_version"].is_null());
+    assert!(body["error_message"].is_null());
+}
+
+#[tokio::test]
 async fn clinical_import_prepare_freezes_selection_country_and_blocks_live_writes_before_it() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

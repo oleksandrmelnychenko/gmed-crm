@@ -37,9 +37,15 @@ import {
   type ConciergeTask,
   type ConciergeTaskFilters,
 } from "./model";
+import {
+  isoWeekNumber,
+  taskCalendarDays,
+  taskCalendarWeeks,
+  type TaskCalendarScale,
+} from "./task-calendar";
 
 type TaskView = "board" | "list" | "calendar";
-type CalendarScale = "day" | "week" | "month";
+type CalendarScale = TaskCalendarScale;
 
 const copy = {
   de: {
@@ -88,6 +94,7 @@ const copy = {
     moveTo: "Status ändern",
     unplanned: "Ohne Termin",
     more: "weitere",
+    showLess: "Weniger anzeigen",
     patient: "Patient",
     provider: "Anbieter",
     activeTasks: "Aktiv",
@@ -96,6 +103,7 @@ const copy = {
     archive: "Archivieren",
     restore: "Wiederherstellen",
     archived: "Archiviert",
+    calendarWeekShort: "KW",
   },
   ru: {
     title: "Менеджер задач",
@@ -143,6 +151,7 @@ const copy = {
     moveTo: "Изменить статус",
     unplanned: "Без даты",
     more: "ещё",
+    showLess: "Свернуть",
     patient: "Пациент",
     provider: "Провайдер",
     activeTasks: "Активные",
@@ -151,6 +160,7 @@ const copy = {
     archive: "В архив",
     restore: "Восстановить",
     archived: "В архиве",
+    calendarWeekShort: "Нед.",
   },
 } as const;
 
@@ -161,32 +171,6 @@ function dateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function addDays(date: Date, amount: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + amount);
-  return next;
-}
-
-function startOfWeek(date: Date) {
-  const day = (date.getDay() + 6) % 7;
-  return addDays(startOfDay(date), -day);
-}
-
-function calendarDays(scale: CalendarScale, focus: Date) {
-  if (scale === "day") return [startOfDay(focus)];
-  if (scale === "week") {
-    const start = startOfWeek(focus);
-    return Array.from({ length: 7 }, (_, index) => addDays(start, index));
-  }
-  const first = new Date(focus.getFullYear(), focus.getMonth(), 1);
-  const start = startOfWeek(first);
-  return Array.from({ length: 42 }, (_, index) => addDays(start, index));
 }
 
 function formatDateTime(value: Date | null, lang: Lang) {
@@ -353,12 +337,20 @@ export function ConciergeTaskManager({
   const [view, setView] = useState<TaskView>("board");
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
+  const [expandedCalendarDays, setExpandedCalendarDays] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [clock, setClock] = useState(() => Date.now());
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
-  const days = useMemo(() => calendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
+  const days = useMemo(() => taskCalendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
+  const calendarWeeks = useMemo(() => taskCalendarWeeks(days), [days]);
+  const calendarLocale = lang === "de" ? "de-DE" : "ru-RU";
+  const weekdayLabels = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(calendarLocale, { weekday: "short" }).format(new Date(2026, 0, 5 + index)));
+  }, [calendarLocale]);
   const visibleStatuses = filters.archive === "archived"
     ? statuses.filter((status) => status === "completed" || status === "cancelled")
     : statuses;
@@ -383,6 +375,15 @@ export function ConciergeTaskManager({
     if (calendarScale === "month") next.setMonth(next.getMonth() + direction);
     else next.setDate(next.getDate() + direction * (calendarScale === "week" ? 7 : 1));
     setFocusDate(next);
+  }
+
+  function toggleCalendarDay(key: string) {
+    setExpandedCalendarDays((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
@@ -433,35 +434,82 @@ export function ConciergeTaskManager({
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
             <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
-            <h3 className="text-sm font-semibold">{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric" }).format(focusDate)}</h3>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="rounded-md tabular-nums">{labels.calendarWeekShort} {isoWeekNumber(focusDate)}</Badge>
+              <h3 className="text-sm font-semibold">{new Intl.DateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>
+            </div>
             <div className="flex gap-1">{(["day", "week", "month"] as const).map((scale) => <Button key={scale} type="button" size="sm" variant={calendarScale === scale ? "secondary" : "ghost"} className="h-8 text-xs" onClick={() => setCalendarScale(scale)}>{labels[scale]}</Button>)}</div>
           </div>
           <div className="overflow-x-auto">
-            <div className={cn("grid", calendarScale === "day" ? "grid-cols-1" : "min-w-[700px] grid-cols-7")}>
-              {days.map((day) => {
-                const rows = tasksByDay.get(dateKey(day)) ?? [];
-                const visibleLimit = calendarScale === "month" ? 3 : 12;
-                const hiddenCount = Math.max(0, rows.length - visibleLimit);
-                const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
-                return (
-                  <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5", outsideMonth && "bg-muted/30 text-muted-foreground")}>
-                    <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                      {new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { weekday: calendarScale === "month" ? undefined : "short", day: "2-digit", month: calendarScale === "day" ? "long" : undefined }).format(day)}
-                    </button>
-                    <div className="space-y-1">
-                      {rows.slice(0, visibleLimit).map((task) => (
-                        <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
-                      ))}
-                      {hiddenCount > 0 ? (
-                        <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" onClick={() => setView("list")}>
-                          +{hiddenCount} {labels.more}
-                        </button>
-                      ) : null}
+            {calendarScale === "day" ? (
+              <div className="grid grid-cols-1">
+                {days.map((day) => {
+                  const key = dateKey(day);
+                  const rows = tasksByDay.get(key) ?? [];
+                  const visibleLimit = 12;
+                  const hiddenCount = Math.max(0, rows.length - visibleLimit);
+                  const expanded = expandedCalendarDays.has(key);
+                  const visibleRows = expanded ? rows : rows.slice(0, visibleLimit);
+                  return (
+                    <div key={day.toISOString()} className="min-h-28 border-b p-1.5">
+                      <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
+                        {new Intl.DateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
+                      </button>
+                      <div className="space-y-1">
+                        {visibleRows.map((task) => (
+                          <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
+                        ))}
+                        {hiddenCount > 0 ? (
+                          <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>
+                            {expanded ? labels.showLess : `+${hiddenCount} ${labels.more}`}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="min-w-[760px]">
+                <div className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b bg-muted/25 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="flex items-center justify-center border-r px-1 py-2">{labels.calendarWeekShort}</div>
+                  {weekdayLabels.map((label) => <div key={label} className="border-r px-2 py-2 text-center last:border-r-0">{label}</div>)}
+                </div>
+                {calendarWeeks.map((week) => (
+                  <div key={week[0]?.toISOString()} className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))]">
+                    <div className="flex min-h-28 items-start justify-center border-b border-r bg-muted/20 px-1 py-2 text-xs font-semibold tabular-nums text-muted-foreground">
+                      {labels.calendarWeekShort} {isoWeekNumber(week[0] ?? focusDate)}
+                    </div>
+                    {week.map((day) => {
+                      const key = dateKey(day);
+                      const rows = tasksByDay.get(key) ?? [];
+                      const visibleLimit = calendarScale === "month" ? 3 : 12;
+                      const hiddenCount = Math.max(0, rows.length - visibleLimit);
+                      const expanded = expandedCalendarDays.has(key);
+                      const visibleRows = expanded ? rows : rows.slice(0, visibleLimit);
+                      const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
+                      return (
+                        <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5 last:border-r-0", outsideMonth && "bg-muted/30 text-muted-foreground")}>
+                          <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
+                            {new Intl.DateTimeFormat(calendarLocale, { day: "2-digit" }).format(day)}
+                          </button>
+                          <div className="space-y-1">
+                            {visibleRows.map((task) => (
+                              <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
+                            ))}
+                            {hiddenCount > 0 ? (
+                              <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>
+                                {expanded ? labels.showLess : `+${hiddenCount} ${labels.more}`}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       ) : null}

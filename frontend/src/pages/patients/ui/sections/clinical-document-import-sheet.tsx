@@ -46,6 +46,7 @@ import {
   fetchClinicalDocumentImport,
   fetchClinicalDocumentImports,
   prepareClinicalDocumentImport,
+  rescanClinicalDocumentImport,
   retryClinicalDocumentImport,
   type ClinicalDocumentImport,
   type ClinicalDocumentImportCandidate,
@@ -1375,6 +1376,62 @@ export function ClinicalDocumentImportSheet({
     }
   }
 
+  async function rescan() {
+    if (!documentImport) return;
+    setBusy(true);
+    try {
+      const rescanned = await rescanClinicalDocumentImport(patientId, documentImport.id);
+      setDocumentImport(rescanned);
+      setCandidates([]);
+      setActiveCandidateId(null);
+      setActiveTab("all");
+      setSourceCountry("");
+      setPatientIdentityConfirmed(false);
+      void refreshHistory(true);
+      toast.success(tx("Документ отправлен на повторное сканирование", "Dokument wird erneut gescannt"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : tx("Не удалось пересканировать документ", "Dokument konnte nicht erneut gescannt werden"),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rescanHistoryItem(item: ClinicalDocumentImportSummary) {
+    if (!["review_required", "failed", "applied"].includes(item.status)) return;
+    setHistoryBusyId(item.id);
+    try {
+      const rescanned = item.status === "applied"
+        ? await createClinicalDocumentImport(patientId, item.document_id)
+        : await rescanClinicalDocumentImport(patientId, item.id);
+      setDocumentImport(rescanned);
+      setCandidates([]);
+      setActiveCandidateId(null);
+      setActiveTab("all");
+      setSourceCountry("");
+      setPatientIdentityConfirmed(false);
+      await loadPreview(rescanned.document_id);
+      await refreshHistory(true);
+      toast.success(
+        tx(
+          "Документ отправлен на повторное сканирование",
+          "Dokument wird erneut gescannt",
+        ),
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : tx("Не удалось пересканировать документ", "Dokument konnte nicht erneut gescannt werden"),
+      );
+    } finally {
+      setHistoryBusyId(null);
+    }
+  }
+
   async function apply() {
     if (!documentImport) return;
     if (documentImport.status === "review_required" && medicationReview.unresolved > 0) {
@@ -2023,6 +2080,15 @@ export function ClinicalDocumentImportSheet({
               <span className="hidden truncate text-xs text-muted-foreground sm:block">
                 {documentImport.document_name}
               </span>
+              {documentImport.status === "review_required" ? (
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={rescan}>
+                  {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+                  <span className="hidden sm:inline">
+                    {tx("Пересканировать документ", "Dokument neu scannen")}
+                  </span>
+                  <span className="sm:hidden">{tx("Пересканировать", "Neu scannen")}</span>
+                </Button>
+              ) : null}
               <Badge variant="outline" className={importStatusTone[documentImport.status]}>
                 <ImportStatusGlyph status={documentImport.status} />
                 {importStatusLabels[documentImport.status][lang === "de" ? "de" : "ru"]}
@@ -2202,6 +2268,27 @@ export function ClinicalDocumentImportSheet({
                               </div>
                               <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                             </button>
+                            {["review_required", "failed", "applied"].includes(item.status) ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-orange-700 hover:bg-orange-50 hover:text-orange-800"
+                                disabled={deleteBusy || historyBusyId === item.id}
+                                onClick={() => void rescanHistoryItem(item)}
+                                aria-label={tx("Пересканировать документ", "Dokument neu scannen")}
+                                title={
+                                  item.status === "applied"
+                                    ? tx(
+                                        "Пересканировать документ, сохранив предыдущий импорт",
+                                        "Dokument neu scannen und vorherigen Import behalten",
+                                      )
+                                    : tx("Пересканировать документ", "Dokument neu scannen")
+                                }
+                              >
+                                <RotateCcw className={cn("size-4", historyBusyId === item.id && "animate-spin")} />
+                              </Button>
+                            ) : null}
                             <Button
                               type="button"
                               size="icon-sm"

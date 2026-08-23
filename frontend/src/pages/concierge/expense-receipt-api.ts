@@ -27,8 +27,9 @@ function expenseFormData(input: ConciergeExpenseSubmitInput) {
   form.set("currency", input.currency);
   form.set("paid_by", input.paidBy);
   form.set("service_delivered", String(input.serviceDelivered));
+  form.set("document_missing", String(input.documentMissing));
   if (input.note) form.set("note", input.note);
-  form.set("file", input.file, input.file.name);
+  if (input.file) form.set("file", input.file, input.file.name);
   return form;
 }
 

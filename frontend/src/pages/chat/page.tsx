@@ -12,6 +12,9 @@ import {
   Shield,
   ShieldCheck,
   ArrowLeft,
+  Clock3,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import {
   CHAT_E2E_PREVIEW,
@@ -40,10 +43,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { deNormalize } from "@/components/data-table/search";
 import {
   downloadMessageAttachmentBytes,
+  deletePeerMessage,
   fetchAllowedPeers,
   fetchConversations,
   fetchPeerMessages,
@@ -52,6 +57,7 @@ import {
   openMessagesSocket,
   sendPeerMessage,
   uploadPeerAttachment,
+  type SentMessageReceipt,
 } from "./data/chat-api";
 import {
   canAccessChat,
@@ -68,6 +74,7 @@ import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/t
 type KeyDialogMode = "manage" | "export" | "import" | null;
 
 const CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
+const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
 
 type ImportedKeyBackup = {
   name: string;
@@ -82,6 +89,17 @@ function formatChatDay(iso: string, lang: "de" | "ru") {
     month: "long",
     year: value.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
   }).format(value);
+}
+
+function formatMessageExpiry(iso: string, lang: "de" | "ru", now: number) {
+  const remainingSeconds = Math.max(0, Math.ceil((new Date(iso).getTime() - now) / 1000));
+  const formatter = new Intl.RelativeTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    numeric: "always",
+  });
+  if (remainingSeconds < 60) return formatter.format(remainingSeconds, "second");
+  if (remainingSeconds < 3600) return formatter.format(Math.ceil(remainingSeconds / 60), "minute");
+  if (remainingSeconds < 86400) return formatter.format(Math.ceil(remainingSeconds / 3600), "hour");
+  return formatter.format(Math.ceil(remainingSeconds / 86400), "day");
 }
 
 type ChatPageState = {
@@ -110,6 +128,10 @@ type ChatPageState = {
   keyDialogBusy: boolean;
   keyDialogStatus: string | null;
   importedKeyBackup: ImportedKeyBackup | null;
+  messageTimerSeconds: number;
+  deleteTarget: Message | null;
+  deletingMessageId: string | null;
+  expiryClock: number;
 };
 
 type ChatPagePatch =
@@ -175,6 +197,10 @@ function useChatPageContent() {
       keyDialogBusy: false,
       keyDialogStatus: null,
       importedKeyBackup: null,
+      messageTimerSeconds: 0,
+      deleteTarget: null,
+      deletingMessageId: null,
+      expiryClock: Date.now(),
     }),
   );
   const {
@@ -203,6 +229,10 @@ function useChatPageContent() {
     keyDialogBusy,
     keyDialogStatus,
     importedKeyBackup,
+    messageTimerSeconds,
+    deleteTarget,
+    deletingMessageId,
+    expiryClock,
   } = chatState;
   const setChatField = <K extends keyof ChatPageState>(
     field: K,
@@ -258,6 +288,12 @@ function useChatPageContent() {
     setChatField("keyDialogStatus", value);
   const setImportedKeyBackup = (value: SetStateAction<ImportedKeyBackup | null>) =>
     setChatField("importedKeyBackup", value);
+  const setMessageTimerSeconds = (value: SetStateAction<number>) =>
+    setChatField("messageTimerSeconds", value);
+  const setDeleteTarget = (value: SetStateAction<Message | null>) =>
+    setChatField("deleteTarget", value);
+  const setDeletingMessageId = (value: SetStateAction<string | null>) =>
+    setChatField("deletingMessageId", value);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -271,6 +307,14 @@ function useChatPageContent() {
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  useEffect(() => {
+    if (!messages.some((message) => message.expires_at)) return;
+    const interval = window.setInterval(() => {
+      dispatchChatState({ expiryClock: Date.now() });
+    }, 1_000);
+    return () => window.clearInterval(interval);
   }, [messages]);
 
   // Load conversations
@@ -852,6 +896,119 @@ function useChatPageContent() {
     t.chat_secure_passphrase_required,
   ]);
 
+  const applyDeliveryReceipt = (
+    peerId: string,
+    clientMessageId: string,
+    receipt: SentMessageReceipt,
+  ) => {
+    if (activePeerRef.current !== peerId) return;
+    setMessages((current) =>
+      current.map((message) =>
+        message.client_message_id === clientMessageId
+          ? {
+              ...message,
+              id: receipt.id,
+              created_at: receipt.created_at,
+              expires_at: receipt.expires_at ?? message.expires_at,
+              delivery_state: undefined,
+            }
+          : message,
+      ),
+    );
+  };
+
+  const deliverTextMessage = async (message: Message) => {
+    const peerId = message.to_user;
+    const clientMessageId = message.client_message_id;
+    const text = message.message?.trim();
+    if (!clientMessageId || !text) return;
+
+    try {
+      const lifecycle = {
+        client_message_id: clientMessageId,
+        ...(message.retry_expires_in_seconds
+          ? { expires_in_seconds: message.retry_expires_in_seconds }
+          : {}),
+      };
+      const receipt = activePeerMessageKey
+        ? await (async () => {
+            const senderKey = await ensureServerMessageKey();
+            const payload = await encryptMessageForPeer(
+              text,
+              senderKey,
+              activePeerMessageKey,
+            );
+            return sendPeerMessage(peerId, { ...payload, ...lifecycle });
+          })()
+        : await sendPeerMessage(peerId, { message: text, ...lifecycle });
+
+      applyDeliveryReceipt(peerId, clientMessageId, receipt);
+      setSecureStatus(null);
+      void loadMessagesForPeer(peerId).catch(() => undefined);
+      void loadConversations();
+    } catch {
+      try {
+        const serverMessages = await fetchPeerMessages(peerId);
+        if (serverMessages.some((item) => item.client_message_id === clientMessageId)) {
+          const hydrated = await hydrateMessages(peerId, serverMessages);
+          if (activePeerRef.current === peerId) setMessages(hydrated);
+          setSecureStatus(null);
+          void loadConversations();
+          return;
+        }
+      } catch {
+        // The retry control below keeps the idempotency key and can safely resend.
+      }
+      if (activePeerRef.current === peerId) {
+        setMessages((current) =>
+          current.map((item) =>
+            item.client_message_id === clientMessageId
+              ? { ...item, delivery_state: "failed" }
+              : item,
+          ),
+        );
+        setSecureStatus(t.chat_secure_message_send_failed);
+      }
+    } finally {
+      if (activePeerRef.current === peerId) setSending(false);
+    }
+  };
+
+  const retryTextMessage = async (message: Message) => {
+    if (sending || message.delivery_state !== "failed") return;
+    setSending(true);
+    setMessages((current) =>
+      current.map((item) =>
+        item.client_message_id === message.client_message_id
+          ? { ...item, delivery_state: "sending" }
+          : item,
+      ),
+    );
+    await deliverTextMessage({ ...message, delivery_state: "sending" });
+  };
+
+  const confirmDeleteMessage = async () => {
+    if (!deleteTarget || !activePeer || deletingMessageId) return;
+    if (deleteTarget.id.startsWith("local-")) {
+      setMessages((current) => current.filter((message) => message.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      return;
+    }
+
+    setDeletingMessageId(deleteTarget.id);
+    try {
+      await deletePeerMessage(activePeer, deleteTarget.id);
+      setMessages((current) => current.filter((message) => message.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      setSecureStatus(null);
+      void loadConversations();
+    } catch {
+      setSecureStatus(t.chat_message_delete_failed);
+    } finally {
+      setDeletingMessageId(null);
+    }
+  };
+
   // Send message
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
@@ -866,6 +1023,11 @@ function useChatPageContent() {
       setSending(true);
       const formData = new FormData();
       const caption = input.trim();
+      const clientMessageId = crypto.randomUUID();
+      formData.append("client_message_id", clientMessageId);
+      if (messageTimerSeconds) {
+        formData.append("expires_in_seconds", String(messageTimerSeconds));
+      }
       try {
         const senderKey = await ensureServerMessageKey();
         const encryptedAttachment = await encryptAttachmentForPeer(
@@ -919,6 +1081,7 @@ function useChatPageContent() {
         setSecureStatus(null);
         setInput("");
         setPendingFile(null);
+        setMessageTimerSeconds(0);
       } catch {
         setSecureStatus(t.chat_secure_attachment_send_failed);
       } finally {
@@ -931,28 +1094,34 @@ function useChatPageContent() {
     if (!input.trim()) return;
     setSending(true);
     const msg = input.trim();
+    const clientMessageId = crypto.randomUUID();
+    const peerId = activePeer;
+    const createdAt = new Date().toISOString();
+    const expiresAt = messageTimerSeconds
+      ? new Date(Date.now() + messageTimerSeconds * 1_000).toISOString()
+      : null;
+    const optimisticMessage: Message = {
+      id: `local-${clientMessageId}`,
+      from_user: myId,
+      to_user: peerId,
+      message: msg,
+      is_e2e: !!activePeerMessageKey,
+      is_read: false,
+      read_at: null,
+      created_at: createdAt,
+      expires_at: expiresAt,
+      client_message_id: clientMessageId,
+      delivery_state: "sending",
+      retry_expires_in_seconds: messageTimerSeconds || undefined,
+      attachment_filename: null,
+      attachment_mime: null,
+      attachment_size: null,
+      attachment_key: null,
+    };
     setInput("");
-    try {
-      if (activePeerMessageKey) {
-        const senderKey = await ensureServerMessageKey();
-        const payload = await encryptMessageForPeer(
-          msg,
-          senderKey,
-          activePeerMessageKey,
-        );
-        await sendPeerMessage(activePeer, payload);
-      } else {
-        await sendPeerMessage(activePeer, { message: msg });
-      }
-      await loadMessagesForPeer(activePeer);
-      void loadConversations();
-      setSecureStatus(null);
-    } catch {
-      setInput(msg);
-      setSecureStatus(t.chat_secure_message_send_failed);
-    } finally {
-      setSending(false);
-    }
+    setMessageTimerSeconds(0);
+    setMessages((current) => [optimisticMessage, ...current]);
+    await deliverTextMessage(optimisticMessage);
   };
 
   // Filtered conversations (German-aware fold)
@@ -975,7 +1144,23 @@ function useChatPageContent() {
         deNormalize(roleDisplay(u.role, t)).includes(normalizedUserSearch)),
   );
 
-  const displayMsgs = [...messages].reverse();
+  const messageTimerLabel =
+    messageTimerSeconds === 60
+      ? t.chat_message_timer_minute
+      : messageTimerSeconds === 60 * 60
+        ? t.chat_message_timer_hour
+        : messageTimerSeconds === 24 * 60 * 60
+          ? t.chat_message_timer_day
+          : messageTimerSeconds === 7 * 24 * 60 * 60
+            ? t.chat_message_timer_week
+            : t.chat_message_timer_off;
+
+  const displayMsgs = [...messages]
+    .filter(
+      (message) =>
+        !message.expires_at || new Date(message.expires_at).getTime() > expiryClock,
+    )
+    .reverse();
 
   if (!canViewChat) {
     return (
@@ -1217,6 +1402,12 @@ function useChatPageContent() {
                   !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =
                   mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at)}` : null;
+                const expiryLabel = m.expires_at
+                  ? t.chat_message_expires.replace(
+                      "{time}",
+                      formatMessageExpiry(m.expires_at, lang, expiryClock),
+                    )
+                  : null;
 
                 return (
                   <div
@@ -1233,7 +1424,12 @@ function useChatPageContent() {
                         <span className="h-px flex-1 bg-border" />
                       </div>
                     ) : null}
-                    <div className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
+                    <div
+                      className={cn(
+                        "group/message flex flex-col",
+                        mine ? "items-end" : "items-start",
+                      )}
+                    >
                     {/* Attachment */}
                     {hasAttachment &&
                       (isSecureAttachment ? (
@@ -1299,12 +1495,49 @@ function useChatPageContent() {
                         {m.message}
                       </div>
                     )}
-                    {!groupedWithNext ? (
-                      <span className="mt-0.5 px-1 text-[10px] text-muted-foreground">
-                        {timeAgo(m.created_at)}
-                        {readReceipt ? ` - ${readReceipt}` : ""}
-                      </span>
-                    ) : null}
+                    <div className="mt-0.5 flex min-h-5 items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
+                      {m.delivery_state === "sending" ? (
+                        <span>{t.chat_message_sending}</span>
+                      ) : null}
+                      {m.delivery_state === "failed" ? (
+                        <>
+                          <span className="text-destructive">{t.chat_message_failed}</span>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium text-foreground hover:bg-muted"
+                            onClick={() => void retryTextMessage(m)}
+                            disabled={sending}
+                          >
+                            <RotateCcw className="size-3" />
+                            {t.chat_message_retry}
+                          </button>
+                        </>
+                      ) : null}
+                      {expiryLabel ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Clock3 className="size-3" />
+                          {expiryLabel}
+                        </span>
+                      ) : null}
+                      {!groupedWithNext && m.delivery_state !== "sending" ? (
+                        <span>
+                          {timeAgo(m.created_at)}
+                          {readReceipt ? ` - ${readReceipt}` : ""}
+                        </span>
+                      ) : null}
+                      {mine && m.delivery_state !== "sending" ? (
+                        <button
+                          type="button"
+                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover/message:opacity-100"
+                          onClick={() => setDeleteTarget(m)}
+                          disabled={deletingMessageId === m.id}
+                          aria-label={t.chat_message_delete}
+                          title={t.chat_message_delete}
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
+                      ) : null}
+                    </div>
                     </div>
                   </div>
                 );
@@ -1389,6 +1622,39 @@ function useChatPageContent() {
               >
                 <Paperclip className="size-[18px]" />
               </button>
+              <label
+                className={cn(
+                  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  messageTimerSeconds > 0 && "bg-amber-50 text-amber-700",
+                )}
+                title={`${t.chat_message_timer}: ${messageTimerLabel}`}
+              >
+                <Clock3 className="size-[18px]" />
+                {messageTimerSeconds > 0 ? (
+                  <span className="absolute right-1 top-1 size-1.5 rounded-full bg-amber-500" />
+                ) : null}
+                <select
+                  value={messageTimerSeconds}
+                  onChange={(event) => setMessageTimerSeconds(Number(event.target.value))}
+                  className="absolute inset-0 cursor-pointer opacity-0"
+                  aria-label={t.chat_message_timer}
+                  disabled={sending}
+                >
+                  {CHAT_TIMER_OPTIONS.map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {seconds === 60
+                        ? t.chat_message_timer_minute
+                        : seconds === 60 * 60
+                          ? t.chat_message_timer_hour
+                          : seconds === 24 * 60 * 60
+                            ? t.chat_message_timer_day
+                            : seconds === 7 * 24 * 60 * 60
+                              ? t.chat_message_timer_week
+                              : t.chat_message_timer_off}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -1541,6 +1807,17 @@ function useChatPageContent() {
                 )}
               </DialogContent>
             </Dialog>
+            <DirtyDismissConfirmDialog
+              open={deleteTarget !== null}
+              title={t.chat_message_delete_title}
+              message={t.chat_message_delete_description}
+              cancelLabel={t.common_cancel}
+              confirmLabel={t.common_delete}
+              destructive
+              confirmDisabled={deletingMessageId !== null}
+              onCancel={() => setDeleteTarget(null)}
+              onConfirm={() => void confirmDeleteMessage()}
+            />
           </>
         )}
       </div>

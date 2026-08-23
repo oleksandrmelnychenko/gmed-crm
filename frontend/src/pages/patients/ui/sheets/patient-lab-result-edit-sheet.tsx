@@ -458,22 +458,24 @@ export function PatientLabCorrectionMetadata({
 }) {
   if (!item.corrected_at) return null;
   return (
-    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-amber-800">
-      <Badge
-        variant="outline"
-        className="h-5 rounded-full border-amber-300 bg-amber-50 px-1.5 text-[9px] font-semibold text-amber-800"
-      >
-        <CheckCircle2 className="mr-1 size-3" />
-        {tx("Исправлено", "Korrigiert")}
-      </Badge>
-      <span>
-        {formatCorrectionTimestamp(item.corrected_at, tx)}
-        {item.corrected_by_name ? ` · ${item.corrected_by_name}` : ""}
-      </span>
-      {item.correction_note ? (
-        <span className="max-w-[360px] truncate" title={item.correction_note}>
-          · {item.correction_note}
+    <div className="mt-1.5 min-w-0 border-t border-amber-200/70 pt-1.5 text-[10px] text-amber-800">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Badge
+          variant="outline"
+          className="h-5 rounded-full border-amber-300 bg-amber-50 px-1.5 text-[9px] font-semibold text-amber-800"
+        >
+          <CheckCircle2 className="mr-1 size-3" />
+          {tx("Исправлено", "Korrigiert")}
+        </Badge>
+        <span className="min-w-0 truncate" title={item.corrected_by_name ?? undefined}>
+          {formatCorrectionTimestamp(item.corrected_at, tx)}
+          {item.corrected_by_name ? ` · ${item.corrected_by_name}` : ""}
         </span>
+      </div>
+      {item.correction_note ? (
+        <p className="mt-0.5 truncate text-amber-700/90" title={item.correction_note}>
+          {item.correction_note}
+        </p>
       ) : null}
     </div>
   );

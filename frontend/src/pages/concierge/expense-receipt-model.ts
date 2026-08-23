@@ -40,7 +40,8 @@ export type ConciergeExpenseItem = {
   paid_by: ConciergeExpensePaidBy;
   service_delivered: boolean;
   note: string | null;
-  receipt: ConciergeExpenseReceipt;
+  receipt: ConciergeExpenseReceipt | null;
+  document_missing: boolean;
   external_invoice_id: string | null;
   external_invoice_status: string | null;
   balance_consequence: ConciergeExpenseBalanceConsequence;
@@ -102,7 +103,8 @@ export type ConciergeExpenseSubmitInput = {
   paidBy: ConciergeExpensePaidBy;
   serviceDelivered: boolean;
   note: string | null;
-  file: File;
+  documentMissing: boolean;
+  file: File | null;
 };
 
 export type ReceiptFileValidationError = "required" | "too_large" | "unsupported_type";

@@ -171,6 +171,20 @@ export interface AdminSystemTranslations {
   chat_secure_server_channel_label: string;
   chat_security_e2e_description: string;
   chat_security_server_description: string;
+  chat_message_sending: string;
+  chat_message_failed: string;
+  chat_message_retry: string;
+  chat_message_delete: string;
+  chat_message_delete_title: string;
+  chat_message_delete_description: string;
+  chat_message_delete_failed: string;
+  chat_message_timer: string;
+  chat_message_timer_off: string;
+  chat_message_timer_minute: string;
+  chat_message_timer_hour: string;
+  chat_message_timer_day: string;
+  chat_message_timer_week: string;
+  chat_message_expires: string;
   chat_export_keys: string;
   chat_import_keys: string;
   chat_export_secure_keys_title: string;
@@ -587,6 +601,21 @@ export const adminSystemRu: AdminSystemTranslations = {
     "Сообщения и вложения защищены сквозным шифрованием между устройствами.",
   chat_security_server_description:
     "Текст защищен серверным шифрованием. Сквозное шифрование и вложения включатся после активации чата собеседником.",
+  chat_message_sending: "Отправляется…",
+  chat_message_failed: "Не отправлено",
+  chat_message_retry: "Повторить",
+  chat_message_delete: "Удалить сообщение",
+  chat_message_delete_title: "Удалить сообщение?",
+  chat_message_delete_description:
+    "Сообщение и вложение будут удалены у обоих участников. Это действие нельзя отменить.",
+  chat_message_delete_failed: "Не удалось удалить сообщение.",
+  chat_message_timer: "Таймер сообщения",
+  chat_message_timer_off: "Без таймера",
+  chat_message_timer_minute: "1 минута",
+  chat_message_timer_hour: "1 час",
+  chat_message_timer_day: "24 часа",
+  chat_message_timer_week: "7 дней",
+  chat_message_expires: "Исчезнет {time}",
   chat_export_keys: "Экспорт ключей",
   chat_import_keys: "Импорт ключей",
   chat_export_secure_keys_title: "Экспорт ключей защищенного чата",
@@ -1019,6 +1048,21 @@ export const adminSystemDe: AdminSystemTranslations = {
     "Nachrichten und Anhänge sind zwischen den Geräten Ende-zu-Ende verschlüsselt.",
   chat_security_server_description:
     "Text ist serverseitig verschlüsselt. Ende-zu-Ende-Verschlüsselung und Anhänge werden nach Aktivierung durch die Gegenseite verfügbar.",
+  chat_message_sending: "Wird gesendet…",
+  chat_message_failed: "Nicht gesendet",
+  chat_message_retry: "Erneut versuchen",
+  chat_message_delete: "Nachricht löschen",
+  chat_message_delete_title: "Nachricht löschen?",
+  chat_message_delete_description:
+    "Nachricht und Anhang werden für beide Teilnehmer gelöscht. Dies kann nicht rückgängig gemacht werden.",
+  chat_message_delete_failed: "Die Nachricht konnte nicht gelöscht werden.",
+  chat_message_timer: "Nachrichten-Timer",
+  chat_message_timer_off: "Kein Timer",
+  chat_message_timer_minute: "1 Minute",
+  chat_message_timer_hour: "1 Stunde",
+  chat_message_timer_day: "24 Stunden",
+  chat_message_timer_week: "7 Tage",
+  chat_message_expires: "Verschwindet {time}",
   chat_export_keys: "Schlüssel exportieren",
   chat_import_keys: "Schlüssel importieren",
   chat_export_secure_keys_title: "Sichere Chat-Schlüssel exportieren",

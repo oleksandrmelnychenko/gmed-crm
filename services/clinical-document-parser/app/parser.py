@@ -439,7 +439,7 @@ def _extract_document_subject(text: str) -> DocumentSubject | None:
 
 
 LAB_RESULT_RE = re.compile(
-    r"^(?P<comparator><=|>=|<|>|=)?\s*(?P<number>[+-]?(?:\d{1,3}(?:[. ]\d{3})+|\d+)(?:,\d+)?|[+-]?\d+\.\d+)\s*(?P<marker>[*↑↓]?)$"
+    r"^(?P<comparator><=|>=|<|>|=)?\s*(?P<number>[+-]?(?:\d{1,3}(?:[. ]\d{3})+|\d+)(?:,\d+)?|[+-]?\d+\.\d+)\s*(?P<marker>[*↑↓]|\(\s*[+-]\s*\))?$"
 )
 LAB_TEXT_RESULT_RE = re.compile(
     r"^(?:neg\.?|pos\.?|negativ|positiv|reaktiv|nicht\s+nachweisbar|nachweisbar|normal|unauff[aä]llig)$",
@@ -464,6 +464,43 @@ LAB_NARRATIVE_VALUE_RE = re.compile(
     r"[ \t]*(?P<unit>g/L|g/dl|mg/L|mg/dl|/nL|/nl|/μL|/µL|%|s)?",
     re.IGNORECASE,
 )
+
+
+def _dated_normwert_table_date(page: str) -> str | None:
+    """Return the result-column date from a compact German lab-table header.
+
+    Scanned forms often OCR the visual header columns in a different reading
+    order, for example ``Testbezeichnung``, then the date, then ``Normwert`` on
+    separate lines. Limit the search to the page header so a print date in the
+    footer cannot be mistaken for the specimen/result date.
+    """
+
+    header_lines: list[str] = []
+    for raw_line in page.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if _heading_key(line).startswith(("ausdru", "seite")):
+            break
+        header_lines.append(line)
+        if len(header_lines) == 8:
+            break
+    header = "\n".join(header_lines)
+    analyte_header = re.search(
+        r"\b(?:Testbezeichnung|Bezeichnung|Parameter|Messwert|Analyt)\b",
+        header,
+        re.IGNORECASE,
+    )
+    if not analyte_header or not re.search(
+        r"\b(?:Normwert|Normbereich|Referenzbereich)\b",
+        header,
+        re.IGNORECASE,
+    ):
+        return None
+    match = LAB_COLUMN_DATE_RE.search(header)
+    if match and match.start() < analyte_header.start():
+        return None
+    return _normalize_german_date(match.group("date")) if match else None
 
 
 def _parse_localized_number(value: str) -> float | None:
@@ -1183,9 +1220,14 @@ def _lab_abnormal_flag(
     comparator: str | None,
     reference_low: float | None,
     reference_high: float | None,
-    explicit_marker: str,
+    explicit_marker: str | None,
 ) -> str:
-    if explicit_marker:
+    compact_marker = (explicit_marker or "").replace(" ", "")
+    if compact_marker == "(+)" or compact_marker == "↑":
+        return "high"
+    if compact_marker == "(-)" or compact_marker == "↓":
+        return "low"
+    if compact_marker:
         return "abnormal"
     if result is None or comparator in {"<", ">", "<=", ">="}:
         return "unknown"
@@ -1199,12 +1241,15 @@ def _lab_abnormal_flag(
 
 
 def _looks_like_lab_unit(value: str) -> bool:
-    compact = value.strip()
+    compact = value.strip().strip("()[] ")
     return bool(
         re.fullmatch(
-            r"(?:%|s|fl|fL|pg|g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
-            r"/(?:nl|nL|pl|pL|µl|μl)|ml/min|"
-            r"(?:AU|m?IU|m?IE|g|mg|ng|µg|μg|µmol|μmol|mmol|mol|U|IU|µIU|μIU|G|T)/(?:l|L|I|dl|ml))",
+            r"(?:%|s|sec|fl|fL|pg|pg/Ery|g|mg|ng|µg|μg|ug|"
+            r"pmol|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
+            r"(?:Mio\.|Tsd\.)?/(?:nl|nL|pl|pL|ul|µl|μl)|"
+            r"ml/min(?:/1[.,]73m2)?|"
+            r"(?:AU|m?IU|m?IE|g|mg|ng|µg|μg|ug|pmol|µmol|μmol|mmol|mol|"
+            r"U|IU|[uµμ]UI|µIU|μIU|G|T)/(?:l|L|I|dl|ml))",
             compact,
             re.IGNORECASE,
         )
@@ -1222,7 +1267,9 @@ def _looks_like_lab_sidebar_noise(value: str) -> bool:
 
 LAB_PANEL_HEADING_RE = re.compile(
     r"^(?:kleines\s+|gro(?:ß|ss)es\s+)?blutbild$|"
-    r"^(?:hämatologie|klinische\s+chemie|enzyme|leberwerte|nierenfunktion|"
+    r"^(?:differential\s+blutbild\s+(?:absolut|relativ)|diabetologie|"
+    r"eiwei(?:ß|ss)[-\s]+elektrophorese|vitamine|"
+    r"hämatologie|klinische\s+chemie|enzyme|leberwerte|nierenfunktion|"
     r"gerinnung|immunsystem|immunologie|impftiter|serologie|infektionsserologie|"
     r"sonstiges|stoffwechsel|wasser\s*[-/](?:\s*[-/])?\s*elektrolythaushalt|elektrolyte|"
     r"lipid(?:e|status)|schilddrüse|entzündung)$",
@@ -1239,6 +1286,17 @@ def _lab_row_metadata(
     metadata_headers: list[str],
 ) -> tuple[str, str | None, str | None] | None:
     cells = _lab_cells(prefix)
+    if len(cells) == 1:
+        inline_matches = list(LAB_REFERENCE_RANGE_RE.finditer(cells[0]))
+        inline_matches.extend(LAB_REFERENCE_LIMIT_RE.finditer(cells[0]))
+        if not inline_matches:
+            return None
+        reference_match = max(inline_matches, key=lambda match: match.start())
+        analyte = cells[0][: reference_match.start()].strip(" -*•|\\/‘’\"“”?,")
+        reference_text = cells[0][reference_match.start() :].strip()
+        if not analyte or not any(character.isalpha() for character in analyte):
+            return None
+        cells = [analyte, reference_text]
     if len(cells) < 2:
         return None
     analyte = cells[0].strip(" -*•")
@@ -1270,8 +1328,9 @@ def _lab_row_metadata(
     )
     if reference_match:
         trailing = reference_text[reference_match.end() :].strip()
-        if trailing and _looks_like_lab_unit(trailing):
-            unit = unit or trailing
+        trailing_unit = trailing.strip("()[] ")
+        if trailing_unit and _looks_like_lab_unit(trailing_unit):
+            unit = unit or trailing_unit
             reference_text = reference_text[: reference_match.end()].strip()
     if not analyte or len(analyte) > 160 or not any(character.isalpha() for character in analyte):
         return None
@@ -1623,6 +1682,14 @@ def _laboratory_candidates(
     )
 
     for page_number, page in enumerate(text.split("\f"), start=1):
+        split_header_date = _dated_normwert_table_date(page)
+        if split_header_date:
+            laboratory_mode = True
+            column_dates = [split_header_date]
+            # The single-result parser below consumes OCR cells rather than
+            # absolute positions; a sentinel keeps the shared table state on.
+            column_positions = [0]
+            metadata_headers = ["Testbezeichnung", "Normwert"]
         continued_table = laboratory_mode and bool(column_dates)
         continuation_positions = (
             _continuation_lab_column_positions(
@@ -1633,7 +1700,7 @@ def _laboratory_candidates(
             if continued_table
             else []
         )
-        for raw_line in page.splitlines():
+        for line_index, raw_line in enumerate(page.splitlines()):
             line = raw_line.strip()
             if not line:
                 continue
@@ -1656,6 +1723,43 @@ def _laboratory_candidates(
                 continue
 
             date_matches = list(LAB_COLUMN_DATE_RE.finditer(raw_line))
+            header_cells = _lab_cells(raw_line)
+            header_keys = [_heading_key(cell) for cell in header_cells]
+            if split_header_date and line_index < 10 and (
+                date_matches
+                or any(
+                    key
+                    in {
+                        "testbezeichnung",
+                        "bezeichnung",
+                        "parameter",
+                        "messwert",
+                        "analyt",
+                        "normwert",
+                        "normbereich",
+                        "referenzbereich",
+                    }
+                    for key in header_keys
+                )
+            ):
+                continue
+            if heading_key.startswith(("ausdru", "seite")):
+                continue
+            is_dated_normwert_header = bool(
+                date_matches
+                and header_keys
+                and header_keys[0]
+                in {"testbezeichnung", "bezeichnung", "parameter", "messwert", "analyt"}
+                and any(
+                    key in {"norm", "normwert", "referenz", "referenzbereich", "reference"}
+                    for key in header_keys[1:]
+                )
+            )
+            if is_dated_normwert_header:
+                laboratory_mode = True
+            if laboratory_mode and _looks_like_lab_panel_heading(line):
+                current_panel = line.rstrip(":")
+                continue
             if laboratory_mode and date_matches:
                 normalized_dates = [
                     _normalize_german_date(match.group("date")) for match in date_matches
@@ -1667,6 +1771,39 @@ def _laboratory_candidates(
                     continue
             if not laboratory_mode or not column_dates or not column_positions:
                 continue
+
+            if len(column_dates) == 1:
+                cells = _lab_cells(raw_line)
+                for result_index, result_cell in enumerate(cells[1:], start=1):
+                    result_text = result_cell.strip(" |[]{}")
+                    if not (
+                        LAB_RESULT_RE.fullmatch(result_text)
+                        or LAB_TEXT_RESULT_RE.fullmatch(result_text)
+                    ):
+                        continue
+                    metadata = _lab_row_metadata(
+                        "\t".join(cells[:result_index]), metadata_headers
+                    )
+                    if metadata is None:
+                        continue
+                    analyte, unit, reference_text = metadata
+                    candidates.append(
+                        _lab_candidate(
+                            analyte=analyte,
+                            result_text=result_text,
+                            unit=unit,
+                            reference_text=reference_text,
+                            measured_on=column_dates[0],
+                            panel=current_panel,
+                            page_number=page_number,
+                            source_text=line,
+                        )
+                    )
+                    break
+                else:
+                    result_index = None
+                if result_index is not None:
+                    continue
 
             if continued_table:
                 metadata_cells, result_cells = _trailing_lab_result_cells(
@@ -1774,6 +1911,16 @@ def _detect_document_type(text: str) -> str:
         text,
         re.IGNORECASE,
     ):
+        return "laboratory_report"
+    if re.search(
+        r"(?:Testbezeichnung|Bezeichnung|Parameter|Messwert)[^\n\f]*"
+        r"(?:Normwert|Normbereich|Referenzbereich)[^\n\f]*"
+        r"\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})",
+        text,
+        re.IGNORECASE,
+    ):
+        return "laboratory_report"
+    if any(_dated_normwert_table_date(page) for page in text.split("\f")):
         return "laboratory_report"
     if "onkologische diagnosen" in lowered or "nichtonkologische diagnosen" in lowered:
         return "oncology_report"

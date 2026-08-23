@@ -83,6 +83,10 @@ pub fn router() -> Router<AppState> {
             post(retry_import),
         )
         .route(
+            "/patients/{patient_id}/clinical-document-imports/{import_id}/rescan",
+            post(rescan_import),
+        )
+        .route(
             "/patients/{patient_id}/clinical-document-imports/{import_id}/complete",
             post(complete_import),
         )
@@ -2396,6 +2400,68 @@ async fn retry_import(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retry import");
         }
     };
+    Json(import_json(&row)).into_response()
+}
+
+async fn rescan_import(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    let row = match sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET status = 'queued', document_type = NULL, source_language = NULL,
+               parser_version = NULL,
+               draft = '{"candidates":[],"warnings":[]}'::jsonb,
+               reviewed_draft = NULL, applied_counts = '{}'::jsonb,
+               error_message = NULL, reviewed_by = NULL, applied_by = NULL,
+               worker_id = NULL, locked_at = NULL, completed_at = NULL,
+               applied_at = NULL, prepared_payload_fingerprint = NULL,
+               prepared_source_country = NULL, prepared_candidate_payloads = '{}'::jsonb,
+               prepared_patient_identity_confirmed = false,
+               prepared_identity_gate_version = 0, prepared_at = NULL,
+               updated_at = now()
+           WHERE id = $1 AND patient_id = $2
+             AND status IN ('review_required', 'failed')
+             AND deleted_at IS NULL
+           RETURNING id, patient_id, document_id, status, document_type, source_language,
+                     parser_version, draft, reviewed_draft, prepared_source_country,
+                     prepared_patient_identity_confirmed, prepared_identity_gate_version,
+                     prepared_at, applied_counts, error_message, worker_id,
+                     requested_by, reviewed_by, applied_by, locked_at, completed_at,
+                     applied_at, created_at, updated_at"#,
+    )
+    .bind(import_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Only failed or review-ready imports can be rescanned",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, "rescan clinical document import");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
+        }
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        "rescan_clinical_document_import",
+        Some(auth.user_id),
+        "clinical_document_import",
+        Some(import_id),
+        json!({
+            "patient_id": patient_id,
+            "document_id": row.get::<Uuid, _>("document_id"),
+            "status": "queued",
+        }),
+    ));
     Json(import_json(&row)).into_response()
 }
 

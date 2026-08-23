@@ -1871,16 +1871,19 @@ function PatientLabHistoryTable({
         id: "document",
         label: tx("Документ", "Dokument"),
         accessor: (row) => row.source_document_name,
+        width: 320,
         cellClassName: "whitespace-normal",
         render: (row) => (
-          <div className="min-w-0 text-muted-foreground">
+          <div className="min-w-0 space-y-1 text-muted-foreground">
             <ClinicalRecordSource item={row} tx={tx} />
-            {row.source_country ? <span className="block text-[10px]">{row.source_country}</span> : null}
-            {row.recorded_by_name ? (
-              <span className="block truncate text-[10px]" title={row.recorded_by_name}>
-                {tx("Внёс", "Erfasst von")}: {row.recorded_by_name}
-              </span>
-            ) : null}
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
+              {row.source_country ? <span>{row.source_country}</span> : null}
+              {row.recorded_by_name ? (
+                <span className="min-w-0 truncate" title={row.recorded_by_name}>
+                  {tx("Внёс", "Erfasst von")}: {row.recorded_by_name}
+                </span>
+              ) : null}
+            </div>
             <PatientLabCorrectionMetadata item={row} tx={tx} />
           </div>
         ),
@@ -1897,7 +1900,7 @@ function PatientLabHistoryTable({
       storageKey={storageKey}
       density="compact"
       disableRowHover
-      rowHeightOverrides={{ comfortable: 62, compact: 56, condensed: 50 }}
+      rowHeightOverrides={{ comfortable: 100, compact: 92, condensed: 84 }}
       rowActions={canManage ? (row) => (
         <div className="flex items-center justify-end gap-1">
           <PatientLabResultEditAction
@@ -2431,9 +2434,11 @@ function MedicationHistoryTree({
                             </p>
                           </div>
                           <div className="max-w-full text-right text-[11px] leading-5 text-muted-foreground">
-                            <p className="max-w-[360px] truncate" title={event.source_document_name ?? undefined}>
-                              {event.source_document_name ?? tx("Документ", "Dokument")}
-                            </p>
+                            <ClinicalRecordSource
+                              item={event}
+                              tx={tx}
+                              className="ml-auto max-w-[360px] [&>button]:ml-auto [&>span]:ml-auto"
+                            />
                             <p>
                               {[event.source_country, event.source_page ? `${tx("стр.", "S.")} ${event.source_page}` : null]
                                 .filter(Boolean).join(" · ") || "—"}

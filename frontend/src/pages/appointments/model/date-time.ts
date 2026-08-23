@@ -1,3 +1,5 @@
+import { startOfIsoWeek } from "@/lib/calendar-standards";
+
 import {
   CALENDAR_STORAGE_DATE_KEY,
   CALENDAR_STORAGE_VIEW_KEY,
@@ -86,9 +88,7 @@ export function toDateInput(date: Date): string {
 
 export function startOfWeekInput(anchorDate: string): string {
   const date = new Date(`${anchorDate}T12:00:00`);
-  const diff = (date.getDay() + 6) % 7;
-  date.setDate(date.getDate() - diff);
-  return toDateInput(date);
+  return toDateInput(startOfIsoWeek(date));
 }
 
 export function endOfWeekInput(anchorDate: string): string {

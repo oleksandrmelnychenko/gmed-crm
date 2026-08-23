@@ -10,6 +10,15 @@ import type { Conversation, Message, UserItem } from "../model/types";
 
 type JsonPayload = Record<string, unknown>;
 
+export type SentMessageReceipt = {
+  ok: boolean;
+  id: string;
+  created_at: string;
+  expires_at?: string | null;
+  client_message_id?: string | null;
+  duplicate?: boolean;
+};
+
 export function fetchConversations() {
   return apiFetch<Conversation[]>("/messages/conversations");
 }
@@ -36,17 +45,23 @@ export function fetchAllowedPeers(searchTerm: string) {
 }
 
 export function sendPeerMessage(peerId: string, payload: JsonPayload) {
-  return apiFetch(`/messages/${peerId}`, {
+  return apiFetch<SentMessageReceipt>(`/messages/${peerId}`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function uploadPeerAttachment(peerId: string, formData: FormData) {
-  await apiFetch(`/messages/${peerId}/upload`, {
+  const receipt = await apiFetch<SentMessageReceipt>(`/messages/${peerId}/upload`, {
     method: "POST",
     body: formData,
   });
+  clearApiCache();
+  return receipt;
+}
+
+export async function deletePeerMessage(peerId: string, messageId: string) {
+  await apiFetch(`/messages/${peerId}/${messageId}`, { method: "DELETE" });
   clearApiCache();
 }
 

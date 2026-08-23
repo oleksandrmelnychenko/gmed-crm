@@ -82,10 +82,18 @@ struct ExpenseMultipart {
     currency: Option<String>,
     paid_by: Option<String>,
     service_delivered: Option<bool>,
+    document_missing: Option<bool>,
     note: Option<String>,
     file_data: Option<Vec<u8>>,
     file_name: Option<String>,
     declared_mime: Option<String>,
+}
+
+struct PreparedReceipt {
+    data: Vec<u8>,
+    file_name: String,
+    mime_type: String,
+    sha256: String,
 }
 
 #[derive(Deserialize)]
@@ -645,6 +653,18 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
                     }
                 })
             }
+            "document_missing" => {
+                input.document_missing = Some(match value.trim().to_ascii_lowercase().as_str() {
+                    "true" | "1" | "yes" => true,
+                    "false" | "0" | "no" => false,
+                    _ => {
+                        return Err(err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "document_missing must be true or false",
+                        ));
+                    }
+                })
+            }
             "note" => input.note = clean_text(Some(value), 2000),
             _ => {}
         }
@@ -730,50 +750,70 @@ async fn submit_expense(
             );
         }
     };
-    let data = match input.file_data.take() {
-        Some(value) if !value.is_empty() => value,
-        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "receipt file is required"),
-    };
-    let file_name = input
-        .file_name
-        .take()
-        .unwrap_or_else(|| "receipt".to_string());
-    let declared_mime = input
-        .declared_mime
-        .take()
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-    let mime_type = match validate_upload_magic_bytes(
-        Some(file_name.as_str()),
-        Some(declared_mime.as_str()),
-        &data,
-    ) {
-        Ok(Some(value)) => value,
-        Ok(None) => {
+    let document_missing = input.document_missing.unwrap_or(false);
+    let receipt = match (document_missing, input.file_data.take()) {
+        (true, Some(data)) if !data.is_empty() => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Receipt must be a PDF, JPEG, PNG, or WEBP file",
+                "A receipt file cannot be supplied when document_missing is true",
             );
         }
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
-    if !matches!(
-        mime_type.as_str(),
-        "application/pdf" | "image/jpeg" | "image/png" | "image/webp"
-    ) {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Receipt must be a PDF, JPEG, PNG, or WEBP file",
-        );
-    }
-    match scan_upload_bytes(Some(file_name.as_str()), &data).await {
-        Ok(FileScanOutcome::Clean) => {}
-        Ok(FileScanOutcome::Skipped) => {
-            tracing::warn!(filename = %file_name, "virus scanner unavailable; concierge receipt scan skipped");
+        (true, _) => None,
+        (false, Some(data)) if !data.is_empty() => {
+            let file_name = input
+                .file_name
+                .take()
+                .unwrap_or_else(|| "receipt".to_string());
+            let declared_mime = input
+                .declared_mime
+                .take()
+                .unwrap_or_else(|| "application/octet-stream".to_string());
+            let mime_type = match validate_upload_magic_bytes(
+                Some(file_name.as_str()),
+                Some(declared_mime.as_str()),
+                &data,
+            ) {
+                Ok(Some(value)) => value,
+                Ok(None) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Receipt must be a PDF, JPEG, PNG, or WEBP file",
+                    );
+                }
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            };
+            if !matches!(
+                mime_type.as_str(),
+                "application/pdf" | "image/jpeg" | "image/png" | "image/webp"
+            ) {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Receipt must be a PDF, JPEG, PNG, or WEBP file",
+                );
+            }
+            match scan_upload_bytes(Some(file_name.as_str()), &data).await {
+                Ok(FileScanOutcome::Clean) => {}
+                Ok(FileScanOutcome::Skipped) => {
+                    tracing::warn!(filename = %file_name, "virus scanner unavailable; concierge receipt scan skipped");
+                }
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+            }
+            let sha256 = hash_bytes(&data);
+            Some(PreparedReceipt {
+                data,
+                file_name,
+                mime_type,
+                sha256,
+            })
         }
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    }
-
-    let receipt_sha256 = hash_bytes(&data);
+        (false, _) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "receipt file is required unless document_missing is true",
+            );
+        }
+    };
+    let receipt_sha256 = receipt.as_ref().map(|value| value.sha256.as_str());
     let payload_value = json!({
         "service_id": service_id,
         "order_id": input.order_id,
@@ -787,9 +827,10 @@ async fn submit_expense(
         "paid_by": paid_by,
         "service_delivered": service_delivered,
         "note": input.note,
+        "document_missing": document_missing,
         "receipt_sha256": receipt_sha256,
-        "mime_type": mime_type,
-        "original_filename": file_name,
+        "mime_type": receipt.as_ref().map(|value| value.mime_type.as_str()),
+        "original_filename": receipt.as_ref().map(|value| value.file_name.as_str()),
     });
     let payload_hash = hash_json(&payload_value);
 
@@ -859,30 +900,32 @@ async fn submit_expense(
         .await;
     }
 
-    let duplicate_receipt = match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id FROM concierge_expense_submissions
-           WHERE concierge_service_id = $1 AND receipt_sha256 = $2
-           FOR UPDATE"#,
-    )
-    .bind(service_id)
-    .bind(&receipt_sha256)
-    .fetch_optional(&mut *transaction)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, service_id = %service_id, "check duplicate concierge receipt");
+    if let Some(receipt_sha256) = receipt_sha256 {
+        let duplicate_receipt = match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id FROM concierge_expense_submissions
+               WHERE concierge_service_id = $1 AND receipt_sha256 = $2
+               FOR UPDATE"#,
+        )
+        .bind(service_id)
+        .bind(receipt_sha256)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, service_id = %service_id, "check duplicate concierge receipt");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to submit expense",
+                );
+            }
+        };
+        if duplicate_receipt.is_some() {
             return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to submit expense",
+                StatusCode::CONFLICT,
+                "This receipt was already submitted for the Concierge service",
             );
         }
-    };
-    if duplicate_receipt.is_some() {
-        return err(
-            StatusCode::CONFLICT,
-            "This receipt was already submitted for the Concierge service",
-        );
     }
 
     if let Some(order_id) = input.order_id {
@@ -944,52 +987,59 @@ async fn submit_expense(
         }
     }
 
-    let (file_size, storage_key, original_filename) =
-        match store_document_blob(&data, file_name.as_str()).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
-    let document_id = Uuid::new_v4();
     let expense_id = Uuid::new_v4();
-    let document_insert = sqlx::query(
-        r#"INSERT INTO documents (
-               id, patient_id, order_id, auto_name, original_filename,
-               art, category, status, visibility, is_medical, mime_type, file_size,
-               storage_key, klinik, ursprung, notes,
-               document_direction, document_variant, access_category,
-               document_date, source_person, source_institution,
-               addressee_institution, financial_status,
-               version_root_document_id, version_number, uploaded_by
-           ) VALUES (
-               $1, $2, $3, $4, $5,
-               'receipt', 'payment', 'active', 'internal', false, $6, $7,
-               $8, $9, 'concierge_expense_receipt', $10,
-               'incoming', 'original', 'financial',
-               $11, $12, $9,
-               'GMED', 'open',
-               $1, 1, $13
-           )"#,
-    )
-    .bind(document_id)
-    .bind(service.patient_id)
-    .bind(input.order_id)
-    .bind(format!("Receipt - {vendor}"))
-    .bind(&original_filename)
-    .bind(&mime_type)
-    .bind(file_size)
-    .bind(&storage_key)
-    .bind(&vendor)
-    .bind(input.note.as_deref())
-    .bind(expense_date)
-    .bind(format!("Concierge service {service_id}"))
-    .bind(auth.user_id)
-    .execute(&mut *transaction)
-    .await;
-    if let Err(error) = document_insert {
-        tracing::error!(error = %error, service_id = %service_id, "insert concierge receipt document");
-        remove_document_blob(&storage_key).await;
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save receipt");
-    }
+    let mut stored_blob_key: Option<String> = None;
+    let document_id = if let Some(receipt) = receipt.as_ref() {
+        let (file_size, storage_key, original_filename) =
+            match store_document_blob(&receipt.data, receipt.file_name.as_str()).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+        stored_blob_key = Some(storage_key.clone());
+        let document_id = Uuid::new_v4();
+        let document_insert = sqlx::query(
+            r#"INSERT INTO documents (
+                   id, patient_id, order_id, auto_name, original_filename,
+                   art, category, status, visibility, is_medical, mime_type, file_size,
+                   storage_key, klinik, ursprung, notes,
+                   document_direction, document_variant, access_category,
+                   document_date, source_person, source_institution,
+                   addressee_institution, financial_status,
+                   version_root_document_id, version_number, uploaded_by
+               ) VALUES (
+                   $1, $2, $3, $4, $5,
+                   'receipt', 'payment', 'active', 'internal', false, $6, $7,
+                   $8, $9, 'concierge_expense_receipt', $10,
+                   'incoming', 'original', 'financial',
+                   $11, $12, $9,
+                   'GMED', 'open',
+                   $1, 1, $13
+               )"#,
+        )
+        .bind(document_id)
+        .bind(service.patient_id)
+        .bind(input.order_id)
+        .bind(format!("Receipt - {vendor}"))
+        .bind(&original_filename)
+        .bind(&receipt.mime_type)
+        .bind(file_size)
+        .bind(&storage_key)
+        .bind(&vendor)
+        .bind(input.note.as_deref())
+        .bind(expense_date)
+        .bind(format!("Concierge service {service_id}"))
+        .bind(auth.user_id)
+        .execute(&mut *transaction)
+        .await;
+        if let Err(error) = document_insert {
+            tracing::error!(error = %error, service_id = %service_id, "insert concierge receipt document");
+            remove_document_blob(&storage_key).await;
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save receipt");
+        }
+        Some(document_id)
+    } else {
+        None
+    };
 
     let expense_insert = sqlx::query(
         r#"INSERT INTO concierge_expense_submissions (
@@ -1023,13 +1073,15 @@ async fn submit_expense(
     .bind(service_delivered)
     .bind(input.note.as_deref())
     .bind(&payload_hash)
-    .bind(&receipt_sha256)
+    .bind(receipt_sha256)
     .bind(auth.user_id)
     .execute(&mut *transaction)
     .await;
     if let Err(error) = expense_insert {
         tracing::warn!(error = %error, service_id = %service_id, "insert concierge expense submission rejected");
-        remove_document_blob(&storage_key).await;
+        if let Some(storage_key) = stored_blob_key.as_deref() {
+            remove_document_blob(storage_key).await;
+        }
         return err(StatusCode::CONFLICT, "Expense submission was rejected");
     }
     let notification_deliveries = match insert_finance_review_notifications(
@@ -1045,7 +1097,9 @@ async fn submit_expense(
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, expense_id = %expense_id, "create Concierge expense review notifications");
-            remove_document_blob(&storage_key).await;
+            if let Some(storage_key) = stored_blob_key.as_deref() {
+                remove_document_blob(storage_key).await;
+            }
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to notify financial review",
@@ -1054,7 +1108,9 @@ async fn submit_expense(
     };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, expense_id = %expense_id, "commit concierge expense submission");
-        remove_document_blob(&storage_key).await;
+        if let Some(storage_key) = stored_blob_key.as_deref() {
+            remove_document_blob(storage_key).await;
+        }
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to submit expense",
@@ -1071,6 +1127,7 @@ async fn submit_expense(
             "patient_id": service.patient_id,
             "order_id": input.order_id,
             "receipt_document_id": document_id,
+            "document_missing": document_missing,
             "amount_gross": amount_gross.to_string(),
             "currency": currency,
             "paid_by": paid_by,
@@ -1151,7 +1208,7 @@ async fn load_expense_item(
                       AS order_leistung_name
            FROM concierge_expense_submissions submission
            JOIN users submitter ON submitter.id = submission.submitted_by
-           JOIN documents document ON document.id = submission.receipt_document_id
+           LEFT JOIN documents document ON document.id = submission.receipt_document_id
            LEFT JOIN concierge_expense_review_events initial
              ON initial.expense_id = submission.id
             AND initial.action IN ('posted', 'rejected')
@@ -1282,6 +1339,17 @@ async fn load_expense_item(
         }));
     }
 
+    let receipt = row
+        .try_get::<Option<Uuid>, _>("document_id")
+        .unwrap_or_default()
+        .map(|document_id| json!({
+            "document_id": document_id,
+            "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+            "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
+            "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
+            "download_url": format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/receipt"),
+        }));
+
     Ok(Some(json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
@@ -1307,13 +1375,8 @@ async fn load_expense_item(
             "display_name": row.try_get::<String, _>("submitter_name").unwrap_or_default(),
         },
         "submitted_at": row.try_get::<chrono::DateTime<Utc>, _>("created_at").ok(),
-        "receipt": {
-            "document_id": row.try_get::<Uuid, _>("document_id").unwrap_or_default(),
-            "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
-            "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
-            "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
-            "download_url": format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/receipt"),
-        },
+        "document_missing": receipt.is_none(),
+        "receipt": receipt,
         "external_invoice": row.try_get::<Option<Uuid>, _>("external_invoice_id").unwrap_or_default().map(|id| json!({
             "id": id,
             "status": row.try_get::<Option<String>, _>("external_status").unwrap_or_default(),

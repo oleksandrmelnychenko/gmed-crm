@@ -1073,7 +1073,7 @@ export const de = {
   appt_in_progress: "Läuft",
   appt_completed: "Abgeschlossen",
   appt_cancelled: "Storniert",
-  cal_weekdays: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"] as const,
+  cal_weekdays: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"] as const,
   cal_months: [
     "Januar",
     "Februar",

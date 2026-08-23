@@ -29,5 +29,7 @@ describe("ClinicalRecordSource", () => {
     expect(html).toContain('data-clinical-source="document"');
     expect(html).toContain("Из документа");
     expect(html).toContain("Arztbrief.pdf · S. 3");
+    expect(html).toContain("Предпросмотр документа: Arztbrief.pdf");
+    expect(html).toContain("<button");
   });
 });

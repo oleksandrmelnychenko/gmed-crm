@@ -29,6 +29,8 @@ use gmed_domain::role::Role;
 const MAX_FILE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 const MAX_MESSAGE_CHARS: usize = 10_000;
 const MAX_ENCRYPTED_MESSAGE_SIZE: usize = 64 * 1024;
+const MIN_MESSAGE_EXPIRY_SECONDS: i64 = 60;
+const MAX_MESSAGE_EXPIRY_SECONDS: i64 = 30 * 24 * 60 * 60;
 const UPLOAD_DIR: &str = "uploads/chat";
 
 /// Public alias exposed so other modules (e.g. key rotation) can locate
@@ -53,6 +55,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/messages/{user_id}",
             get(get_conversation).post(send_message),
+        )
+        .route(
+            "/messages/{user_id}/{message_id}",
+            axum::routing::delete(delete_message),
         )
         .route("/messages/{user_id}/upload", post(upload_file))
         .route("/messages/{user_id}/read", post(mark_conversation_read))
@@ -285,6 +291,105 @@ async fn write_message_peer_audit(
         Some(peer_id),
         context,
     ));
+}
+
+async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
+    let rows = match sqlx::query(
+        r#"SELECT id, from_user, to_user, attachment_key
+             FROM direct_messages
+            WHERE (from_user = $1 OR to_user = $1)
+              AND deleted_at IS NULL
+              AND expires_at IS NOT NULL
+              AND expires_at <= now()
+            ORDER BY expires_at
+            LIMIT 100"#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error, user_id = %user_id, "load expired direct messages");
+            return;
+        }
+    };
+
+    for row in rows {
+        let message_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        let from_user = row
+            .try_get::<Uuid, _>("from_user")
+            .unwrap_or_else(|_| Uuid::nil());
+        let to_user = row
+            .try_get::<Uuid, _>("to_user")
+            .unwrap_or_else(|_| Uuid::nil());
+        let attachment_key = row
+            .try_get::<Option<String>, _>("attachment_key")
+            .ok()
+            .flatten();
+
+        let updated = sqlx::query(
+            r#"UPDATE direct_messages
+                  SET deleted_at = now(),
+                      is_read = true,
+                      read_at = COALESCE(read_at, now()),
+                      message = NULL,
+                      message_ciphertext = NULL,
+                      message_nonce = NULL,
+                      e2e_algorithm = NULL,
+                      e2e_ciphertext = NULL,
+                      e2e_nonce = NULL,
+                      e2e_salt = NULL,
+                      sender_key_fingerprint = NULL,
+                      recipient_key_fingerprint = NULL,
+                      attachment_filename = NULL,
+                      attachment_mime = NULL,
+                      attachment_size = NULL,
+                      attachment_key = NULL,
+                      attachment_nonce = NULL,
+                      attachment_e2e_algorithm = NULL,
+                      attachment_e2e_nonce = NULL,
+                      attachment_e2e_salt = NULL
+                WHERE id = $1
+                  AND deleted_at IS NULL"#,
+        )
+        .bind(message_id)
+        .execute(&state.db)
+        .await;
+
+        match updated {
+            Ok(result) if result.rows_affected() > 0 => {
+                if let Some(file_key) =
+                    attachment_key.filter(|value| sanitize_filename(value) == *value)
+                {
+                    let path = std::path::Path::new(UPLOAD_DIR).join(file_key);
+                    if let Err(error) = tokio::fs::remove_file(path).await
+                        && error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        tracing::warn!(error = %error, message_id = %message_id, "remove expired chat attachment");
+                    }
+                }
+                publish_message_event(
+                    state,
+                    from_user,
+                    to_user,
+                    "message_deleted",
+                    Some(message_id),
+                );
+                publish_message_event(
+                    state,
+                    to_user,
+                    from_user,
+                    "message_deleted",
+                    Some(message_id),
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(error = %error, message_id = %message_id, "purge expired direct message");
+            }
+        }
+    }
 }
 
 async fn list_allowed_peers(
@@ -549,6 +654,7 @@ async fn list_conversations(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
+    purge_expired_messages_for_user(&state, auth.user_id).await;
     match sqlx::query(
         r#"WITH latest AS (
             SELECT DISTINCT ON (peer)
@@ -560,7 +666,9 @@ async fn list_conversations(
                 CASE WHEN from_user = $1 THEN true ELSE false END AS is_mine,
                 attachment_filename
             FROM direct_messages
-            WHERE from_user = $1 OR to_user = $1
+            WHERE (from_user = $1 OR to_user = $1)
+              AND deleted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())
            ORDER BY peer, created_at DESC
         )
         SELECT l.peer AS peer, u.name AS name, u.email AS email, u.role AS role, u.is_active AS is_active,
@@ -577,7 +685,13 @@ async fn list_conversations(
                l.created_at AS last_at,
                l.is_read AS is_read, l.read_at AS last_read_at, l.is_mine AS is_mine,
                l.attachment_filename AS attachment_filename,
-               (SELECT count(*) FROM direct_messages WHERE from_user = l.peer AND to_user = $1 AND NOT is_read) AS unread
+               (SELECT count(*)
+                  FROM direct_messages
+                 WHERE from_user = l.peer
+                   AND to_user = $1
+                   AND NOT is_read
+                   AND deleted_at IS NULL
+                   AND (expires_at IS NULL OR expires_at > now())) AS unread
         FROM latest l
         JOIN users u ON u.id = l.peer
         ORDER BY l.created_at DESC"#,
@@ -686,16 +800,19 @@ async fn get_conversation(
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
+    purge_expired_messages_for_user(&state, auth.user_id).await;
 
     match sqlx::query(
         r#"SELECT id, from_user, to_user, message, message_ciphertext, message_nonce, encryption_key_id,
                   e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
                   sender_key_fingerprint, recipient_key_fingerprint,
-                  is_read, read_at, created_at,
+                  is_read, read_at, created_at, expires_at, client_message_id,
                   attachment_filename, attachment_mime, attachment_size, attachment_key,
                   attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt
            FROM direct_messages
-           WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)
+           WHERE ((from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1))
+             AND deleted_at IS NULL
+             AND (expires_at IS NULL OR expires_at > now())
            ORDER BY created_at DESC LIMIT $3"#,
     )
     .bind(auth.user_id)
@@ -760,6 +877,8 @@ async fn get_conversation(
                         "is_read": r.try_get::<bool, _>("is_read").unwrap_or(false),
                         "read_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("read_at").ok().flatten().map(|value| value.to_rfc3339()),
                         "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "expires_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at").ok().flatten().map(|value| value.to_rfc3339()),
+                        "client_message_id": r.try_get::<Option<Uuid>, _>("client_message_id").ok().flatten(),
                         "attachment_filename": r.try_get::<Option<String>, _>("attachment_filename").unwrap_or_default(),
                         "attachment_mime": r.try_get::<Option<String>, _>("attachment_mime").unwrap_or_default(),
                         "attachment_size": r.try_get::<Option<i64>, _>("attachment_size").unwrap_or_default(),
@@ -796,12 +915,32 @@ async fn get_conversation(
 #[derive(Deserialize)]
 struct SendReq {
     message: Option<String>,
+    client_message_id: Option<Uuid>,
+    expires_in_seconds: Option<i64>,
     e2e_algorithm: Option<String>,
     e2e_ciphertext: Option<String>,
     e2e_nonce: Option<String>,
     e2e_salt: Option<String>,
     sender_key_fingerprint: Option<String>,
     recipient_key_fingerprint: Option<String>,
+}
+
+#[allow(clippy::result_large_err)]
+fn message_expires_at(
+    expires_in_seconds: Option<i64>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, axum::response::Response> {
+    let Some(seconds) = expires_in_seconds else {
+        return Ok(None);
+    };
+    if !(MIN_MESSAGE_EXPIRY_SECONDS..=MAX_MESSAGE_EXPIRY_SECONDS).contains(&seconds) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid message expiration timer",
+        ));
+    }
+    Ok(Some(
+        chrono::Utc::now() + chrono::Duration::seconds(seconds),
+    ))
 }
 
 fn has_any_e2e_fields(body: &SendReq) -> bool {
@@ -855,6 +994,11 @@ async fn send_message(
         .map(str::trim)
         .unwrap_or_default()
         .to_string();
+    let expires_at = match message_expires_at(body.expires_in_seconds) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let client_message_id = body.client_message_id;
     let has_e2e_payload = has_any_e2e_fields(&body);
 
     if has_e2e_payload {
@@ -960,10 +1104,15 @@ async fn send_message(
                    e2e_nonce,
                    e2e_salt,
                    sender_key_fingerprint,
-                   recipient_key_fingerprint
+                   recipient_key_fingerprint,
+                   client_message_id,
+                   expires_at
                )
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-               RETURNING id, created_at"#,
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+               ON CONFLICT (from_user, to_user, client_message_id)
+                   WHERE client_message_id IS NOT NULL
+               DO UPDATE SET client_message_id = EXCLUDED.client_message_id
+               RETURNING id, created_at, (xmax = 0) AS inserted"#,
         )
         .bind(auth.user_id)
         .bind(user_id)
@@ -973,6 +1122,8 @@ async fn send_message(
         .bind(&salt)
         .bind(sender_key_fingerprint)
         .bind(recipient_key_fingerprint)
+        .bind(client_message_id)
+        .bind(expires_at)
         .fetch_one(&state.db)
         .await
         {
@@ -981,6 +1132,7 @@ async fn send_message(
                 let created_at: chrono::DateTime<chrono::Utc> = row
                     .try_get("created_at")
                     .unwrap_or_else(|_| chrono::Utc::now());
+                let inserted = row.try_get::<bool, _>("inserted").unwrap_or(true);
                 write_message_peer_audit(
                     &state,
                     auth.user_id,
@@ -996,20 +1148,37 @@ async fn send_message(
                     }),
                 )
                 .await;
-                create_message_notification(
-                    &state,
-                    auth.user_id,
-                    user_id,
-                    Some("[Encrypted message]"),
-                    None,
-                )
-                .await;
-                publish_message_event(&state, auth.user_id, user_id, "message_created", Some(id));
-                publish_message_event(&state, user_id, auth.user_id, "message_created", Some(id));
+                if inserted {
+                    create_message_notification(
+                        &state,
+                        auth.user_id,
+                        user_id,
+                        Some("[Encrypted message]"),
+                        None,
+                    )
+                    .await;
+                    publish_message_event(
+                        &state,
+                        auth.user_id,
+                        user_id,
+                        "message_created",
+                        Some(id),
+                    );
+                    publish_message_event(
+                        &state,
+                        user_id,
+                        auth.user_id,
+                        "message_created",
+                        Some(id),
+                    );
+                }
                 Json(serde_json::json!({
                     "ok": true,
                     "id": id,
                     "created_at": created_at.to_rfc3339(),
+                    "expires_at": expires_at.map(|value| value.to_rfc3339()),
+                    "client_message_id": client_message_id,
+                    "duplicate": !inserted,
                     "is_e2e": true,
                 }))
                 .into_response()
@@ -1039,15 +1208,22 @@ async fn send_message(
         };
 
         match sqlx::query(
-            "INSERT INTO direct_messages (from_user, to_user, message_ciphertext, message_nonce, encryption_key_id)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, created_at",
+            "INSERT INTO direct_messages (
+                 from_user, to_user, message_ciphertext, message_nonce, encryption_key_id,
+                 client_message_id, expires_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (from_user, to_user, client_message_id)
+                 WHERE client_message_id IS NOT NULL
+             DO UPDATE SET client_message_id = EXCLUDED.client_message_id
+             RETURNING id, created_at, (xmax = 0) AS inserted",
         )
         .bind(auth.user_id)
         .bind(user_id)
         .bind(&ciphertext)
         .bind(&nonce)
         .bind(&key_id)
+        .bind(client_message_id)
+        .bind(expires_at)
         .fetch_one(&state.db)
         .await
         {
@@ -1056,6 +1232,7 @@ async fn send_message(
                 let created_at: chrono::DateTime<chrono::Utc> = row
                     .try_get("created_at")
                     .unwrap_or_else(|_| chrono::Utc::now());
+                let inserted = row.try_get::<bool, _>("inserted").unwrap_or(true);
                 write_message_peer_audit(
                     &state,
                     auth.user_id,
@@ -1069,20 +1246,37 @@ async fn send_message(
                     }),
                 )
                 .await;
-                create_message_notification(
-                    &state,
-                    auth.user_id,
-                    user_id,
-                    Some(trimmed_message.as_str()),
-                    None,
-                )
-                .await;
-                publish_message_event(&state, auth.user_id, user_id, "message_created", Some(id));
-                publish_message_event(&state, user_id, auth.user_id, "message_created", Some(id));
+                if inserted {
+                    create_message_notification(
+                        &state,
+                        auth.user_id,
+                        user_id,
+                        Some(trimmed_message.as_str()),
+                        None,
+                    )
+                    .await;
+                    publish_message_event(
+                        &state,
+                        auth.user_id,
+                        user_id,
+                        "message_created",
+                        Some(id),
+                    );
+                    publish_message_event(
+                        &state,
+                        user_id,
+                        auth.user_id,
+                        "message_created",
+                        Some(id),
+                    );
+                }
                 Json(serde_json::json!({
                     "ok": true,
                     "id": id,
                     "created_at": created_at.to_rfc3339(),
+                    "expires_at": expires_at.map(|value| value.to_rfc3339()),
+                    "client_message_id": client_message_id,
+                    "duplicate": !inserted,
                     "is_e2e": false,
                 }))
                 .into_response()
@@ -1093,6 +1287,120 @@ async fn send_message(
             }
         }
     }
+}
+
+async fn delete_message(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((user_id, message_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
+        return resp;
+    }
+
+    let row = match sqlx::query(
+        r#"WITH target AS (
+               SELECT id, attachment_key
+                 FROM direct_messages
+                WHERE id = $3
+                  AND from_user = $1
+                  AND to_user = $2
+                  AND deleted_at IS NULL
+                FOR UPDATE
+           ), updated AS (
+               UPDATE direct_messages AS dm
+                  SET deleted_at = now(),
+                      deleted_by = $1,
+                      is_read = true,
+                      read_at = COALESCE(read_at, now()),
+                      message = NULL,
+                      message_ciphertext = NULL,
+                      message_nonce = NULL,
+                      e2e_algorithm = NULL,
+                      e2e_ciphertext = NULL,
+                      e2e_nonce = NULL,
+                      e2e_salt = NULL,
+                      sender_key_fingerprint = NULL,
+                      recipient_key_fingerprint = NULL,
+                      attachment_filename = NULL,
+                      attachment_mime = NULL,
+                      attachment_size = NULL,
+                      attachment_key = NULL,
+                      attachment_nonce = NULL,
+                      attachment_e2e_algorithm = NULL,
+                      attachment_e2e_nonce = NULL,
+                      attachment_e2e_salt = NULL
+                 FROM target
+                WHERE dm.id = target.id
+               RETURNING dm.id
+           )
+           SELECT updated.id, target.attachment_key
+             FROM updated
+             JOIN target ON true"#,
+    )
+    .bind(auth.user_id)
+    .bind(user_id)
+    .bind(message_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "Message not found or cannot be deleted",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "delete direct message");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete message",
+            );
+        }
+    };
+
+    if let Some(file_key) = row
+        .try_get::<Option<String>, _>("attachment_key")
+        .ok()
+        .flatten()
+        .filter(|value| sanitize_filename(value) == *value)
+    {
+        let path = std::path::Path::new(UPLOAD_DIR).join(file_key);
+        if let Err(error) = tokio::fs::remove_file(path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(error = %error, message_id = %message_id, "remove deleted chat attachment");
+        }
+    }
+
+    write_message_peer_audit(
+        &state,
+        auth.user_id,
+        "delete_message",
+        user_id,
+        json!({ "message_id": message_id }),
+    )
+    .await;
+    publish_message_event(
+        &state,
+        auth.user_id,
+        user_id,
+        "message_deleted",
+        Some(message_id),
+    );
+    publish_message_event(
+        &state,
+        user_id,
+        auth.user_id,
+        "message_deleted",
+        Some(message_id),
+    );
+
+    Json(json!({ "ok": true, "id": message_id })).into_response()
 }
 
 /// Upload a file attachment (multipart/form-data).
@@ -1124,6 +1432,8 @@ async fn upload_file(
     let mut sender_key_fingerprint: Option<String> = None;
     let mut recipient_key_fingerprint: Option<String> = None;
     let mut attachment_plaintext_size: Option<i64> = None;
+    let mut client_message_id: Option<Uuid> = None;
+    let mut expires_in_seconds: Option<i64> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -1225,6 +1535,20 @@ async fn upload_file(
                     .and_then(|value| value.trim().parse::<i64>().ok())
                     .filter(|value| *value > 0);
             }
+            "client_message_id" => {
+                client_message_id = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|value| Uuid::parse_str(value.trim()).ok());
+            }
+            "expires_in_seconds" => {
+                expires_in_seconds = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|value| value.trim().parse::<i64>().ok());
+            }
             _ => {}
         }
     }
@@ -1238,6 +1562,51 @@ async fn upload_file(
         .is_some_and(|value| value.chars().count() > MAX_MESSAGE_CHARS)
     {
         return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+    }
+    let expires_at = match message_expires_at(expires_in_seconds) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    if let Some(client_id) = client_message_id {
+        match sqlx::query(
+            r#"SELECT id, created_at, expires_at,
+                      attachment_key, attachment_filename, attachment_mime, attachment_size,
+                      attachment_e2e_algorithm
+                 FROM direct_messages
+                WHERE from_user = $1
+                  AND to_user = $2
+                  AND client_message_id = $3
+                LIMIT 1"#,
+        )
+        .bind(auth.user_id)
+        .bind(user_id)
+        .bind(client_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => {
+                return Json(json!({
+                    "ok": true,
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+                    "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                    "expires_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("expires_at").ok().flatten().map(|value| value.to_rfc3339()),
+                    "client_message_id": client_id,
+                    "duplicate": true,
+                    "attachment_key": row.try_get::<Option<String>, _>("attachment_key").ok().flatten(),
+                    "attachment_filename": row.try_get::<Option<String>, _>("attachment_filename").ok().flatten(),
+                    "attachment_mime": row.try_get::<Option<String>, _>("attachment_mime").ok().flatten(),
+                    "attachment_size": row.try_get::<Option<i64>, _>("attachment_size").ok().flatten(),
+                    "attachment_is_e2e": row.try_get::<Option<String>, _>("attachment_e2e_algorithm").ok().flatten().is_some(),
+                }))
+                .into_response();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, "check duplicate attachment message");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
     }
     let has_attachment_e2e = attachment_e2e_algorithm
         .as_deref()
@@ -1534,11 +1903,11 @@ async fn upload_file(
                sender_key_fingerprint, recipient_key_fingerprint,
                attachment_filename, attachment_mime, attachment_size, attachment_key,
                attachment_nonce, attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt,
-               encryption_key_id
+               encryption_key_id, client_message_id, expires_at
            )
            VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-               $11, $12, $13, $14, $15, $16, $17, $18, $19
+               $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
            ) RETURNING id, created_at"#,
     )
     .bind(auth.user_id)
@@ -1560,6 +1929,8 @@ async fn upload_file(
     .bind(stored_attachment_e2e_nonce.as_deref())
     .bind(stored_attachment_e2e_salt.as_deref())
     .bind(stored_encryption_key_id.as_deref())
+    .bind(client_message_id)
+    .bind(expires_at)
     .fetch_one(&state.db)
     .await
     {
@@ -1596,6 +1967,9 @@ async fn upload_file(
             publish_message_event(&state, user_id, auth.user_id, "message_created", Some(id));
             Json(serde_json::json!({
                 "ok": true, "id": id, "created_at": created_at.to_rfc3339(),
+                "expires_at": expires_at.map(|value| value.to_rfc3339()),
+                "client_message_id": client_message_id,
+                "duplicate": false,
                 "attachment_key": file_key, "attachment_filename": file_name,
                 "attachment_mime": mime_type, "attachment_size": file_size,
                 "attachment_is_e2e": has_attachment_e2e,
@@ -1625,7 +1999,10 @@ async fn download_file(
         r#"SELECT id, from_user, to_user, attachment_filename, attachment_mime, attachment_size,
                   attachment_nonce, attachment_e2e_algorithm, encryption_key_id
            FROM direct_messages
-           WHERE attachment_key = $1 AND (from_user = $2 OR to_user = $2)
+           WHERE attachment_key = $1
+             AND (from_user = $2 OR to_user = $2)
+             AND deleted_at IS NULL
+             AND (expires_at IS NULL OR expires_at > now())
            LIMIT 1"#,
     )
     .bind(&file_key)
@@ -1766,6 +2143,8 @@ async fn mark_conversation_read(
          WHERE from_user = $2
            AND to_user = $1
            AND NOT is_read
+           AND deleted_at IS NULL
+           AND (expires_at IS NULL OR expires_at > now())
          RETURNING read_at",
     )
     .bind(auth.user_id)
@@ -1858,7 +2237,10 @@ async fn mark_all_conversations_read(
         r#"UPDATE direct_messages
            SET is_read = true,
                read_at = COALESCE(read_at, now())
-           WHERE to_user = $1 AND NOT is_read"#,
+           WHERE to_user = $1
+             AND NOT is_read
+             AND deleted_at IS NULL
+             AND (expires_at IS NULL OR expires_at > now())"#,
     )
     .bind(auth.user_id)
     .execute(&mut *tx)
@@ -1932,10 +2314,16 @@ async fn unread_total(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
-    let count = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "c!" FROM direct_messages WHERE to_user = $1 AND NOT is_read"#,
-        auth.user_id
+    purge_expired_messages_for_user(&state, auth.user_id).await;
+    let count = sqlx::query_scalar::<_, i64>(
+        r#"SELECT count(*) AS "c!"
+             FROM direct_messages
+            WHERE to_user = $1
+              AND NOT is_read
+              AND deleted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())"#,
     )
+    .bind(auth.user_id)
     .fetch_one(&state.db)
     .await
     .unwrap_or(0);
