@@ -31,6 +31,7 @@ import {
   leadVisitTimingLabel,
 } from "@/pages/leads/model/leads-model";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
+import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
 
 import {
   fetchPatientRelations,
@@ -606,6 +607,8 @@ function usePatientProfileTabContent({
 
   return (
     <div className="space-y-5 mt-4 min-h-[400px]">
+      {canCreateTasks && id ? <LinkedTasksSection patientId={id} patientName={[detail.first_name, detail.last_name].filter(Boolean).join(" ")} /> : null}
+
       <div className="space-y-3">
         <ProfileSummaryCard
           title={t.patient_profile_personal_data}
@@ -1075,7 +1078,7 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               title={l("patients_create_task_for_this_patient")}
               description={l("patients_create_internal_or_external_task_linked_to_this_patient")}
-              onClick={() => staffGo(`/task-manager?create=1&patient=${encodeURIComponent(id)}`)}
+              onClick={() => window.dispatchEvent(new CustomEvent(OPEN_PATIENT_TASK_CREATOR_EVENT, { detail: { patientId: id } }))}
             />
           ) : null}
           {canExportPatientCompliance ? (

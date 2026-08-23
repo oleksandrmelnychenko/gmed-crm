@@ -49,6 +49,58 @@ final result: passed
 
 ---
 
+# Design QA — task detail in patient-profile style
+
+- Source visual truth: `C:\Users\oleks\AppData\Local\Temp\codex-clipboard-7cffd141-73bc-4a69-99c1-7e832f7e4063.png`
+- Implementation screenshot: `C:\Users\oleks\AppData\Local\Temp\gmed-task-detail-dots.png`
+- Combined comparison: `C:\Users\oleks\AppData\Local\Temp\gmed-task-detail-dots-comparison.png`
+- Viewport: 2560 × 1250 desktop, light Russian interface
+
+## Visual comparison
+
+The task detail now uses the patient profile's card language: white sections with restrained borders, muted header strips, small orange section dots, table-like label/value rows, orange primary accents, and no nested gray islands. The peach icon tiles were removed from the dialog header and every section. Overview, links, files, checklist, comments, and history use the same compact section rhythm.
+
+## Interaction and runtime checks
+
+- Opened the patient-linked task `Принести торта` from the task manager and checked the complete scrollable detail state.
+- Patient linkage remains directly navigable from the detail.
+- Targeted ESLint and `git diff --check`: passed.
+- The visible `API route not found` message belongs to the not-yet-deployed DEV attachment endpoint; deployment remains intentionally deferred until the requested batch is complete.
+- Vite HMR logged transient `RealtimeProvider` remount errors during source updates; the final rendered state recovered and remained interactive.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual differences remain for the requested patient-profile styling.
+
+final result: passed
+
+---
+
+# Design QA — notes aligned with specializations
+
+- Source visual truth: `C:\Users\oleks\AppData\Local\Temp\gmed-specializations-source.png`
+- Implementation screenshot: `C:\Users\oleks\AppData\Local\Temp\gmed-notes-implementation-final.png`
+- Combined comparison: `C:\Users\oleks\AppData\Local\Temp\gmed-notes-vs-specializations-comparison.png`
+- Viewport: 2560 × 1250 desktop, light Russian interface
+
+## Visual comparison
+
+Notes now reuse the Specializations master-detail shell: compact searchable left pane, orange selected rail, thin neutral borders, aligned detail header/actions, and a profile-style files section. The updated date is a compact blue chip placed at the upper-right of each note row, preserving the note title and preview hierarchy.
+
+## Interaction and runtime checks
+
+- Existing note selection loads the editor without layout shift.
+- Save/archive/file controls remain visible in the detail pane.
+- Targeted ESLint and `git diff --check`: passed.
+
+## Findings
+
+- No actionable P0, P1, or P2 differences remain for the requested Notes layout and date placement.
+
+final result: passed
+
+---
+
 # Design QA — Build release widget
 
 - Source screenshot: `C:\Users\oleks\OneDrive\Documents\ChatGPT\gmed\build-widget-source-header.png`
@@ -253,5 +305,34 @@ The lower card region was compared separately after activating the Mollie link s
 ## Findings
 
 - No actionable P0, P1, or P2 differences remain for the requested localization and Mollie states.
+
+final result: passed
+
+---
+
+# Design QA — provider linked tasks and documents placement
+
+- Source visual truth: `C:\Users\oleks\AppData\Local\Temp\codex-clipboard-01d9f891-d1a8-44d9-ba20-e25291f0eb3b.png`
+- Linked-tasks implementation: `C:\Users\oleks\AppData\Local\Temp\gmed-provider-linked-tasks-final.png`
+- Linked-tasks comparison: `C:\Users\oleks\AppData\Local\Temp\gmed-provider-linked-tasks-comparison.png`
+- Documents implementation: `C:\Users\oleks\AppData\Local\Temp\gmed-med-provider-documents-after-history.png`
+- Viewport: 2560 × 1250 desktop, light Russian interface
+
+## Visual comparison
+
+The provider profile keeps the same compact table structure, column rhythm, orange action, and status/date treatment as the supplied reference. The peach icon tile in the linked-tasks header is replaced with the small orange profile dot used throughout the current profile design. Medical-provider documents now render as a full table directly after `История взаимодействий`.
+
+## Interaction and runtime checks
+
+- `Создать задачу` opens the task/event dialog inside the provider profile.
+- The URL remains on the provider route before and after opening the dialog; no task-manager redirect occurs.
+- The current provider is preselected, and the patient field remains optional and searchable.
+- Closing the dialog returns to the unchanged provider profile.
+- DOM ordering on a medical provider confirms `Документы` appears after `История взаимодействий`.
+- Targeted ESLint and `git diff --check`: passed.
+
+## Findings
+
+- No actionable P0, P1, or P2 visual or flow issues remain for this change.
 
 final result: passed

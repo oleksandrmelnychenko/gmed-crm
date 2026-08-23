@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,7 @@ const copy = {
     saved: "Notiz gespeichert",
     fileAdded: "Datei angehängt",
     error: "Aktion fehlgeschlagen",
+    cancel: "Abbrechen",
   },
   ru: {
     title: "Заметки",
@@ -96,6 +98,7 @@ const copy = {
     saved: "Заметка сохранена",
     fileAdded: "Файл прикреплён",
     error: "Не удалось выполнить действие",
+    cancel: "Отмена",
   },
 } as const;
 
@@ -129,7 +132,9 @@ export function InternalNotesPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const isNew = selectedId === "new";
+  const [newNoteOpen, setNewNoteOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newBody, setNewBody] = useState("");
 
   const loadNotes = useCallback(async (keepSelection = true) => {
     setLoading(true);
@@ -138,7 +143,6 @@ export function InternalNotesPage() {
       const rows = await apiFetch<NoteSummary[]>("/internal-notes", { forceFresh: true });
       setNotes(rows);
       setSelectedId((current) => {
-        if (current === "new") return current;
         if (keepSelection && current && rows.some((note) => note.id === current)) return current;
         return rows[0]?.id ?? null;
       });
@@ -154,14 +158,7 @@ export function InternalNotesPage() {
   }, [loadNotes]);
 
   useEffect(() => {
-    if (!selectedId || selectedId === "new") {
-      if (selectedId === "new") {
-        setActiveNote(null);
-        setDraftTitle("");
-        setDraftBody("");
-      }
-      return;
-    }
+    if (!selectedId) return;
     let cancelled = false;
     void apiFetch<InternalNote>(`/internal-notes/${selectedId}`, { forceFresh: true })
       .then((note) => {
@@ -186,25 +183,46 @@ export function InternalNotesPage() {
 
   async function saveNote() {
     const title = draftTitle.trim();
-    if (!title) return;
+    if (!title || !selectedId || !activeNote) return;
     setSaving(true);
     setError("");
     setNotice("");
     try {
-      const saved = isNew
-        ? await apiFetch<InternalNote>("/internal-notes", {
-            method: "POST",
-            body: JSON.stringify({ title, body: draftBody.trim() || null }),
-          })
-        : await apiFetch<InternalNote>(`/internal-notes/${selectedId}/update`, {
-            method: "POST",
-            body: JSON.stringify({
-              title,
-              body: draftBody.trim() || null,
-              expected_updated_at: activeNote?.updated_at,
-            }),
-          });
+      const saved = await apiFetch<InternalNote>(`/internal-notes/${selectedId}/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          body: draftBody.trim() || null,
+          expected_updated_at: activeNote.updated_at,
+        }),
+      });
       clearApiCache("/internal-notes");
+      setActiveNote(saved);
+      setSelectedId(saved.id);
+      setNotice(labels.saved);
+      await loadNotes();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : labels.error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createNote() {
+    const title = newTitle.trim();
+    if (!title || saving) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const saved = await apiFetch<InternalNote>("/internal-notes", {
+        method: "POST",
+        body: JSON.stringify({ title, body: newBody.trim() || null }),
+      });
+      clearApiCache("/internal-notes");
+      setNewNoteOpen(false);
+      setNewTitle("");
+      setNewBody("");
       setActiveNote(saved);
       setSelectedId(saved.id);
       setNotice(labels.saved);
@@ -271,69 +289,74 @@ export function InternalNotesPage() {
   }
 
   return (
-    <div className="space-y-3" data-testid="internal-notes-page">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0" data-testid="internal-notes-page">
       <PageHeader
         title={labels.title}
         description={labels.subtitle}
-        actions={<Button type="button" onClick={() => setSelectedId("new")}><Plus />{labels.newNote}</Button>}
+        actions={<Button type="button" onClick={() => { setNewTitle(""); setNewBody(""); setNewNoteOpen(true); }}><Plus />{labels.newNote}</Button>}
       />
 
       {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       {notice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p> : null}
 
-      <div className="grid min-h-[calc(100vh-14rem)] overflow-hidden rounded-xl border bg-card shadow-sm lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="border-b bg-muted/15 lg:border-b-0 lg:border-r">
-          <div className="border-b p-3">
+      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/70 lg:border-r lg:border-b-0">
+          <div className="border-b border-border/70 p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="bg-background pl-9" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} />
+              <Input className="h-9 rounded-lg bg-field pl-9" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} />
             </div>
           </div>
-          <div className="max-h-[360px] overflow-y-auto p-2 lg:max-h-[calc(100vh-18rem)]">
+          <div className="min-h-0 max-h-[280px] flex-1 overflow-y-auto overscroll-contain p-2 lg:max-h-none">
             {loading ? <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
             {!loading && visibleNotes.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted-foreground">{labels.noNotes}</p> : null}
             {visibleNotes.map((note) => (
               <button
                 key={note.id}
                 type="button"
-                className={cn("mb-1 w-full rounded-lg border px-3 py-3 text-left transition-colors", selectedId === note.id ? "border-primary/40 bg-primary/5" : "border-transparent hover:bg-muted/60")}
+                className={cn("relative mb-1 w-full rounded-lg px-2.5 py-2 text-left transition-colors", selectedId === note.id ? "bg-muted/70 before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]" : "hover:bg-muted/45")}
                 onClick={() => setSelectedId(note.id)}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="line-clamp-1 text-sm font-semibold">{note.title}</p>
-                  {note.attachment_count > 0 ? <Badge variant="secondary" className="shrink-0"><Paperclip className="size-3" />{note.attachment_count}</Badge> : null}
+                  <p className="line-clamp-1 text-[13px] font-semibold">{note.title}</p>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {note.attachment_count > 0 ? <Badge variant="secondary" className="h-5 shrink-0 rounded-full px-1.5 text-[9px]"><Paperclip className="size-2.5" />{note.attachment_count}</Badge> : null}
+                    <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium tabular-nums text-sky-700">
+                      {formatDate(note.updated_at, lang)}
+                    </span>
+                  </div>
                 </div>
-                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{note.body || "—"}</p>
-                <p className="mt-2 text-[11px] text-muted-foreground">{formatDate(note.updated_at, lang)}</p>
+                <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{note.body || "—"}</p>
               </button>
             ))}
           </div>
         </aside>
 
-        <main className="min-w-0 p-4 sm:p-6">
+        <main className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden">
           {!selectedId ? <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">{labels.selectNote}</div> : (
-            <div className="mx-auto max-w-4xl space-y-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{isNew ? labels.newNote : `${labels.updated} ${activeNote ? formatDate(activeNote.updated_at, lang) : ""}`}</p>
-                  {!isNew && activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-semibold text-foreground">{activeNote?.title ?? labels.untitled}</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at, lang) : ""}`}</p>
+                  {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
                 </div>
                 <div className="flex gap-2">
-                  {!isNew && activeNote ? <Button type="button" variant="outline" disabled={saving} onClick={() => void archiveNote()}><Archive />{labels.archive}</Button> : null}
-                  <Button type="button" disabled={saving || !draftTitle.trim()} onClick={() => void saveNote()}>
+                  {activeNote ? <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void archiveNote()}><Archive />{labels.archive}</Button> : null}
+                  <Button type="button" size="sm" disabled={saving || !draftTitle.trim()} onClick={() => void saveNote()}>
                     {saving ? <LoaderCircle className="animate-spin" /> : <Save />}{saving ? labels.saving : labels.save}
                   </Button>
                 </div>
               </div>
 
-              <label className="block space-y-1.5 text-sm font-medium">
+              <label className="mx-4 mt-4 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteTitle}</span>
-                <Input value={draftTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setDraftTitle(event.target.value)} />
+                <Input className="h-9 bg-field" value={draftTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setDraftTitle(event.target.value)} />
               </label>
-              <label className="block space-y-1.5 text-sm font-medium">
+              <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteBody}</span>
                 <textarea
-                  className="min-h-64 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm leading-6 outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                  className="min-h-40 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                   value={draftBody}
                   maxLength={20_000}
                   placeholder={labels.bodyPlaceholder}
@@ -341,12 +364,12 @@ export function InternalNotesPage() {
                 />
               </label>
 
-              {!isNew && activeNote ? (
-                <section className="rounded-xl border bg-muted/15 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+              {activeNote ? (
+                <section className="mx-4 mt-4 mb-4 overflow-hidden rounded-lg border border-border/70 bg-card sm:mx-5 sm:mb-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
                     <div>
-                      <h2 className="text-sm font-semibold">{labels.attachments}</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">{labels.allowedFiles}</p>
+                      <h2 className="flex items-center gap-2 text-[13px] font-semibold"><span className="size-2 rounded-full bg-[var(--brand)]" />{labels.attachments}</h2>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowedFiles}</p>
                     </div>
                     <input
                       ref={fileInputRef}
@@ -362,7 +385,7 @@ export function InternalNotesPage() {
                       {uploading ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.attach}
                     </Button>
                   </div>
-                  <div className="mt-4 divide-y rounded-lg border bg-background">
+                  <div className="divide-y divide-border/60">
                     {activeNote.attachments.map((attachment) => (
                       <div key={attachment.id} className="flex items-center gap-3 px-3 py-2.5">
                         {attachment.mime_type.startsWith("image/") ? <FileImage className="size-5 shrink-0 text-violet-600" /> : <FileText className="size-5 shrink-0 text-sky-600" />}
@@ -382,7 +405,37 @@ export function InternalNotesPage() {
           )}
         </main>
       </div>
+
+      <Dialog open={newNoteOpen} onOpenChange={setNewNoteOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{labels.newNote}</DialogTitle>
+            <DialogDescription>{labels.subtitle}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <label className="grid gap-1.5 text-sm font-medium">
+              <span>{labels.noteTitle}</span>
+              <Input autoFocus value={newTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setNewTitle(event.target.value)} />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              <span>{labels.noteBody}</span>
+              <textarea
+                className="min-h-52 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                value={newBody}
+                maxLength={20_000}
+                placeholder={labels.bodyPlaceholder}
+                onChange={(event) => setNewBody(event.target.value)}
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => setNewNoteOpen(false)}>{labels.cancel}</Button>
+            <Button type="button" disabled={saving || !newTitle.trim()} onClick={() => void createNote()}>
+              {saving ? <LoaderCircle className="animate-spin" /> : <Save />}{saving ? labels.saving : labels.save}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-

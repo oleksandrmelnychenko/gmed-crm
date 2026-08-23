@@ -65,6 +65,7 @@ import { cn } from "@/lib/utils";
 import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
+import { LinkedTasksSection } from "@/pages/concierge/linked-tasks-section";
 
 import {
   createProviderStaffRole,
@@ -3422,6 +3423,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onEdit={openProviderEditSheet}
                   />
 
+                  {canStaffPath("/task-manager") ? <LinkedTasksSection providerId={detail.id} /> : null}
+
                   <ProviderOverviewSection
                     detail={detail}
                     financialSummary={providerFinancialSummary}
@@ -3435,6 +3438,13 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   />
 
                   <ProviderProfileReadOnlySection detail={detail} />
+
+                  {detail.provider_type !== "medical" ? (
+                    <ProviderDocumentsSection
+                      detail={detail}
+                      canManage={permissions.canManageRegistry}
+                    />
+                  ) : null}
 
                   <DoctorSection
                     detail={detail}
@@ -3516,6 +3526,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   <InteractionHistorySection
                     detail={detail}
                   />
+                  {detail.provider_type === "medical" ? (
+                    <ProviderDocumentsSection
+                      detail={detail}
+                      canManage={permissions.canManageRegistry}
+                    />
+                  ) : null}
               </div>
             </div>
           ) : detailError ? (
@@ -4124,6 +4140,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onDelete={handleDeleteProvider}
                   />
 
+                  {canStaffPath("/task-manager") ? <LinkedTasksSection providerId={detail.id} /> : null}
+
                   <ProviderOverviewSection
                     detail={detail}
                     financialSummary={providerFinancialSummary}
@@ -4136,10 +4154,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     onOpenAppointments={() => window.open(`/appointments?provider=${detail.id}`, "_blank", "noopener,noreferrer")}
                   />
 
-                  <ProviderDocumentsSection
-                    detail={detail}
-                    canManage={permissions.canManageRegistry}
-                  />
+                  {detail.provider_type !== "medical" ? (
+                    <ProviderDocumentsSection
+                      detail={detail}
+                      canManage={permissions.canManageRegistry}
+                    />
+                  ) : null}
 
                   <ProviderChildrenSection onOpenProvider={openProvider}>
                     {detail.children}
@@ -4257,6 +4277,12 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                 <InteractionHistorySection
                   detail={detail}
                 />
+                {detail.provider_type === "medical" ? (
+                  <ProviderDocumentsSection
+                    detail={detail}
+                    canManage={permissions.canManageRegistry}
+                  />
+                ) : null}
                 </div>
               </AdminSheetScaffold>
             </div>

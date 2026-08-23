@@ -39,13 +39,15 @@ test.describe("live RBAC denied route normalization", () => {
     await expectForbiddenRouteRedirect(page, "/appointments");
   });
 
-  test("patient manager is redirected away from Task Manager, Concierge and Company Finance", async ({
+  test("patient manager can open Task Manager but is redirected away from Concierge and Company Finance", async ({
     page,
     request,
   }) => {
     await setGermanLanguage(page);
     await bootstrapAndLogin(page, request, "pm");
-    for (const path of ["/task-manager", "/concierge", "/company-finance"]) {
+    await page.goto("/task-manager");
+    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
+    for (const path of ["/concierge", "/company-finance"]) {
       await expectForbiddenRouteRedirect(page, path);
     }
   });
@@ -154,12 +156,14 @@ test.describe("live RBAC denied route normalization", () => {
     await expectForbiddenRouteRedirect(page, "/documents");
   });
 
-  test("interpreter is redirected away from reports workspace", async ({
+  test("interpreter can open Task Manager but is redirected away from reports workspace", async ({
     page,
     request,
   }) => {
     await setGermanLanguage(page);
     await bootstrapAndLogin(page, request, "interpreter");
+    await page.goto("/task-manager");
+    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
     await expectForbiddenRouteRedirect(page, "/reports");
   });
 

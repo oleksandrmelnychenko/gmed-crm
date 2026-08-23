@@ -37,6 +37,7 @@ import {
   conciergeServiceDisplayTitle,
   conciergeServiceTaxonomyLabel,
   conciergeWorkspaceStats,
+  canModifyConciergeTask,
   filterConciergeServices,
   filterConciergeTaskAssignees,
   isConciergeServiceOverdue,
@@ -103,6 +104,7 @@ const REALTIME_EVENTS = [
   "concierge_expense.reversed",
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
+  "concierge_operational_item.deleted",
   "concierge_operational_item.reminder_sent",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
@@ -149,6 +151,8 @@ const text = {
     loadFailed: "Der Concierge-Arbeitsbereich konnte nicht geladen werden.",
     updateFailed: "Der Servicestatus konnte nicht aktualisiert werden.",
     taskUpdateFailed: "Der Aufgabenstatus konnte nicht aktualisiert werden.",
+    taskDeleteConfirm: "Diese Aufgabe wirklich löschen?",
+    taskDeleteFailed: "Die Aufgabe konnte nicht gelöscht werden.",
     planned: "Geplant",
     booked: "Gebucht",
     status_confirmed: "Bestätigt",
@@ -197,6 +201,8 @@ const text = {
     loadFailed: "Не удалось загрузить рабочее пространство консьержа.",
     updateFailed: "Не удалось обновить статус услуги.",
     taskUpdateFailed: "Не удалось обновить статус задачи.",
+    taskDeleteConfirm: "Удалить эту задачу?",
+    taskDeleteFailed: "Не удалось удалить задачу.",
     planned: "Запланировано",
     booked: "Забронировано",
     status_confirmed: "Подтверждено",
@@ -469,6 +475,7 @@ export function ConciergeWorkspacePage() {
   const [version, setVersion] = useState(0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -497,6 +504,7 @@ export function ConciergeWorkspacePage() {
   const requestRefresh = useCallback(() => {
     clearApiCache("/concierge-services");
     clearApiCache("/concierge-operational-items");
+    clearApiCache("/concierge-operational-items/assignees");
     clearApiCache("/providers");
     clearApiCache("/users");
     setVersion((current) => current + 1);
@@ -539,7 +547,7 @@ export function ConciergeWorkspacePage() {
             forceFresh: version > 0,
           }).catch(() => []),
           user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
+            ? apiFetch<ConciergeAssignee[]>("/concierge-operational-items/assignees", {
                 cacheTtlMs: 30_000,
                 forceFresh: version > 0,
               }).then(filterConciergeTaskAssignees)
@@ -811,7 +819,7 @@ export function ConciergeWorkspacePage() {
 
   async function changeTaskStatus(task: ConciergeTask, requestedStatus?: string) {
     const status = requestedStatus ?? nextConciergeTaskStatus(task.status);
-    if (!status || updatingTaskId) return;
+    if (!status || updatingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
 
     setUpdatingTaskId(task.id);
     setError("");
@@ -864,6 +872,7 @@ export function ConciergeWorkspacePage() {
   }
 
   function openEditTask(task: ConciergeTask) {
+    if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
     setTaskDialogOpen(true);
@@ -887,8 +896,9 @@ export function ConciergeWorkspacePage() {
     setSearchParams(next, { replace: true });
   }
 
-  async function saveTask(input: SaveConciergeOperationalItemInput) {
-    if (submittingTask) return;
+  async function saveTask(input: SaveConciergeOperationalItemInput): Promise<ConciergeTask> {
+    if (submittingTask) throw new Error(labels.taskUpdateFailed);
+    if (editingTask && !canModifyConciergeTask(editingTask, user?.id, user?.role)) throw new Error(labels.taskUpdateFailed);
     setSubmittingTask(true);
     setTaskError("");
     setError("");
@@ -919,14 +929,28 @@ export function ConciergeWorkspacePage() {
           ? current.map((item) => item.id === saved.id ? saved : item)
           : [...current, saved];
       });
-      setTaskDialogOpen(false);
-      setEditingTask(null);
-      createTaskRequestIdRef.current = null;
+      return saved;
     } catch (saveError) {
       setTaskError(saveError instanceof Error ? saveError.message : labels.taskUpdateFailed);
       throw saveError;
     } finally {
       setSubmittingTask(false);
+    }
+  }
+
+  async function deleteTask(task: ConciergeTask) {
+    if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    if (!window.confirm(labels.taskDeleteConfirm)) return;
+    setDeletingTaskId(task.id);
+    setError("");
+    try {
+      await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
+      clearApiCache("/concierge-operational-items");
+      setTasks((current) => current.filter((item) => item.id !== task.id));
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : labels.taskDeleteFailed);
+    } finally {
+      setDeletingTaskId(null);
     }
   }
 
@@ -1015,7 +1039,10 @@ export function ConciergeWorkspacePage() {
           now={now}
           canManageTeam={user?.role === "ceo"}
           updatingTaskId={updatingTaskId}
+          deletingTaskId={deletingTaskId}
+          canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
           onEdit={openEditTask}
+          onDelete={(task) => void deleteTask(task)}
           onOpen={openTaskDetail}
           onStatusChange={(task, status) => void changeTaskStatus(task, status)}
         />
@@ -1172,6 +1199,7 @@ export function ConciergeWorkspacePage() {
         assignees={assignees}
         currentUserId={user?.id ?? null}
         canAssign={user?.role === "ceo"}
+        canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
         patients={taskPatients}
         providers={taskProviders}
         lang={lang}

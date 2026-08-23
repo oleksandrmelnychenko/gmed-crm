@@ -167,6 +167,12 @@ const DocumentsPage = lazy(() =>
   })),
 );
 
+const FilesPage = lazy(() =>
+  import("@/pages/files").then((module) => ({
+    default: module.FilesPage,
+  })),
+);
+
 const SpecializationsPage = lazy(() =>
   import("@/pages/specializations").then((module) => ({
     default: module.SpecializationsPage,
@@ -399,6 +405,7 @@ function AppRoutes() {
               element={<StaffRouteRedirect to="/specializations" />}
             />
             <Route path="documents/:documentId" element={<DocumentsPage />} />
+            <Route path="files" element={<FilesPage />} />
             <Route path="specializations" element={<SpecializationsPage />} />
             <Route path="concierge" element={<ConciergeWorkspacePage />} />
             <Route path="task-manager" element={<ConciergeTaskManagerPage />} />

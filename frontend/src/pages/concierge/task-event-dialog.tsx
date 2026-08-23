@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,14 @@ import {
   ConciergeField,
   conciergeDialogContentClassName,
 } from "./dialog-layout";
+import {
+  ConciergeTaskAttachments,
+  ConciergeTaskStagedAttachments,
+  filesMissingFromTaskAttachments,
+  listConciergeTaskAttachments,
+  taskAttachmentFileKey,
+  uploadConciergeTaskAttachment,
+} from "./task-attachments";
 
 const copy = {
   de: {
@@ -75,6 +83,7 @@ const copy = {
     searchProvider: "Provider suchen",
     internalOwner: "Verantwortlich in GMED",
     externalType: "Externer Ausführender",
+    searchExternalType: "Art des Ausführenden suchen",
     externalName: "Name / Unternehmen",
     externalNamePlaceholder: "z. B. Fahrer Müller oder Hotel Adlon",
     externalPhone: "Telefon",
@@ -84,6 +93,7 @@ const copy = {
     clinic: "Klinik",
     partner: "Partner",
     other: "Andere",
+    attachmentUploadFailed: "Die Aufgabe wurde angelegt, aber nicht alle Dateien konnten hochgeladen werden. Bitte erneut versuchen.",
   },
   ru: {
     createTitle: "Создать задачу или событие",
@@ -133,6 +143,7 @@ const copy = {
     searchProvider: "Найти провайдера",
     internalOwner: "Ответственный в GMED",
     externalType: "Внешний исполнитель",
+    searchExternalType: "Найти тип исполнителя",
     externalName: "Имя / компания",
     externalNamePlaceholder: "Например, водитель Мюллер или Hotel Adlon",
     externalPhone: "Телефон",
@@ -142,6 +153,7 @@ const copy = {
     clinic: "Клиника",
     partner: "Партнёр",
     other: "Другое",
+    attachmentUploadFailed: "Задача создана, но не все файлы удалось загрузить. Повторите попытку.",
   },
 } as const;
 
@@ -149,7 +161,12 @@ function assigneeRoleLabel(role: string, lang: Lang) {
   const labels: Record<string, [string, string]> = {
     concierge: ["Concierge", "Консьерж"],
     ceo: ["CEO", "CEO"],
+    ceo_assistant: ["CEO-Assistenz", "Ассистент CEO"],
     billing: ["Buchhaltung", "Бухгалтерия"],
+    patient_manager: ["Patientenmanagement", "Менеджер пациентов"],
+    sales: ["Vertrieb", "Отдел продаж"],
+    teamlead_interpreter: ["Teamlead Dolmetscher", "Тимлид переводчиков"],
+    interpreter: ["Dolmetscher", "Переводчик"],
   };
   const label = labels[role];
   return label ? (lang === "de" ? label[0] : label[1]) : role;
@@ -223,6 +240,7 @@ export function ConciergeTaskEventDialog({
   assignees,
   currentUserId,
   canAssign,
+  canModifyAttachments = false,
   showServiceLink = true,
   patients = [],
   providers = [],
@@ -241,6 +259,7 @@ export function ConciergeTaskEventDialog({
   assignees: ConciergeAssignee[];
   currentUserId: string | null;
   canAssign: boolean;
+  canModifyAttachments?: boolean;
   showServiceLink?: boolean;
   patients?: ConciergeTaskPatientOption[];
   providers?: ConciergeTaskProviderOption[];
@@ -252,7 +271,7 @@ export function ConciergeTaskEventDialog({
   submitting: boolean;
   error: string;
   onOpenChange: (open: boolean) => void;
-  onSave: (input: SaveConciergeOperationalItemInput) => Promise<void>;
+  onSave: (input: SaveConciergeOperationalItemInput) => Promise<ConciergeTask>;
 }) {
   const labels = copy[lang];
   const [kind, setKind] = useState<"task" | "event">("task");
@@ -274,6 +293,10 @@ export function ConciergeTaskEventDialog({
   const [externalName, setExternalName] = useState("");
   const [externalPhone, setExternalPhone] = useState("");
   const [externalEmail, setExternalEmail] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingAttachmentError, setPendingAttachmentError] = useState("");
+  const [uploadingPending, setUploadingPending] = useState(false);
+  const createdTaskRef = useRef<ConciergeTask | null>(null);
 
   const sortedServices = useMemo(
     () => services
@@ -308,43 +331,76 @@ export function ConciergeTaskEventDialog({
     setExternalEmail(item?.external_assignee_email ?? "");
   }, [assignees, currentUserId, initialDate, initialPatientId, initialProviderId, item, open]);
 
+  useEffect(() => {
+    if (!open) return;
+    setPendingFiles([]);
+    setPendingAttachmentError("");
+    setUploadingPending(false);
+    createdTaskRef.current = null;
+  }, [item?.id, open]);
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (uploadingPending) return;
+    setUploadingPending(true);
+    setPendingAttachmentError("");
     try {
-      await onSave({
-        kind,
-        title: title.trim(),
-        note: note.trim() || null,
-        concierge_service_id: showServiceLink
-          ? serviceId || null
-          : item && assigneeId !== item.assigned_to
-            ? null
-            : item?.concierge_service_id ?? null,
-        due_at: kind === "task" ? toIso(dueAt) : null,
-        starts_at: kind === "event" ? toIso(startsAt) : null,
-        ends_at: kind === "event" ? toIso(endsAt) : null,
-        location: location.trim() || null,
-        priority,
-        status,
-        assigned_to: canAssign ? assigneeId || null : null,
-        reminder_at: toIso(reminderAt),
-        task_audience: audience,
-        patient_id: patientId || null,
-        provider_id: providerId || null,
-        external_assignee_type: audience === "external" ? externalType : null,
-        external_assignee_name: audience === "external" ? externalName.trim() || null : null,
-        external_assignee_phone: audience === "external" ? externalPhone.trim() || null : null,
-        external_assignee_email: audience === "external" ? externalEmail.trim() || null : null,
-      });
+      let saved = createdTaskRef.current;
+      const retryingAttachmentUpload = Boolean(saved);
+      if (!saved) {
+        saved = await onSave({
+          kind,
+          title: title.trim(),
+          note: note.trim() || null,
+          concierge_service_id: showServiceLink
+            ? serviceId || null
+            : item && assigneeId !== item.assigned_to
+              ? null
+              : item?.concierge_service_id ?? null,
+          due_at: kind === "task" ? toIso(dueAt) : null,
+          starts_at: kind === "event" ? toIso(startsAt) : null,
+          ends_at: kind === "event" ? toIso(endsAt) : null,
+          location: location.trim() || null,
+          priority,
+          status,
+          assigned_to: canAssign ? assigneeId || null : null,
+          reminder_at: toIso(reminderAt),
+          task_audience: audience,
+          patient_id: patientId || null,
+          provider_id: providerId || null,
+          external_assignee_type: audience === "external" ? externalType : null,
+          external_assignee_name: audience === "external" ? externalName.trim() || null : null,
+          external_assignee_phone: audience === "external" ? externalPhone.trim() || null : null,
+          external_assignee_email: audience === "external" ? externalEmail.trim() || null : null,
+        });
+        createdTaskRef.current = saved;
+      }
+      let filesToUpload = pendingFiles;
+      if (retryingAttachmentUpload) {
+        const existing = await listConciergeTaskAttachments(saved.id);
+        filesToUpload = filesMissingFromTaskAttachments(pendingFiles, existing);
+        setPendingFiles(filesToUpload);
+      }
+      for (const file of filesToUpload) {
+        await uploadConciergeTaskAttachment(saved.id, file);
+        const uploadedKey = taskAttachmentFileKey(file);
+        setPendingFiles((current) => current.filter((entry) => taskAttachmentFileKey(entry) !== uploadedKey));
+      }
+      onOpenChange(false);
     } catch {
-      // Preserve the form so the Concierge can correct or retry the request.
+      if (createdTaskRef.current) setPendingAttachmentError(labels.attachmentUploadFailed);
+      // Preserve both the form and remaining staged files for a safe retry.
+    } finally {
+      setUploadingPending(false);
     }
   }
+
+  const dialogBusy = submitting || uploadingPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader icon={kind === "event" ? CalendarClock : ListTodo} tone="orange" title={item ? labels.editTitle : labels.createTitle} />
+        <ConciergeDialogHeader icon={kind === "event" ? CalendarClock : ListTodo} tone="plain" title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
@@ -393,9 +449,9 @@ export function ConciergeTaskEventDialog({
                     {audience === "external" ? (
                       <>
                         <ConciergeField label={labels.externalType}>
-                          <select className={selectClass} value={externalType} onChange={(event) => setExternalType(event.target.value)}>
+                          <NativeComboboxSelect className={selectClass} value={externalType} searchPlaceholder={labels.searchExternalType} onChange={(event) => setExternalType(event.target.value)}>
                             {(["driver", "hotel", "clinic", "partner", "other"] as const).map((value) => <option key={value} value={value}>{labels[value]}</option>)}
-                          </select>
+                          </NativeComboboxSelect>
                         </ConciergeField>
                         <ConciergeField label={labels.externalName}>
                           <Input value={externalName} required maxLength={255} placeholder={labels.externalNamePlaceholder} onChange={(event) => setExternalName(event.target.value)} />
@@ -456,13 +512,31 @@ export function ConciergeTaskEventDialog({
                   </div>
                 </ConciergeDialogSection>
               </div>
+              {item ? (
+                <div className="lg:col-span-2">
+                  <ConciergeTaskAttachments taskId={item.id} lang={lang} canModify={canModifyAttachments} />
+                </div>
+              ) : (
+                <div className="lg:col-span-2">
+                  <ConciergeTaskStagedAttachments
+                    files={pendingFiles}
+                    lang={lang}
+                    disabled={dialogBusy}
+                    externalError={pendingAttachmentError}
+                    onChange={(files) => {
+                      setPendingFiles(files);
+                      setPendingAttachmentError("");
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </ConciergeDialogBody>
 
           <ConciergeDialogFooter>
-            <Button type="button" className="h-9 rounded-lg" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
-            <Button type="submit" className="h-9 rounded-lg px-4" disabled={submitting || !title.trim() || (kind === "event" && !startsAt) || (canAssign && !assigneeId) || (audience === "external" && !externalName.trim())}>
-              {submitting ? <LoaderCircle className="animate-spin" /> : null}{submitting ? labels.saving : item ? labels.save : labels.create}
+            <Button type="button" className="h-9 rounded-lg" variant="outline" disabled={dialogBusy} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
+            <Button type="submit" className="h-9 rounded-lg px-4" disabled={dialogBusy || !title.trim() || (kind === "event" && !startsAt) || (canAssign && !assigneeId) || (audience === "external" && !externalName.trim())}>
+              {dialogBusy ? <LoaderCircle className="animate-spin" /> : null}{dialogBusy ? labels.saving : item ? labels.save : labels.create}
             </Button>
           </ConciergeDialogFooter>
         </form>

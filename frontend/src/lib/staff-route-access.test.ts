@@ -32,6 +32,7 @@ describe("first-release staff RBAC", () => {
       "/company-finance",
       "/finance-catalog",
       "/documents/document-1",
+      "/files",
       "/specializations",
       "/concierge",
       "/task-manager",
@@ -57,6 +58,7 @@ describe("first-release staff RBAC", () => {
       "/patients/patient-1",
       "/providers/provider-1",
       "/documents",
+      "/files",
       "/concierge",
       "/task-manager",
       "/services",
@@ -95,6 +97,7 @@ describe("first-release staff RBAC", () => {
       "/company-finance",
       "/finance-catalog",
       "/documents",
+      "/files",
       "/services",
     ]) {
       expect(canAccessStaffRoute("billing", path), path).toBe(true);
@@ -124,7 +127,26 @@ describe("first-release staff RBAC", () => {
         "sales",
         "it_admin",
       ],
-      "/task-manager": ["ceo", "concierge", "billing"],
+      "/task-manager": [
+        "ceo",
+        "ceo_assistant",
+        "patient_manager",
+        "sales",
+        "concierge",
+        "billing",
+        "teamlead_interpreter",
+        "interpreter",
+      ],
+      "/files": [
+        "ceo",
+        "ceo_assistant",
+        "patient_manager",
+        "sales",
+        "concierge",
+        "billing",
+        "teamlead_interpreter",
+        "interpreter",
+      ],
       "/concierge": ["ceo", "concierge"],
       "/company-finance": ["ceo", "billing"],
     } as const;
@@ -142,6 +164,9 @@ describe("first-release staff RBAC", () => {
   });
 
   it("derives navigation from the same rules", () => {
+    const ceo = listStaffNavItems("ceo").map((item) => item.to);
+    expect(ceo.indexOf("/files")).toBe(ceo.indexOf("/documents") + 1);
+
     const concierge = listStaffNavItems("concierge").map((item) => item.to);
     expect(concierge).toContain("/leads");
     expect(concierge).toContain("/appointments");

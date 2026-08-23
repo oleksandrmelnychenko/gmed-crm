@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Building2,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -10,12 +11,16 @@ import {
   MessageSquareText,
   Pencil,
   Search,
+  Trash2,
+  UserRound,
   UsersRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { SelectField } from "@/components/ui/select-field";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -75,9 +80,13 @@ const copy = {
     reminder: "Erinnerung",
     details: "Details",
     edit: "Bearbeiten",
+    delete: "Löschen",
+    noPermission: "Nur der Ersteller oder eine übergeordnete Rolle darf diese Aufgabe ändern",
     moveTo: "Status ändern",
     unplanned: "Ohne Termin",
     more: "weitere",
+    patient: "Patient",
+    provider: "Anbieter",
   },
   ru: {
     title: "Менеджер задач",
@@ -120,9 +129,13 @@ const copy = {
     reminder: "Напоминание",
     details: "Подробнее",
     edit: "Изменить",
+    delete: "Удалить",
+    noPermission: "Изменять задачу может только её автор или вышестоящий сотрудник",
     moveTo: "Изменить статус",
     unplanned: "Без даты",
     more: "ещё",
+    patient: "Пациент",
+    provider: "Провайдер",
   },
 } as const;
 
@@ -178,8 +191,8 @@ function priorityTone(priority: string) {
   return "border-sky-200 bg-sky-50 text-sky-700";
 }
 
-function taskAccent(priority: string, overdue: boolean) {
-  if (overdue || priority === "urgent") return "border-l-rose-400";
+function taskAccent(priority: string) {
+  if (priority === "urgent") return "border-l-rose-400";
   if (priority === "high") return "border-l-orange-400";
   if (priority === "low") return "border-l-slate-300";
   return "border-l-sky-400";
@@ -191,8 +204,11 @@ function TaskCard({
   now,
   compact = false,
   updating,
+  deleting,
+  canModify,
   onOpen,
   onEdit,
+  onDelete,
   onStatusChange,
 }: {
   task: ConciergeTask;
@@ -200,28 +216,49 @@ function TaskCard({
   now: Date;
   compact?: boolean;
   updating: boolean;
+  deleting: boolean;
+  canModify: boolean;
   onOpen: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
+  onDelete: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
 }) {
   const labels = copy[lang];
   const scheduled = conciergeTaskScheduledAt(task);
   const overdue = isConciergeTaskOverdue(task, now);
   return (
-    <article className={cn("rounded-lg border border-l-[3px] bg-card p-3 shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-md", taskAccent(task.priority, overdue), overdue ? "border-rose-200" : "border-border/70", compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
+    <article className={cn("relative rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
       <button type="button" className={cn("min-w-0 text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-28")}>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
+          {task.patient_name ? (
+            <Badge
+              variant="outline"
+              className="max-w-full rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-800"
+              title={`${labels.patient}: ${task.patient_name}`}
+            >
+              <UserRound className="size-3 shrink-0" />
+              <span className="truncate">{labels.patient}: {task.patient_name}</span>
+            </Badge>
+          ) : null}
+          {task.provider_name ? (
+            <Badge
+              variant="outline"
+              className="max-w-full rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-800"
+              title={`${labels.provider}: ${task.provider_name}`}
+            >
+              <Building2 className="size-3 shrink-0" />
+              <span className="truncate">{labels.provider}: {task.provider_name}</span>
+            </Badge>
+          ) : null}
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
         </div>
         <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-foreground">{task.title}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
           <p className="truncate"><UsersRound className="mr-1.5 inline size-3.5" />{task.assigned_to_name}</p>
-          {task.patient_name ? <p className="truncate">{task.patient_name}</p> : null}
-          {task.provider_name ? <p className="truncate">{task.provider_name}</p> : null}
           {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
@@ -230,16 +267,19 @@ function TaskCard({
           {task.reminder_at ? <span><CircleAlert className="mr-1 inline size-3" />{labels.reminder}</span> : null}
         </div>
       </button>
-      <Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs" onClick={() => onEdit(task)}><Pencil />{labels.edit}</Button>
-      <select
-        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+      <div className={cn("flex items-center gap-1", !compact && "absolute right-2 top-2 z-10")}>
+        <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button>
+        <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={!canModify || updating || deleting} title={canModify ? labels.delete : labels.noPermission} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button>
+      </div>
+      <SelectField
+        className="h-8 min-w-[130px] rounded-md bg-background text-xs"
         value={task.status}
-        disabled={updating}
+        disabled={!canModify || updating || deleting}
+        title={canModify ? labels.moveTo : labels.noPermission}
         aria-label={labels.moveTo}
-        onChange={(event) => onStatusChange(task, event.target.value)}
-      >
-        {statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}
-      </select>
+        options={statuses.map((status) => ({ value: status, label: labels[status] }))}
+        onValueChange={(status) => onStatusChange(task, status)}
+      />
     </article>
   );
 }
@@ -251,7 +291,10 @@ export function ConciergeTaskManager({
   now,
   canManageTeam,
   updatingTaskId,
+  deletingTaskId,
+  canModifyTask,
   onEdit,
+  onDelete,
   onOpen,
   onStatusChange,
   onCreateAt,
@@ -262,7 +305,10 @@ export function ConciergeTaskManager({
   now: Date;
   canManageTeam: boolean;
   updatingTaskId: string | null;
+  deletingTaskId: string | null;
+  canModifyTask: (task: ConciergeTask) => boolean;
   onEdit: (task: ConciergeTask) => void;
+  onDelete: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
   onCreateAt?: (date: Date) => void;
@@ -276,9 +322,6 @@ export function ConciergeTaskManager({
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
-  const active = tasks.filter((task) => !["completed", "cancelled"].includes(task.status)).length;
-  const overdue = tasks.filter((task) => isConciergeTaskOverdue(task, effectiveNow)).length;
-  const scheduledToday = tasks.filter((task) => conciergeTaskScheduledAt(task) && dateKey(conciergeTaskScheduledAt(task) as Date) === dateKey(effectiveNow)).length;
   const days = useMemo(() => calendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
   const tasksByDay = useMemo(() => {
     const result = new Map<string, ConciergeTask[]>();
@@ -305,12 +348,6 @@ export function ConciergeTaskManager({
 
   return (
     <section className="space-y-3" aria-label={labels.title}>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-sky-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.active}</p><p className="mt-1 font-mono text-lg font-semibold">{active}</p></div>
-        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-amber-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.dueToday}</p><p className="mt-1 font-mono text-lg font-semibold">{scheduledToday}</p></div>
-        <div className="rounded-lg border border-border/70 border-l-[3px] border-l-rose-400 bg-card px-3 py-2.5 shadow-xs"><p className="text-[11px] font-medium text-muted-foreground">{labels.overdue}</p><p className={cn("mt-1 font-mono text-lg font-semibold", overdue > 0 && "text-rose-600")}>{overdue}</p></div>
-      </div>
-
       {canManageTeam ? (
         <div className="rounded-lg border border-border/70 bg-card p-3 shadow-sm">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.teamWorkload}</h3>
@@ -327,15 +364,15 @@ export function ConciergeTaskManager({
 
       <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:items-center sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <div className="relative col-span-2 min-w-0 sm:col-auto sm:min-w-[240px] sm:flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-10 rounded-md bg-field pl-8 text-xs sm:h-8" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
-        {canManageTeam ? <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select> : null}
-        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}><option value="all">{labels.allStatuses}</option>{statuses.map((status) => <option key={status} value={status}>{labels[status]}</option>)}</select>
-        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} onChange={(event) => setFilters((current) => ({ ...current, priority: event.target.value }))}><option value="all">{labels.allPriorities}</option>{["low", "normal", "high", "urgent"].map((priority) => <option key={priority} value={priority}>{labels[priority as keyof typeof labels]}</option>)}</select>
-        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.kind} onChange={(event) => setFilters((current) => ({ ...current, kind: event.target.value }))}><option value="all">{labels.allKinds}</option><option value="task">{labels.task}</option><option value="event">{labels.event}</option></select>
-        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.audience} onChange={(event) => setFilters((current) => ({ ...current, audience: event.target.value }))}><option value="all">{labels.allAudiences}</option><option value="internal">{labels.internal}</option><option value="external">{labels.external}</option></select>
-        <select className="h-10 min-w-0 rounded-md border border-input bg-field px-2 text-xs sm:h-8 sm:w-[125px] sm:shrink-0" value={filters.timing} onChange={(event) => setFilters((current) => ({ ...current, timing: event.target.value as ConciergeTaskFilters["timing"] }))}><option value="all">{labels.allTiming}</option><option value="today">{labels.today}</option><option value="overdue">{labels.overdue}</option><option value="upcoming">{labels.upcoming}</option></select>
+        {canManageTeam ? <NativeComboboxSelect className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</NativeComboboxSelect> : null}
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} options={[{ value: "all", label: labels.allStatuses }, ...statuses.map((status) => ({ value: status, label: labels[status] }))]} onValueChange={(status) => setFilters((current) => ({ ...current, status }))} />
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} options={[{ value: "all", label: labels.allPriorities }, ...["low", "normal", "high", "urgent"].map((priority) => ({ value: priority, label: labels[priority as keyof typeof labels] }))]} onValueChange={(priority) => setFilters((current) => ({ ...current, priority }))} />
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.kind} options={[{ value: "all", label: labels.allKinds }, { value: "task", label: labels.task }, { value: "event", label: labels.event }]} onValueChange={(kind) => setFilters((current) => ({ ...current, kind }))} />
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.audience} options={[{ value: "all", label: labels.allAudiences }, { value: "internal", label: labels.internal }, { value: "external", label: labels.external }]} onValueChange={(audience) => setFilters((current) => ({ ...current, audience }))} />
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[125px] sm:shrink-0" value={filters.timing} options={[{ value: "all", label: labels.allTiming }, { value: "today", label: labels.today }, { value: "overdue", label: labels.overdue }, { value: "upcoming", label: labels.upcoming }]} onValueChange={(timing) => setFilters((current) => ({ ...current, timing: timing as ConciergeTaskFilters["timing"] }))} />
       </div>
 
-      <div className="mx-auto grid w-full grid-cols-3 gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs sm:flex sm:w-fit">
+      <div className="mx-auto grid w-full grid-cols-3 gap-1 sm:flex sm:w-fit">
         {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
@@ -345,12 +382,12 @@ export function ConciergeTaskManager({
         <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
           {statuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} onOpen={onOpen} onEdit={onEdit} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">

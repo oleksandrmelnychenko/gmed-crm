@@ -71,6 +71,16 @@ test.describe("P0 operations modules", () => {
     await expect(page.getByText(externalTitle).first()).toBeVisible();
     await expect(page.getByText(scenario.patient.name).first()).toBeVisible();
     await expect(page.getByText("Berlin Driver GmbH").first()).toBeVisible();
+
+    await page.goto(`/patients/${scenario.patient.id}`);
+    const patientTasks = page.getByTestId("linked-tasks-section");
+    await expect(patientTasks).toContainText(internalTitle);
+    await expect(patientTasks).toContainText(/Offene Aufgaben:\s*[1-9]/);
+
+    await page.goto(`/providers/${SEEDED_NON_MEDICAL_PROVIDER_ID}`);
+    const providerTasks = page.getByTestId("linked-tasks-section");
+    await expect(providerTasks).toContainText(externalTitle);
+    await expect(providerTasks).toContainText(/Offene Aufgaben:\s*[1-9]/);
   });
 
   test("internal notes display an attached file and remain available to staff", async ({

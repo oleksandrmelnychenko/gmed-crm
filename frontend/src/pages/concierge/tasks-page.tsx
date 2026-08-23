@@ -10,6 +10,8 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
+  assignableConciergeTaskUsers,
+  canModifyConciergeTask,
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
   type ConciergeProvider,
@@ -27,6 +29,7 @@ import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 const REALTIME_EVENTS = [
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
+  "concierge_operational_item.deleted",
   "concierge_operational_item.reminder_sent",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
@@ -42,6 +45,8 @@ const copy = {
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
     updateFailed: "Die Aufgabe konnte nicht aktualisiert werden.",
+    deleteConfirm: "Diese Aufgabe wirklich löschen?",
+    deleteFailed: "Die Aufgabe konnte nicht gelöscht werden.",
     retry: "Erneut laden",
   },
   ru: {
@@ -52,6 +57,8 @@ const copy = {
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
     updateFailed: "Не удалось обновить задачу.",
+    deleteConfirm: "Удалить эту задачу?",
+    deleteFailed: "Не удалось удалить задачу.",
     retry: "Повторить",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
@@ -67,6 +74,7 @@ export function ConciergeTaskManagerPage() {
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -82,7 +90,7 @@ export function ConciergeTaskManagerPage() {
 
   const requestRefresh = useCallback(() => {
     clearApiCache("/concierge-operational-items");
-    clearApiCache("/users");
+    clearApiCache("/concierge-operational-items/assignees");
     clearApiCache("/patients");
     clearApiCache("/providers");
     setVersion((current) => current + 1);
@@ -106,34 +114,30 @@ export function ConciergeTaskManagerPage() {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
-          user?.role === "ceo"
-            ? apiFetch<ConciergeAssignee[]>("/users?active_only=true", {
-                cacheTtlMs: 30_000,
-                forceFresh: version > 0,
-              }).then(filterConciergeTaskAssignees)
-            : Promise.resolve(
-                user
-                  ? [{
-                      id: user.id,
-                      name: user.name,
-                      email: user.email,
-                      role: user.role,
-                      is_active: true,
-                    }]
-                  : [],
-              ),
+          apiFetch<ConciergeAssignee[]>("/concierge-operational-items/assignees", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          })
+            .then(filterConciergeTaskAssignees)
+            .catch(() => user ? [{
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role,
+              is_active: true,
+            }] : []),
           apiFetch<PatientSummary[]>("/patients?active_only=true", {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
-          }),
+          }).catch(() => []),
           apiFetch<ConciergeProvider[]>("/providers?active_only=true", {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
-          }),
+          }).catch(() => []),
         ]);
         if (!cancelled) {
           setTasks(taskRows);
-          setAssignees(assigneeRows);
+          setAssignees(assignableConciergeTaskUsers(assigneeRows, user?.id, user?.role));
           setPatients(patientRows.map((patient) => ({
             id: patient.id,
             name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
@@ -159,7 +163,7 @@ export function ConciergeTaskManagerPage() {
   }, [labels.loadFailed, user, version]);
 
   async function changeTaskStatus(task: ConciergeTask, status: string) {
-    if (updatingTaskId) return;
+    if (updatingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
     setUpdatingTaskId(task.id);
     setError("");
     try {
@@ -206,6 +210,7 @@ export function ConciergeTaskManagerPage() {
   }
 
   function openEditTask(task: ConciergeTask) {
+    if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
     setInitialTaskDate(null);
@@ -224,8 +229,9 @@ export function ConciergeTaskManagerPage() {
     setSearchParams(next, { replace: true });
   }
 
-  async function saveTask(input: SaveConciergeOperationalItemInput) {
-    if (submittingTask) return;
+  async function saveTask(input: SaveConciergeOperationalItemInput): Promise<ConciergeTask> {
+    if (submittingTask) throw new Error(labels.updateFailed);
+    if (editingTask && !canModifyConciergeTask(editingTask, user?.id, user?.role)) throw new Error(labels.updateFailed);
     setSubmittingTask(true);
     setTaskError("");
     setError("");
@@ -256,14 +262,34 @@ export function ConciergeTaskManagerPage() {
           ? current.map((item) => item.id === saved.id ? saved : item)
           : [...current, saved];
       });
-      setTaskDialogOpen(false);
-      setEditingTask(null);
-      createTaskRequestIdRef.current = null;
+      return saved;
     } catch (saveError) {
       setTaskError(saveError instanceof Error ? saveError.message : labels.updateFailed);
       throw saveError;
     } finally {
       setSubmittingTask(false);
+    }
+  }
+
+  async function deleteTask(task: ConciergeTask) {
+    if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    if (!window.confirm(labels.deleteConfirm)) return;
+    setDeletingTaskId(task.id);
+    setError("");
+    try {
+      await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
+      clearApiCache("/concierge-operational-items");
+      setTasks((current) => current.filter((item) => item.id !== task.id));
+      if (detailTaskId === task.id) {
+        setDetailTaskId(null);
+        const next = new URLSearchParams(searchParams);
+        next.delete("task");
+        setSearchParams(next, { replace: true });
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : labels.deleteFailed);
+    } finally {
+      setDeletingTaskId(null);
     }
   }
 
@@ -307,9 +333,12 @@ export function ConciergeTaskManagerPage() {
         assignees={assignees}
         lang={lang}
         now={now}
-        canManageTeam={user?.role === "ceo"}
+        canManageTeam={assignees.some((assignee) => assignee.id !== user?.id)}
         updatingTaskId={updatingTaskId}
+        deletingTaskId={deletingTaskId}
+        canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
         onEdit={openEditTask}
+        onDelete={(task) => void deleteTask(task)}
         onOpen={openTaskDetail}
         onStatusChange={(task, status) => void changeTaskStatus(task, status)}
         onCreateAt={(date) => openCreateTask(date)}
@@ -320,7 +349,8 @@ export function ConciergeTaskManagerPage() {
         services={[]}
         assignees={assignees}
         currentUserId={user?.id ?? null}
-        canAssign={user?.role === "ceo"}
+        canAssign={assignees.length > 0}
+        canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
         showServiceLink={false}
         patients={patients}
         providers={providers}

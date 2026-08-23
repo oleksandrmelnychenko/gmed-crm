@@ -7,12 +7,14 @@ import { cn } from "@/lib/utils";
 export const conciergeDialogContentClassName =
   "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
 
-type DialogTone = "amber" | "indigo" | "orange" | "slate";
+type DialogTone = "amber" | "dot" | "indigo" | "orange" | "plain" | "slate";
 
 const iconToneClass: Record<DialogTone, string> = {
   amber: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  dot: "bg-[var(--brand)]",
   indigo: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
   orange: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300",
+  plain: "text-foreground",
   slate: "bg-muted text-muted-foreground",
 };
 
@@ -23,7 +25,7 @@ export function ConciergeDialogHeader({
   description,
   meta,
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   tone?: DialogTone;
   title: string;
   description?: string;
@@ -32,8 +34,8 @@ export function ConciergeDialogHeader({
   return (
     <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 sm:px-6 sm:py-5 sm:pr-14">
       <div className="flex min-w-0 items-start gap-3">
-        <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg sm:size-10", iconToneClass[tone])}>
-          <Icon className="size-4.5" />
+        <span className={cn("flex shrink-0 items-center justify-center", tone === "dot" ? "mt-2 size-2 rounded-full" : tone === "plain" ? "mt-0.5 size-5" : "size-9 rounded-lg sm:size-10", iconToneClass[tone])}>
+          {Icon && tone !== "dot" ? <Icon className={cn("size-4.5", tone === "plain" && "stroke-[1.5]")} /> : null}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
