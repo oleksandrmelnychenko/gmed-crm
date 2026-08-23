@@ -22,7 +22,7 @@ test.describe("P0 operations modules", () => {
     request,
   }) => {
     await setGermanLanguage(page);
-    const scenario = await bootstrapAndLogin(page, request, "concierge");
+    const scenario = await bootstrapAndLogin(page, request, "ceo");
     const conciergeApi = await authenticateApiClient(
       request,
       scenario.credentials.concierge.email,
@@ -180,7 +180,7 @@ test.describe("P0 operations modules", () => {
     request,
   }) => {
     await setGermanLanguage(page);
-    const scenario = await bootstrapAndLogin(page, request, "billing");
+    const scenario = await bootstrapAndLogin(page, request, "ceo");
     const ceoApi = await authenticateApiClient(
       request,
       scenario.credentials.ceo.email,

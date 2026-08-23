@@ -464,6 +464,7 @@ export async function bootstrapAndLogin(
   request: APIRequestContext,
   role:
     | "pm"
+    | "ceo"
     | "assistant"
     | "billing"
     | "sales"
@@ -476,6 +477,8 @@ export async function bootstrapAndLogin(
   const credentials =
     role === "pm"
       ? scenario.credentials.pm
+      : role === "ceo"
+        ? scenario.credentials.ceo
       : role === "assistant"
         ? scenario.credentials.assistant
         : role === "billing"
