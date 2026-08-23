@@ -494,7 +494,7 @@ async fn operational_item_api_rejects_clinical_payload_and_medical_service_links
             "request_id": Uuid::new_v4(),
             "kind": "task",
             "title": "Unsafe task",
-            "patient_id": patient_id
+            "diagnosis": "Sensitive clinical detail"
         })),
     )
     .await;
@@ -514,6 +514,98 @@ async fn operational_item_api_rejects_clinical_payload_and_medical_service_links
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{medical_link}");
+}
+
+#[tokio::test]
+async fn internal_and_external_task_audiences_round_trip_with_their_context() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("audience-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("audience-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("audience-{tag}")).await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, internal) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Prepare patient arrival",
+            "task_audience": "internal",
+            "patient_id": patient_id,
+            "due_at": "2026-08-24T09:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{internal}");
+    assert_eq!(internal["task_audience"], "internal");
+    assert_eq!(internal["patient_id"], patient_id.to_string());
+    assert!(internal["patient_name"].is_string());
+    assert!(internal["external_assignee_name"].is_null());
+
+    let (status, external) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Confirm airport pickup",
+            "task_audience": "external",
+            "provider_id": provider_id,
+            "external_assignee_type": "driver",
+            "external_assignee_name": "Berlin Driver GmbH",
+            "external_assignee_phone": "+49 30 123456",
+            "external_assignee_email": "dispatch@example.test",
+            "due_at": "2026-08-24T10:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{external}");
+    assert_eq!(external["task_audience"], "external");
+    assert_eq!(external["provider_id"], provider_id.to_string());
+    assert!(external["provider_name"].is_string());
+    assert_eq!(external["external_assignee_type"], "driver");
+    assert_eq!(external["external_assignee_name"], "Berlin Driver GmbH");
+
+    let (status, invalid_external) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Missing external recipient",
+            "task_audience": "external",
+            "external_assignee_type": "driver"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{invalid_external}"
+    );
+
+    let (status, filtered) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}?task_audience=internal&patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{filtered}");
+    assert_eq!(filtered.as_array().map(Vec::len), Some(1));
+    assert_eq!(filtered[0]["id"], internal["id"]);
 }
 
 #[tokio::test]

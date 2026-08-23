@@ -1,6 +1,8 @@
 # Таски розробки
 
-> Деталізований **інженерний** план по фазах. Продуктові вимоги та user stories — у `docs/requirements/03_product-backlog_ua.md` (1:1 з аркушем `User Stories` у `docs/1 (Update 2) User Story Salesforce.xlsx`, регенерація: `python scripts/generate_product_backlog_from_excel.py`). RBAC — `docs/backlog/02_rbac-matrix_ua.md`; KPI — `docs/backlog/03_kpi-catalog_ua.md`. Ієрархія джерел: `docs/00_source-of-truth_ua.md`. Чекбокси тут можуть відставати від коду — синхронізувати з репозиторієм окремо.
+> Деталізований **історичний інженерний план** по фазах. Продуктові вимоги та user stories — у `docs/requirements/03_product-backlog_ua.md` (1:1 з аркушем `User Stories` у `docs/1 (Update 2) User Story Salesforce.xlsx`, регенерація: `python scripts/generate_product_backlog_from_excel.py`). RBAC — `docs/backlog/02_rbac-matrix_ua.md`; KPI — `docs/backlog/03_kpi-catalog_ua.md`. Ієрархія джерел: `docs/00_source-of-truth_ua.md`.
+>
+> **Не використовувати unchecked-чекбокси нижче як live status.** Актуальний стан і докази станом на 2026-08-23 знаходяться у `docs/testing/backlog-proof-matrix_ua.md` та `docs/testing/p0-operations-release-proof_ua.md`. Зокрема Task Manager, Notes, Concierge expenses, company/patient balances, portal accounts і provider/patient document links уже реалізовані та мають regression proof.
 
 ## Phase 1: Core System (Priority 1)
 

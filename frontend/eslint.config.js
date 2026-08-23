@@ -6,7 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // Native mobile toolchains copy third-party bridge bundles into generated
+  // build directories. They are not application source and may contain rule
+  // directives for plugins that GMED does not install.
+  globalIgnores(['dist', 'android/**/build/**', 'ios/**/build/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

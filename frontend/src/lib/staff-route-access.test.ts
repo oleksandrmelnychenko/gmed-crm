@@ -111,6 +111,36 @@ describe("first-release staff RBAC", () => {
     }
   });
 
+  it("locks the P0 operations workspaces to their backend role contracts", () => {
+    const matrix = {
+      "/notes": [
+        "ceo",
+        "ceo_assistant",
+        "patient_manager",
+        "teamlead_interpreter",
+        "interpreter",
+        "concierge",
+        "billing",
+        "sales",
+        "it_admin",
+      ],
+      "/task-manager": ["ceo", "concierge", "billing"],
+      "/concierge": ["ceo", "concierge"],
+      "/company-finance": ["ceo", "billing"],
+    } as const;
+
+    for (const [path, allowedRoles] of Object.entries(matrix)) {
+      for (const role of ALL_STAFF_ROLES) {
+        expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(
+          (allowedRoles as readonly string[]).includes(role),
+        );
+        expect(listStaffNavItems(role).map((item) => item.to).includes(path), `${role} nav -> ${path}`).toBe(
+          (allowedRoles as readonly string[]).includes(role),
+        );
+      }
+    }
+  });
+
   it("derives navigation from the same rules", () => {
     const concierge = listStaffNavItems("concierge").map((item) => item.to);
     expect(concierge).toContain("/leads");

@@ -1,6 +1,21 @@
 # Full Docs / Backlog Reconciliation (UA)
 
-> Повна звірка документації в `docs/` з поточним станом репозиторію станом на **2026-04-15**. Це не заміняє канонічні вимоги; файл потрібен, щоб розвести: `source-of-truth`, planning docs, current-state код і явні gaps.
+> Повна звірка документації в `docs/` з поточним станом репозиторію, первинно виконана **2026-04-15** та актуалізована для operations release **2026-08-23**. Це не заміняє канонічні вимоги; файл потрібен, щоб розвести: `source-of-truth`, planning docs, current-state код і явні gaps.
+
+## Operations addendum — 2026-08-23
+
+Після первинної звірки реалізовані й переведені у current-state такі великі slices:
+
+- окремий Concierge workspace із сервісами, партнерами, маршрутами, рекомендаціями, задачами та подіями;
+- Task Manager з internal/external audience, пацієнтом для внутрішньої задачі та контактами зовнішнього виконавця;
+- Notes workspace з пошуком, optimistic locking і encrypted PDF/image/Word attachments;
+- concierge receipt workflow до finance review, company finance і patient account statement;
+- company financial position/accounts/provider settlements;
+- portal subscriptions, активація та редагування patient account;
+- provider documents із медичною прив'язкою одночасно до provider і patient;
+- patient profile/grid balance та deduplicated treating/clinical-history doctor presentation.
+
+Канонічний proof і точна рольова матриця цих slices: [`p0-operations-release-proof_ua.md`](p0-operations-release-proof_ua.md). Старі planning-чекбокси у `docs/backlog/04_implementation-tasks_ua.md` свідомо не переписуються заднім числом.
 
 ## 1. Методика звірки
 

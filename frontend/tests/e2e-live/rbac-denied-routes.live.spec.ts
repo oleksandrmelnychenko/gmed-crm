@@ -39,6 +39,45 @@ test.describe("live RBAC denied route normalization", () => {
     await expectForbiddenRouteRedirect(page, "/appointments");
   });
 
+  test("patient manager is redirected away from Task Manager, Concierge and Company Finance", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "pm");
+    for (const path of ["/task-manager", "/concierge", "/company-finance"]) {
+      await expectForbiddenRouteRedirect(page, path);
+    }
+  });
+
+  test("concierge can open notes and Task Manager but not Company Finance", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "concierge");
+    await page.goto("/notes");
+    await expect(page.getByTestId("internal-notes-page")).toBeVisible();
+    await page.goto("/task-manager");
+    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
+    await expectForbiddenRouteRedirect(page, "/company-finance");
+  });
+
+  test("billing can open notes, Task Manager and Company Finance but not Concierge", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "billing");
+    await page.goto("/notes");
+    await expect(page.getByTestId("internal-notes-page")).toBeVisible();
+    await page.goto("/task-manager");
+    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
+    await page.goto("/company-finance");
+    await expect(page.getByRole("heading", { name: /Unternehmenssaldo|Company balance/i })).toBeVisible();
+    await expectForbiddenRouteRedirect(page, "/concierge");
+  });
+
   test("sales is redirected away from documents workspace", async ({
     page,
     request,

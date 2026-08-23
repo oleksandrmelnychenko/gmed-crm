@@ -26,7 +26,7 @@ export function ConciergeDialogHeader({
   icon: LucideIcon;
   tone?: DialogTone;
   title: string;
-  description: string;
+  description?: string;
   meta?: ReactNode;
 }) {
   return (
@@ -40,9 +40,11 @@ export function ConciergeDialogHeader({
             <DialogTitle className="text-base leading-tight sm:text-lg">{title}</DialogTitle>
             {meta}
           </div>
-          <DialogDescription className="mt-1 max-w-3xl text-xs leading-5 sm:text-sm">
-            {description}
-          </DialogDescription>
+          {description ? (
+            <DialogDescription className="mt-1 max-w-3xl text-xs leading-5 sm:text-sm">
+              {description}
+            </DialogDescription>
+          ) : null}
         </div>
       </div>
     </DialogHeader>

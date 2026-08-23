@@ -8,6 +8,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -29,7 +30,6 @@ const copy = {
   de: {
     createTitle: "Aufgabe oder Termin anlegen",
     editTitle: "Aufgabe oder Termin bearbeiten",
-    description: "Nur operative Informationen erfassen. Medizinische Daten gehören nicht in diesen Bereich.",
     task: "Aufgabe",
     event: "Termin",
     title: "Titel",
@@ -69,8 +69,10 @@ const copy = {
     external: "Extern",
     patient: "Patient / Kunde",
     noPatient: "Ohne Patientenzuordnung",
+    searchPatient: "Patient suchen",
     provider: "Provider",
     noProvider: "Ohne Providerzuordnung",
+    searchProvider: "Provider suchen",
     internalOwner: "Verantwortlich in GMED",
     externalType: "Externer Ausführender",
     externalName: "Name / Unternehmen",
@@ -86,7 +88,6 @@ const copy = {
   ru: {
     createTitle: "Создать задачу или событие",
     editTitle: "Изменить задачу или событие",
-    description: "Добавляйте только операционные данные. Медицинской информации здесь быть не должно.",
     task: "Задача",
     event: "Событие",
     title: "Название",
@@ -126,8 +127,10 @@ const copy = {
     external: "Внешняя",
     patient: "Пациент / клиент",
     noPatient: "Без привязки к пациенту",
+    searchPatient: "Найти пациента",
     provider: "Провайдер",
     noProvider: "Без привязки к провайдеру",
+    searchProvider: "Найти провайдера",
     internalOwner: "Ответственный в GMED",
     externalType: "Внешний исполнитель",
     externalName: "Имя / компания",
@@ -341,7 +344,7 @@ export function ConciergeTaskEventDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader icon={kind === "event" ? CalendarClock : ListTodo} tone="orange" title={item ? labels.editTitle : labels.createTitle} description={labels.description} />
+        <ConciergeDialogHeader icon={kind === "event" ? CalendarClock : ListTodo} tone="orange" title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
@@ -376,16 +379,16 @@ export function ConciergeTaskEventDialog({
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <ConciergeField label={labels.patient}>
-                      <select className={selectClass} value={patientId} onChange={(event) => setPatientId(event.target.value)}>
+                      <NativeComboboxSelect className={selectClass} value={patientId} searchPlaceholder={labels.searchPatient} onChange={(event) => setPatientId(event.target.value)}>
                         <option value="">{labels.noPatient}</option>
                         {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
-                      </select>
+                      </NativeComboboxSelect>
                     </ConciergeField>
                     <ConciergeField label={labels.provider}>
-                      <select className={selectClass} value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+                      <NativeComboboxSelect className={selectClass} value={providerId} searchPlaceholder={labels.searchProvider} onChange={(event) => setProviderId(event.target.value)}>
                         <option value="">{labels.noProvider}</option>
                         {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
-                      </select>
+                      </NativeComboboxSelect>
                     </ConciergeField>
                     {audience === "external" ? (
                       <>
