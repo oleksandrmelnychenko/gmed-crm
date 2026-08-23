@@ -73,7 +73,16 @@ export function notificationHrefForRole(item: Notification, role: string) {
     return role === "concierge" ? "/concierge" : "/services";
   }
   if (item.entity_type === "concierge_task") {
-    return role === "concierge" || role === "ceo" || role === "billing"
+    return [
+      "ceo",
+      "ceo_assistant",
+      "billing",
+      "patient_manager",
+      "sales",
+      "concierge",
+      "teamlead_interpreter",
+      "interpreter",
+    ].includes(role)
       ? `/task-manager?task=${item.entity_id}`
       : null;
   }

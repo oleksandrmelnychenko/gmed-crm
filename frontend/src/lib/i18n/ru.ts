@@ -22,6 +22,7 @@ export const ru = {
   nav_notes: "Заметки",
   nav_main: "Главное",
   nav_documents: "Документы",
+  nav_files: "Файлы",
   nav_specializations: "Специализации",
   nav_contracts: "Договоры",
   nav_invoices: "Счета",

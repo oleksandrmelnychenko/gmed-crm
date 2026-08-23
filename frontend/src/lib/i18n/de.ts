@@ -22,6 +22,7 @@ export const de = {
   nav_notes: "Notizen",
   nav_main: "Haupt",
   nav_documents: "Dokumente",
+  nav_files: "Dateien",
   nav_specializations: "Spezialisierungen",
   nav_contracts: "Verträge",
   nav_invoices: "Rechnungen",

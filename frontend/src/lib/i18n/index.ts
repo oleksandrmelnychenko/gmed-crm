@@ -31,6 +31,7 @@ export interface Translations
   nav_notes: string;
   nav_main: string;
   nav_documents: string;
+  nav_files: string;
   nav_specializations: string;
   nav_contracts: string;
   nav_invoices: string;

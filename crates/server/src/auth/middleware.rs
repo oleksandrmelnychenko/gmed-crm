@@ -111,7 +111,7 @@ async fn require_auth_with_workspace_policy(
 
     if enforce_release_workspace_roles
         && is_empty_workspace_role(auth_user.role)
-        && !is_empty_workspace_session_path(req.uri().path())
+        && !is_empty_workspace_allowed_path(auth_user.role, req.uri().path())
     {
         tracing::warn!(
             role = %auth_user.role,
@@ -187,12 +187,37 @@ fn is_empty_workspace_role(role: Role) -> bool {
     role != Role::Patient && !role.is_release_staff_role()
 }
 
-fn is_empty_workspace_session_path(path: &str) -> bool {
+fn is_empty_workspace_allowed_path(role: Role, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
-    matches!(
+    let session_path = matches!(
         path,
         "/me" | "/auth/logout" | "/auth/logout-all" | "/auth/sessions" | "/stats/my-kpis"
-    ) || path.starts_with("/auth/sessions/")
+    ) || path.starts_with("/auth/sessions/");
+    if session_path {
+        return true;
+    }
+    if !is_task_manager_workspace_role(role) {
+        return false;
+    }
+    path == "/concierge-operational-items"
+        || path.starts_with("/concierge-operational-items/")
+        || path == "/concierge-operational-attachments"
+        || path == "/notifications"
+        || path.starts_with("/notifications/")
+}
+
+fn is_task_manager_workspace_role(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Ceo
+            | Role::CeoAssistant
+            | Role::Billing
+            | Role::PatientManager
+            | Role::Sales
+            | Role::Concierge
+            | Role::TeamleadInterpreter
+            | Role::Interpreter
+    )
 }
 
 fn unauthorized() -> Response {
@@ -367,10 +392,38 @@ mod tests {
             "/api/v1/auth/sessions/family-id/revoke",
             "/api/v1/stats/my-kpis",
         ] {
-            assert!(is_empty_workspace_session_path(path), "{path}");
+            assert!(
+                is_empty_workspace_allowed_path(Role::ItAdmin, path),
+                "{path}"
+            );
         }
         for path in ["/", "/patients", "/api/v1/leads", "/messages/unread-total"] {
-            assert!(!is_empty_workspace_session_path(path), "{path}");
+            assert!(
+                !is_empty_workspace_allowed_path(Role::ItAdmin, path),
+                "{path}"
+            );
         }
+
+        for path in [
+            "/api/v1/concierge-operational-items",
+            "/api/v1/concierge-operational-items/assignees",
+            "/api/v1/concierge-operational-items/task-id",
+            "/api/v1/concierge-operational-attachments",
+            "/api/v1/notifications",
+            "/api/v1/notifications/unread-count",
+        ] {
+            assert!(
+                is_empty_workspace_allowed_path(Role::PatientManager, path),
+                "{path}"
+            );
+            assert!(
+                !is_empty_workspace_allowed_path(Role::ItAdmin, path),
+                "{path}"
+            );
+        }
+        assert!(!is_empty_workspace_allowed_path(
+            Role::PatientManager,
+            "/api/v1/patients"
+        ));
     }
 }

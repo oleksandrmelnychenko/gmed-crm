@@ -1,22 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  CalendarClock,
+  Building2,
+  Cake,
   Check,
   Circle,
-  Clock3,
-  History,
+  ExternalLink,
   ListChecks,
   LoaderCircle,
   MessageSquareText,
   Plus,
+  Trash2,
   UserRound,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -26,15 +30,16 @@ import type {
   ConciergeTaskComment,
   ConciergeTaskDetail,
 } from "./model";
+import { canModifyConciergeTask } from "./model";
 import {
   conciergeDialogContentClassName,
   ConciergeDialogBody,
   ConciergeDialogHeader,
 } from "./dialog-layout";
+import { ConciergeTaskAttachments } from "./task-attachments";
 
 const copy = {
   de: {
-    description: "Operative Details, Checkliste, Kommentare und unveränderlicher Verlauf",
     loading: "Aufgabe wird geladen",
     checklist: "Checkliste",
     addChecklist: "Checklistenpunkt hinzufügen",
@@ -57,6 +62,8 @@ const copy = {
     internal: "Intern",
     external: "Extern",
     patient: "Patient / Kunde",
+    provider: "Provider",
+    birthDate: "Geburtsdatum",
     externalAssignee: "Externer Ausführender",
     open: "Offen",
     in_progress: "In Arbeit",
@@ -75,9 +82,16 @@ const copy = {
     comment_added: "Kommentar hinzugefügt",
     checklist_item_added: "Checklistenpunkt hinzugefügt",
     checklist_item_toggled: "Checklistenpunkt aktualisiert",
+    attachment_added: "Anhang hinzugefügt",
+    attachment_deleted: "Anhang entfernt",
+    delete: "Löschen",
+    deleteTitle: "Aufgabe löschen?",
+    deleteMessage: "Die Aufgabe verschwindet aus dem Aufgabenmanager. Der Audit-Verlauf bleibt erhalten.",
+    cancel: "Abbrechen",
+    overview: "Aufgabendaten",
+    links: "Verknüpfungen",
   },
   ru: {
-    description: "Операционные детали, чек-лист, комментарии и неизменяемая история",
     loading: "Загрузка задачи",
     checklist: "Чек-лист",
     addChecklist: "Добавить пункт",
@@ -100,6 +114,8 @@ const copy = {
     internal: "Внутренняя",
     external: "Внешняя",
     patient: "Пациент / клиент",
+    provider: "Провайдер",
+    birthDate: "Дата рождения",
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
     in_progress: "В работе",
@@ -118,6 +134,14 @@ const copy = {
     comment_added: "Добавлен комментарий",
     checklist_item_added: "Добавлен пункт чек-листа",
     checklist_item_toggled: "Пункт чек-листа изменён",
+    attachment_added: "Файл прикреплён",
+    attachment_deleted: "Файл удалён",
+    delete: "Удалить",
+    deleteTitle: "Удалить задачу?",
+    deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
+    cancel: "Отмена",
+    overview: "Данные задачи",
+    links: "Связи",
   },
 } as const;
 
@@ -125,6 +149,8 @@ const CHILD_REALTIME_EVENTS = [
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
   "concierge_operational_item.checklist_item_toggled",
+  "concierge_operational_item.attachment_added",
+  "concierge_operational_item.attachment_deleted",
 ] as const;
 
 function dateTime(value: string | null, lang: Lang) {
@@ -135,6 +161,47 @@ function dateTime(value: string | null, lang: Lang) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function dateOnly(value: string | null, lang: Lang) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
+}
+
+function TaskDetailSection({
+  title,
+  action,
+  className,
+  children,
+}: {
+  title: ReactNode;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function TaskDetailRow({ label, value }: { label: ReactNode; value: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-1.5 px-3.5 py-2.5 sm:grid-cols-[minmax(10rem,0.4fr)_minmax(0,1fr)] sm:items-center sm:gap-3">
+      <span className="min-w-0 break-words text-xs font-medium text-muted-foreground sm:text-[13px]">{label}</span>
+      <div className="min-w-0 break-words text-sm font-medium leading-snug text-foreground">{value}</div>
+    </div>
+  );
 }
 
 export function ConciergeTaskDetailDialog({
@@ -151,12 +218,15 @@ export function ConciergeTaskDetailDialog({
   onChanged: () => void;
 }) {
   const labels = copy[lang];
+  const { user } = useAuth();
   const [detail, setDetail] = useState<ConciergeTaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
   const [checklistLabel, setChecklistLabel] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
   const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
@@ -295,79 +365,115 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function deleteTask() {
+    if (!taskId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch<void>(`/concierge-operational-items/${taskId}`, { method: "DELETE" });
+      clearApiCache("/concierge-operational-items");
+      setDeleteConfirmOpen(false);
+      onOpenChange(false);
+      onChanged();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : labels.delete);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={conciergeDialogContentClassName}>
+      <DialogContent className={conciergeDialogContentClassName} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
-          tone="indigo"
+          tone="dot"
           title={detail?.item.title ?? labels.loading}
-          description={labels.description}
-          meta={detail ? <Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canModify ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
           {loading && !detail ? <div className="flex items-center justify-center py-20 text-sm text-muted-foreground"><LoaderCircle className="mr-2 animate-spin" />{labels.loading}</div> : null}
           {detail ? (
-            <div className="space-y-4">
-              <section className="grid gap-2 rounded-lg border border-border/70 bg-muted/30 p-3 text-xs sm:grid-cols-3">
-                <p className="rounded-md bg-background/70 p-2.5"><UserRound className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.assignee}: </span><strong>{detail.item.assigned_to_name}</strong></p>
-                <p className="rounded-md bg-background/70 p-2.5"><Clock3 className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.due}: </span><strong>{dateTime(detail.item.kind === "event" ? detail.item.starts_at : detail.item.due_at, lang)}</strong></p>
-                <p className="rounded-md bg-background/70 p-2.5"><CalendarClock className="mr-1.5 inline size-3.5 text-muted-foreground" /><span className="text-muted-foreground">{labels.reminder}: </span><strong>{dateTime(detail.item.reminder_at, lang)}</strong></p>
-              </section>
+            <div className="space-y-3">
+              <TaskDetailSection title={labels.overview}>
+                <div className="divide-y divide-border/60">
+                  <TaskDetailRow label={labels.assignee} value={detail.item.assigned_to_name} />
+                  <TaskDetailRow label={labels.due} value={dateTime(detail.item.kind === "event" ? detail.item.starts_at : detail.item.due_at, lang)} />
+                  <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at, lang)} />
+                  <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{detail.item.note || "—"}</p>} />
+                  <TaskDetailRow label={labels.location} value={detail.item.location || "—"} />
+                  <TaskDetailRow label={labels.status} value={<Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>} />
+                  <TaskDetailRow label={labels.priority} value={<Badge variant="outline" className="rounded-full">{labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>} />
+                  <TaskDetailRow label={labels.category} value={<Badge variant="outline" className="rounded-full">{detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>} />
+                </div>
+              </TaskDetailSection>
 
-              <section className="grid gap-3 rounded-lg border border-border/70 bg-card p-3 text-sm sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <p className="text-xs font-medium text-muted-foreground">{labels.note}</p>
-                  <p className="mt-1 whitespace-pre-wrap">{detail.item.note || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">{labels.location}</p>
-                  <p className="mt-1">{detail.item.location || "—"}</p>
-                </div>
-                <div className="flex flex-wrap items-end gap-2">
-                  <Badge variant="outline">{labels.status}: {labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
-                  <Badge variant="outline">{labels.priority}: {labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>
-                  <Badge variant="outline">{labels.category}: {detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>
-                </div>
-                {detail.item.patient_name ? <div><p className="text-xs font-medium text-muted-foreground">{labels.patient}</p><p className="mt-1">{detail.item.patient_name}</p></div> : null}
-                {detail.item.task_audience === "external" ? <div><p className="text-xs font-medium text-muted-foreground">{labels.externalAssignee}</p><p className="mt-1 font-medium">{detail.item.external_assignee_name || "—"}</p><p className="text-xs text-muted-foreground">{[detail.item.external_assignee_phone, detail.item.external_assignee_email].filter(Boolean).join(" · ")}</p></div> : null}
-              </section>
+              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.provider_id && detail.item.provider_name) || detail.item.task_audience === "external" ? (
+                <TaskDetailSection title={labels.links}>
+                  <div className="divide-y divide-border/60">
+                    {detail.item.patient_id && detail.item.patient_name ? (
+                      <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><UserRound className="size-4" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
+                    {detail.item.provider_id && detail.item.provider_name ? (
+                      <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><Building2 className="size-4" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.provider}</span><strong className="block truncate text-sm">{detail.item.provider_name}</strong><span className="block truncate text-xs text-muted-foreground">{[detail.item.provider_phone, detail.item.provider_email].filter(Boolean).join(" · ") || "—"}</span></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
+                    {detail.item.task_audience === "external" ? <TaskDetailRow label={labels.externalAssignee} value={<><p>{detail.item.external_assignee_name || "—"}</p><p className="mt-0.5 text-xs font-normal text-muted-foreground">{[detail.item.external_assignee_phone, detail.item.external_assignee_email].filter(Boolean).join(" · ")}</p></>} /> : null}
+                  </div>
+                </TaskDetailSection>
+              ) : null}
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              <section className="rounded-lg border border-border/70 bg-card">
-                <div className="flex items-center gap-2 border-b px-3 py-2.5"><ListChecks className="size-4 text-primary" /><h3 className="text-sm font-semibold">{labels.checklist}</h3><Badge variant="secondary" className="ml-auto rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></div>
-                <div className="space-y-2 p-3">
-                  {detail.checklist.length === 0 ? <p className="py-5 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
-                    <button key={item.id} type="button" className="flex w-full items-start gap-2 rounded-lg border p-2 text-left text-sm hover:bg-muted/40" disabled={busy} onClick={() => void toggleChecklist(item)}>
+              <ConciergeTaskAttachments taskId={detail.item.id} lang={lang} canModify={canModify} />
+
+            <div className="grid items-start gap-3 lg:grid-cols-2">
+              <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
+                <div className="divide-y divide-border/60">
+                  {detail.checklist.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
+                    <button key={item.id} type="button" className="flex w-full items-start gap-2 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/20" disabled={busy} onClick={() => void toggleChecklist(item)}>
                       {item.is_completed ? <Check className="mt-0.5 size-4 text-emerald-600" /> : <Circle className="mt-0.5 size-4 text-muted-foreground" />}
                       <span className={cn("min-w-0 flex-1", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
                     </button>
                   ))}
-                  <div className="flex gap-2"><Input value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div>
+                  <div className="flex gap-2 p-3"><Input className="h-9" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div>
                 </div>
-              </section>
+              </TaskDetailSection>
 
-              <section className="rounded-lg border border-border/70 bg-card">
-                <div className="flex items-center gap-2 border-b px-3 py-2.5"><MessageSquareText className="size-4 text-primary" /><h3 className="text-sm font-semibold">{labels.comments}</h3><Badge variant="secondary" className="ml-auto rounded-full">{detail.comments.length}</Badge></div>
-                <div className="space-y-2 p-3">
-                  {detail.comments.length === 0 ? <p className="py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => <article key={item.id} className="rounded-lg border bg-muted/20 p-2.5"><div className="flex justify-between gap-2 text-[10px] text-muted-foreground"><strong className="text-foreground">{item.created_by_name}</strong><time>{dateTime(item.created_at, lang)}</time></div><p className="mt-1.5 whitespace-pre-wrap text-sm">{item.body}</p></article>)}
-                  <textarea className="min-h-24 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} />
-                  <Button type="button" size="sm" className="w-full" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button>
+              <TaskDetailSection title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
+                <div className="divide-y divide-border/60">
+                  {detail.comments.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => <article key={item.id} className="px-3.5 py-2.5"><div className="flex justify-between gap-2 text-[10px] text-muted-foreground"><strong className="text-foreground">{item.created_by_name}</strong><time>{dateTime(item.created_at, lang)}</time></div><p className="mt-1.5 whitespace-pre-wrap text-sm">{item.body}</p></article>)}
+                  <div className="space-y-2 p-3"><textarea className="min-h-20 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><Button type="button" size="sm" className="w-full" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div>
                 </div>
-              </section>
+              </TaskDetailSection>
             </div>
 
-            <section className="rounded-lg border border-border/70 bg-card">
-              <div className="flex items-center gap-2 border-b px-3 py-2.5"><History className="size-4 text-primary" /><h3 className="text-sm font-semibold">{labels.history}</h3></div>
-              <div className="divide-y">
+            <TaskDetailSection title={labels.history}>
+              <div className="divide-y divide-border/60">
                 {detail.history.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at, lang)}</time></div>)}
               </div>
-            </section>
+            </TaskDetailSection>
             </div>
           ) : null}
         </ConciergeDialogBody>
       </DialogContent>
+      <DirtyDismissConfirmDialog
+        open={deleteConfirmOpen}
+        title={labels.deleteTitle}
+        message={labels.deleteMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={labels.delete}
+        destructive
+        confirmDisabled={busy}
+        onCancel={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => void deleteTask()}
+      />
     </Dialog>
   );
 }

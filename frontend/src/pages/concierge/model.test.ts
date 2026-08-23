@@ -14,6 +14,9 @@ import {
   conciergeServiceCostVariance,
   conciergeServiceDisplayTitle,
   conciergeTaskDisplayTitle,
+  assignableConciergeTaskUsers,
+  canAssignConciergeTaskToRole,
+  canModifyConciergeTask,
   filterConciergeServices,
   filterConciergeTasks,
   filterConciergeTaskAssignees,
@@ -35,20 +38,57 @@ import {
 } from "./model";
 
 describe("filterConciergeTaskAssignees", () => {
-  it("keeps active Concierge, CEO and accounting users", () => {
+  it("keeps every active role in the task hierarchy", () => {
     const users: ConciergeAssignee[] = [
       { id: "1", name: "Concierge", email: "c@test", role: "concierge", is_active: true },
       { id: "2", name: "CEO", email: "ceo@test", role: "ceo", is_active: true },
       { id: "3", name: "Billing", email: "b@test", role: "billing", is_active: true },
-      { id: "4", name: "Patient", email: "p@test", role: "patient", is_active: true },
-      { id: "5", name: "Inactive", email: "i@test", role: "billing", is_active: false },
+      { id: "4", name: "Assistant", email: "a@test", role: "ceo_assistant", is_active: true },
+      { id: "5", name: "Manager", email: "m@test", role: "patient_manager", is_active: true },
+      { id: "6", name: "Sales", email: "s@test", role: "sales", is_active: true },
+      { id: "7", name: "Lead", email: "l@test", role: "teamlead_interpreter", is_active: true },
+      { id: "8", name: "Interpreter", email: "i@test", role: "interpreter", is_active: true },
+      { id: "9", name: "Patient", email: "p@test", role: "patient", is_active: true },
+      { id: "10", name: "Inactive", email: "x@test", role: "billing", is_active: false },
     ];
 
     expect(filterConciergeTaskAssignees(users).map((user) => user.role).sort()).toEqual([
       "billing",
       "ceo",
+      "ceo_assistant",
       "concierge",
+      "interpreter",
+      "patient_manager",
+      "sales",
+      "teamlead_interpreter",
     ]);
+  });
+
+  it("limits assignment to the actor's level and lower levels", () => {
+    const users: ConciergeAssignee[] = [
+      { id: "ceo", name: "CEO", email: "ceo@test", role: "ceo", is_active: true },
+      { id: "billing", name: "Billing", email: "billing@test", role: "billing", is_active: true },
+      { id: "concierge", name: "Concierge", email: "concierge@test", role: "concierge", is_active: true },
+      { id: "lead", name: "Lead", email: "lead@test", role: "teamlead_interpreter", is_active: true },
+      { id: "interpreter", name: "Interpreter", email: "interpreter@test", role: "interpreter", is_active: true },
+    ];
+
+    expect(canAssignConciergeTaskToRole("teamlead_interpreter", "interpreter")).toBe(true);
+    expect(canAssignConciergeTaskToRole("teamlead_interpreter", "billing")).toBe(false);
+    expect(assignableConciergeTaskUsers(users, "lead", "teamlead_interpreter").map((user) => user.id).sort()).toEqual([
+      "concierge",
+      "interpreter",
+      "lead",
+    ]);
+  });
+
+  it("allows only the creator or a strictly higher role to modify a task", () => {
+    const createdByConcierge = task({ assigned_by: "creator", assigned_by_role: "concierge" });
+    expect(canModifyConciergeTask(createdByConcierge, "creator", "concierge")).toBe(true);
+    expect(canModifyConciergeTask(createdByConcierge, "peer", "concierge")).toBe(false);
+    expect(canModifyConciergeTask(createdByConcierge, "manager", "patient_manager")).toBe(true);
+    expect(canModifyConciergeTask(task({ assigned_by_role: "billing" }), "lead", "teamlead_interpreter")).toBe(false);
+    expect(canModifyConciergeTask(task({ assigned_by_role: null }), "ceo", "ceo")).toBe(true);
   });
 });
 

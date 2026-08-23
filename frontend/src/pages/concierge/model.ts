@@ -134,6 +134,7 @@ export type ConciergeTask = {
   assigned_to_name: string;
   assigned_by: string;
   assigned_by_name: string;
+  assigned_by_role?: string | null;
   concierge_service_id: string | null;
   due_at: string | null;
   starts_at: string | null;
@@ -152,6 +153,11 @@ export type ConciergeTask = {
   task_audience: "internal" | "external";
   patient_id: string | null;
   patient_name: string | null;
+  patient_birth_date: string | null;
+  provider_id: string | null;
+  provider_name: string | null;
+  provider_phone: string | null;
+  provider_email: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -166,13 +172,64 @@ export type ConciergeAssignee = {
   is_active: boolean;
 };
 
-const CONCIERGE_TASK_ASSIGNEE_ROLES = new Set(["concierge", "ceo", "billing"]);
+export const TASK_MANAGER_ROLES = [
+  "ceo",
+  "ceo_assistant",
+  "billing",
+  "patient_manager",
+  "sales",
+  "concierge",
+  "teamlead_interpreter",
+  "interpreter",
+] as const;
 
-/** Task manager assignees include operations, CEO and accounting staff. */
+const TASK_MANAGER_ROLE_SET = new Set<string>(TASK_MANAGER_ROLES);
+
+const TASK_ROLE_LEVEL: Record<string, number> = {
+  interpreter: 1,
+  concierge: 2,
+  teamlead_interpreter: 2,
+  ceo_assistant: 3,
+  billing: 3,
+  patient_manager: 3,
+  sales: 3,
+  ceo: 4,
+};
+
+/** Task manager assignees include every active role participating in the task hierarchy. */
 export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
   return users
-    .filter((user) => user.is_active && CONCIERGE_TASK_ASSIGNEE_ROLES.has(user.role))
+    .filter((user) => user.is_active && TASK_MANAGER_ROLE_SET.has(user.role))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function canAssignConciergeTaskToRole(actorRole: string | null | undefined, targetRole: string) {
+  const actorLevel = actorRole ? TASK_ROLE_LEVEL[actorRole] : undefined;
+  const targetLevel = TASK_ROLE_LEVEL[targetRole];
+  return actorLevel !== undefined && targetLevel !== undefined && actorLevel >= targetLevel;
+}
+
+export function assignableConciergeTaskUsers(
+  users: ConciergeAssignee[],
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return filterConciergeTaskAssignees(users).filter(
+    (candidate) => candidate.id === actorId || canAssignConciergeTaskToRole(actorRole, candidate.role),
+  );
+}
+
+export function canModifyConciergeTask(
+  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  if (!actorId || !actorRole) return false;
+  if (task.assigned_by === actorId) return true;
+  if (actorRole === "ceo") return true;
+  const actorLevel = TASK_ROLE_LEVEL[actorRole];
+  const authorLevel = task.assigned_by_role ? TASK_ROLE_LEVEL[task.assigned_by_role] : undefined;
+  return actorLevel !== undefined && authorLevel !== undefined && actorLevel > authorLevel;
 }
 
 export type ConciergeTaskChecklistItem = {

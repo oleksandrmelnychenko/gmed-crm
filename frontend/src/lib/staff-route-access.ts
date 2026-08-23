@@ -140,9 +140,16 @@ const ROLES_CONCIERGE_WORKSPACE = [
 
 const ROLES_TASK_MANAGER = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "sales",
   "concierge",
   "billing",
+  "teamlead_interpreter",
+  "interpreter",
 ] as const satisfies readonly StaffRole[];
+
+const ROLES_FILES = ROLES_TASK_MANAGER;
 
 type RouteRule = {
   id: string;
@@ -294,7 +301,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: {
       section: "crm",
       labelKey: "nav_specializations",
-      after: "documents",
+      after: "files",
     },
   },
   {
@@ -303,6 +310,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/documents",
     roles: ROLES_DOCUMENTS,
     nav: { section: "crm", labelKey: "nav_documents" },
+  },
+  {
+    id: "files",
+    match: "exact",
+    path: "/files",
+    roles: ROLES_FILES,
+    nav: { section: "crm", labelKey: "nav_files", after: "documents" },
   },
   {
     id: "chat",

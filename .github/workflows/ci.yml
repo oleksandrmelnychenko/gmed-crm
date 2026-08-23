@@ -85,6 +85,42 @@ jobs:
       - name: Test
         run: npm --prefix frontend run test
 
+  operations-live-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run P0 operations browser regression
+        working-directory: frontend
+        run: >-
+          npx playwright test
+          -c playwright.live.config.ts
+          tests/e2e-live/operations-p0.live.spec.ts
+          tests/e2e-live/rbac-denied-routes.live.spec.ts
+
   clinical-document-parser:
     runs-on: ubuntu-latest
     defaults:
