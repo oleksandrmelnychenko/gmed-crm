@@ -1091,6 +1091,21 @@ struct PatientUploadPreset {
 
 const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
     DocumentTemplateDefinition {
+        id: "free_text_document",
+        label: "Freies Dokument",
+        description: "Individuelles PDF mit frei definierbarem Titel und Text.",
+        art: "free_text_document",
+        category: "administrative",
+        default_auto_name: "Freies Dokument",
+        default_status: "draft",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de", "en", "uk", "ru"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
         id: "treatment_plan",
         label: "Behandlungsplan",
         description: "Druckfertiger Behandlungsplan nach Tagen mit wiederverwendbaren Hinweisblöcken.",
@@ -11534,6 +11549,18 @@ async fn generate_document(
             "Unknown document template",
         );
     };
+
+    if template.id == "free_text_document"
+        && !body
+            .manual_text
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Free text document requires document text",
+        );
+    }
 
     let has_free_form_override = body
         .manual_text

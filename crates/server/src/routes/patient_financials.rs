@@ -247,10 +247,15 @@ async fn load_patient_settlement_ledger(
                  )
            ), scoped_external AS (
                SELECT external.*, orders.order_number,
-                      provider.name AS provider_name
+                      COALESCE(expense.vendor_name, provider.name) AS provider_name
                FROM external_invoices external
                JOIN orders ON orders.id = external.order_id
                LEFT JOIN providers provider ON provider.id = external.provider_id
+               LEFT JOIN concierge_expense_review_events expense_review
+                 ON expense_review.external_invoice_id = external.id
+                AND expense_review.action = 'posted'
+               LEFT JOIN concierge_expense_submissions expense
+                 ON expense.id = expense_review.expense_id
                WHERE external.patient_id = $1
                  AND $5::boolean = false
                  AND external.status <> 'cancelled'

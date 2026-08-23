@@ -281,6 +281,31 @@ describe("buildGenerateDocumentPayload", () => {
     ).toBe("Form fallback text");
   });
 
+  it("always sends the operator text for a free text document", () => {
+    const payload = buildGenerateDocumentPayload({
+      template: template({
+        id: "free_text_document",
+        art: "free_text_document",
+        category: "administrative",
+        label: "Freies Dokument",
+      }),
+      form: generateForm({
+        templateId: "free_text_document",
+        titleOverride: "Individuelles Dokument",
+        manualText: "Individueller Freitext",
+        manualTextDirty: false,
+      }),
+      patients,
+      displayedManualText: "Individueller Freitext",
+    });
+
+    expect(payload).toMatchObject({
+      template_id: "free_text_document",
+      title_override: "Individuelles Dokument",
+      manual_text: "Individueller Freitext",
+    });
+  });
+
   it.each([
     "framework_contract",
     "single_order",
@@ -355,6 +380,34 @@ describe("buildGenerateDocumentPayload", () => {
 });
 
 describe("buildGeneratedDocumentManualTextDraft", () => {
+  it("starts a free text document with the operator text only", () => {
+    const draft = buildGeneratedDocumentManualTextDraft({
+      template: template({
+        id: "free_text_document",
+        art: "free_text_document",
+        label: "Freies Dokument",
+      }),
+      form: generateForm({
+        templateId: "free_text_document",
+        manualText: "Eigener Inhalt",
+      }),
+      patientLabel: "GM-001 · Anna Müller",
+      lang: "de",
+      labels: {
+        appointmentsTitle: "Termin",
+        documentDate: "Dokumentdatum",
+        sourceInstitution: "Quelle",
+        addresseePerson: "Adressat",
+        ordersPatient: "Patient",
+        ordersTitle: "Auftrag",
+        sectionBindings: "Vorlagenfelder",
+        textBlocks: "Textbausteine",
+      },
+    });
+
+    expect(draft).toBe("Eigener Inhalt");
+  });
+
   it("exposes the generated document text before submit", () => {
     const draft = buildGeneratedDocumentManualTextDraft({
       template: template({

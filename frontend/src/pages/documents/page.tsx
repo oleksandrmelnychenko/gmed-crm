@@ -140,6 +140,7 @@ import {
   VISIBILITY_OPTIONS,
   buildStandardDocumentNameFromMetadata,
   buildGeneratedDocumentManualTextDraft,
+  isFreeTextDocumentTemplate,
   buildGenerateDocumentPayload,
   buildDocumentsPath,
   canManageDocumentIntake,
@@ -991,6 +992,12 @@ function StaffDocumentsPage({
         : "Der Text unten wird aus den aktuellen Formulardaten aufgebaut. Wenn du ihn bearbeitest, wird das PDF genau aus diesem Text erstellt.",
     resetGeneratedText:
       lang === "ru" ? "Вернуть текст шаблона" : "Vorlagentext wiederherstellen",
+    clearGeneratedText:
+      lang === "ru" ? "Очистить текст" : "Text leeren",
+    freeTextRequired:
+      lang === "ru"
+        ? "Введите текст произвольного документа."
+        : "Geben Sie den Text des freien Dokuments ein.",
   };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
@@ -1330,6 +1337,9 @@ function StaffDocumentsPage({
   );
   const selectedTemplateUsesDesignedRenderer = Boolean(
     selectedTemplate && isDesignedAgencyDocumentTemplate(selectedTemplate.id),
+  );
+  const selectedTemplateIsFreeText = isFreeTextDocumentTemplate(
+    selectedTemplate?.id,
   );
   const selectedTemplateBindingFields = selectedTemplate
     ? (DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [])
@@ -2180,6 +2190,13 @@ function StaffDocumentsPage({
     }
     if (selectedTemplateRequiresOrder && !generateForm.orderId) {
       setGenerateError(orderContextRequiredMessage);
+      return;
+    }
+    if (
+      selectedTemplateIsFreeText &&
+      !displayedGeneratedManualText.trim()
+    ) {
+      setGenerateError(metaText.freeTextRequired);
       return;
     }
     if (selectedTemplate.id === "enhanced_due_diligence") {
@@ -3991,10 +4008,15 @@ function StaffDocumentsPage({
                           }))
                         }
                       >
-                        {metaText.resetGeneratedText}
+                        {selectedTemplateIsFreeText
+                          ? metaText.clearGeneratedText
+                          : metaText.resetGeneratedText}
                       </Button>
                     </div>
-                    <Field label={metaText.finalGeneratedText}>
+                    <Field
+                      label={metaText.finalGeneratedText}
+                      required={selectedTemplateIsFreeText}
+                    >
                       <textarea
                         value={displayedGeneratedManualText}
                         onChange={(event) =>

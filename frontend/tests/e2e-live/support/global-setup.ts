@@ -52,6 +52,31 @@ function buildBackendBinary(logFile: string) {
   );
 }
 
+function repairLegacyFreshMigrationFixture(containerName: string): boolean {
+  try {
+    execFileSync(
+      "docker",
+      [
+        "exec",
+        containerName,
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        "gmed",
+        "-d",
+        "gmed_e2e",
+        "-c",
+        "TRUNCATE TABLE invoices CASCADE",
+      ],
+      { stdio: "ignore", windowsHide: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function writeStateFile(state: ProcessState) {
   await fsp.mkdir(path.dirname(STATE_FILE), { recursive: true });
   await fsp.writeFile(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
@@ -95,16 +120,46 @@ export default async function globalSetup() {
     },
     path.join(LOG_DIR, "backend.log"),
   );
+  let freshMigrationFixtureRepaired = false;
 
   async function waitForBackend(attempt: number): Promise<void> {
     try {
-      await waitForHttp(`${BACKEND_URL}/health`, 90_000);
+      const activeBackend = backend;
+      const backendExited = new Promise<never>((_resolve, reject) => {
+        const fail = (code: number | null, signal: NodeJS.Signals | null) =>
+          reject(
+            new Error(
+              `Backend exited before health check (code=${String(code)}, signal=${String(signal)})`,
+            ),
+          );
+        if (activeBackend.exitCode !== null) {
+          fail(activeBackend.exitCode, activeBackend.signalCode);
+          return;
+        }
+        activeBackend.once("exit", fail);
+      });
+      await Promise.race([
+        waitForHttp(`${BACKEND_URL}/health`, 90_000),
+        backendExited,
+      ]);
       return;
     } catch (error) {
       if (attempt >= 2) {
         throw error;
       }
       stopProcessTree(backend.pid ?? 0);
+      if (
+        !freshMigrationFixtureRepaired &&
+        db &&
+        repairLegacyFreshMigrationFixture(db.containerName)
+      ) {
+        // The historical demo seed contains invoice lines that predate quote
+        // quantity snapshots. On a brand-new database that legacy fixture
+        // reaches the partial-invoicing backfill and aborts migration
+        // 20260819113000. Live E2E owns this disposable database, so remove
+        // only those demo invoices before retrying the normal migration path.
+        freshMigrationFixtureRepaired = true;
+      }
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       backend = spawnLoggedProcess(
         backendExecutablePath(),
