@@ -14,7 +14,9 @@ use crate::{
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
-    routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file, remove_document_blob},
+    routes::documents::{
+        MAX_FILE_SIZE, NewStoredDocument, persist_document_file, remove_document_blob,
+    },
     state::AppState,
 };
 use gmed_domain::role::Role;
@@ -139,21 +141,36 @@ async fn upload_provider_document(
         match field.name().unwrap_or("") {
             "file" => {
                 let name = field.file_name().unwrap_or("document").trim().to_string();
-                let mime = field.content_type().unwrap_or("application/octet-stream").to_string();
+                let mime = field
+                    .content_type()
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
                 let bytes = match field.bytes().await {
-                    Ok(value) if !value.is_empty() && value.len() <= MAX_FILE_SIZE => value.to_vec(),
-                    Ok(value) if value.len() > MAX_FILE_SIZE => return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large"),
+                    Ok(value) if !value.is_empty() && value.len() <= MAX_FILE_SIZE => {
+                        value.to_vec()
+                    }
+                    Ok(value) if value.len() > MAX_FILE_SIZE => {
+                        return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large");
+                    }
                     _ => return err(StatusCode::BAD_REQUEST, "Failed to read file"),
                 };
                 file = Some((name, mime, bytes));
             }
             "patient_id" => {
-                patient_id = field.text().await.ok().and_then(|value| Uuid::parse_str(value.trim()).ok());
+                patient_id = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|value| Uuid::parse_str(value.trim()).ok());
             }
             "title" => title = normalized(field.text().await.ok(), 255),
             "notes" => notes = normalized(field.text().await.ok(), 4_000),
             "is_medical" => {
-                is_medical = field.text().await.ok().is_some_and(|value| matches!(value.trim(), "true" | "1"));
+                is_medical = field
+                    .text()
+                    .await
+                    .ok()
+                    .is_some_and(|value| matches!(value.trim(), "true" | "1"));
             }
             _ => {}
         }
@@ -162,26 +179,33 @@ async fn upload_provider_document(
         return err(StatusCode::BAD_REQUEST, "No file uploaded");
     };
     if is_medical && patient_id.is_none() {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_id is required for a medical document");
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "patient_id is required for a medical document",
+        );
     }
     if let Some(patient_id) = patient_id {
-        let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
-            .bind(patient_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(false);
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+                .bind(patient_id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap_or(false);
         if !exists {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Patient not found");
         }
     }
-    let mime_type = match validate_upload_magic_bytes(Some(&file_name), Some(&claimed_mime), &data) {
+    let mime_type = match validate_upload_magic_bytes(Some(&file_name), Some(&claimed_mime), &data)
+    {
         Ok(Some(value)) => value,
         Ok(None) => claimed_mime,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     match scan_upload_bytes(Some(&file_name), &data).await {
         Ok(FileScanOutcome::Clean) => {}
-        Ok(FileScanOutcome::Skipped) => tracing::warn!(file_name = %file_name, "virus scanner unavailable; provider document scan skipped"),
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(file_name = %file_name, "virus scanner unavailable; provider document scan skipped")
+        }
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     }
     let auto_name = title.unwrap_or_else(|| file_name.clone());
@@ -194,7 +218,11 @@ async fn upload_provider_document(
         appointment_id: None,
         auto_name: &auto_name,
         original_filename: &file_name,
-        art: if is_medical { "medical_document" } else { "provider_document" },
+        art: if is_medical {
+            "medical_document"
+        } else {
+            "provider_document"
+        },
         category: Some(if is_medical { "medical" } else { "provider" }),
         status: "active",
         visibility: "internal",
@@ -224,7 +252,8 @@ async fn upload_provider_document(
         version_number: 1,
         uploaded_by: auth.user_id,
     };
-    let (document_id, _, _, storage_key) = match persist_document_file(&state, &data, &input).await {
+    let (document_id, _, _, storage_key) = match persist_document_file(&state, &data, &input).await
+    {
         Ok(value) => value,
         Err(response) => return response,
     };

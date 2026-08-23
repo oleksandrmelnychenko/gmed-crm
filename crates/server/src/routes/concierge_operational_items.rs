@@ -381,15 +381,17 @@ async fn create_item(
         return response;
     }
     if let Some(patient_id) = fields.patient_id {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)",
-        )
-        .bind(patient_id)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap_or(false);
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+                .bind(patient_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap_or(false);
         if !exists {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_id must reference a patient");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "patient_id must reference a patient",
+            );
         }
     }
     let item_id = match sqlx::query_scalar::<_, Uuid>(
@@ -600,15 +602,17 @@ async fn update_item(
         return response;
     }
     if let Some(patient_id) = fields.patient_id {
-        let exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)",
-        )
-        .bind(patient_id)
-        .fetch_one(&mut *tx)
-        .await
-        .unwrap_or(false);
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+                .bind(patient_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap_or(false);
         if !exists {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_id must reference a patient");
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "patient_id must reference a patient",
+            );
         }
     }
 
@@ -1489,21 +1493,55 @@ fn validate_item_fields(
     let ends_at = parse_datetime(ends_at, "Invalid ends_at (RFC3339)")?;
     let reminder_at = parse_datetime(reminder_at, "Invalid reminder_at (RFC3339)")?;
     if !is_valid_audience(task_audience) {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid task_audience"));
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid task_audience",
+        ));
     }
-    let mut external_assignee_type = normalize_text(external_assignee_type, 50, "External assignee type is too long")?;
-    let mut external_assignee_name = normalize_text(external_assignee_name, 255, "External assignee name is too long")?;
-    let mut external_assignee_phone = normalize_text(external_assignee_phone, 100, "External assignee phone is too long")?;
-    let mut external_assignee_email = normalize_text(external_assignee_email, 255, "External assignee email is too long")?;
+    let mut external_assignee_type = normalize_text(
+        external_assignee_type,
+        50,
+        "External assignee type is too long",
+    )?;
+    let mut external_assignee_name = normalize_text(
+        external_assignee_name,
+        255,
+        "External assignee name is too long",
+    )?;
+    let mut external_assignee_phone = normalize_text(
+        external_assignee_phone,
+        100,
+        "External assignee phone is too long",
+    )?;
+    let mut external_assignee_email = normalize_text(
+        external_assignee_email,
+        255,
+        "External assignee email is too long",
+    )?;
     if task_audience == "external" {
-        if !external_assignee_type.as_deref().is_some_and(is_valid_external_assignee_type) {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid external_assignee_type"));
+        if !external_assignee_type
+            .as_deref()
+            .is_some_and(is_valid_external_assignee_type)
+        {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid external_assignee_type",
+            ));
         }
         if external_assignee_name.is_none() {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "external_assignee_name is required"));
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "external_assignee_name is required",
+            ));
         }
-        if external_assignee_email.as_deref().is_some_and(|value| !value.contains('@') || value.chars().any(char::is_whitespace)) {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid external_assignee_email"));
+        if external_assignee_email
+            .as_deref()
+            .is_some_and(|value| !value.contains('@') || value.chars().any(char::is_whitespace))
+        {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid external_assignee_email",
+            ));
         }
     } else {
         external_assignee_type = None;

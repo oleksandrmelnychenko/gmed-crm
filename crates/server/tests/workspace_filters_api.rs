@@ -3548,22 +3548,16 @@ async fn patient_portal_account_activation_requires_membership_and_links_account
     assert_eq!(body["created"], true);
 
     let portal_user_id = Uuid::parse_str(body["user_id"].as_str().unwrap()).unwrap();
-    let user = sqlx::query(
-        "SELECT email, password_hash, role, is_active FROM users WHERE id = $1",
-    )
-    .bind(portal_user_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let user = sqlx::query("SELECT email, password_hash, role, is_active FROM users WHERE id = $1")
+        .bind(portal_user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(user.get::<String, _>("email"), email);
     assert_eq!(user.get::<String, _>("role"), "patient");
     assert!(user.get::<bool, _>("is_active"));
     assert!(
-        password::verify_password(
-            "Portal!1234",
-            &user.get::<String, _>("password_hash")
-        )
-        .unwrap()
+        password::verify_password("Portal!1234", &user.get::<String, _>("password_hash")).unwrap()
     );
 
     let active_link_count = sqlx::query_scalar::<_, i64>(
@@ -3595,13 +3589,12 @@ async fn patient_portal_account_activation_requires_membership_and_links_account
     assert_eq!(body["user_id"], portal_user_id.to_string());
     assert_eq!(body["created"], false);
 
-    let refreshed_hash = sqlx::query_scalar::<_, String>(
-        "SELECT password_hash FROM users WHERE id = $1",
-    )
-    .bind(portal_user_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let refreshed_hash =
+        sqlx::query_scalar::<_, String>("SELECT password_hash FROM users WHERE id = $1")
+            .bind(portal_user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(password::verify_password("Changed!5678", &refreshed_hash).unwrap());
 }
 

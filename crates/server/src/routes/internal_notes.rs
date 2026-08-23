@@ -15,9 +15,7 @@ use crate::{
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
-    routes::documents::{
-        read_document_storage_bytes, remove_document_blob, store_document_blob,
-    },
+    routes::documents::{read_document_storage_bytes, remove_document_blob, store_document_blob},
     state::AppState,
 };
 use gmed_domain::role::Role;
@@ -104,7 +102,12 @@ async fn list_notes(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load notes");
         }
     };
-    Json(rows.iter().filter_map(note_summary_json).collect::<Vec<_>>()).into_response()
+    Json(
+        rows.iter()
+            .filter_map(note_summary_json)
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
 }
 
 async fn create_note(
@@ -178,10 +181,16 @@ async fn update_note(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let expected_updated_at = match chrono::DateTime::parse_from_rfc3339(body.expected_updated_at.trim()) {
-        Ok(value) => value.with_timezone(&chrono::Utc),
-        Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid expected_updated_at"),
-    };
+    let expected_updated_at =
+        match chrono::DateTime::parse_from_rfc3339(body.expected_updated_at.trim()) {
+            Ok(value) => value.with_timezone(&chrono::Utc),
+            Err(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid expected_updated_at",
+                );
+            }
+        };
     let result = match sqlx::query(
         r#"UPDATE internal_notes
            SET title = $2, body = $3, updated_by = $4, updated_at = now()
@@ -333,10 +342,11 @@ async fn upload_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to encrypt file");
         }
     };
-    let (file_size, storage_key, stored_name) = match store_document_blob(&encrypted, &file_name).await {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
+    let (file_size, storage_key, stored_name) =
+        match store_document_blob(&encrypted, &file_name).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
     let attachment_id = Uuid::new_v4();
     if let Err(error) = sqlx::query(
         r#"INSERT INTO internal_note_attachments (
@@ -361,11 +371,12 @@ async fn upload_attachment(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to attach file");
     }
     let _ = file_size;
-    let _ = sqlx::query("UPDATE internal_notes SET updated_at = now(), updated_by = $2 WHERE id = $1")
-        .bind(note_id)
-        .bind(auth.user_id)
-        .execute(&state.db)
-        .await;
+    let _ =
+        sqlx::query("UPDATE internal_notes SET updated_at = now(), updated_by = $2 WHERE id = $1")
+            .bind(note_id)
+            .bind(auth.user_id)
+            .execute(&state.db)
+            .await;
     match load_note(&state, note_id).await {
         Ok(Some(value)) => (StatusCode::CREATED, Json(value)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Note not found"),
@@ -400,11 +411,17 @@ async fn download_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to download file");
         }
     };
-    let file_name = row.try_get::<String, _>("file_name").unwrap_or_else(|_| "file".to_string());
-    let mime_type = row.try_get::<String, _>("mime_type").unwrap_or_else(|_| "application/octet-stream".to_string());
+    let file_name = row
+        .try_get::<String, _>("file_name")
+        .unwrap_or_else(|_| "file".to_string());
+    let mime_type = row
+        .try_get::<String, _>("mime_type")
+        .unwrap_or_else(|_| "application/octet-stream".to_string());
     let storage_key = row.try_get::<String, _>("storage_key").unwrap_or_default();
     let nonce = row.try_get::<Vec<u8>, _>("file_nonce").unwrap_or_default();
-    let key_id = row.try_get::<String, _>("encryption_key_id").unwrap_or_default();
+    let key_id = row
+        .try_get::<String, _>("encryption_key_id")
+        .unwrap_or_default();
     let encrypted = match read_document_storage_bytes(
         note_id,
         &storage_key,
@@ -458,11 +475,12 @@ async fn delete_attachment(
         }
     };
     remove_document_blob(&storage_key).await;
-    let _ = sqlx::query("UPDATE internal_notes SET updated_at = now(), updated_by = $2 WHERE id = $1")
-        .bind(note_id)
-        .bind(auth.user_id)
-        .execute(&state.db)
-        .await;
+    let _ =
+        sqlx::query("UPDATE internal_notes SET updated_at = now(), updated_by = $2 WHERE id = $1")
+            .bind(note_id)
+            .bind(auth.user_id)
+            .execute(&state.db)
+            .await;
     StatusCode::NO_CONTENT.into_response()
 }
 
@@ -472,7 +490,10 @@ fn validate_note_fields(
 ) -> Result<(String, Option<String>), axum::response::Response> {
     let title = title.trim();
     if title.is_empty() || title.chars().count() > 255 {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Title is required (max 255)"));
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Title is required (max 255)",
+        ));
     }
     let body = body.map(str::trim).filter(|value| !value.is_empty());
     if body.is_some_and(|value| value.chars().count() > 20_000) {
@@ -594,7 +615,10 @@ fn require_internal_staff(auth: &AuthUser) -> Result<(), axum::response::Respons
     ) {
         return Ok(());
     }
-    Err(err(StatusCode::FORBIDDEN, "Internal notes are available to staff only"))
+    Err(err(
+        StatusCode::FORBIDDEN,
+        "Internal notes are available to staff only",
+    ))
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

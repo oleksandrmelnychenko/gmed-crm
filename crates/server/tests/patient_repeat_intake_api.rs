@@ -60,10 +60,9 @@ async fn repeat_intake_is_retired_and_cannot_create_duplicate_leads() {
     assert_eq!(status, StatusCode::GONE, "{payload}");
     assert_eq!(payload["message"], RETIRED_MESSAGE);
 
-    let after: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM leads WHERE flow = 'repeat_patient'")
-            .fetch_one(&ctx.pool)
-            .await
-            .unwrap();
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM leads WHERE flow = 'repeat_patient'")
+        .fetch_one(&ctx.pool)
+        .await
+        .unwrap();
     assert_eq!(after, before, "retired endpoint must not create a lead");
 }
