@@ -790,6 +790,7 @@ export interface Translations
   topbar_notifications: string;
   topbar_mark_all_read: string;
   topbar_no_notifications: string;
+  topbar_announcement_dismiss_failed: string;
   topbar_message_placeholder: string;
   topbar_online: string;
 

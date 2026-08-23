@@ -1951,6 +1951,23 @@ async fn add_comment(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let (assigned_by, task_title) = match sqlx::query_as::<_, (Uuid, String)>(
+        r#"SELECT assigned_by, title
+           FROM tasks
+           WHERE id = $1 AND task_scope = 'concierge_operational'
+             AND deleted_at IS NULL AND archived_at IS NULL"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge task comment notification context");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let inserted_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_operational_task_comments (
                task_id, body, created_by, request_id
@@ -2024,6 +2041,33 @@ async fn add_comment(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Comment not found"),
         Err(response) => return response,
     };
+    let mut comment_notifications = Vec::new();
+    if inserted {
+        let mut recipient_ids = Vec::new();
+        for recipient_id in [assigned_by, assigned_to] {
+            if recipient_id != auth.user_id
+                && recipient_id != Uuid::nil()
+                && !recipient_ids.contains(&recipient_id)
+            {
+                recipient_ids.push(recipient_id);
+            }
+        }
+        for recipient_id in recipient_ids {
+            match insert_task_notification(
+                &mut tx,
+                recipient_id,
+                "operational_task_comment_added",
+                "New task comment",
+                &task_title,
+                item_id,
+            )
+            .await
+            {
+                Ok(value) => comment_notifications.push(value),
+                Err(response) => return response,
+            }
+        }
+    }
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task comment");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -2038,6 +2082,9 @@ async fn add_comment(
             serde_json::json!({ "comment_id": comment_id }),
         )
         .await;
+    }
+    for notification in comment_notifications {
+        publish_pending_notification(&state, notification, item_id).await;
     }
     Json(comment).into_response()
 }

@@ -27,6 +27,8 @@ use crate::state::AppState;
 use gmed_domain::role::Role;
 
 const MAX_FILE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
+const MAX_MESSAGE_CHARS: usize = 10_000;
+const MAX_ENCRYPTED_MESSAGE_SIZE: usize = 64 * 1024;
 const UPLOAD_DIR: &str = "uploads/chat";
 
 /// Public alias exposed so other modules (e.g. key rotation) can locate
@@ -47,6 +49,7 @@ pub fn router() -> Router<AppState> {
         .route("/messages/e2e-key/{user_id}", get(get_peer_e2e_key))
         .route("/messages/allowed-peers", get(list_allowed_peers))
         .route("/messages/conversations", get(list_conversations))
+        .route("/messages/read-all", post(mark_all_conversations_read))
         .route(
             "/messages/{user_id}",
             get(get_conversation).post(send_message),
@@ -679,7 +682,7 @@ async fn get_conversation(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
-    let limit = q.limit.unwrap_or(50).min(200);
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
@@ -899,7 +902,12 @@ async fn send_message(
 
         let ciphertext = match body.e2e_ciphertext.as_deref() {
             Some(value) => match decode_base64_message_field(value, "Invalid e2e_ciphertext") {
-                Ok(bytes) if !bytes.is_empty() => bytes,
+                Ok(bytes) if !bytes.is_empty() && bytes.len() <= MAX_ENCRYPTED_MESSAGE_SIZE => {
+                    bytes
+                }
+                Ok(bytes) if bytes.len() > MAX_ENCRYPTED_MESSAGE_SIZE => {
+                    return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+                }
                 Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext"),
                 Err(resp) => return resp,
             },
@@ -1014,6 +1022,9 @@ async fn send_message(
     } else {
         if trimmed_message.is_empty() {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Message is empty");
+        }
+        if trimmed_message.chars().count() > MAX_MESSAGE_CHARS {
+            return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
         }
 
         let (ciphertext, nonce, key_id) = match state.message_keys.encrypt_str(&trimmed_message) {
@@ -1222,6 +1233,12 @@ async fn upload_file(
         Some(d) if !d.is_empty() => d,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    if message_text
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > MAX_MESSAGE_CHARS)
+    {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+    }
     let has_attachment_e2e = attachment_e2e_algorithm
         .as_deref()
         .map(str::trim)
@@ -1383,7 +1400,12 @@ async fn upload_file(
             }
             let caption_ciphertext = match e2e_ciphertext.as_deref() {
                 Some(value) => match decode_base64_message_field(value, "Invalid e2e_ciphertext") {
-                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    Ok(bytes) if !bytes.is_empty() && bytes.len() <= MAX_ENCRYPTED_MESSAGE_SIZE => {
+                        bytes
+                    }
+                    Ok(bytes) if bytes.len() > MAX_ENCRYPTED_MESSAGE_SIZE => {
+                        return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+                    }
                     Ok(_) => {
                         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext");
                     }
@@ -1768,7 +1790,7 @@ async fn mark_conversation_read(
             (0, None)
         }
     };
-    let _ = sqlx::query(
+    let notifications_marked_read = sqlx::query(
         "UPDATE user_notifications
          SET is_read = true
          WHERE user_id = $1
@@ -1780,7 +1802,26 @@ async fn mark_conversation_read(
     .bind(auth.user_id)
     .bind(user_id)
     .execute(&state.db)
-    .await;
+    .await
+    .map(|result| result.rows_affected())
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, user_id = %auth.user_id, peer_id = %user_id, "mark message notifications read");
+        0
+    });
+    if marked_read_count > 0 || notifications_marked_read > 0 {
+        crate::realtime::publish_notification_event(
+            &state,
+            auth.user_id,
+            "notification.read",
+            None,
+            json!({
+                "entity_type": "message_peer",
+                "entity_id": user_id,
+                "marked_read_count": notifications_marked_read,
+            }),
+        )
+        .await;
+    }
     publish_message_event(&state, auth.user_id, user_id, "conversation_read", None);
     publish_message_event(&state, user_id, auth.user_id, "conversation_read", None);
     write_message_peer_audit(
@@ -1796,6 +1837,92 @@ async fn mark_conversation_read(
     )
     .await;
     Json(serde_json::json!({"ok": true, "marked_read_count": marked_read_count, "last_read_at": last_read_at})).into_response()
+}
+
+async fn mark_all_conversations_read(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, "begin mark all conversations read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let marked_read_count = match sqlx::query(
+        r#"UPDATE direct_messages
+           SET is_read = true,
+               read_at = COALESCE(read_at, now())
+           WHERE to_user = $1 AND NOT is_read"#,
+    )
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, "mark all direct messages read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let notifications_marked_read = match sqlx::query(
+        r#"UPDATE user_notifications
+           SET is_read = true
+           WHERE user_id = $1
+             AND entity_type = 'message_peer'
+             AND kind IN ('direct_message', 'direct_message_attachment')
+             AND NOT is_read"#,
+    )
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, "mark all message notifications read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, user_id = %auth.user_id, "commit mark all conversations read");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    crate::realtime::publish_notification_event(
+        &state,
+        auth.user_id,
+        "notification.read",
+        None,
+        json!({
+            "entity_type": "message_peer",
+            "all_conversations": true,
+            "marked_read_count": notifications_marked_read,
+        }),
+    )
+    .await;
+    write_message_peer_audit(
+        &state,
+        auth.user_id,
+        "read_all_message_conversations",
+        auth.user_id,
+        json!({
+            "marked_read_count": marked_read_count,
+            "notifications_marked_read": notifications_marked_read,
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "ok": true,
+        "marked_read_count": marked_read_count,
+        "notifications_marked_read": notifications_marked_read,
+    }))
+    .into_response()
 }
 
 async fn unread_total(

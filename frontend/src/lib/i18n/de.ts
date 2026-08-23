@@ -916,6 +916,8 @@ export const de = {
   topbar_notifications: "Benachrichtigungen",
   topbar_mark_all_read: "Alle als gelesen markieren",
   topbar_no_notifications: "Keine Benachrichtigungen",
+  topbar_announcement_dismiss_failed:
+    "Die Ankündigung konnte nicht ausgeblendet werden. Bitte erneut versuchen.",
   topbar_message_placeholder: "Nachricht...",
   topbar_online: "Online",
 

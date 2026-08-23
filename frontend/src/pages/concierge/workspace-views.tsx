@@ -245,6 +245,7 @@ export function ConciergeTaskQueue({
   updatingTaskId,
   onAdvance,
   onEdit,
+  onOpen,
 }: {
   tasks: ConciergeTask[];
   lang: Lang;
@@ -252,6 +253,7 @@ export function ConciergeTaskQueue({
   updatingTaskId: string | null;
   onAdvance: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
+  onOpen: (task: ConciergeTask) => void;
 }) {
   const labels = copy[lang];
   const [showCompleted, setShowCompleted] = useState(false);
@@ -300,6 +302,7 @@ export function ConciergeTaskQueue({
                 )}
                 data-testid={`concierge-task-${task.id}`}
               >
+                <button type="button" className="block w-full rounded-md text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/40" onClick={() => onOpen(task)}>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>
                     {priorityLabel(task.priority, lang)}
@@ -332,6 +335,7 @@ export function ConciergeTaskQueue({
                   {task.location ? <p className="flex items-center gap-1.5"><MapPin className="size-3.5" />{task.location}</p> : null}
                   <p className="truncate border-t border-border/60 pt-1.5">{labels.assignedBy}: <span className="font-medium text-foreground">{task.assigned_by_name}</span></p>
                 </div>
+                </button>
                 <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
                   <Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs" aria-label={labels.editTask} onClick={() => onEdit(task)}>
                     <Pencil />{labels.editTask}

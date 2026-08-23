@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin, UsersRound } from "lucide-react";
+import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin, MessageSquareText, UsersRound } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -16,6 +17,8 @@ import {
   type ConciergeAssignee,
   type ConciergeService,
   type ConciergeTask,
+  type ConciergeTaskComment,
+  type ConciergeTaskDetail,
 } from "./model";
 import {
   ConciergeDialogBody,
@@ -95,6 +98,13 @@ const copy = {
     partner: "Partner",
     other: "Andere",
     attachmentUploadFailed: "Die Aufgabe wurde angelegt, aber nicht alle Dateien konnten hochgeladen werden. Bitte erneut versuchen.",
+    comments: "Kommentare",
+    commentPlaceholder: "Kommentar oder Arbeitsergebnis hinzufügen",
+    addComment: "Kommentar hinzufügen",
+    noComments: "Noch keine Kommentare",
+    commentsLoading: "Kommentare werden geladen",
+    commentsLoadFailed: "Kommentare konnten nicht geladen werden.",
+    commentAddFailed: "Der Kommentar konnte nicht hinzugefügt werden.",
   },
   ru: {
     createTitle: "Создать задачу или событие",
@@ -156,6 +166,13 @@ const copy = {
     partner: "Партнёр",
     other: "Другое",
     attachmentUploadFailed: "Задача создана, но не все файлы удалось загрузить. Повторите попытку.",
+    comments: "Комментарии",
+    commentPlaceholder: "Добавить комментарий или результат работы",
+    addComment: "Добавить комментарий",
+    noComments: "Комментариев пока нет",
+    commentsLoading: "Загрузка комментариев",
+    commentsLoadFailed: "Не удалось загрузить комментарии.",
+    commentAddFailed: "Не удалось добавить комментарий.",
   },
 } as const;
 
@@ -223,6 +240,15 @@ function localDateTimeValue(value: Date | string | null) {
 
 function toIso(value: string) {
   return value ? new Date(value).toISOString() : null;
+}
+
+function commentDateTime(value: string, lang: Lang) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 export function selectTaskAssigneeId(
@@ -298,7 +324,13 @@ export function ConciergeTaskEventDialog({
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingAttachmentError, setPendingAttachmentError] = useState("");
   const [uploadingPending, setUploadingPending] = useState(false);
+  const [comments, setComments] = useState<ConciergeTaskComment[]>([]);
+  const [comment, setComment] = useState("");
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const createdTaskRef = useRef<ConciergeTask | null>(null);
+  const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
 
   const sortedServices = useMemo(
     () => services
@@ -340,6 +372,60 @@ export function ConciergeTaskEventDialog({
     setUploadingPending(false);
     createdTaskRef.current = null;
   }, [item?.id, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setComments([]);
+    setComment("");
+    setCommentError("");
+    setCommentBusy(false);
+    commentRequestRef.current = null;
+    if (!item) {
+      setCommentsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCommentsLoading(true);
+    void apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${item.id}`, { forceFresh: true })
+      .then((detail) => {
+        if (!cancelled) setComments(detail.comments);
+      })
+      .catch(() => {
+        if (!cancelled) setCommentError(labels.commentsLoadFailed);
+      })
+      .finally(() => {
+        if (!cancelled) setCommentsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item, labels.commentsLoadFailed, open]);
+
+  async function addComment() {
+    if (!item || !comment.trim() || commentBusy) return;
+    const body = comment.trim();
+    const requestId = commentRequestRef.current?.body === body
+      ? commentRequestRef.current.requestId
+      : crypto.randomUUID();
+    commentRequestRef.current = { body, requestId };
+    setCommentBusy(true);
+    setCommentError("");
+    try {
+      const row = await apiFetch<ConciergeTaskComment>(`/concierge-operational-items/${item.id}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ request_id: requestId, body }),
+      });
+      setComments((current) => current.some((entry) => entry.id === row.id) ? current : [...current, row]);
+      setComment("");
+      commentRequestRef.current = null;
+      clearApiCache("/concierge-operational-items");
+    } catch {
+      setCommentError(labels.commentAddFailed);
+    } finally {
+      setCommentBusy(false);
+    }
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -532,6 +618,44 @@ export function ConciergeTaskEventDialog({
                   />
                 </div>
               )}
+              {item ? (
+                <div className="lg:col-span-2">
+                  <ConciergeDialogSection title={labels.comments} icon={MessageSquareText}>
+                    {commentError ? <p role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{commentError}</p> : null}
+                    <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
+                      {commentsLoading ? (
+                        <div className="flex items-center justify-center px-3 py-6 text-xs text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.commentsLoading}</div>
+                      ) : comments.length === 0 ? (
+                        <p className="px-3 py-6 text-center text-xs text-muted-foreground">{labels.noComments}</p>
+                      ) : (
+                        <div className="divide-y divide-border/60">
+                          {comments.map((entry) => (
+                            <article key={entry.id} className="px-3 py-2.5">
+                              <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                                <strong className="truncate text-foreground">{entry.created_by_name}</strong>
+                                <time className="shrink-0">{commentDateTime(entry.created_at, lang)}</time>
+                              </div>
+                              <p className="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{entry.body}</p>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                      <div className="space-y-2 border-t border-border/70 p-3">
+                        <textarea
+                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                          value={comment}
+                          maxLength={4000}
+                          placeholder={labels.commentPlaceholder}
+                          onChange={(event) => setComment(event.target.value)}
+                        />
+                        <Button type="button" size="sm" className="w-full" disabled={commentBusy || !comment.trim()} onClick={() => void addComment()}>
+                          {commentBusy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}
+                        </Button>
+                      </div>
+                    </div>
+                  </ConciergeDialogSection>
+                </div>
+              ) : null}
             </div>
           </ConciergeDialogBody>
 

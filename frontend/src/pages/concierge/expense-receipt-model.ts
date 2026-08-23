@@ -145,11 +145,45 @@ export function minorUnitsToMoneyString(value: number): string {
   return `${Math.floor(value / 100)}.${String(value % 100).padStart(2, "0")}`;
 }
 
-export function calculateConciergeExpenseGross(net: string, vat: string): string {
+function percentageStringToBasisPoints(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const [whole, fraction = ""] = normalized.split(".");
+  const basisPoints = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  return Number.isSafeInteger(basisPoints) && basisPoints <= 10_000 ? basisPoints : null;
+}
+
+export function calculateConciergeExpenseVat(net: string, vatRate: string): string {
   const netMinor = moneyStringToMinorUnits(net);
-  const vatMinor = moneyStringToMinorUnits(vat);
+  const vatBasisPoints = percentageStringToBasisPoints(vatRate);
+  if (netMinor === null || vatBasisPoints === null) return "";
+  const vatMinorBigInt = (BigInt(netMinor) * BigInt(vatBasisPoints) + 5_000n) / 10_000n;
+  if (vatMinorBigInt > BigInt(Number.MAX_SAFE_INTEGER)) return "";
+  return minorUnitsToMoneyString(Number(vatMinorBigInt));
+}
+
+export function calculateConciergeExpenseGross(net: string, vatRate: string): string {
+  const netMinor = moneyStringToMinorUnits(net);
+  const vatMinor = moneyStringToMinorUnits(calculateConciergeExpenseVat(net, vatRate));
   if (netMinor === null || vatMinor === null) return "";
   return minorUnitsToMoneyString(netMinor + vatMinor);
+}
+
+export function calculateConciergeExpenseNetFromGross(gross: string, vatRate: string): string {
+  const grossMinor = moneyStringToMinorUnits(gross);
+  const vatBasisPoints = percentageStringToBasisPoints(vatRate);
+  if (grossMinor === null || vatBasisPoints === null) return "";
+  const divisor = BigInt(10_000 + vatBasisPoints);
+  const netMinorBigInt = (BigInt(grossMinor) * 10_000n + divisor / 2n) / divisor;
+  if (netMinorBigInt > BigInt(Number.MAX_SAFE_INTEGER)) return "";
+  return minorUnitsToMoneyString(Number(netMinorBigInt));
+}
+
+export function calculateConciergeExpenseVatFromGross(gross: string, vatRate: string): string {
+  const grossMinor = moneyStringToMinorUnits(gross);
+  const netMinor = moneyStringToMinorUnits(calculateConciergeExpenseNetFromGross(gross, vatRate));
+  if (grossMinor === null || netMinor === null || netMinor > grossMinor) return "";
+  return minorUnitsToMoneyString(grossMinor - netMinor);
 }
 
 export type ConciergeExpenseConsequencePreview = {

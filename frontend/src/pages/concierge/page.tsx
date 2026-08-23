@@ -934,6 +934,14 @@ export function ConciergeWorkspacePage() {
     setSearchParams(next, { replace: true });
   }
 
+  function openWorkspaceTaskDetail(task: ConciergeTask) {
+    setDetailTaskId(task.id);
+    const next = new URLSearchParams(searchParams);
+    next.set("task", task.id);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  }
+
   async function saveTask(input: SaveConciergeOperationalItemInput): Promise<ConciergeTask> {
     if (submittingTask) throw new Error(labels.taskUpdateFailed);
     if (editingTask && !canModifyConciergeTask(editingTask, user?.id, user?.role)) throw new Error(labels.taskUpdateFailed);
@@ -1205,6 +1213,7 @@ export function ConciergeWorkspacePage() {
             updatingTaskId={updatingTaskId}
             onAdvance={advanceTask}
             onEdit={openEditTask}
+            onOpen={openWorkspaceTaskDetail}
           />
         </div>
       )}
@@ -1246,6 +1255,20 @@ export function ConciergeWorkspacePage() {
         error={expenseError}
         submitting={submittingExpense}
         progress={expenseProgress}
+        vendorSuggestions={[
+          ...providers.map((provider) => ({
+            id: `provider:${provider.id}`,
+            value: provider.name,
+            description: lang === "ru" ? "Внешний партнёр" : "Externer Partner",
+          })),
+          ...assignees.map((assignee) => ({
+            id: `user:${assignee.id}`,
+            value: assignee.name,
+            description: lang === "ru"
+              ? `Внутренний пользователь · ${assignee.email}`
+              : `Interner Benutzer · ${assignee.email}`,
+          })),
+        ]}
         onOpenChange={(open) => {
           if (open) return;
           expenseLoadSequenceRef.current += 1;

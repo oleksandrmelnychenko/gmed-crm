@@ -1317,3 +1317,19 @@ html[data-native-platform] {
 .topbar-context-action-refresh {}
 
 .topbar-context-action-create {}
+/* Online user avatars: distance-falloff lift with a bouncy return. */
+.topbar-avatar-hover-item {
+  --avatar-shift: 0px;
+  --avatar-scale-active: 1;
+  transform-origin: center;
+  transform: translateY(var(--avatar-shift)) scale(var(--avatar-scale-active));
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-avatar-hover-item {
+    transform: none !important;
+    transition: none !important;
+  }
+}

@@ -35,9 +35,17 @@ import {
   type ActiveSession,
   type ChatMessage,
   type Notification,
+  dismissActiveAnnouncement,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const TOPBAR_REALTIME_EVENTS = [
   "notification.created",
@@ -138,6 +146,18 @@ export function Topbar() {
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
+  const onlineUsersWithSelf =
+    !isPatientPortal && user
+      ? [
+          {
+            user_id: user.id,
+            user_name: user.name,
+            user_email: user.email,
+            role: user.role,
+          },
+          ...onlineUsers.filter((onlineUser) => onlineUser.user_id !== user.id),
+        ]
+      : onlineUsers;
   const showAppointmentsBadge =
     !isPatientPortal && location.pathname.startsWith("/appointments");
 
@@ -268,9 +288,9 @@ export function Topbar() {
           ) : null}
 
           {/* Online users avatars */}
-          {!isPatientPortal && onlineUsers.length > 0 && (
+          {!isPatientPortal && onlineUsersWithSelf.length > 0 && (
             <OnlineAvatars
-              users={onlineUsers}
+              users={onlineUsersWithSelf}
               onToggle={() => {
                 setUsersOpen(!usersOpen);
                 setNotifOpen(false);
@@ -320,7 +340,7 @@ export function Topbar() {
       {/* Users panel */}
       {usersOpen && (
         <UsersPanel
-          users={onlineUsers}
+          users={onlineUsersWithSelf}
           currentUserId={user?.id}
           onClose={() => setUsersOpen(false)}
         />
@@ -366,25 +386,67 @@ function OnlineAvatars({
   const maxShow = 8;
   const show = users.slice(0, maxShow);
   const overflow = Math.max(0, users.length - maxShow);
+  const rootRef = useRef<HTMLButtonElement>(null);
+
+  const setAvatarShifts = (
+    activeIndex: number | null,
+    phase: "in" | "out",
+  ) => {
+    const elements = rootRef.current?.querySelectorAll<HTMLElement>(
+      "[data-online-avatar]",
+    );
+    if (!elements) return;
+
+    const easing =
+      phase === "out"
+        ? "cubic-bezier(0.34, 3.85, 0.64, 1)"
+        : "cubic-bezier(0.22, 1, 0.36, 1)";
+
+    elements.forEach((element, index) => {
+      element.style.transitionTimingFunction = easing;
+      if (activeIndex === null) {
+        element.style.setProperty("--avatar-shift", "0px");
+        element.style.setProperty("--avatar-scale-active", "1");
+        return;
+      }
+
+      const distance = Math.abs(index - activeIndex);
+      const shift = -4 * Math.pow(0.45, distance);
+      element.style.setProperty("--avatar-shift", `${shift.toFixed(3)}px`);
+      element.style.setProperty(
+        "--avatar-scale-active",
+        index === activeIndex ? "1.05" : "1",
+      );
+    });
+  };
 
   return (
     <button
+      ref={rootRef}
       type="button"
-      className="flex items-center cursor-pointer [&>*+*]:-ml-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex cursor-pointer items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>*+*]:-ml-1.5"
       onClick={onToggle}
+      onMouseLeave={() => setAvatarShifts(null, "out")}
       aria-label={t.topbar_online_users}
     >
-      {show.map((u) => (
+      {show.map((u, index) => (
         <span
           key={u.user_id}
+          data-online-avatar
           aria-hidden="true"
-          className="flex items-center justify-center size-7 rounded-full bg-muted text-[10px] font-medium text-foreground border-2 border-background"
+          className="topbar-avatar-hover-item flex size-7 items-center justify-center rounded-full border-2 border-background bg-muted text-[10px] font-medium text-foreground"
+          onMouseEnter={() => setAvatarShifts(index, "in")}
         >
           {initials(u.user_name)}
         </span>
       ))}
       {overflow > 0 && (
-        <span className="flex items-center justify-center size-7 rounded-full bg-muted-foreground text-[10px] font-medium text-background border-2 border-background">
+        <span
+          data-online-avatar
+          aria-hidden="true"
+          className="topbar-avatar-hover-item flex size-7 items-center justify-center rounded-full border-2 border-background bg-muted-foreground text-[10px] font-medium text-background"
+          onMouseEnter={() => setAvatarShifts(show.length, "in")}
+        >
           +{overflow}
         </span>
       )}
@@ -407,6 +469,12 @@ function NotificationPanel({
   const { t } = useLang();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
+  const [selectedAnnouncement, setSelectedAnnouncement] =
+    useState<ActiveAnnouncement | null>(null);
+  const [dismissingAnnouncementId, setDismissingAnnouncementId] = useState<
+    string | null
+  >(null);
+  const [announcementActionError, setAnnouncementActionError] = useState(false);
 
   const loadWorkspace = useCallback(() => {
     fetchNotificationPanelWorkspace()
@@ -467,6 +535,23 @@ function NotificationPanel({
     }
   };
 
+  const dismissAnnouncement = (id: string) => {
+    setAnnouncementActionError(false);
+    setDismissingAnnouncementId(id);
+    void dismissActiveAnnouncement(id)
+      .then(() => {
+        clearApiCache("/announcements/active");
+        setAnnouncements((current) =>
+          current.filter((announcement) => announcement.id !== id),
+        );
+        setSelectedAnnouncement((current) =>
+          current?.id === id ? null : current,
+        );
+      })
+      .catch(() => setAnnouncementActionError(true))
+      .finally(() => setDismissingAnnouncementId(null));
+  };
+
   return (
     <>
       <button
@@ -500,15 +585,38 @@ function NotificationPanel({
                         : "bg-blue-500/10 text-blue-800 dark:text-blue-300";
                 return (
                   <div
-                    key={`${a.title}:${a.message}`}
-                    className={`px-4 py-2 text-xs ${colors}`}
+                    key={a.id}
+                    className={`flex items-start gap-2 px-4 py-2.5 text-xs ${colors}`}
                   >
-                    <strong>{a.title}</strong>: {a.message}
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                      onClick={() => setSelectedAnnouncement(a)}
+                      title={t.providers_open}
+                    >
+                      <span className="block truncate font-semibold">{a.title}</span>
+                      <span className="mt-0.5 line-clamp-2 opacity-90">{a.message}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current disabled:opacity-50 motion-reduce:transition-none"
+                      onClick={() => dismissAnnouncement(a.id)}
+                      disabled={dismissingAnnouncementId === a.id}
+                      title={t.common_dismiss}
+                      aria-label={`${t.common_dismiss}: ${a.title}`}
+                    >
+                      <X aria-hidden="true" className="size-3.5" />
+                    </button>
                   </div>
                 );
               })}
             </div>
           )}
+          {announcementActionError ? (
+            <p className="border-b border-border bg-destructive/10 px-4 py-2 text-xs text-destructive">
+              {t.topbar_announcement_dismiss_failed}
+            </p>
+          ) : null}
           {notifs.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
               {t.topbar_no_notifications}
@@ -555,6 +663,35 @@ function NotificationPanel({
           </button>
         ) : null}
       </div>
+      <Dialog
+        open={selectedAnnouncement !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedAnnouncement(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedAnnouncement?.title}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {t.topbar_notifications}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="whitespace-pre-wrap break-words text-sm leading-6">
+            {selectedAnnouncement?.message}
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+              onClick={() => selectedAnnouncement && dismissAnnouncement(selectedAnnouncement.id)}
+              disabled={dismissingAnnouncementId === selectedAnnouncement?.id}
+            >
+              <X aria-hidden="true" className="size-4" />
+              {t.common_dismiss}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -723,25 +860,40 @@ function UsersPanel({
           </h3>
         </div>
         <div className="max-h-80 overflow-y-auto">
-          {users.map((u) => (
-            <button
-              key={u.user_id}
-              type="button"
-              onClick={() => openChat(u)}
-              className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              <div className="flex items-center justify-center size-8 rounded-full bg-muted text-xs font-medium shrink-0">
-                {initials(u.user_name)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{u.user_name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {roleDisplay(u.role, t)}
-                </p>
-              </div>
-              <MessageSquare aria-hidden="true" className="size-4 text-primary shrink-0" />
-            </button>
-          ))}
+          {users.map((u) => {
+            const isCurrentUser = u.user_id === currentUserId;
+            return (
+              <button
+                key={u.user_id}
+                type="button"
+                onClick={() => {
+                  if (!isCurrentUser) openChat(u);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none",
+                  isCurrentUser ? "cursor-default bg-primary/5" : "cursor-pointer hover:bg-muted",
+                )}
+              >
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                  {initials(u.user_name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {u.user_name}
+                    {isCurrentUser ? (
+                      <span className="ml-1.5 font-normal text-primary">· {t.chat_you}</span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {roleDisplay(u.role, t)}
+                  </p>
+                </div>
+                {!isCurrentUser ? (
+                  <MessageSquare aria-hidden="true" className="size-4 shrink-0 text-primary" />
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
     </>

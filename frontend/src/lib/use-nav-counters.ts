@@ -12,6 +12,12 @@ const LEAD_EVENTS = [
   "lead.failed_resolved",
 ] as const;
 
+const CHAT_NOTIFICATION_EVENTS = [
+  "notification.created",
+  "notification.read",
+  "notifications.read_all",
+] as const;
+
 const REFRESH_INTERVAL_MS = 60_000;
 
 export type NavCounters = {
@@ -68,6 +74,15 @@ export function useNavCounters(enabled: boolean): NavCounters {
   }, [enabled, refreshChat, refreshLeads]);
 
   useDebouncedRealtimeSubscription(LEAD_EVENTS, refreshLeads);
+  useDebouncedRealtimeSubscription(CHAT_NOTIFICATION_EVENTS, (_event, events) => {
+    if (
+      events.some(
+        (event) => event.payload?.entity_type === "message_peer",
+      )
+    ) {
+      refreshChat();
+    }
+  });
 
   return { chatUnread, newLeads };
 }

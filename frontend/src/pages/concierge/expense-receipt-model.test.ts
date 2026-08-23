@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   CONCIERGE_EXPENSE_MAX_FILE_SIZE,
   calculateConciergeExpenseGross,
+  calculateConciergeExpenseNetFromGross,
+  calculateConciergeExpenseVat,
+  calculateConciergeExpenseVatFromGross,
   conciergeExpenseConsequencePreview,
   moneyStringToMinorUnits,
   validateConciergeExpenseReceiptFile,
@@ -33,11 +36,18 @@ describe("Concierge expense receipt model", () => {
     expect(validateConciergeExpenseReceiptFile(null)).toBe("required");
   });
 
-  it("uses exact minor units for net, VAT and gross", () => {
+  it("uses exact minor units and calculates VAT from a percentage", () => {
     expect(moneyStringToMinorUnits("12,30")).toBe(1_230);
     expect(moneyStringToMinorUnits("0.07")).toBe(7);
     expect(moneyStringToMinorUnits("12.345")).toBeNull();
     expect(calculateConciergeExpenseGross("100.00", "19.00")).toBe("119.00");
+    expect(calculateConciergeExpenseVat("12.30", "7.5")).toBe("0.92");
+    expect(calculateConciergeExpenseGross("12.30", "7.5")).toBe("13.22");
+    expect(calculateConciergeExpenseNetFromGross("119.00", "19")).toBe("100.00");
+    expect(calculateConciergeExpenseVatFromGross("119.00", "19")).toBe("19.00");
+    expect(calculateConciergeExpenseNetFromGross("13.22", "7.5")).toBe("12.30");
+    expect(calculateConciergeExpenseVatFromGross("13.22", "7.5")).toBe("0.92");
+    expect(calculateConciergeExpenseGross("100.00", "101")).toBe("");
     expect(calculateConciergeExpenseGross("", "19.00")).toBe("");
   });
 

@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::audit;
@@ -16,6 +17,7 @@ use gmed_domain::role::Role;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/announcements/active", get(active_announcements))
+        .route("/announcements/{id}/dismiss", post(dismiss_announcement))
         .route(
             "/admin/announcements",
             get(list_all).post(create_announcement),
@@ -32,14 +34,23 @@ pub fn router() -> Router<AppState> {
 
 async fn active_announcements(
     State(state): State<AppState>,
-    Extension(_auth): Extension<AuthUser>,
+    Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    match sqlx::query!(
-        "SELECT id, title, message, variant, starts_at, ends_at
-         FROM announcements
-         WHERE is_active = true AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())
-         ORDER BY created_at DESC"
+    match sqlx::query(
+        r#"SELECT a.id, a.title, a.message, a.variant, a.starts_at, a.ends_at
+           FROM announcements a
+           WHERE a.is_active = true
+             AND a.starts_at <= now()
+             AND (a.ends_at IS NULL OR a.ends_at > now())
+             AND NOT EXISTS (
+                 SELECT 1
+                 FROM announcement_dismissals dismissed
+                 WHERE dismissed.announcement_id = a.id
+                   AND dismissed.user_id = $1
+             )
+           ORDER BY a.created_at DESC"#,
     )
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     {
@@ -48,8 +59,12 @@ async fn active_announcements(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "id": r.id, "title": r.title, "message": r.message, "variant": r.variant,
-                        "starts_at": r.starts_at, "ends_at": r.ends_at,
+                        "id": r.get::<Uuid, _>("id"),
+                        "title": r.get::<String, _>("title"),
+                        "message": r.get::<String, _>("message"),
+                        "variant": r.get::<String, _>("variant"),
+                        "starts_at": r.get::<chrono::DateTime<chrono::Utc>, _>("starts_at"),
+                        "ends_at": r.get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at"),
                     })
                 })
                 .collect();
@@ -58,6 +73,56 @@ async fn active_announcements(
         Err(e) => {
             tracing::error!(error = %e, "active announcements");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+async fn dismiss_announcement(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    let dismissed = sqlx::query(
+        r#"WITH existing AS (
+               SELECT id FROM announcements WHERE id = $1
+           )
+           INSERT INTO announcement_dismissals (announcement_id, user_id)
+           SELECT id, $2 FROM existing
+           ON CONFLICT (announcement_id, user_id)
+           DO UPDATE SET dismissed_at = now()
+           RETURNING announcement_id"#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    match dismissed {
+        Ok(Some(_)) => {
+            state.audit_sender.try_send(audit::domain_event(
+                "dismiss_announcement",
+                Some(auth.user_id),
+                "announcement",
+                Some(id),
+                serde_json::json!({}),
+            ));
+            crate::realtime::publish_announcement_user_event(
+                &state,
+                auth.user_id,
+                "announcement.dismissed",
+                id,
+                serde_json::json!({}),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "Announcement not found"),
+        Err(error) => {
+            tracing::error!(%error, announcement_id = %id, user_id = %auth.user_id, "dismiss announcement");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to dismiss announcement",
+            )
         }
     }
 }

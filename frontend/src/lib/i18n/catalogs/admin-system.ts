@@ -162,6 +162,15 @@ export interface AdminSystemTranslations {
   chat_secure_encrypted_label: string;
   chat_secure_attachment_label: string;
   chat_seen: string;
+  chat_no_users_found: string;
+  chat_load_failed: string;
+  chat_attachment_pending: string;
+  chat_attachment_too_large: string;
+  chat_security_settings: string;
+  chat_security_settings_description: string;
+  chat_secure_server_channel_label: string;
+  chat_security_e2e_description: string;
+  chat_security_server_description: string;
   chat_export_keys: string;
   chat_import_keys: string;
   chat_export_secure_keys_title: string;
@@ -565,6 +574,19 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_secure_encrypted_label: "Сквозное шифрование",
   chat_secure_attachment_label: "Защищенное вложение",
   chat_seen: "Прочитано",
+  chat_no_users_found: "Пользователи не найдены.",
+  chat_load_failed: "Не удалось загрузить чат.",
+  chat_attachment_pending:
+    "Вложения станут доступны, когда собеседник активирует защищенный чат.",
+  chat_attachment_too_large: "Файл превышает допустимый размер 20 МБ.",
+  chat_security_settings: "Безопасность чата",
+  chat_security_settings_description:
+    "Статус защиты переписки и резервные копии ключей этого устройства.",
+  chat_secure_server_channel_label: "Защищенный канал",
+  chat_security_e2e_description:
+    "Сообщения и вложения защищены сквозным шифрованием между устройствами.",
+  chat_security_server_description:
+    "Текст защищен серверным шифрованием. Сквозное шифрование и вложения включатся после активации чата собеседником.",
   chat_export_keys: "Экспорт ключей",
   chat_import_keys: "Импорт ключей",
   chat_export_secure_keys_title: "Экспорт ключей защищенного чата",
@@ -984,6 +1006,19 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_secure_encrypted_label: "Ende-zu-Ende verschlüsselt",
   chat_secure_attachment_label: "Sicherer Anhang",
   chat_seen: "Gesehen",
+  chat_no_users_found: "Keine Benutzer gefunden.",
+  chat_load_failed: "Der Chat konnte nicht geladen werden.",
+  chat_attachment_pending:
+    "Anhänge werden verfügbar, sobald die Gegenseite den sicheren Chat aktiviert.",
+  chat_attachment_too_large: "Die Datei überschreitet die zulässigen 20 MB.",
+  chat_security_settings: "Chat-Sicherheit",
+  chat_security_settings_description:
+    "Schutzstatus der Unterhaltung und Schlüssel-Sicherungen dieses Geräts.",
+  chat_secure_server_channel_label: "Geschützter Kanal",
+  chat_security_e2e_description:
+    "Nachrichten und Anhänge sind zwischen den Geräten Ende-zu-Ende verschlüsselt.",
+  chat_security_server_description:
+    "Text ist serverseitig verschlüsselt. Ende-zu-Ende-Verschlüsselung und Anhänge werden nach Aktivierung durch die Gegenseite verfügbar.",
   chat_export_keys: "Schlüssel exportieren",
   chat_import_keys: "Schlüssel importieren",
   chat_export_secure_keys_title: "Sichere Chat-Schlüssel exportieren",

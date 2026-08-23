@@ -511,6 +511,80 @@ async fn mark_read_and_unread_count() {
     assert!(all_read, "all messages from A should be marked read");
 }
 
+#[tokio::test]
+async fn mark_all_read_clears_chat_messages_and_lamp_notifications() {
+    let Some(app) = test_app().await else { return };
+    let sender_a = seed_user(app.pool(), &unique_tag("messages-read-all-a"), "ceo").await;
+    let sender_b = seed_user(app.pool(), &unique_tag("messages-read-all-b"), "concierge").await;
+    let recipient = seed_user(
+        app.pool(),
+        &unique_tag("messages-read-all-recipient"),
+        "billing",
+    )
+    .await;
+    let auth_a = auth_header_with_id("ceo", sender_a);
+    let auth_b = auth_header_with_id("concierge", sender_b);
+    let auth_recipient = auth_header_with_id("billing", recipient);
+
+    for (auth, message) in [(&auth_a, "Message from A"), (&auth_b, "Message from B")] {
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/messages/{recipient}"),
+            auth,
+            Some(json!({"message": message})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (_, unread_before) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/unread-total",
+        &auth_recipient,
+        None,
+    )
+    .await;
+    assert_eq!(unread_before["count"], 2);
+
+    let (status, result) = json_request(
+        &app,
+        "POST",
+        "/api/v1/messages/read-all",
+        &auth_recipient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["marked_read_count"], 2);
+    assert_eq!(result["notifications_marked_read"], 2);
+
+    let (_, unread_after) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/unread-total",
+        &auth_recipient,
+        None,
+    )
+    .await;
+    assert_eq!(unread_after["count"], 0);
+
+    let unread_lamp_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM user_notifications
+           WHERE user_id = $1
+             AND entity_type = 'message_peer'
+             AND kind IN ('direct_message', 'direct_message_attachment')
+             AND NOT is_read"#,
+    )
+    .bind(recipient)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(unread_lamp_notifications, 0);
+}
+
 // ════════════════════════════════════════════════════════════════
 // CONVERSATIONS LIST
 // ════════════════════════════════════════════════════════════════
@@ -854,6 +928,25 @@ async fn send_long_message() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
+}
+
+#[tokio::test]
+async fn send_message_over_limit_is_rejected() {
+    let Some(app) = test_app().await else { return };
+    let peer = seed_user(app.pool(), &unique_tag("messages-too-long-peer"), "billing").await;
+    let too_long = "A".repeat(10_001);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{peer}"),
+        &app.auth_header("ceo"),
+        Some(json!({"message": too_long})),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["message"], "Message is too long");
 }
 
 #[tokio::test]

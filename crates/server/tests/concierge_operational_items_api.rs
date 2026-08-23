@@ -1468,6 +1468,18 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
     .await;
     assert_eq!(status, StatusCode::OK, "{replayed_comment}");
     assert_eq!(first_comment["id"], replayed_comment["id"]);
+    let comment_notification_recipients: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT user_id
+           FROM user_notifications
+           WHERE entity_type = 'concierge_task'
+             AND entity_id = $1
+             AND kind = 'operational_task_comment_added'"#,
+    )
+    .bind(task_id)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(comment_notification_recipients, vec![ctx.admin_id]);
     let (status, drift) = json_request(
         &ctx.app,
         "POST",

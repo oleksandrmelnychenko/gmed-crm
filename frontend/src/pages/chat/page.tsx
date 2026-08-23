@@ -10,6 +10,7 @@ import {
   Download,
   MessageSquare,
   Shield,
+  ShieldCheck,
   ArrowLeft,
 } from "lucide-react";
 import {
@@ -46,6 +47,7 @@ import {
   fetchAllowedPeers,
   fetchConversations,
   fetchPeerMessages,
+  markAllMessagesRead,
   markPeerMessagesRead,
   openMessagesSocket,
   sendPeerMessage,
@@ -53,20 +55,34 @@ import {
 } from "./data/chat-api";
 import {
   canAccessChat,
+  chatMessageDateKey,
   formatSize,
   initials,
+  isSameChatMessageGroup,
   roleDisplay,
   timeAgo,
   truncate,
 } from "./model/chat-model";
 import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
 
-type KeyDialogMode = "export" | "import" | null;
+type KeyDialogMode = "manage" | "export" | "import" | null;
+
+const CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 type ImportedKeyBackup = {
   name: string;
   content: string;
 };
+
+function formatChatDay(iso: string, lang: "de" | "ru") {
+  const value = new Date(iso);
+  if (Number.isNaN(value.getTime())) return iso.slice(0, 10);
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: value.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  }).format(value);
+}
 
 type ChatPageState = {
   conversations: Conversation[];
@@ -76,7 +92,11 @@ type ChatPageState = {
   activeRole: string;
   input: string;
   loading: boolean;
+  messageLoading: boolean;
   sending: boolean;
+  conversationError: boolean;
+  messageError: boolean;
+  userError: boolean;
   search: string;
   showNewChat: boolean;
   allUsers: UserItem[];
@@ -121,9 +141,7 @@ function createChatPageFieldPatch<K extends keyof ChatPageState>(
 function useChatPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
-  const secureChannelPendingStatus = lang === "de"
-    ? "Textnachrichten sind bereits über den geschützten Serverkanal verfügbar. Ende-zu-Ende-Verschlüsselung und Anhänge werden aktiviert, sobald die andere Person den Chat öffnet."
-    : "Текстовые сообщения уже доступны через защищённый серверный канал. Сквозное шифрование и вложения включатся, когда собеседник откроет чат.";
+  const secureChannelPendingStatus = t.chat_attachment_pending;
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
   const canViewChat = canAccessChat(user?.role);
@@ -139,7 +157,11 @@ function useChatPageContent() {
       activeRole: "",
       input: "",
       loading: true,
+      messageLoading: false,
       sending: false,
+      conversationError: false,
+      messageError: false,
+      userError: false,
       search: "",
       showNewChat: false,
       allUsers: [],
@@ -163,7 +185,11 @@ function useChatPageContent() {
     activeRole,
     input,
     loading,
+    messageLoading,
     sending,
+    conversationError,
+    messageError,
+    userError,
     search,
     showNewChat,
     allUsers,
@@ -196,8 +222,16 @@ function useChatPageContent() {
     setChatField("input", value);
   const setLoading = (value: SetStateAction<boolean>) =>
     setChatField("loading", value);
+  const setMessageLoading = (value: SetStateAction<boolean>) =>
+    setChatField("messageLoading", value);
   const setSending = (value: SetStateAction<boolean>) =>
     setChatField("sending", value);
+  const setConversationError = (value: SetStateAction<boolean>) =>
+    setChatField("conversationError", value);
+  const setMessageError = (value: SetStateAction<boolean>) =>
+    setChatField("messageError", value);
+  const setUserError = (value: SetStateAction<boolean>) =>
+    setChatField("userError", value);
   const setSearch = (value: SetStateAction<string>) =>
     setChatField("search", value);
   const setShowNewChat = (value: SetStateAction<boolean>) =>
@@ -230,6 +264,8 @@ function useChatPageContent() {
   const keyBackupInputRef = useRef<HTMLInputElement>(null);
   const hydratedDraftRef = useRef("");
   const activePeerRef = useRef<string | null>(null);
+  const ignoredRoutePeerRef = useRef<string | null>(null);
+  const messageRequestIdRef = useRef(0);
   const peerMessageKeyCacheRef = useRef<Record<string, MessageKeyEnvelope>>({});
 
   // Scroll to bottom on new messages
@@ -244,11 +280,12 @@ function useChatPageContent() {
       setLoading(false);
       return;
     }
+    setConversationError(false);
     try {
       const data = await fetchConversations();
       setConversations(data);
     } catch {
-      /* ignore */
+      setConversationError(true);
     } finally {
       setLoading(false);
     }
@@ -324,19 +361,51 @@ function useChatPageContent() {
         setMessages([]);
         return;
       }
-      const msgs = await fetchPeerMessages(peerId);
-      const hydrated = await hydrateMessages(peerId, msgs);
-      setMessages(hydrated);
-      if (markRead) {
-        await markPeerMessagesRead(peerId);
+      const requestId = ++messageRequestIdRef.current;
+      setMessageLoading(true);
+      setMessageError(false);
+      try {
+        const msgs = await fetchPeerMessages(peerId);
+        const hydrated = await hydrateMessages(peerId, msgs);
+        if (
+          requestId !== messageRequestIdRef.current ||
+          activePeerRef.current !== peerId
+        ) {
+          return;
+        }
+        setMessages(hydrated);
+        if (markRead) {
+          await markPeerMessagesRead(peerId);
+        }
+      } catch (error) {
+        if (
+          requestId === messageRequestIdRef.current &&
+          activePeerRef.current === peerId
+        ) {
+          setMessageError(true);
+        }
+        throw error;
+      } finally {
+        if (
+          requestId === messageRequestIdRef.current &&
+          activePeerRef.current === peerId
+        ) {
+          setMessageLoading(false);
+        }
       }
     },
     [canViewChat, hydrateMessages],
   );
 
   useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
+    if (!canViewChat) {
+      void loadConversations();
+      return;
+    }
+    void markAllMessagesRead()
+      .then(loadConversations)
+      .catch(() => loadConversations());
+  }, [canViewChat, loadConversations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -377,12 +446,8 @@ function useChatPageContent() {
 
   const applyActivePeerMessageKey = useCallback((key: MessageKeyEnvelope | null) => {
     setActivePeerMessageKey(key);
-    setSecureStatus(
-      key
-        ? null
-        : secureChannelPendingStatus,
-    );
-  }, [secureChannelPendingStatus]);
+    setSecureStatus(null);
+  }, []);
 
   const failActivePeerMessageKey = useCallback(() => {
     setActivePeerMessageKey(null);
@@ -390,9 +455,14 @@ function useChatPageContent() {
   }, [t.chat_secure_key_failed]);
 
   const openPeerFromRoute = useCallback((peer: string, name: string, role: string) => {
+    messageRequestIdRef.current += 1;
+    activePeerRef.current = peer;
     setActivePeer(peer);
     setActiveName(name);
     setActiveRole(role);
+    setMessages([]);
+    setMessageLoading(true);
+    setMessageError(false);
     setShowNewChat(false);
     setPendingFile(null);
   }, []);
@@ -448,7 +518,11 @@ function useChatPageContent() {
 
   useEffect(() => {
     const peer = searchParams.get("peer");
-    if (!peer) return;
+    if (!peer) {
+      ignoredRoutePeerRef.current = null;
+      return;
+    }
+    if (ignoredRoutePeerRef.current === peer) return;
 
     const fromConversation = conversations.find((item) => item.user_id === peer);
     const fromUserList = allUsers.find((item) => item.id === peer);
@@ -551,9 +625,15 @@ function useChatPageContent() {
   }, [activePeer, loadConversations, loadMessagesForPeer]);
 
   const openConversation = (userId: string, name: string, role: string) => {
+    ignoredRoutePeerRef.current = null;
+    messageRequestIdRef.current += 1;
+    activePeerRef.current = userId;
     setActivePeer(userId);
     setActiveName(name);
     setActiveRole(role);
+    setMessages([]);
+    setMessageLoading(true);
+    setMessageError(false);
     setShowNewChat(false);
     setPendingFile(null);
     setSearchParams(
@@ -569,22 +649,49 @@ function useChatPageContent() {
     );
   };
 
+  const closeConversation = () => {
+    ignoredRoutePeerRef.current = activePeerRef.current;
+    messageRequestIdRef.current += 1;
+    activePeerRef.current = null;
+    setActivePeer(null);
+    setActiveName("");
+    setActiveRole("");
+    setMessages([]);
+    setMessageLoading(false);
+    setMessageError(false);
+    setPendingFile(null);
+    resetActivePeerSecurity();
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("peer");
+        next.delete("name");
+        next.delete("role");
+        next.delete("draft");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const loadUsers = useCallback(async () => {
     if (!canViewChat) {
       setAllUsers([]);
       return;
     }
+    setUserError(false);
     try {
       const data = await fetchAllowedPeers(userSearch);
       setAllUsers(data);
     } catch {
-      /* ignore */
+      setUserError(true);
     }
   }, [canViewChat, userSearch]);
 
   useEffect(() => {
     if (!showNewChat) return;
-    void loadUsers();
+    const timer = window.setTimeout(() => void loadUsers(), 250);
+    return () => window.clearTimeout(timer);
   }, [loadUsers, showNewChat]);
 
   const resetKeyDialog = useCallback(() => {
@@ -810,11 +917,11 @@ function useChatPageContent() {
         await loadMessagesForPeer(activePeer);
         void loadConversations();
         setSecureStatus(null);
+        setInput("");
+        setPendingFile(null);
       } catch {
         setSecureStatus(t.chat_secure_attachment_send_failed);
       } finally {
-        setInput("");
-        setPendingFile(null);
         setSending(false);
       }
       return;
@@ -839,7 +946,7 @@ function useChatPageContent() {
       }
       await loadMessagesForPeer(activePeer);
       void loadConversations();
-      setSecureStatus(activePeerMessageKey ? null : secureChannelPendingStatus);
+      setSecureStatus(null);
     } catch {
       setInput(msg);
       setSecureStatus(t.chat_secure_message_send_failed);
@@ -928,7 +1035,18 @@ function useChatPageContent() {
               className="h-8 rounded-lg text-sm"
             />
             <div className="max-h-40 overflow-y-auto space-y-0.5">
-              {filteredUsers.map((u) => (
+              {userError ? (
+                <div className="flex flex-col items-center gap-2 py-4 text-center">
+                  <p className="text-xs text-destructive">{t.common_error}</p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void loadUsers()}>
+                    {t.common_refresh}
+                  </Button>
+                </div>
+              ) : filteredUsers.length === 0 ? (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  {t.chat_no_users_found}
+                </p>
+              ) : filteredUsers.map((u) => (
                 <button
                   key={u.id}
                   onClick={() => openConversation(u.id, u.name, u.role)}
@@ -951,6 +1069,13 @@ function useChatPageContent() {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <p className="text-sm text-muted-foreground text-center py-8">{t.common_loading}</p>
+          ) : conversationError ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+              <p className="text-sm text-destructive">{t.chat_load_failed}</p>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadConversations()}>
+                {t.common_refresh}
+              </Button>
+            </div>
           ) : filteredConvos.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">{t.chat_no_conversations}</p>
           ) : (
@@ -1010,12 +1135,7 @@ function useChatPageContent() {
                   type="button"
                   aria-label={t.chat_title}
                   className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
-                  onClick={() => {
-                    setActivePeer(null);
-                    setActiveName("");
-                    setActiveRole("");
-                    resetActivePeerSecurity();
-                  }}
+                  onClick={closeConversation}
                 >
                   <ArrowLeft className="size-4" />
                 </button>
@@ -1026,46 +1146,70 @@ function useChatPageContent() {
                   <p className="text-sm font-semibold truncate">{activeName}</p>
                   <p className="text-[10px] text-muted-foreground">
                     {roleDisplay(activeRole, t)}
-                    {activePeerMessageKey ? ` - ${t.chat_secure_encrypted_label}` : ""}
+                    {` - ${
+                      activePeerMessageKey
+                        ? t.chat_secure_encrypted_label
+                        : t.chat_secure_server_channel_label
+                    }`}
                   </p>
                 </div>
               </div>
-              <div className="hidden items-center gap-2 shrink-0 sm:flex">
-                <input
-                  ref={keyBackupInputRef}
-                  type="file"
-                  accept="application/json"
-                  className="hidden"
-                  onChange={(event) => void handleKeyBackupFileChange(event)}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => {
-                    setKeyDialogMode("export");
-                    setKeyDialogStatus(null);
-                  }}
-                >
-                  {t.chat_export_keys}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl"
-                  onClick={() => keyBackupInputRef.current?.click()}
-                >
-                  {t.chat_import_keys}
-                </Button>
-              </div>
+              <input
+                ref={keyBackupInputRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(event) => void handleKeyBackupFileChange(event)}
+              />
+              <button
+                type="button"
+                className={cn(
+                  "flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  activePeerMessageKey
+                    ? "border-emerald-200 text-emerald-700"
+                    : "border-border text-muted-foreground",
+                )}
+                onClick={() => {
+                  setKeyDialogMode("manage");
+                  setKeyDialogStatus(null);
+                }}
+                title={t.chat_security_settings}
+                aria-label={t.chat_security_settings}
+              >
+                <ShieldCheck className="size-4" />
+              </button>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5">
-              {displayMsgs.map((m) => {
+            <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+              {messageLoading && displayMsgs.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  {t.common_loading}
+                </div>
+              ) : null}
+              {messageError ? (
+                <div className="mx-auto my-4 flex max-w-sm flex-col items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-center">
+                  <p className="text-sm text-destructive">{t.common_error}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => activePeer && void loadMessagesForPeer(activePeer, true)}
+                  >
+                    {t.common_refresh}
+                  </Button>
+                </div>
+              ) : null}
+              {displayMsgs.map((m, index) => {
                 const mine = m.from_user === myId;
+                const previousMessage = displayMsgs[index - 1];
+                const nextMessage = displayMsgs[index + 1];
+                const groupedWithPrevious = isSameChatMessageGroup(previousMessage, m);
+                const groupedWithNext = isSameChatMessageGroup(m, nextMessage);
+                const startsNewDay =
+                  !previousMessage ||
+                  chatMessageDateKey(previousMessage.created_at) !==
+                    chatMessageDateKey(m.created_at);
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
                 const isSecureAttachment = m.attachment_is_e2e ?? false;
@@ -1075,7 +1219,21 @@ function useChatPageContent() {
                   mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at)}` : null;
 
                 return (
-                  <div key={m.id} className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
+                  <div
+                    key={m.id}
+                    className={groupedWithPrevious ? "mt-1" : "mt-3"}
+                  >
+                    {startsNewDay ? (
+                      <div
+                        role="separator"
+                        className="my-4 flex items-center gap-3 text-[10px] text-muted-foreground"
+                      >
+                        <span className="h-px flex-1 bg-border" />
+                        <span>{formatChatDay(m.created_at, lang)}</span>
+                        <span className="h-px flex-1 bg-border" />
+                      </div>
+                    ) : null}
+                    <div className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
                     {/* Attachment */}
                     {hasAttachment &&
                       (isSecureAttachment ? (
@@ -1124,19 +1282,30 @@ function useChatPageContent() {
                       <div
                         data-testid={`chat-message-text-${m.id}`}
                         className={cn(
-                          "max-w-[85%] rounded-2xl px-4 py-2 text-sm sm:max-w-[70%]",
+                          "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm leading-5 sm:max-w-[70%]",
                           mine
-                            ? "bg-foreground text-background rounded-br-md"
-                            : "bg-muted text-foreground rounded-bl-md"
+                            ? cn(
+                                "bg-foreground text-background",
+                                groupedWithPrevious && "rounded-tr-md",
+                                groupedWithNext && "rounded-br-md",
+                              )
+                            : cn(
+                                "bg-muted text-foreground",
+                                groupedWithPrevious && "rounded-tl-md",
+                                groupedWithNext && "rounded-bl-md",
+                              ),
                         )}
                       >
                         {m.message}
                       </div>
                     )}
-                    <span className="text-[10px] text-muted-foreground mt-0.5 px-1">
-                      {timeAgo(m.created_at)}
-                      {readReceipt ? ` - ${readReceipt}` : ""}
-                    </span>
+                    {!groupedWithNext ? (
+                      <span className="mt-0.5 px-1 text-[10px] text-muted-foreground">
+                        {timeAgo(m.created_at)}
+                        {readReceipt ? ` - ${readReceipt}` : ""}
+                      </span>
+                    ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -1144,8 +1313,18 @@ function useChatPageContent() {
             </div>
 
             {secureStatus && (
-              <div className="px-5 py-2 border-t bg-muted/30 text-[11px] text-muted-foreground">
-                {secureStatus}
+              <div className="flex items-center gap-2 border-t bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground sm:px-5">
+                <Shield className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">{secureStatus}</span>
+                <button
+                  type="button"
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+                  onClick={() => setSecureStatus(null)}
+                  aria-label={t.common_close}
+                  title={t.common_close}
+                >
+                  <X className="size-3.5" />
+                </button>
               </div>
             )}
 
@@ -1155,7 +1334,13 @@ function useChatPageContent() {
                 <FileText className="size-4 text-muted-foreground shrink-0" />
                 <span className="text-sm flex-1 min-w-0 break-words">{pendingFile.name}</span>
                 <span className="text-xs text-muted-foreground">{formatSize(pendingFile.size)}</span>
-                <button onClick={() => setPendingFile(null)} className="text-muted-foreground hover:text-foreground">
+                <button
+                  type="button"
+                  onClick={() => setPendingFile(null)}
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={t.common_remove}
+                  title={t.common_remove}
+                >
                   <X className="size-4" />
                 </button>
               </div>
@@ -1174,33 +1359,61 @@ function useChatPageContent() {
                     return;
                   }
                   const file = e.target.files?.[0];
-                  if (file) setPendingFile(file);
+                  if (file && file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+                    setSecureStatus(t.chat_attachment_too_large);
+                    setPendingFile(null);
+                  } else if (file) {
+                    setSecureStatus(null);
+                    setPendingFile(file);
+                  }
                   e.target.value = "";
                 }}
               />
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={sending || !activePeerMessageKey}
+                onClick={() => {
+                  if (!activePeerMessageKey) {
+                    setSecureStatus(secureChannelPendingStatus);
+                    return;
+                  }
+                  fileInputRef.current?.click();
+                }}
+                disabled={sending}
                 title={
                   activePeerMessageKey
                     ? t.chat_secure_attachment_label
                     : secureChannelPendingStatus
                 }
+                aria-label={t.chat_secure_attachment_label}
                 className="flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Paperclip className="size-[18px]" />
               </button>
-              <Input
+              <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
                 placeholder={t.chat_type_message}
                 autoComplete="off"
-                className="flex-1 h-10 rounded-xl"
+                rows={1}
+                maxLength={10_000}
+                aria-label={t.chat_type_message}
+                className="min-h-10 max-h-28 flex-1 resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
               <button
                 type="submit"
-                disabled={sending}
+                disabled={sending || (!input.trim() && !pendingFile)}
+                aria-label={t.chat_send}
+                title={t.chat_send}
                 className="flex items-center justify-center size-9 rounded-lg bg-foreground text-background hover:opacity-80 transition-opacity shrink-0 disabled:opacity-40"
               >
                 <Send className="size-4" />
@@ -1211,62 +1424,121 @@ function useChatPageContent() {
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>
-                    {keyDialogMode === "export"
-                      ? t.chat_export_secure_keys_title
-                      : t.chat_import_secure_keys_title}
+                    {keyDialogMode === "manage"
+                      ? t.chat_security_settings
+                      : keyDialogMode === "export"
+                        ? t.chat_export_secure_keys_title
+                        : t.chat_import_secure_keys_title}
                   </DialogTitle>
                   <DialogDescription>
-                    {keyDialogMode === "export"
-                      ? t.chat_export_secure_keys_description
-                      : t.chat_import_secure_keys_description}
+                    {keyDialogMode === "manage"
+                      ? t.chat_security_settings_description
+                      : keyDialogMode === "export"
+                        ? t.chat_export_secure_keys_description
+                        : t.chat_import_secure_keys_description}
                   </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-3">
-                  {keyDialogMode === "import" && (
-                    <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                      {importedKeyBackup
-                        ? t.chat_backup_selected.replace("{name}", importedKeyBackup.name)
-                        : t.chat_backup_choose_first}
+                {keyDialogMode === "manage" ? (
+                  <>
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3 rounded-xl border bg-muted/30 px-3 py-3">
+                        <ShieldCheck
+                          className={cn(
+                            "mt-0.5 size-4 shrink-0",
+                            activePeerMessageKey
+                              ? "text-emerald-600"
+                              : "text-muted-foreground",
+                          )}
+                        />
+                        <div>
+                          <p className="text-sm font-medium">
+                            {activePeerMessageKey
+                              ? t.chat_secure_encrypted_label
+                              : t.chat_secure_server_channel_label}
+                          </p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {activePeerMessageKey
+                              ? t.chat_security_e2e_description
+                              : t.chat_security_server_description}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setKeyDialogMode("export");
+                            setKeyDialogStatus(null);
+                          }}
+                        >
+                          {t.chat_export_keys}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => keyBackupInputRef.current?.click()}
+                        >
+                          {t.chat_import_keys}
+                        </Button>
+                      </div>
                     </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label htmlFor="chat-key-passphrase">{t.chat_key_passphrase}</Label>
-                    <Input
-                      id="chat-key-passphrase"
-                      type="password"
-                      value={keyPassphrase}
-                      onChange={(event) => setKeyPassphrase(event.target.value)}
-                      placeholder={t.chat_key_passphrase_placeholder}
-                    />
-                  </div>
-                  {keyDialogStatus && (
-                    <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                      {keyDialogStatus}
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={resetKeyDialog}>
+                        {t.chat_close}
+                      </Button>
+                    </DialogFooter>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      {keyDialogMode === "import" && (
+                        <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                          {importedKeyBackup
+                            ? t.chat_backup_selected.replace("{name}", importedKeyBackup.name)
+                            : t.chat_backup_choose_first}
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <Label htmlFor="chat-key-passphrase">{t.chat_key_passphrase}</Label>
+                        <Input
+                          id="chat-key-passphrase"
+                          type="password"
+                          value={keyPassphrase}
+                          onChange={(event) => setKeyPassphrase(event.target.value)}
+                          placeholder={t.chat_key_passphrase_placeholder}
+                        />
+                      </div>
+                      {keyDialogStatus && (
+                        <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                          {keyDialogStatus}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={resetKeyDialog}>
-                    {t.chat_close}
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={() => void handleKeyDialogSubmit()}
-                    disabled={
-                      keyDialogBusy ||
-                      !keyPassphrase.trim() ||
-                      (keyDialogMode === "import" && !importedKeyBackup)
-                    }
-                  >
-                    {keyDialogBusy
-                      ? t.chat_working
-                      : keyDialogMode === "export"
-                        ? t.chat_export_backup
-                        : t.chat_import_backup}
-                  </Button>
-                </DialogFooter>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={resetKeyDialog}>
+                        {t.chat_close}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void handleKeyDialogSubmit()}
+                        disabled={
+                          keyDialogBusy ||
+                          !keyPassphrase.trim() ||
+                          (keyDialogMode === "import" && !importedKeyBackup)
+                        }
+                      >
+                        {keyDialogBusy
+                          ? t.chat_working
+                          : keyDialogMode === "export"
+                            ? t.chat_export_backup
+                            : t.chat_import_backup}
+                      </Button>
+                    </DialogFooter>
+                  </>
+                )}
               </DialogContent>
             </Dialog>
           </>

@@ -1008,6 +1008,23 @@ pub async fn publish_announcement_event(
     .await;
 }
 
+pub async fn publish_announcement_user_event(
+    state: &AppState,
+    user_id: Uuid,
+    event_type: &str,
+    announcement_id: Uuid,
+    payload: Value,
+) {
+    publish_event(
+        state,
+        RealtimeEvent::new(event_type, "announcement", announcement_id)
+            .actor(Some(user_id))
+            .target_users(vec![user_id])
+            .payload(payload),
+    )
+    .await;
+}
+
 pub async fn publish_notification_event(
     state: &AppState,
     user_id: Uuid,

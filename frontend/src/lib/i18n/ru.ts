@@ -913,6 +913,8 @@ export const ru = {
   topbar_notifications: "Уведомления",
   topbar_mark_all_read: "Отметить все прочитанными",
   topbar_no_notifications: "Нет уведомлений",
+  topbar_announcement_dismiss_failed:
+    "Не удалось скрыть объявление. Повторите попытку.",
   topbar_message_placeholder: "Сообщение...",
   topbar_online: "Онлайн",
 

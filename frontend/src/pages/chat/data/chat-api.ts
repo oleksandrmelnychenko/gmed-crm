@@ -22,6 +22,12 @@ export function markPeerMessagesRead(peerId: string) {
   return apiFetch(`/messages/${peerId}/read`, { method: "POST" });
 }
 
+export async function markAllMessagesRead() {
+  await apiFetch("/messages/read-all", { method: "POST" });
+  clearApiCache("/messages/unread-total");
+  clearApiCache("/messages/conversations");
+}
+
 export function fetchAllowedPeers(searchTerm: string) {
   const query = searchTerm.trim()
     ? `/messages/allowed-peers?search=${encodeURIComponent(searchTerm.trim())}`

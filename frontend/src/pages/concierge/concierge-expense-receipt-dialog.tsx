@@ -18,6 +18,9 @@ import { cn } from "@/lib/utils";
 
 import {
   calculateConciergeExpenseGross,
+  calculateConciergeExpenseNetFromGross,
+  calculateConciergeExpenseVat,
+  calculateConciergeExpenseVatFromGross,
   conciergeExpenseConsequencePreview,
   moneyStringToMinorUnits,
   validateConciergeExpenseReceiptFile,
@@ -51,9 +54,10 @@ const copy = {
     fileUnsupported: "Nur PDF-, JPEG-, PNG- oder WEBP-Dateien sind erlaubt.",
     expense: "Ausgabedaten",
     vendor: "Partner oder Leistungserbringer",
+    vendorInternalHint: "Interne GMED-Benutzer können ebenfalls als Ausführende ausgewählt werden.",
     expenseDate: "Belegdatum",
     net: "Netto",
-    vat: "MwSt.",
+    vat: "MwSt., %",
     gross: "Brutto",
     currency: "Währung",
     paidBy: "Bezahlt von",
@@ -82,6 +86,7 @@ const copy = {
     download: "Beleg herunterladen",
     submittedBy: "Eingereicht von {name}",
     loading: "Kundendaten werden geladen",
+    incomplete: "Bitte Partner oder Ausführenden, Beträge und Beleg vollständig angeben.",
   },
   ru: {
     title: "Расход и подтверждение",
@@ -96,9 +101,10 @@ const copy = {
     fileUnsupported: "Разрешены только PDF, JPEG, PNG и WEBP.",
     expense: "Данные расхода",
     vendor: "Партнёр или исполнитель",
+    vendorInternalHint: "Можно выбрать внутреннего пользователя GMED или указать внешнего исполнителя вручную.",
     expenseDate: "Дата документа",
     net: "Нетто",
-    vat: "НДС",
+    vat: "НДС, %",
     gross: "Брутто",
     currency: "Валюта",
     paidBy: "Кто оплатил",
@@ -127,6 +133,7 @@ const copy = {
     download: "Скачать документ",
     submittedBy: "Отправил(а): {name}",
     loading: "Загрузка данных клиента",
+    incomplete: "Укажите партнёра или исполнителя, суммы и добавьте подтверждающий документ.",
   },
 } as const;
 
@@ -182,6 +189,7 @@ export function ConciergeExpenseReceiptDialog({
   error,
   submitting,
   progress,
+  vendorSuggestions = [],
   onOpenChange,
   onSubmit,
   onDownload,
@@ -195,6 +203,7 @@ export function ConciergeExpenseReceiptDialog({
   error: string;
   submitting: boolean;
   progress: number;
+  vendorSuggestions?: Array<{ id: string; value: string; description: string }>;
   onOpenChange: (open: boolean) => void;
   onSubmit: (input: ConciergeExpenseSubmitInput) => Promise<ConciergeExpenseMutationResponse>;
   onDownload: (item: ConciergeExpenseItem) => Promise<void>;
@@ -209,19 +218,37 @@ export function ConciergeExpenseReceiptDialog({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [vendor, setVendor] = useState("");
   const [expenseDate, setExpenseDate] = useState(todayInputValue);
-  const [amountNet, setAmountNet] = useState("");
-  const [amountVat, setAmountVat] = useState("");
+  const [netInput, setNetInput] = useState("");
+  const [grossInput, setGrossInput] = useState("");
+  const [amountSource, setAmountSource] = useState<"net" | "gross">("net");
+  const [vatRate, setVatRate] = useState("19");
   const [paidBy, setPaidBy] = useState<ConciergeExpensePaidBy>("unpaid");
   const [serviceDelivered, setServiceDelivered] = useState(false);
   const [note, setNote] = useState("");
   const [success, setSuccess] = useState("");
+  const [formError, setFormError] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const amountGross = calculateConciergeExpenseGross(amountNet, amountVat);
+  const amountNet = amountSource === "net"
+    ? netInput
+    : calculateConciergeExpenseNetFromGross(grossInput, vatRate);
+  const amountGross = amountSource === "gross"
+    ? grossInput
+    : calculateConciergeExpenseGross(netInput, vatRate);
+  const amountVat = amountSource === "gross"
+    ? calculateConciergeExpenseVatFromGross(grossInput, vatRate)
+    : calculateConciergeExpenseVat(netInput, vatRate);
   const consequence = conciergeExpenseConsequencePreview(paidBy, serviceDelivered, amountGross);
   const currency = context?.service.currency || service?.currency || "EUR";
   const providerMissing = paidBy !== "patient" && !context?.service.provider_id;
-  const validMoney = moneyStringToMinorUnits(amountGross) !== null && (moneyStringToMinorUnits(amountGross) ?? 0) > 0;
+  const netMinor = moneyStringToMinorUnits(amountNet);
+  const vatMinor = moneyStringToMinorUnits(amountVat);
+  const grossMinor = moneyStringToMinorUnits(amountGross);
+  const validMoney = netMinor !== null
+    && vatMinor !== null
+    && grossMinor !== null
+    && grossMinor > 0
+    && netMinor + vatMinor === grossMinor;
   const canSubmit = Boolean(
       service &&
       context &&
@@ -256,12 +283,15 @@ export function ConciergeExpenseReceiptDialog({
     setFileError(null);
     setVendor(service.provider_name || service.vendor_name || "");
     setExpenseDate(todayInputValue());
-    setAmountNet("");
-    setAmountVat("");
+    setNetInput("");
+    setGrossInput("");
+    setAmountSource("net");
+    setVatRate("19");
     setPaidBy("unpaid");
     setServiceDelivered(service.status === "completed");
     setNote("");
     setSuccess("");
+    setFormError("");
   }, [open, service]);
 
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
@@ -270,6 +300,7 @@ export function ConciergeExpenseReceiptDialog({
     setFileError(validation);
     setFile(validation ? null : next);
     setSuccess("");
+    setFormError("");
   }
 
   function resetFileInputs() {
@@ -282,8 +313,10 @@ export function ConciergeExpenseReceiptDialog({
     const validation = validateConciergeExpenseReceiptFile(file);
     if (validation || !service || !file || !context || !canSubmit) {
       setFileError(validation);
+      setFormError(labels.incomplete);
       return;
     }
+    setFormError("");
     const requestId = requestIdRef.current ?? crypto.randomUUID();
     requestIdRef.current = requestId;
     try {
@@ -294,7 +327,7 @@ export function ConciergeExpenseReceiptDialog({
         vendor: vendor.trim(),
         expenseDate,
         amountNet: amountNet.replace(",", "."),
-        amountVat: amountVat.replace(",", "."),
+        amountVat,
         amountGross,
         currency,
         paidBy,
@@ -305,8 +338,10 @@ export function ConciergeExpenseReceiptDialog({
       requestIdRef.current = crypto.randomUUID();
       setFile(null);
       resetFileInputs();
-      setAmountNet("");
-      setAmountVat("");
+      setNetInput("");
+      setGrossInput("");
+      setAmountSource("net");
+      setVatRate("19");
       setNote("");
       setSuccess(labels.success);
     } catch {
@@ -362,9 +397,9 @@ export function ConciergeExpenseReceiptDialog({
                   <ConciergeProfileDialogSection title={labels.receipt}>
                     <input ref={cameraInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={chooseFile} />
                     <input ref={fileInputRef} className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={chooseFile} />
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => cameraInputRef.current?.click()}><Camera />{labels.camera}</Button>
-                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => fileInputRef.current?.click()}><Upload />{labels.chooseFile}</Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" size="sm" variant="outline" className="h-8 rounded-md" onClick={() => cameraInputRef.current?.click()}><Camera />{labels.camera}</Button>
+                      <Button type="button" size="sm" variant="outline" className="h-8 rounded-md" onClick={() => fileInputRef.current?.click()}><Upload />{labels.chooseFile}</Button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">{labels.fileHint}</p>
                     {file && previewUrl ? (
@@ -417,12 +452,36 @@ export function ConciergeExpenseReceiptDialog({
                 <div className="space-y-3 lg:sticky lg:top-0">
                   <ConciergeProfileDialogSection title={labels.expense}>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <ConciergeField label={labels.vendor} className="sm:col-span-2"><Input value={vendor} maxLength={255} required onChange={(event) => setVendor(event.target.value)} /></ConciergeField>
+                      <ConciergeField label={labels.vendor} className="sm:col-span-2">
+                        <Input
+                          list={`concierge-expense-vendors-${service.id}`}
+                          value={vendor}
+                          maxLength={255}
+                          required
+                          onChange={(event) => {
+                            setVendor(event.target.value);
+                            setFormError("");
+                          }}
+                        />
+                        <datalist id={`concierge-expense-vendors-${service.id}`}>
+                          {vendorSuggestions.map((suggestion) => (
+                            <option key={suggestion.id} value={suggestion.value}>
+                              {suggestion.description}
+                            </option>
+                          ))}
+                        </datalist>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{labels.vendorInternalHint}</p>
+                      </ConciergeField>
                       <ConciergeField label={labels.expenseDate}><Input type="date" value={expenseDate} max={todayInputValue()} required onChange={(event) => setExpenseDate(event.target.value)} /></ConciergeField>
                       <ConciergeField label={labels.currency}><Input readOnly value={currency} /></ConciergeField>
-                      <ConciergeField label={labels.net}><Input inputMode="decimal" placeholder="0.00" value={amountNet} required onChange={(event) => setAmountNet(event.target.value)} /></ConciergeField>
-                      <ConciergeField label={labels.vat}><Input inputMode="decimal" placeholder="0.00" value={amountVat} required onChange={(event) => setAmountVat(event.target.value)} /></ConciergeField>
-                      <ConciergeField label={labels.gross} className="sm:col-span-2"><Input readOnly value={amountGross} placeholder="0.00" /></ConciergeField>
+                      <ConciergeField label={labels.net}><Input inputMode="decimal" placeholder="0.00" value={amountNet} required onChange={(event) => { setAmountSource("net"); setNetInput(event.target.value); }} /></ConciergeField>
+                      <ConciergeField label={labels.vat}>
+                        <div className="relative">
+                          <Input className="pr-8" inputMode="decimal" placeholder="19" value={vatRate} required onChange={(event) => setVatRate(event.target.value)} />
+                          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">%</span>
+                        </div>
+                      </ConciergeField>
+                      <ConciergeField label={labels.gross} className="sm:col-span-2"><Input inputMode="decimal" value={amountGross} placeholder="0.00" required onChange={(event) => { setAmountSource("gross"); setGrossInput(event.target.value); }} /></ConciergeField>
                       <ConciergeField label={labels.paidBy} className="sm:col-span-2">
                         <select className={selectClass} value={paidBy} onChange={(event) => setPaidBy(event.target.value as ConciergeExpensePaidBy)}>
                           <option value="patient">{labels.paidPatient}</option>
@@ -430,9 +489,9 @@ export function ConciergeExpenseReceiptDialog({
                           <option value="unpaid">{labels.unpaid}</option>
                         </select>
                       </ConciergeField>
-                      <label className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2.5 text-xs font-medium sm:col-span-2">
-                        <input type="checkbox" className="size-4 accent-primary" checked={serviceDelivered} onChange={(event) => setServiceDelivered(event.target.checked)} />
-                        {labels.serviceDelivered}
+                      <label className="inline-flex w-fit cursor-pointer items-center gap-2 px-0.5 py-1 text-xs font-medium text-foreground sm:col-span-2">
+                        <input type="checkbox" className="size-4 rounded border-input accent-primary" checked={serviceDelivered} onChange={(event) => setServiceDelivered(event.target.checked)} />
+                        <span>{labels.serviceDelivered}</span>
                       </label>
                       <ConciergeField label={labels.note} className="sm:col-span-2"><textarea className="min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={note} maxLength={2000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} /></ConciergeField>
                     </div>
@@ -453,6 +512,7 @@ export function ConciergeExpenseReceiptDialog({
                   </ConciergeProfileDialogSection>
 
                   {success ? <p role="status" className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800"><CheckCircle2 className="size-4 shrink-0" />{success}</p> : null}
+                  {formError ? <p role="alert" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><AlertCircle className="size-4 shrink-0" />{formError}</p> : null}
                   {error ? <p role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"><AlertCircle className="size-4 shrink-0" />{error}</p> : null}
                 </div>
               </div>
@@ -460,7 +520,7 @@ export function ConciergeExpenseReceiptDialog({
           </ConciergeDialogBody>
           <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-5">
             <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
-            <Button type="submit" disabled={!canSubmit}>{submitting ? <LoaderCircle className="animate-spin" /> : <Upload />}{submitting ? labels.submitting : labels.submit}</Button>
+            <Button type="submit" disabled={submitting || loading || !context}>{submitting ? <LoaderCircle className="animate-spin" /> : <Upload />}{submitting ? labels.submitting : labels.submit}</Button>
           </div>
         </form>
       </DialogContent>

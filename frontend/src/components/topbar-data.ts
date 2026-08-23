@@ -19,6 +19,7 @@ export interface ActiveSession {
 }
 
 export interface ActiveAnnouncement {
+  id: string;
   title: string;
   message: string;
   variant: string;
@@ -149,6 +150,10 @@ export function markAllNotificationsRead() {
 
 export function markNotificationRead(id: string) {
   return apiFetch(`/notifications/${id}/read`, { method: "POST" });
+}
+
+export function dismissActiveAnnouncement(id: string) {
+  return apiFetch(`/announcements/${id}/dismiss`, { method: "POST" });
 }
 
 export function fetchTopbarChatMessages(userId: string) {
