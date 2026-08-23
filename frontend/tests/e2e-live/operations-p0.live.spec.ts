@@ -70,8 +70,10 @@ test.describe("P0 operations modules", () => {
     await page.goto("/task-manager");
     await expect(page.getByText(internalTitle).first()).toBeVisible();
     await expect(page.getByText(externalTitle).first()).toBeVisible();
-    await expect(page.getByText(scenario.patient.name).first()).toBeVisible();
-    await expect(page.getByText("Berlin Driver GmbH").first()).toBeVisible();
+    const internalTaskCard = page.locator("article").filter({ hasText: internalTitle }).first();
+    const externalTaskCard = page.locator("article").filter({ hasText: externalTitle }).first();
+    await expect(internalTaskCard).toContainText(scenario.patient.name);
+    await expect(externalTaskCard).toContainText("Berlin Driver GmbH");
 
     await page.getByText(internalTitle).first().click();
     const internalTaskDialog = page.getByRole("dialog", { name: internalTitle });
