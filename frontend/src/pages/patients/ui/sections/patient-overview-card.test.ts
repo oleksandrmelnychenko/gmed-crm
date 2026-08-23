@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveTreatingDoctors } from "./patient-overview-card";
+import { deriveDoctors, deriveTreatingDoctors, mergePatientDoctors } from "./patient-overview-card";
 
 describe("deriveTreatingDoctors", () => {
   it("uses the explicitly assigned treating doctor", () => {
@@ -52,6 +52,46 @@ describe("deriveTreatingDoctors", () => {
     expect(doctors[0]).toMatchObject({
       fachbereich: "endokrinologie_und_diabetologie",
       name: "Frau Alexandra Schoeneich",
+    });
+  });
+});
+
+describe("mergePatientDoctors", () => {
+  it("keeps both treating and clinical-history doctors and merges matching people", () => {
+    const treatingDoctors = deriveTreatingDoctors([
+      {
+        treating_doctor_id: "doctor-1",
+        treating_doctor_name: "Herr Treating Doctor",
+        treating_doctor_title: "Dr. med.",
+        treating_doctor_fachbereich: "gastroenterologie",
+        treating_none: false,
+      },
+    ]);
+    const clinicalDoctors = deriveDoctors([
+      {
+        doctor_name: "Herr Diagnostic Doctor",
+        doctor_title: "Prof. Dr. med.",
+        doctor_fachbereich: "radiologie",
+        provider_name: "Diagnostic clinic",
+      },
+      {
+        doctor_name: "Herr Treating Doctor",
+        doctor_title: "Dr. med.",
+        doctor_fachbereich: "gastroenterologie",
+        provider_name: "Treating clinic",
+      },
+    ]);
+
+    const doctors = mergePatientDoctors(treatingDoctors, clinicalDoctors);
+
+    expect(doctors).toHaveLength(2);
+    expect(doctors.find((doctor) => doctor.name === "Herr Diagnostic Doctor")).toMatchObject({
+      isInClinicalHistory: true,
+      isTreating: false,
+    });
+    expect(doctors.find((doctor) => doctor.name === "Herr Treating Doctor")).toMatchObject({
+      isInClinicalHistory: true,
+      isTreating: true,
     });
   });
 });

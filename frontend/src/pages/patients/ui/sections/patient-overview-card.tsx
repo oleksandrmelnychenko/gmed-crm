@@ -9,7 +9,9 @@ import {
   fetchPatientClinical,
   fetchPatientRecommendations,
   type ClinicalDiagnosis,
+  type ClinicalExamination,
   type ClinicalMedication,
+  type ClinicalProcedure,
   type ClinicalWarning,
   type DiagnosisStatus,
   type PatientRecommendation,
@@ -99,6 +101,8 @@ type OverviewDoctor = {
   title: string | null;
   fachbereich: string | null;
   provider: string | null;
+  isTreating: boolean;
+  isInClinicalHistory: boolean;
 };
 
 export function deriveDoctors(
@@ -126,6 +130,8 @@ export function deriveDoctors(
       title: source.doctor_title,
       fachbereich: source.doctor_fachbereich,
       provider: source.provider_name,
+      isTreating: false,
+      isInClinicalHistory: true,
     });
   }
   return [...seen.values()].sort((a, b) =>
@@ -142,10 +148,8 @@ type TreatingDoctorSource = {
 };
 
 /**
- * Derive the overview's treating-doctor list only from the explicit treating
- * doctor assignment. The generic doctor fields identify who documented or
- * performed a diagnosis/examination/procedure and must not be relabelled as
- * the patient's treating physician.
+ * Derive the explicitly assigned treating doctors. Clinical-history doctors
+ * are merged separately so both roles remain visible without duplicate rows.
  */
 export function deriveTreatingDoctors(sources: TreatingDoctorSource[]): OverviewDoctor[] {
   const seen = new Map<string, OverviewDoctor>();
@@ -181,6 +185,39 @@ export function deriveTreatingDoctors(sources: TreatingDoctorSource[]): Overview
       title: source.treating_doctor_title,
       fachbereich: source.treating_doctor_fachbereich ?? null,
       provider: null,
+      isTreating: true,
+      isInClinicalHistory: false,
+    });
+  }
+
+  return [...seen.values()].sort((a, b) => {
+    const specialtyOrder = (a.fachbereich ?? "￿").localeCompare(b.fachbereich ?? "￿");
+    if (specialtyOrder !== 0) return specialtyOrder;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+export function mergePatientDoctors(
+  treatingDoctors: OverviewDoctor[],
+  clinicalHistoryDoctors: OverviewDoctor[],
+): OverviewDoctor[] {
+  const seen = new Map<string, OverviewDoctor>();
+
+  for (const doctor of [...treatingDoctors, ...clinicalHistoryDoctors]) {
+    const key = doctor.name.trim().toLocaleLowerCase();
+    const existing = seen.get(key);
+    if (existing) {
+      if (!existing.title && doctor.title) existing.title = doctor.title;
+      if (!existing.fachbereich && doctor.fachbereich) existing.fachbereich = doctor.fachbereich;
+      if (!existing.provider && doctor.provider) existing.provider = doctor.provider;
+      existing.isTreating ||= doctor.isTreating;
+      existing.isInClinicalHistory ||= doctor.isInClinicalHistory;
+      continue;
+    }
+
+    seen.set(key, {
+      ...doctor,
+      key: `doctor:${key}`,
     });
   }
 
@@ -341,6 +378,8 @@ export function PatientOverviewCard({
   const [cave, setCave] = useState<ClinicalWarning[]>([]);
   const [diagnoses, setDiagnoses] = useState<ClinicalDiagnosis[]>([]);
   const [medications, setMedications] = useState<ClinicalMedication[]>([]);
+  const [examinations, setExaminations] = useState<ClinicalExamination[]>([]);
+  const [procedures, setProcedures] = useState<ClinicalProcedure[]>([]);
   const [recommendations, setRecommendations] = useState<PatientRecommendation[]>([]);
 
   useEffect(() => {
@@ -355,6 +394,8 @@ export function PatientOverviewCard({
       setCave(clinical?.cave ?? []);
       setDiagnoses(clinical?.diagnoses ?? []);
       setMedications(clinical?.medications ?? []);
+      setExaminations(clinical?.examinations ?? []);
+      setProcedures(clinical?.procedures ?? []);
       setRecommendations(recs ?? []);
     });
     return () => {
@@ -389,7 +430,10 @@ export function PatientOverviewCard({
     const pk = parentKey(d);
     return pk == null || !known.has(pk);
   });
-  const doctors = deriveTreatingDoctors(diagnoses);
+  const doctors = mergePatientDoctors(
+    deriveTreatingDoctors(diagnoses),
+    deriveDoctors([...diagnoses, ...medications, ...examinations, ...procedures]),
+  );
   const doctorSpecializationLabel = (value: string) => specializationLabelForValue(value, [], lang);
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
@@ -659,6 +703,18 @@ export function PatientOverviewCard({
                   <p className="text-[13px] text-foreground">
                     {[doctor.title, doctor.name].filter(Boolean).join(" ")}
                   </p>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {doctor.isTreating ? (
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">
+                        {tx("Лечащий", "Behandelnd")}
+                      </span>
+                    ) : null}
+                    {doctor.isInClinicalHistory ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[9px] font-semibold text-sky-700">
+                        {tx("В клинической истории", "In der Krankengeschichte")}
+                      </span>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>
