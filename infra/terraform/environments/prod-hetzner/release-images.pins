@@ -1,5 +1,5 @@
 # Public immutable image references produced and signed by Release Build
-# https://github.com/oleksandrmelnychenko/gmed-crm/actions/runs/32632760613
-GMED_BACKEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-server@sha256:f96471b603263b852703a2d25fb37315cfc5a59a387d7fbef290522ecde62775
-GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:05a9182cb373da851c7cb97e358d6c164113ca75c98f1b3216bc76183ac9f099
-GMED_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser@sha256:265ef642c35d8e5263780cb0f9451a201c7d19bde1baf96a78ffba865efe0090
+# https://github.com/oleksandrmelnychenko/gmed-crm/actions/runs/32663968671
+GMED_BACKEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-server@sha256:73224775f15283fe00dcc5c0da735adad70298c124e47c9bfeaf10081a92e86d
+GMED_FRONTEND_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-frontend@sha256:af9260d32e002261f17b7eb1a0bf50dac7d3baa92b00a25e81e41aad835910f2
+GMED_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser@sha256:e43c0a0ed1eca7bdfcdc5228162713ae3a39b02242fab9d7ff3daac7f6219255
