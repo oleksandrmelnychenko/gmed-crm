@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeftRight,
+  Building2,
+  Landmark,
+  ReceiptText,
   RefreshCw,
   Search,
+  UsersRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -18,6 +23,7 @@ import {
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
@@ -43,6 +49,44 @@ import type {
 type PatientSideFilter = "all" | CompanyBalanceSide | "reconciliation";
 type ProviderSettlementFilter = "open" | "partial" | "settled" | "expected" | "all";
 type ProviderView = "providers" | "documents";
+
+const COMPANY_FINANCE_REALTIME_EVENTS = [
+  "realtime.connected",
+  "realtime.resync_required",
+  "patient.balance_adjustment_created",
+  "patient.balance_adjustment_reversed",
+  "invoice.created",
+  "invoice.status_changed",
+  "invoice.payment_recorded",
+  "invoice.payment_reversed",
+  "invoice.refund_recorded",
+  "invoice.refund_reversed",
+  "invoice.credit_note_created",
+  "invoice.credit_note_reversed",
+  "invoice.prepayment_applied",
+  "invoice.prepayment_released",
+  "order.external_invoice_created",
+  "order.external_invoice_updated",
+  "order.external_invoice_overdue",
+  "order.external_invoice_allocation_created",
+  "order.external_invoice_allocation_reversed",
+  "order.leistung_added",
+  "order.leistung_planned_cost_updated",
+  "order.leistung_approved",
+  "concierge_expense.submitted",
+  "concierge_expense.posted",
+  "concierge_expense.rejected",
+  "concierge_expense.reversed",
+  "company_financial_account.created",
+  "company_financial_account.updated",
+  "company_financial_account.adjustment_created",
+  "company_financial_account.adjustment_reversed",
+  "company_financial_account.transfer_created",
+  "company_financial_account.transfer_reversed",
+  "accounting_entry.financial_account_assigned",
+  "provider_payment.recorded",
+  "provider_payment.reversed",
+] as const;
 
 const today = new Date();
 const initialFilters: CompanyFinancialFilters = {
@@ -309,6 +353,10 @@ export function CompanyFinancePage() {
   const [assignmentBusyId, setAssignmentBusyId] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [conciergeExpensePendingCount, setConciergeExpensePendingCount] = useState(0);
+
+  useDebouncedRealtimeSubscription(COMPANY_FINANCE_REALTIME_EVENTS, () => {
+    setReloadToken((current) => current + 1);
+  }, 200);
 
   useEffect(() => {
     let active = true;
@@ -727,27 +775,33 @@ export function CompanyFinancePage() {
 
       {position && accounts ? (
         <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="min-w-0 gap-3">
-          <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
-          <TabsList className="mx-auto h-auto w-max max-w-none flex-nowrap gap-0.5 rounded-lg border border-border bg-card p-1 shadow-xs">
-            {([
-              ["patients", text.patients, position.patient_positions.length],
-              ["providers", text.providers, position.provider_positions.length],
-              ["concierge-expenses", text.conciergeExpenses, conciergeExpensePendingCount],
-              ["accounts", text.financialAccounts, accounts.items.length],
-              ["cash", text.cash, position.cash_movement_count],
-            ] as const).map(([value, label, count]) => (
-              <TabsTrigger
-                key={value}
-                className="h-8 rounded-md px-3 text-xs data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-sm data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground"
-                value={value}
-              >
-                <span>{label}</span>
-                <span data-count className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
-                  {count}
-                </span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
+            <div className="flex w-max min-w-full justify-center">
+              <TabsList className="h-auto w-max max-w-none flex-nowrap gap-1 rounded-none bg-transparent p-0">
+                {([
+                  ["patients", UsersRound, text.patients, position.patient_positions.length],
+                  ["providers", Building2, text.providers, position.provider_positions.length],
+                  ["concierge-expenses", ReceiptText, text.conciergeExpenses, conciergeExpensePendingCount],
+                  ["accounts", Landmark, text.financialAccounts, accounts.items.length],
+                  ["cash", ArrowLeftRight, text.cash, position.cash_movement_count],
+                ] as const).map(([value, Icon, label, count]) => (
+                  <TabsTrigger
+                    key={value}
+                    className={cn(
+                      buttonVariants({ variant: activeTab === value ? "default" : "ghost", size: "sm" }),
+                      "h-9 min-w-0 rounded-md px-3 text-xs text-foreground data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-none data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground sm:h-8",
+                    )}
+                    value={value}
+                  >
+                    <Icon />
+                    <span>{label}</span>
+                    <span data-count className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground">
+                      {count}
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
           </div>
 
           <TabsContent value="patients">

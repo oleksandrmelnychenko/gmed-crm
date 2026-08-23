@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .route("/users/{user_id}/update", post(update_user))
         .route("/users/{user_id}/deactivate", post(deactivate_user))
         .route("/users/{user_id}/activate", post(activate_user))
+        .route("/users/{user_id}/unlock", post(unlock_user))
         .route("/users/{user_id}/reset-password", post(reset_password))
 }
 
@@ -32,6 +33,9 @@ struct UserResponse {
     name: String,
     role: String,
     is_active: bool,
+    failed_login_attempts: i32,
+    locked_until: Option<chrono::DateTime<chrono::Utc>>,
+    password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -137,7 +141,8 @@ async fn list_users(
     let assignable_only = query.assignable_only.unwrap_or(false);
 
     match sqlx::query(
-        r#"SELECT id, email, name, role, is_active, created_at, updated_at
+        r#"SELECT id, email, name, role, is_active, failed_login_attempts,
+                  locked_until, password_changed_at, created_at, updated_at
            FROM users
            WHERE ($1::text = '%%'
                   OR email ILIKE $1
@@ -213,6 +218,9 @@ async fn list_users(
                     name: r.try_get("name").unwrap_or_default(),
                     role: r.try_get("role").unwrap_or_default(),
                     is_active: r.try_get("is_active").unwrap_or(false),
+                    failed_login_attempts: r.try_get("failed_login_attempts").unwrap_or(0),
+                    locked_until: r.try_get("locked_until").unwrap_or(None),
+                    password_changed_at: r.try_get("password_changed_at").unwrap_or(None),
                     created_at: r
                         .try_get("created_at")
                         .unwrap_or_else(|_| chrono::Utc::now()),
@@ -293,6 +301,9 @@ async fn get_user(
             name: r.name,
             role: r.role,
             is_active: r.is_active,
+            failed_login_attempts: 0,
+            locked_until: None,
+            password_changed_at: None,
             created_at: r.created_at,
             updated_at: r.updated_at,
         })),
@@ -376,6 +387,9 @@ async fn create_user(
                     name: r.name,
                     role: r.role,
                     is_active: r.is_active,
+                    failed_login_attempts: 0,
+                    locked_until: None,
+                    password_changed_at: None,
                     created_at: r.created_at,
                     updated_at: r.updated_at,
                 }),
@@ -473,6 +487,9 @@ async fn update_user(
                 name: r.name,
                 role: r.role,
                 is_active: r.is_active,
+                failed_login_attempts: 0,
+                locked_until: None,
+                password_changed_at: None,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             }))
@@ -579,6 +596,68 @@ async fn activate_user(
     }
 }
 
+async fn unlock_user(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(user_id): Path<Uuid>,
+) -> impl IntoResponse {
+    auth.require_exact_role(&[Role::Ceo])?;
+
+    let result = sqlx::query(
+        r#"UPDATE users
+           SET failed_login_attempts = 0,
+               locked_until = NULL,
+               updated_at = now()
+           WHERE id = $1
+             AND (failed_login_attempts > 0 OR locked_until IS NOT NULL)"#,
+    )
+    .bind(user_id)
+    .execute(&state.db)
+    .await;
+
+    match result {
+        Ok(row) if row.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "unlock_user",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({ "source": "users_workspace" }),
+            ));
+            crate::realtime::publish_admin_event(
+                &state,
+                Some(auth.user_id),
+                "user.unlocked",
+                "user",
+                user_id,
+                serde_json::json!({ "user_id": user_id }),
+            )
+            .await;
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Ok(_) => {
+            let exists =
+                sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+                    .bind(user_id)
+                    .fetch_one(&state.db)
+                    .await
+                    .unwrap_or(false);
+            if exists {
+                Ok(StatusCode::NO_CONTENT)
+            } else {
+                Err(err(StatusCode::NOT_FOUND, "User not found"))
+            }
+        }
+        Err(error) => {
+            tracing::error!(%error, target = %user_id, "Failed to unlock user");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to unlock user",
+            ))
+        }
+    }
+}
+
 async fn reset_password(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -602,17 +681,35 @@ async fn reset_password(
         }
     };
 
-    let result = sqlx::query!(
-        "UPDATE users SET password_hash = $2 WHERE id = $1",
-        user_id,
-        hash
+    let result = sqlx::query(
+        r#"UPDATE users
+           SET password_history = COALESCE(password_history, '[]'::jsonb)
+                                  || jsonb_build_array(password_hash),
+               password_hash = $2,
+               password_changed_at = now(),
+               failed_login_attempts = 0,
+               locked_until = NULL,
+               updated_at = now()
+           WHERE id = $1"#,
     )
+    .bind(user_id)
+    .bind(hash)
     .execute(&state.db)
     .await;
 
     match result {
         Ok(r) if r.rows_affected() > 0 => {
             crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
+            state.audit_sender.try_send(audit::domain_event(
+                "reset_password",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({
+                    "sessions_revoked": true,
+                    "account_unlocked": true,
+                }),
+            ));
             tracing::info!(by = %auth.user_id, target = %user_id, "Password reset");
             crate::realtime::publish_admin_event(
                 &state,

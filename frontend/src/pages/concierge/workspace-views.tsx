@@ -262,7 +262,7 @@ export function ConciergeTaskQueue({
   const openCount = tasks.filter(isConciergeTaskActive).length;
 
   return (
-    <aside className="rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.035)]" aria-label={labels.tasks}>
+    <aside className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.tasks}>
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <ListTodo className="size-4 text-primary" />
@@ -282,7 +282,7 @@ export function ConciergeTaskQueue({
           </Button>
         </div>
       </div>
-      <div className="max-h-[42rem] space-y-2 overflow-y-auto p-2">
+      <div className="space-y-2 p-2">
         {rows.length === 0 ? (
           <p className="px-3 py-8 text-center text-xs text-muted-foreground">{showCompleted ? labels.noTaskHistory : labels.noTasks}</p>
         ) : (
@@ -294,9 +294,8 @@ export function ConciergeTaskQueue({
               <article
                 key={task.id}
                 className={cn(
-                  "rounded-xl border border-l-[3px] bg-card p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)]",
+                  "rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:border-border hover:shadow-md",
                   taskAccent(task.priority, overdue),
-                  overdue ? "border-rose-200" : "border-border/70",
                   ["completed", "cancelled"].includes(task.status) && "opacity-65",
                 )}
                 data-testid={`concierge-task-${task.id}`}
@@ -315,6 +314,14 @@ export function ConciergeTaskQueue({
                       {labels.overdue}
                     </Badge>
                   ) : null}
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-border/70 bg-card font-mono text-[9px] font-medium text-muted-foreground"
+                    title={task.id}
+                    data-testid={`concierge-task-id-${task.id}`}
+                  >
+                    #{task.id.slice(0, 8)}
+                  </Badge>
                 </div>
                 <h3 className="mt-2 text-sm font-semibold leading-5">
                   {conciergeTaskDisplayTitle(task, lang)}

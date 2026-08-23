@@ -63,6 +63,14 @@ pub fn router() -> Router<AppState> {
             post(update_item),
         )
         .route(
+            "/concierge-operational-items/{item_id}/archive",
+            post(archive_item),
+        )
+        .route(
+            "/concierge-operational-items/{item_id}/restore",
+            post(restore_item),
+        )
+        .route(
             "/concierge-operational-items/{item_id}/delete",
             post(delete_item),
         )
@@ -92,6 +100,7 @@ struct ListItemsQuery {
     audience: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    archive: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -212,7 +221,8 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           END AS concierge_service_id,
           t.task_kind, t.due_date, t.starts_at, t.ends_at,
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
-          t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
+          t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
+          t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
@@ -228,6 +238,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    FROM tasks t
    JOIN users assignee ON assignee.id = t.assigned_to
    JOIN users assigner ON assigner.id = t.assigned_by
+   LEFT JOIN users archiver ON archiver.id = t.archived_by
    LEFT JOIN concierge_services cs ON cs.id = t.concierge_service_id
    LEFT JOIN providers linked_provider ON linked_provider.id = cs.provider_id
    LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
@@ -274,6 +285,10 @@ async fn list_items(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid audience");
     }
+    let archive = query.archive.as_deref().unwrap_or("active");
+    if !matches!(archive, "active" | "archived" | "all") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid archive filter");
+    }
 
     let assignee_filter = query.assigned_to;
 
@@ -288,7 +303,8 @@ async fn list_items(
                   END AS concierge_service_id,
                   t.task_kind, t.due_date, t.starts_at, t.ends_at,
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
-                  t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
+                  t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
+                  t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
@@ -304,6 +320,7 @@ async fn list_items(
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
+           LEFT JOIN users archiver ON archiver.id = t.archived_by
            LEFT JOIN concierge_services cs ON cs.id = t.concierge_service_id
            LEFT JOIN providers linked_provider ON linked_provider.id = cs.provider_id
            LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
@@ -317,6 +334,11 @@ async fn list_items(
              AND ($4::text IS NULL OR t.task_audience = $4)
              AND ($5::uuid IS NULL OR t.patient_id = $5)
              AND ($6::uuid IS NULL OR t.provider_id = $6)
+             AND (
+                 $7::text = 'all'
+                 OR ($7::text = 'active' AND t.archived_at IS NULL)
+                 OR ($7::text = 'archived' AND t.archived_at IS NOT NULL)
+             )
            ORDER BY
                CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
                CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
@@ -329,6 +351,7 @@ async fn list_items(
     .bind(query.audience)
     .bind(query.patient_id)
     .bind(query.provider_id)
+    .bind(archive)
     .fetch_all(&state.db)
     .await
     {
@@ -1151,6 +1174,7 @@ async fn update_item(
     };
     let existing = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.status, task.reminder_at,
+                  task.archived_at,
                   task.updated_at, creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -1185,6 +1209,16 @@ async fn update_item(
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can change this task",
+        );
+    }
+    if existing
+        .try_get::<Option<DateTime<Utc>>, _>("archived_at")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Restore the archived task before editing it",
         );
     }
     if existing.try_get::<DateTime<Utc>, _>("updated_at").ok() != Some(expected_updated_at) {
@@ -1409,6 +1443,208 @@ async fn update_item(
     }
 }
 
+async fn archive_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(item_id): Path<Uuid>,
+) -> axum::response::Response {
+    change_item_archive_state(&state, &auth, item_id, true).await
+}
+
+async fn restore_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(item_id): Path<Uuid>,
+) -> axum::response::Response {
+    change_item_archive_state(&state, &auth, item_id, false).await
+}
+
+async fn change_item_archive_state(
+    state: &AppState,
+    auth: &AuthUser,
+    item_id: Uuid,
+    archive: bool,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge task archive mutation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let task = match sqlx::query(
+        r#"SELECT task.assigned_to, task.assigned_by, task.title, task.status,
+                  task.archived_at, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1
+             AND task.task_scope = 'concierge_operational'
+             AND task.deleted_at IS NULL
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge task archive context");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = task
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by = task
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by_role = task
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    let title = task.try_get::<String, _>("title").unwrap_or_default();
+    let status = task.try_get::<String, _>("status").unwrap_or_default();
+    let archived_at = task
+        .try_get::<Option<DateTime<Utc>>, _>("archived_at")
+        .unwrap_or_default();
+    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the task creator or a higher role can archive this task",
+        );
+    }
+    if archive && !matches!(status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only completed or cancelled tasks can be archived",
+        );
+    }
+    if archive == archived_at.is_some() {
+        let item = match load_item_in_transaction(&mut tx, item_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+            Err(response) => return response,
+        };
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit idempotent concierge task archive mutation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return Json(item).into_response();
+    }
+
+    let result = sqlx::query(
+        r#"UPDATE tasks
+           SET archived_at = CASE WHEN $2 THEN now() ELSE NULL END,
+               archived_by = CASE WHEN $2 THEN $3 ELSE NULL END,
+               updated_at = now()
+           WHERE id = $1
+             AND task_scope = 'concierge_operational'
+             AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(archive)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await;
+    match result {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, archive, "change concierge task archive state");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    let event_type = if archive { "archived" } else { "restored" };
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(item_id)
+    .bind(event_type)
+    .bind(auth.user_id)
+    .bind(serde_json::json!({
+        "status": status,
+        "assigned_to": assigned_to,
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, "record concierge task archive history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let creator_notification = if auth.user_id != assigned_by {
+        let (kind, notification_title) = if archive {
+            ("operational_task_archived", "Task archived")
+        } else {
+            ("operational_task_restored", "Task restored from archive")
+        };
+        match insert_task_notification(
+            &mut tx,
+            assigned_by,
+            kind,
+            notification_title,
+            &title,
+            item_id,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge task archive mutation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let audit_action = if archive {
+        "archive_concierge_operational_item"
+    } else {
+        "restore_concierge_operational_item"
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        audit_action,
+        Some(auth.user_id),
+        "task",
+        Some(item_id),
+        serde_json::json!({
+            "assigned_to": assigned_to,
+            "status": status,
+        }),
+    ));
+    let realtime_event = if archive {
+        "concierge_operational_item.archived"
+    } else {
+        "concierge_operational_item.restored"
+    };
+    crate::realtime::publish_concierge_operational_task_event(
+        state,
+        Some(auth.user_id),
+        realtime_event,
+        item_id,
+        assigned_to,
+        serde_json::json!({
+            "assigned_to": assigned_to,
+            "status": status,
+            "archived": archive,
+        }),
+    )
+    .await;
+    if let Some(notification) = creator_notification {
+        publish_pending_notification(state, notification, item_id).await;
+    }
+    match load_item(state, item_id).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(response) => response,
+    }
+}
+
 async fn delete_item(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1426,6 +1662,7 @@ async fn delete_item(
     };
     let task = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.title, task.status,
+                  task.archived_at,
                   creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -1460,6 +1697,16 @@ async fn delete_item(
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can delete this task",
+        );
+    }
+    if task
+        .try_get::<Option<DateTime<Utc>>, _>("archived_at")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Restore the archived task before deleting it",
         );
     }
     if let Err(error) = sqlx::query(
@@ -2056,7 +2303,8 @@ async fn lock_item_access(
     let query = if for_update {
         r#"SELECT assigned_to
            FROM tasks
-           WHERE id = $1 AND task_scope = 'concierge_operational' AND deleted_at IS NULL
+           WHERE id = $1 AND task_scope = 'concierge_operational'
+             AND deleted_at IS NULL AND archived_at IS NULL
            FOR UPDATE"#
     } else {
         r#"SELECT assigned_to
@@ -2110,7 +2358,8 @@ async fn ensure_operational_mutation_access(
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
              AND task.task_scope = 'concierge_operational'
-             AND task.deleted_at IS NULL"#,
+             AND task.deleted_at IS NULL
+             AND task.archived_at IS NULL"#,
     )
     .bind(item_id)
     .fetch_optional(&state.db)
@@ -2148,6 +2397,7 @@ async fn lock_task_mutation_context(
            WHERE task.id = $1
              AND task.task_scope = 'concierge_operational'
              AND task.deleted_at IS NULL
+             AND task.archived_at IS NULL
            FOR UPDATE OF task"#,
     )
     .bind(item_id)
@@ -2706,6 +2956,9 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "comment_count": row.try_get::<i64, _>("comment_count").unwrap_or_default(),
         "attachment_count": row.try_get::<i64, _>("attachment_count").unwrap_or_default(),
         "completed_at": format_datetime(row, "completed_at"),
+        "archived_at": format_datetime(row, "archived_at"),
+        "archived_by": row.try_get::<Option<Uuid>, _>("archived_by").unwrap_or_default(),
+        "archived_by_name": row.try_get::<Option<String>, _>("archived_by_name").unwrap_or_default(),
         "created_at": format_datetime(row, "created_at"),
         "updated_at": format_datetime(row, "updated_at"),
         "task_audience": row.try_get::<String, _>("task_audience").unwrap_or_else(|_| "internal".to_string()),

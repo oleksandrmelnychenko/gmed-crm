@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useAuth, PendingLoginError } from "@/lib/auth";
+import { AuthLoginError, useAuth, PendingLoginError } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { getBuildLoginDefaults } from "@/pages/login-defaults";
 import { resolveRequestedLoginLanguage } from "@/pages/login-language";
@@ -170,8 +170,20 @@ export function LoginPage() {
           pendingLogin: { id: err.pendingId, status: "pending" },
         });
       } else {
+        const loginError =
+          err instanceof AuthLoginError && err.code === "account_locked"
+            ? tr.login_error_account_locked
+            : err instanceof AuthLoginError && err.code === "unauthorized"
+              ? tr.login_error_invalid
+              : err instanceof AuthLoginError &&
+                  err.code === "forbidden" &&
+                  err.message === "Account is deactivated"
+                ? tr.login_error_account_inactive
+                : err instanceof Error
+                  ? err.message
+                  : tr.login_error_unknown;
         dispatchLoginState({
-          error: err instanceof Error ? err.message : tr.login_error_unknown,
+          error: loginError,
         });
       }
     } finally {

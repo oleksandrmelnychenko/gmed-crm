@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getOptionalAdminPasswordError,
   getRequiredAdminPasswordError,
+  generateAdminPassword,
   isPasswordConfirmationMismatch,
 } from "./admin-users.helpers";
 
@@ -54,5 +55,12 @@ describe("admin user password validation", () => {
     expect(isPasswordConfirmationMismatch("Password1!", "Password1!")).toBe(
       false,
     );
+  });
+
+  it("generates a strong password that already matches the account policy", () => {
+    const password = generateAdminPassword();
+
+    expect(password).toHaveLength(16);
+    expect(getRequiredAdminPasswordError(password, messages)).toBeNull();
   });
 });

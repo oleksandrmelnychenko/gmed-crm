@@ -228,6 +228,17 @@ async fn reset_password_accepts_password_matching_policy() {
     };
     let bearer = auth_header_for(admin_id, "ceo");
     let target_id = seed_user(&pool, "users-api-reset-valid", "patient_manager").await;
+    sqlx::query(
+        r#"UPDATE users
+           SET failed_login_attempts = 5,
+               locked_until = now() + interval '30 minutes',
+               password_changed_at = '2000-01-01'::timestamptz
+           WHERE id = $1"#,
+    )
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, body) = json_request(
         &app,
@@ -239,4 +250,68 @@ async fn reset_password_accepts_password_matching_policy() {
     .await;
 
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let row: (
+        String,
+        i32,
+        Option<chrono::DateTime<chrono::Utc>>,
+        chrono::DateTime<chrono::Utc>,
+        i64,
+    ) = sqlx::query_as(
+        r#"SELECT password_hash,
+                      failed_login_attempts,
+                      locked_until,
+                      password_changed_at,
+                      jsonb_array_length(password_history)::bigint
+               FROM users
+               WHERE id = $1"#,
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(gmed_server::auth::password::verify_password("Password1!", &row.0).unwrap());
+    assert_eq!(row.1, 0);
+    assert!(row.2.is_none(), "password reset must remove the login lock");
+    assert!(row.3 > chrono::Utc::now() - chrono::Duration::minutes(1));
+    assert_eq!(
+        row.4, 1,
+        "the previous hash must be retained in password history"
+    );
+}
+
+#[tokio::test]
+async fn ceo_can_unlock_user_without_changing_password() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let target_id = seed_user(&pool, "users-api-unlock", "patient_manager").await;
+    sqlx::query(
+        "UPDATE users SET failed_login_attempts = 5, locked_until = now() + interval '30 minutes' WHERE id = $1",
+    )
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{target_id}/unlock"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let state: (i32, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT failed_login_attempts, locked_until FROM users WHERE id = $1")
+            .bind(target_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state.0, 0);
+    assert!(state.1.is_none());
 }

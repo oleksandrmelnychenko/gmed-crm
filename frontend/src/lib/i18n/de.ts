@@ -58,6 +58,10 @@ export const de = {
   login_error_password_short: "Mindestens 8 Zeichen",
   login_error_password_long: "Passwort zu lang",
   login_error_unknown: "Anmeldung nicht möglich",
+  login_error_account_locked:
+    "Das Konto wurde nach mehreren fehlgeschlagenen Versuchen vorübergehend gesperrt. Wenden Sie sich zum Entsperren an einen Administrator.",
+  login_error_account_inactive:
+    "Das Konto ist deaktiviert. Wenden Sie sich an einen Administrator.",
   login_mfa_rejected_title: "Zugang abgelehnt",
   login_mfa_rejected_msg:
     "Ihr Anmeldeversuch wurde von einem Administrator abgelehnt.",
@@ -96,6 +100,8 @@ export const de = {
   users_count: "Benutzer",
   users_active: "Aktiv",
   users_inactive: "Inaktiv",
+  users_locked: "Gesperrt",
+  users_unlock: "Entsperren",
   users_password_hint: "Min. 8 Zeichen",
   users_password_policy_hint:
     "Min. 8 Zeichen: Klein-/Grossbuchstabe, Zahl und Sonderzeichen",
@@ -106,6 +112,11 @@ export const de = {
   users_admins: "Administratoren",
   users_reset_password: "Passwort zurücksetzen",
   users_reset_button: "Zurücksetzen",
+  users_generate_password: "Generieren",
+  users_password_reset_success:
+    "Passwort geändert. Die Sperre wurde aufgehoben und aktive Sitzungen wurden beendet.",
+  users_password_reset_confirm:
+    "Das neue Passwort gilt sofort. Der Benutzer wird auf allen Geräten abgemeldet und eine Anmeldesperre wird aufgehoben.",
   users_empty_no_results: "Keine Ergebnisse",
   users_empty_no_users: "Keine Benutzer",
 

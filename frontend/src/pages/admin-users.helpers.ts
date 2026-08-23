@@ -48,3 +48,38 @@ export function isPasswordConfirmationMismatch(
 ) {
   return confirmation.length > 0 && password !== confirmation;
 }
+
+const PASSWORD_CHARACTER_GROUPS = [
+  "ABCDEFGHJKLMNPQRSTUVWXYZ",
+  "abcdefghijkmnopqrstuvwxyz",
+  "23456789",
+  "!@#$%&*+-_=",
+] as const;
+
+function secureRandomIndex(max: number) {
+  const values = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(values);
+  return values[0] % max;
+}
+
+export function generateAdminPassword(length = 16) {
+  const normalizedLength = Math.max(12, length);
+  const alphabet = PASSWORD_CHARACTER_GROUPS.join("");
+  const characters = PASSWORD_CHARACTER_GROUPS.map(
+    (group) => group[secureRandomIndex(group.length)],
+  );
+
+  while (characters.length < normalizedLength) {
+    characters.push(alphabet[secureRandomIndex(alphabet.length)]);
+  }
+
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swapWith = secureRandomIndex(index + 1);
+    [characters[index], characters[swapWith]] = [
+      characters[swapWith],
+      characters[index],
+    ];
+  }
+
+  return characters.join("");
+}

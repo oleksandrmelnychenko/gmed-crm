@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   Building2,
   CalendarDays,
   ChevronLeft,
@@ -25,6 +27,7 @@ import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
+  conciergeTaskCode,
   conciergeTaskScheduledAt,
   conciergeTaskWorkload,
   filterConciergeTasks,
@@ -87,6 +90,12 @@ const copy = {
     more: "weitere",
     patient: "Patient",
     provider: "Anbieter",
+    activeTasks: "Aktiv",
+    archivedTasks: "Archiv",
+    allTasks: "Alle",
+    archive: "Archivieren",
+    restore: "Wiederherstellen",
+    archived: "Archiviert",
   },
   ru: {
     title: "Менеджер задач",
@@ -136,6 +145,12 @@ const copy = {
     more: "ещё",
     patient: "Пациент",
     provider: "Провайдер",
+    activeTasks: "Активные",
+    archivedTasks: "Архив",
+    allTasks: "Все",
+    archive: "В архив",
+    restore: "Восстановить",
+    archived: "В архиве",
   },
 } as const;
 
@@ -205,10 +220,13 @@ function TaskCard({
   compact = false,
   updating,
   deleting,
+  archiving,
   canModify,
   onOpen,
   onEdit,
   onDelete,
+  onArchive,
+  onRestore,
   onStatusChange,
 }: {
   task: ConciergeTask;
@@ -217,19 +235,25 @@ function TaskCard({
   compact?: boolean;
   updating: boolean;
   deleting: boolean;
+  archiving: boolean;
   canModify: boolean;
   onOpen: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
+  onArchive: (task: ConciergeTask) => void;
+  onRestore: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
 }) {
   const labels = copy[lang];
   const scheduled = conciergeTaskScheduledAt(task);
   const overdue = isConciergeTaskOverdue(task, now);
+  const archived = Boolean(task.archived_at);
+  const terminal = task.status === "completed" || task.status === "cancelled";
   return (
-    <article className={cn("relative rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
-      <button type="button" className={cn("min-w-0 text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
-        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-28")}>
+    <article className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
+      <button type="button" className={cn("min-w-0 w-full max-w-full overflow-hidden text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
+        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-52")}>
+          <Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
@@ -254,8 +278,9 @@ function TaskCard({
             </Badge>
           ) : null}
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
+          {archived ? <Badge variant="outline" className="rounded-full border-slate-300 bg-slate-100 text-[10px] text-slate-700">{labels.archived}</Badge> : null}
         </div>
-        <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-foreground">{task.title}</h3>
+        <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{task.title}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
           <p className="truncate"><UsersRound className="mr-1.5 inline size-3.5" />{task.assigned_to_name}</p>
@@ -268,13 +293,18 @@ function TaskCard({
         </div>
       </button>
       <div className={cn("flex items-center gap-1", !compact && "absolute right-2 top-2 z-10")}>
-        <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button>
-        <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={!canModify || updating || deleting} title={canModify ? labels.delete : labels.noPermission} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button>
+        {archived ? (
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore />{labels.restore}</Button>
+        ) : terminal ? (
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive />{labels.archive}</Button>
+        ) : null}
+        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
+        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.delete : labels.noPermission} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
       <SelectField
         className="h-8 min-w-[130px] rounded-md bg-background text-xs"
         value={task.status}
-        disabled={!canModify || updating || deleting}
+        disabled={archived || !canModify || updating || deleting || archiving}
         title={canModify ? labels.moveTo : labels.noPermission}
         aria-label={labels.moveTo}
         options={statuses.map((status) => ({ value: status, label: labels[status] }))}
@@ -292,9 +322,12 @@ export function ConciergeTaskManager({
   canManageTeam,
   updatingTaskId,
   deletingTaskId,
+  archivingTaskId,
   canModifyTask,
   onEdit,
   onDelete,
+  onArchive,
+  onRestore,
   onOpen,
   onStatusChange,
   onCreateAt,
@@ -306,9 +339,12 @@ export function ConciergeTaskManager({
   canManageTeam: boolean;
   updatingTaskId: string | null;
   deletingTaskId: string | null;
+  archivingTaskId: string | null;
   canModifyTask: (task: ConciergeTask) => boolean;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
+  onArchive: (task: ConciergeTask) => void;
+  onRestore: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
   onCreateAt?: (date: Date) => void;
@@ -318,11 +354,14 @@ export function ConciergeTaskManager({
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [clock, setClock] = useState(() => Date.now());
-  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all" });
+  const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
   const days = useMemo(() => calendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
+  const visibleStatuses = filters.archive === "archived"
+    ? statuses.filter((status) => status === "completed" || status === "cancelled")
+    : statuses;
   const tasksByDay = useMemo(() => {
     const result = new Map<string, ConciergeTask[]>();
     filtered.forEach((task) => {
@@ -349,7 +388,7 @@ export function ConciergeTaskManager({
   return (
     <section className="space-y-3" aria-label={labels.title}>
       {canManageTeam ? (
-        <div className="rounded-lg border border-border/70 bg-card p-3 shadow-sm">
+        <div className="rounded-lg border border-border/70 bg-card p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.teamWorkload}</h3>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {workload.map(({ assignee, active: assigneeActive, overdue: assigneeOverdue, today }) => (
@@ -362,8 +401,9 @@ export function ConciergeTaskManager({
         </div>
       ) : null}
 
-      <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:items-center sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+      <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 sm:flex sm:flex-nowrap sm:items-center sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <div className="relative col-span-2 min-w-0 sm:col-auto sm:min-w-[240px] sm:flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-10 rounded-md bg-field pl-8 text-xs sm:h-8" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
+        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[120px] sm:shrink-0" value={filters.archive} options={[{ value: "active", label: labels.activeTasks }, { value: "archived", label: labels.archivedTasks }, { value: "all", label: labels.allTasks }]} onValueChange={(archive) => setFilters((current) => ({ ...current, archive: archive as ConciergeTaskFilters["archive"] }))} />
         {canManageTeam ? <NativeComboboxSelect className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</NativeComboboxSelect> : null}
         <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} options={[{ value: "all", label: labels.allStatuses }, ...statuses.map((status) => ({ value: status, label: labels[status] }))]} onValueChange={(status) => setFilters((current) => ({ ...current, status }))} />
         <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} options={[{ value: "all", label: labels.allPriorities }, ...["low", "normal", "high", "urgent"].map((priority) => ({ value: priority, label: labels[priority as keyof typeof labels] }))]} onValueChange={(priority) => setFilters((current) => ({ ...current, priority }))} />
@@ -379,15 +419,15 @@ export function ConciergeTaskManager({
       {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}
 
       {filtered.length > 0 && view === "board" ? (
-        <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {statuses.map((status) => {
+        <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-4")}>
+          {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">

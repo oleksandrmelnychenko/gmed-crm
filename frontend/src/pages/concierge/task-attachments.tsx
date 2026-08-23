@@ -6,6 +6,8 @@ import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
+import { conciergeTaskErrorMessage } from "./model";
+
 export type ConciergeTaskAttachment = {
   id: string;
   file_name: string;
@@ -162,7 +164,7 @@ export function ConciergeTaskAttachments({
       }
       clearApiCache(`/concierge-operational-items/${taskId}/attachments`);
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : labels.uploadFailed);
+      setError(conciergeTaskErrorMessage(uploadError, lang, labels.uploadFailed));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -193,7 +195,7 @@ export function ConciergeTaskAttachments({
       clearApiCache(`/concierge-operational-items/${taskId}/attachments`);
       setAttachments((current) => current.filter((item) => item.id !== attachment.id));
     } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : labels.removeFailed);
+      setError(conciergeTaskErrorMessage(removeError, lang, labels.removeFailed));
     } finally {
       setBusy(false);
     }

@@ -41,6 +41,7 @@ test.describe("P0 operations modules", () => {
           title: internalTitle,
           task_audience: "internal",
           patient_id: scenario.patient.id,
+          provider_id: SEEDED_NON_MEDICAL_PROVIDER_ID,
           due_at: "2026-08-24T09:00:00Z",
         },
       },
@@ -71,6 +72,15 @@ test.describe("P0 operations modules", () => {
     await expect(page.getByText(externalTitle).first()).toBeVisible();
     await expect(page.getByText(scenario.patient.name).first()).toBeVisible();
     await expect(page.getByText("Berlin Driver GmbH").first()).toBeVisible();
+
+    await page.getByText(internalTitle).first().click();
+    const internalTaskDialog = page.getByRole("dialog", { name: internalTitle });
+    await expect(internalTaskDialog.getByRole("link", { name: new RegExp(scenario.patient.name) })).toHaveAttribute(
+      "href",
+      `/patients/${scenario.patient.id}`,
+    );
+    await expect(internalTaskDialog.locator(`a[href="/providers/${SEEDED_NON_MEDICAL_PROVIDER_ID}"]`)).toBeVisible();
+    await internalTaskDialog.getByRole("button", { name: "Schließen" }).click();
 
     await page.goto(`/patients/${scenario.patient.id}`);
     const patientTasks = page.getByTestId("linked-tasks-section");

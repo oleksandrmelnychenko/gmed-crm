@@ -67,6 +67,8 @@ export interface Translations
   login_error_password_short: string;
   login_error_password_long: string;
   login_error_unknown: string;
+  login_error_account_locked: string;
+  login_error_account_inactive: string;
   login_mfa_rejected_title: string;
   login_mfa_rejected_msg: string;
   login_mfa_pending_msg: string;
@@ -101,6 +103,8 @@ export interface Translations
   users_count: string;
   users_active: string;
   users_inactive: string;
+  users_locked: string;
+  users_unlock: string;
   users_password_hint: string;
   users_password_policy_hint: string;
   users_password_policy_complexity: string;
@@ -109,6 +113,9 @@ export interface Translations
   users_admins: string;
   users_reset_password: string;
   users_reset_button: string;
+  users_generate_password: string;
+  users_password_reset_success: string;
+  users_password_reset_confirm: string;
   users_empty_no_results: string;
   users_empty_no_users: string;
 

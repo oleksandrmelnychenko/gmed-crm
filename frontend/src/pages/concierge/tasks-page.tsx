@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +13,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   assignableConciergeTaskUsers,
   canModifyConciergeTask,
+  conciergeTaskErrorMessage,
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
   type ConciergeProvider,
@@ -30,6 +32,8 @@ const REALTIME_EVENTS = [
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
   "concierge_operational_item.deleted",
+  "concierge_operational_item.archived",
+  "concierge_operational_item.restored",
   "concierge_operational_item.reminder_sent",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
@@ -45,9 +49,14 @@ const copy = {
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
     updateFailed: "Die Aufgabe konnte nicht aktualisiert werden.",
-    deleteConfirm: "Diese Aufgabe wirklich löschen?",
+    deleteTitle: "Aufgabe löschen?",
+    deleteMessage: "Die Aufgabe wird aus dem Aufgabenmanager entfernt. Der Audit-Verlauf bleibt erhalten.",
+    delete: "Löschen",
+    cancel: "Abbrechen",
     deleteFailed: "Die Aufgabe konnte nicht gelöscht werden.",
     retry: "Erneut laden",
+    archiveFailed: "Die Aufgabe konnte nicht archiviert werden.",
+    restoreFailed: "Die Aufgabe konnte nicht wiederhergestellt werden.",
   },
   ru: {
     title: "Менеджер задач",
@@ -57,9 +66,14 @@ const copy = {
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
     updateFailed: "Не удалось обновить задачу.",
-    deleteConfirm: "Удалить эту задачу?",
+    deleteTitle: "Удалить задачу?",
+    deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
+    delete: "Удалить",
+    cancel: "Отмена",
     deleteFailed: "Не удалось удалить задачу.",
     retry: "Повторить",
+    archiveFailed: "Не удалось переместить задачу в архив.",
+    restoreFailed: "Не удалось восстановить задачу из архива.",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
 
@@ -75,6 +89,8 @@ export function ConciergeTaskManagerPage() {
   const [version, setVersion] = useState(0);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -110,7 +126,7 @@ export function ConciergeTaskManagerPage() {
       setError("");
       try {
         const [taskRows, assigneeRows, patientRows, providerRows] = await Promise.all([
-          apiFetch<ConciergeTask[]>("/concierge-operational-items", {
+          apiFetch<ConciergeTask[]>("/concierge-operational-items?archive=all", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
@@ -195,7 +211,7 @@ export function ConciergeTaskManagerPage() {
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : labels.updateFailed);
+      setError(conciergeTaskErrorMessage(updateError, lang, labels.updateFailed));
     } finally {
       setUpdatingTaskId(null);
     }
@@ -264,7 +280,7 @@ export function ConciergeTaskManagerPage() {
       });
       return saved;
     } catch (saveError) {
-      setTaskError(saveError instanceof Error ? saveError.message : labels.updateFailed);
+      setTaskError(conciergeTaskErrorMessage(saveError, lang, labels.updateFailed));
       throw saveError;
     } finally {
       setSubmittingTask(false);
@@ -273,13 +289,13 @@ export function ConciergeTaskManagerPage() {
 
   async function deleteTask(task: ConciergeTask) {
     if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
-    if (!window.confirm(labels.deleteConfirm)) return;
     setDeletingTaskId(task.id);
     setError("");
     try {
       await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.filter((item) => item.id !== task.id));
+      setPendingDeleteTask(null);
       if (detailTaskId === task.id) {
         setDetailTaskId(null);
         const next = new URLSearchParams(searchParams);
@@ -287,9 +303,33 @@ export function ConciergeTaskManagerPage() {
         setSearchParams(next, { replace: true });
       }
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : labels.deleteFailed);
+      setError(conciergeTaskErrorMessage(deleteError, lang, labels.deleteFailed));
     } finally {
       setDeletingTaskId(null);
+    }
+  }
+
+  async function changeArchiveState(task: ConciergeTask, archive: boolean) {
+    if (archivingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    setArchivingTaskId(task.id);
+    setError("");
+    try {
+      const updated = await apiFetch<ConciergeTask>(
+        `/concierge-operational-items/${task.id}/${archive ? "archive" : "restore"}`,
+        { method: "POST" },
+      );
+      clearApiCache("/concierge-operational-items");
+      setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (archiveError) {
+      setError(
+        conciergeTaskErrorMessage(
+          archiveError,
+          lang,
+          archive ? labels.archiveFailed : labels.restoreFailed,
+        ),
+      );
+    } finally {
+      setArchivingTaskId(null);
     }
   }
 
@@ -336,9 +376,12 @@ export function ConciergeTaskManagerPage() {
         canManageTeam={assignees.some((assignee) => assignee.id !== user?.id)}
         updatingTaskId={updatingTaskId}
         deletingTaskId={deletingTaskId}
+        archivingTaskId={archivingTaskId}
         canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
         onEdit={openEditTask}
-        onDelete={(task) => void deleteTask(task)}
+        onDelete={setPendingDeleteTask}
+        onArchive={(task) => void changeArchiveState(task, true)}
+        onRestore={(task) => void changeArchiveState(task, false)}
         onOpen={openTaskDetail}
         onStatusChange={(task, status) => void changeTaskStatus(task, status)}
         onCreateAt={(date) => openCreateTask(date)}
@@ -389,6 +432,22 @@ export function ConciergeTaskManagerPage() {
           setSearchParams(next, { replace: true });
         }}
         onChanged={requestRefresh}
+      />
+
+      <DirtyDismissConfirmDialog
+        open={Boolean(pendingDeleteTask)}
+        title={labels.deleteTitle}
+        message={labels.deleteMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={labels.delete}
+        destructive
+        confirmDisabled={Boolean(deletingTaskId)}
+        onCancel={() => {
+          if (!deletingTaskId) setPendingDeleteTask(null);
+        }}
+        onConfirm={() => {
+          if (pendingDeleteTask) void deleteTask(pendingDeleteTask);
+        }}
       />
     </div>
   );

@@ -14,6 +14,8 @@ import {
   conciergeServiceCostVariance,
   conciergeServiceDisplayTitle,
   conciergeTaskDisplayTitle,
+  conciergeTaskErrorMessage,
+  conciergeTaskCode,
   assignableConciergeTaskUsers,
   canAssignConciergeTaskToRole,
   canModifyConciergeTask,
@@ -62,6 +64,23 @@ describe("filterConciergeTaskAssignees", () => {
       "sales",
       "teamlead_interpreter",
     ]);
+  });
+
+  it("localizes task permission errors returned by the API", () => {
+    const error = new Error(
+      "Only the task creator or a higher role can change this task",
+    );
+
+    expect(conciergeTaskErrorMessage(error, "ru", "fallback")).toBe(
+      "Изменять задачу может только её автор или сотрудник с более высокой ролью.",
+    );
+    expect(conciergeTaskErrorMessage(error, "de", "fallback")).toBe(
+      "Nur der Ersteller oder eine Person mit einer höheren Rolle darf diese Aufgabe ändern.",
+    );
+    expect(
+      conciergeTaskErrorMessage(new Error("Specific error"), "ru", "fallback"),
+    ).toBe("Specific error");
+    expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
   });
 
   it("limits assignment to the actor's level and lower levels", () => {
@@ -153,6 +172,9 @@ function task(overrides: Partial<ConciergeTask> = {}): ConciergeTask {
     checklist_completed: 0,
     comment_count: 0,
     completed_at: null,
+    archived_at: null,
+    archived_by: null,
+    archived_by_name: null,
     created_at: "2026-08-18T08:00:00.000Z",
     updated_at: "2026-08-18T08:00:00.000Z",
     task_audience: "internal",
@@ -195,6 +217,10 @@ function provider(overrides: Partial<ConciergeProvider> = {}): ConciergeProvider
 }
 
 describe("concierge workspace model", () => {
+  it("builds a stable human-readable task code", () => {
+    expect(conciergeTaskCode(task({ id: "cba1c6d0-e03d-4087-88d0-9eb825893864" }))).toBe("TASK-CBA1C6D0");
+  });
+
   it("filters task-manager rows by assignee, timing and plain-language search", () => {
     const now = new Date("2026-08-19T12:00:00.000Z");
     const rows = [
@@ -209,7 +235,45 @@ describe("concierge workspace model", () => {
       kind: "all",
       audience: "all",
       timing: "overdue",
+      archive: "active",
     }, now).map((item) => item.id)).toEqual(["overdue"]);
+
+    expect(filterConciergeTasks(rows, {
+      query: "TASK-OVERDUE",
+      assignee: "all",
+      status: "all",
+      priority: "all",
+      kind: "all",
+      audience: "all",
+      timing: "all",
+      archive: "active",
+    }, now).map((item) => item.id)).toEqual(["overdue"]);
+  });
+
+  it("separates active, archived and combined task-manager rows", () => {
+    const now = new Date("2026-08-23T12:00:00.000Z");
+    const rows = [
+      task({ id: "active", status: "completed" }),
+      task({
+        id: "archived",
+        status: "completed",
+        archived_at: "2026-08-23T11:00:00.000Z",
+        archived_by: "manager-1",
+      }),
+    ];
+    const filters = {
+      query: "",
+      assignee: "all",
+      status: "all",
+      priority: "all",
+      kind: "all",
+      audience: "all",
+      timing: "all" as const,
+    };
+
+    expect(filterConciergeTasks(rows, { ...filters, archive: "active" }, now).map((item) => item.id)).toEqual(["active"]);
+    expect(filterConciergeTasks(rows, { ...filters, archive: "archived" }, now).map((item) => item.id)).toEqual(["archived"]);
+    expect(filterConciergeTasks(rows, { ...filters, archive: "all" }, now).map((item) => item.id)).toEqual(["active", "archived"]);
   });
 
   it("calculates manager workload for each Concierge", () => {

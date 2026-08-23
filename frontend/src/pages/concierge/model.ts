@@ -148,6 +148,9 @@ export type ConciergeTask = {
   checklist_completed: number;
   comment_count: number;
   completed_at: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  archived_by_name: string | null;
   created_at: string;
   updated_at: string;
   task_audience: "internal" | "external";
@@ -232,6 +235,30 @@ export function canModifyConciergeTask(
   return actorLevel !== undefined && authorLevel !== undefined && actorLevel > authorLevel;
 }
 
+const TASK_PERMISSION_ERROR_PREFIX =
+  "Only the task creator or a higher role can";
+
+export function conciergeTaskErrorMessage(
+  error: unknown,
+  lang: "de" | "ru",
+  fallback: string,
+) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+
+  if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {
+    return lang === "ru"
+      ? "Изменять задачу может только её автор или сотрудник с более высокой ролью."
+      : "Nur der Ersteller oder eine Person mit einer höheren Rolle darf diese Aufgabe ändern.";
+  }
+
+  return message || fallback;
+}
+
 export type ConciergeTaskChecklistItem = {
   id: string;
   label: string;
@@ -278,6 +305,7 @@ export type ConciergeTaskFilters = {
   kind: string;
   audience: string;
   timing: "all" | "today" | "overdue" | "upcoming";
+  archive: "active" | "archived" | "all";
 };
 
 export type ConciergeProviderTaxonomyNode = {
@@ -412,6 +440,11 @@ export function nextConciergeTaskStatus(status: string): "in_progress" | "comple
 export function conciergeTaskDisplayTitle(task: ConciergeTask, lang: "de" | "ru"): string {
   void lang;
   return task.title;
+}
+
+export function conciergeTaskCode(task: Pick<ConciergeTask, "id">): string {
+  const compactId = task.id.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `TASK-${compactId.slice(0, 8)}`;
 }
 
 export function conciergeWorkspaceStats(
@@ -549,12 +582,15 @@ export function filterConciergeTasks(
 ): ConciergeTask[] {
   const query = filters.query.trim().toLocaleLowerCase();
   return tasks.filter((task) => {
+    if (filters.archive === "active" && task.archived_at) return false;
+    if (filters.archive === "archived" && !task.archived_at) return false;
     if (filters.assignee !== "all" && task.assigned_to !== filters.assignee) return false;
     if (filters.status !== "all" && task.status !== filters.status) return false;
     if (filters.priority !== "all" && task.priority !== filters.priority) return false;
     if (filters.kind !== "all" && task.kind !== filters.kind) return false;
     if (filters.audience !== "all" && task.task_audience !== filters.audience) return false;
     if (query && ![
+      conciergeTaskCode(task),
       task.title,
       task.note,
       task.location,

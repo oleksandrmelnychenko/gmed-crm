@@ -57,6 +57,16 @@ export class PendingLoginError extends Error {
   }
 }
 
+export class AuthLoginError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "AuthLoginError";
+    this.code = code;
+  }
+}
+
 interface ApiErrorBody {
   error?: string;
   message?: string;
@@ -116,7 +126,7 @@ async function parseError(response: Response) {
     body?.error ??
     `${response.status} ${response.statusText || uiText("auth_request_failed")}`;
 
-  throw new Error(message);
+  throw new AuthLoginError(message, body?.error);
 }
 
 async function fetchJson<T>(

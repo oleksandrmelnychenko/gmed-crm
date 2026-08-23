@@ -58,6 +58,10 @@ export const ru = {
   login_error_password_short: "Минимум 8 символов",
   login_error_password_long: "Пароль слишком длинный",
   login_error_unknown: "Не удалось войти",
+  login_error_account_locked:
+    "Аккаунт временно заблокирован после нескольких неудачных попыток. Обратитесь к администратору для разблокировки.",
+  login_error_account_inactive:
+    "Аккаунт деактивирован. Обратитесь к администратору.",
   login_mfa_rejected_title: "Доступ отклонён",
   login_mfa_rejected_msg:
     "Ваша попытка входа была отклонена администратором.",
@@ -95,6 +99,8 @@ export const ru = {
   users_count: "Пользователи",
   users_active: "Активен",
   users_inactive: "Неактивен",
+  users_locked: "Заблокирован",
+  users_unlock: "Разблокировать",
   users_password_hint: "Мин. 8 символов",
   users_password_policy_hint:
     "Мин. 8 символов: строчная и заглавная буква, цифра и символ",
@@ -105,6 +111,11 @@ export const ru = {
   users_admins: "Администраторы",
   users_reset_password: "Сброс пароля",
   users_reset_button: "Сбросить",
+  users_generate_password: "Сгенерировать",
+  users_password_reset_success:
+    "Пароль изменён. Блокировка снята, активные сессии завершены.",
+  users_password_reset_confirm:
+    "Новый пароль начнёт действовать сразу. Пользователь выйдет из аккаунта на всех устройствах, а блокировка входа будет снята.",
   users_empty_no_results: "Нет результатов",
   users_empty_no_users: "Нет пользователей",
 

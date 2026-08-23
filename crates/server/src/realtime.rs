@@ -89,6 +89,24 @@ pub async fn publish_event(state: &AppState, mut event: RealtimeEvent) {
     let _ = state.realtime_events.send(event);
 }
 
+pub async fn publish_company_finance_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    event_type: &str,
+    entity_type: &str,
+    entity_id: Uuid,
+    payload: Value,
+) {
+    publish_event(
+        state,
+        RealtimeEvent::new(event_type, entity_type, entity_id)
+            .actor(actor_user_id)
+            .roles(&["ceo", "billing"])
+            .payload(payload),
+    )
+    .await;
+}
+
 pub async fn load_realtime_events_after(
     state: &AppState,
     after_seq: i64,

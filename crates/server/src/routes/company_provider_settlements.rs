@@ -988,6 +988,20 @@ async fn create_provider_payment(
             "paid_on": input.paid_on.to_string(),
         }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "provider_payment.recorded",
+        "external_invoice",
+        external_invoice_id,
+        json!({
+            "provider_payment_transaction_id": payment_id,
+            "financial_account_id": body.financial_account_id,
+            "amount_gross": decimal_to_string(input.amount_gross),
+            "currency": context.currency,
+        }),
+    )
+    .await;
 
     Json(json!({ "transaction": payment, "idempotent_replay": false })).into_response()
 }
@@ -1290,6 +1304,20 @@ async fn reverse_provider_payment(
             "paid_on": paid_on.to_string(),
         }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "provider_payment.reversed",
+        "external_invoice",
+        external_invoice_id,
+        json!({
+            "provider_payment_reversal_id": reversal_id,
+            "reverses_provider_payment_id": payment_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "currency": context.currency,
+        }),
+    )
+    .await;
 
     Json(json!({ "transaction": value, "idempotent_replay": false })).into_response()
 }

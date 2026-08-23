@@ -555,6 +555,15 @@ async fn create_company_financial_account(
         Some(account_id),
         json!({ "name": name, "account_type": account_type, "currency": currency, "is_default": is_default }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.created",
+        "company_financial_account",
+        account_id,
+        json!({ "currency": currency }),
+    )
+    .await;
     (StatusCode::CREATED, Json(json!({ "id": account_id }))).into_response()
 }
 
@@ -676,6 +685,15 @@ async fn update_company_financial_account(
         Some(account_id),
         json!({ "is_default": body.is_default, "is_active": body.is_active }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.updated",
+        "company_financial_account",
+        account_id,
+        json!({ "is_default": body.is_default, "is_active": body.is_active }),
+    )
+    .await;
     Json(json!({ "id": account_id })).into_response()
 }
 
@@ -821,6 +839,15 @@ async fn create_company_financial_account_adjustment(
         Some(adjustment_id),
         json!({ "financial_account_id": account_id, "direction": direction, "amount": decimal_to_string(amount) }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.adjustment_created",
+        "company_financial_account_adjustment",
+        adjustment_id,
+        json!({ "financial_account_id": account_id, "direction": direction, "amount": decimal_to_string(amount) }),
+    )
+    .await;
     (
         StatusCode::CREATED,
         Json(json!({ "id": adjustment_id, "idempotent_replay": false })),
@@ -996,6 +1023,15 @@ async fn reverse_company_financial_account_adjustment(
         Some(reversal_id),
         json!({ "financial_account_id": account_id, "reverses_adjustment_id": adjustment_id }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.adjustment_reversed",
+        "company_financial_account_adjustment",
+        reversal_id,
+        json!({ "financial_account_id": account_id, "reverses_adjustment_id": adjustment_id }),
+    )
+    .await;
     Json(json!({ "id": reversal_id, "idempotent_replay": false })).into_response()
 }
 
@@ -1119,5 +1155,14 @@ async fn assign_accounting_entry_financial_account(
         Some(entry_id),
         json!({ "financial_account_id": body.financial_account_id, "updated_count": updated_count }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "accounting_entry.financial_account_assigned",
+        "accounting_entry",
+        entry_id,
+        json!({ "financial_account_id": body.financial_account_id, "updated_count": updated_count }),
+    )
+    .await;
     Json(json!({ "updated_count": updated_count, "idempotent_replay": false })).into_response()
 }

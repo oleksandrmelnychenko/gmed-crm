@@ -4,7 +4,6 @@ import {
   CircleDollarSign,
   Clock3,
   ExternalLink,
-  History,
   LoaderCircle,
   Mail,
   MapPinned,
@@ -23,8 +22,8 @@ import {
   conciergeDialogContentClassName,
   ConciergeDialogBody,
   ConciergeDialogHeader,
-  ConciergeDialogSection,
   ConciergeField,
+  ConciergeProfileDialogSection,
 } from "./dialog-layout";
 
 import {
@@ -43,7 +42,6 @@ import {
 const copy = {
   de: {
     title: "Partnerkontakt",
-    description: "Kontakt und Buchungsverlauf für diesen nicht-medizinischen Service dokumentieren.",
     call: "Anrufen",
     email: "E-Mail",
     route: "Route",
@@ -84,7 +82,6 @@ const copy = {
   },
   ru: {
     title: "Связь с партнёром",
-    description: "Фиксируйте контакты и ход бронирования по этой немедицинской услуге.",
     call: "Позвонить",
     email: "Написать",
     route: "Маршрут",
@@ -273,11 +270,9 @@ export function ConciergePartnerInteractionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
-          icon={MessageSquareText}
-          tone="indigo"
+          tone="dot"
           title={labels.title}
-          description={labels.description}
-          meta={<Badge variant="secondary" className="max-w-72 truncate rounded-full">{provider.name}</Badge>}
+          meta={<Badge variant="outline" className="max-w-72 truncate rounded-full font-medium">{provider.name}</Badge>}
         />
 
         <ConciergeDialogBody>
@@ -287,23 +282,23 @@ export function ConciergePartnerInteractionDialog({
             </div>
           ) : null}
 
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
-            <div className="space-y-4">
-              <ConciergeDialogSection title={provider.name}>
-                <div className="grid grid-cols-3 gap-2">
-                  <Button nativeButton={false} render={<a href={callUrl ?? "#"} />} type="button" variant="outline" disabled={!callUrl}>
+          <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.08fr)_minmax(20rem,0.92fr)]">
+            <div className="space-y-3">
+              <ConciergeProfileDialogSection title={provider.name}>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button className="h-9 rounded-lg" nativeButton={false} render={<a href={callUrl ?? "#"} />} type="button" variant="outline" disabled={!callUrl}>
                     <Phone />{labels.call}
                   </Button>
-                  <Button nativeButton={false} render={<a href={emailUrl ?? "#"} />} type="button" variant="outline" disabled={!emailUrl}>
+                  <Button className="h-9 rounded-lg" nativeButton={false} render={<a href={emailUrl ?? "#"} />} type="button" variant="outline" disabled={!emailUrl}>
                     <Mail />{labels.email}
                   </Button>
-                  <Button nativeButton={false} render={<a href={routeUrl ?? "#"} target="_blank" rel="noreferrer" />} type="button" variant="outline" disabled={!routeUrl}>
+                  <Button className="h-9 rounded-lg" nativeButton={false} render={<a href={routeUrl ?? "#"} target="_blank" rel="noreferrer" />} type="button" variant="outline" disabled={!routeUrl}>
                     <MapPinned />{labels.route}
                   </Button>
                 </div>
-              </ConciergeDialogSection>
+              </ConciergeProfileDialogSection>
 
-              <ConciergeDialogSection title={labels.record} icon={MessageSquareText}>
+              <ConciergeProfileDialogSection title={labels.record}>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ConciergeField label={labels.occurredAt}>
               <Input type="datetime-local" value={occurredAt} max={localDateTimeValue(new Date(Date.now() + 5 * 60_000))} onChange={(event) => setOccurredAt(event.target.value)} />
@@ -343,10 +338,10 @@ export function ConciergePartnerInteractionDialog({
                     {submitting ? labels.saving : labels.record}
                   </Button>
                 </div>
-              </ConciergeDialogSection>
+              </ConciergeProfileDialogSection>
             </div>
 
-            <ConciergeDialogSection title={labels.history} icon={History} className="lg:sticky lg:top-0">
+            <ConciergeProfileDialogSection title={labels.history} className="lg:sticky lg:top-0">
               <div className="max-h-[56vh] overflow-y-auto pr-1">
                 {loading ? (
                   <div className="flex justify-center py-12 text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /></div>
@@ -412,7 +407,7 @@ export function ConciergePartnerInteractionDialog({
                   </ol>
                 )}
               </div>
-            </ConciergeDialogSection>
+            </ConciergeProfileDialogSection>
           </div>
         </ConciergeDialogBody>
       </DialogContent>

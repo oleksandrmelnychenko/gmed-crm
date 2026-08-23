@@ -130,3 +130,27 @@ def test_supports_the_complete_medical_specialty_abbreviation_catalog() -> None:
             patient_name="Test Patient",
         )
         assert suggestion.specialty_code == expected_code, specialty_text
+
+
+def test_selected_specialty_category_controls_name_with_sparse_ocr_text() -> None:
+    cases = {
+        "medical_onko": "ONKO",
+        "medical_patho_histo": "HISTO/PATHO",
+        "medical_radiology": "RAD",
+        "medical_hamat": "HÄMAT",
+        "medical_pneumo_resp": "PNEUMO/RESP",
+        "medical_allmed": "ALLMED",
+    }
+
+    for category, expected_code in cases.items():
+        suggestion = suggest_document_name(
+            extracted_text="Befund\nDatum: 23.08.2026",
+            original_filename="scan.pdf",
+            art="Befund",
+            category=category,
+            is_medical=True,
+            patient_name="Test Patient",
+        )
+        assert suggestion.specialty_code == expected_code
+        assert suggestion.category == category
+        assert suggestion.auto_name.startswith(f"{expected_code}-Befund vom 23.08.2026")

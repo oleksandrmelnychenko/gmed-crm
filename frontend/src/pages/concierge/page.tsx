@@ -21,7 +21,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ToolbarField } from "@/components/data-table/toolbar-field";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
@@ -38,6 +38,7 @@ import {
   conciergeServiceTaxonomyLabel,
   conciergeWorkspaceStats,
   canModifyConciergeTask,
+  conciergeTaskErrorMessage,
   filterConciergeServices,
   filterConciergeTaskAssignees,
   isConciergeServiceOverdue,
@@ -105,6 +106,8 @@ const REALTIME_EVENTS = [
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
   "concierge_operational_item.deleted",
+  "concierge_operational_item.archived",
+  "concierge_operational_item.restored",
   "concierge_operational_item.reminder_sent",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
@@ -151,8 +154,13 @@ const text = {
     loadFailed: "Der Concierge-Arbeitsbereich konnte nicht geladen werden.",
     updateFailed: "Der Servicestatus konnte nicht aktualisiert werden.",
     taskUpdateFailed: "Der Aufgabenstatus konnte nicht aktualisiert werden.",
-    taskDeleteConfirm: "Diese Aufgabe wirklich löschen?",
+    taskDeleteTitle: "Aufgabe löschen?",
+    taskDeleteMessage: "Die Aufgabe wird aus dem Aufgabenmanager entfernt. Der Audit-Verlauf bleibt erhalten.",
+    taskDelete: "Löschen",
+    taskDeleteCancel: "Abbrechen",
     taskDeleteFailed: "Die Aufgabe konnte nicht gelöscht werden.",
+    taskArchiveFailed: "Die Aufgabe konnte nicht archiviert werden.",
+    taskRestoreFailed: "Die Aufgabe konnte nicht wiederhergestellt werden.",
     planned: "Geplant",
     booked: "Gebucht",
     status_confirmed: "Bestätigt",
@@ -201,8 +209,13 @@ const text = {
     loadFailed: "Не удалось загрузить рабочее пространство консьержа.",
     updateFailed: "Не удалось обновить статус услуги.",
     taskUpdateFailed: "Не удалось обновить статус задачи.",
-    taskDeleteConfirm: "Удалить эту задачу?",
+    taskDeleteTitle: "Удалить задачу?",
+    taskDeleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
+    taskDelete: "Удалить",
+    taskDeleteCancel: "Отмена",
     taskDeleteFailed: "Не удалось удалить задачу.",
+    taskArchiveFailed: "Не удалось переместить задачу в архив.",
+    taskRestoreFailed: "Не удалось восстановить задачу из архива.",
     planned: "Запланировано",
     booked: "Забронировано",
     status_confirmed: "Подтверждено",
@@ -301,10 +314,9 @@ function ServiceCard({
   return (
     <article
       className={cn(
-        "rounded-xl border border-l-[3px] bg-card p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-border hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)]",
+        "rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:border-border hover:shadow-md",
         serviceAccent(service.status, overdue),
-        overdue ? "border-rose-200" : "border-border/70",
-        compact && "lg:grid lg:grid-cols-[minmax(180px,1.2fr)_minmax(160px,1fr)_minmax(170px,1fr)] lg:items-center lg:gap-4 2xl:grid-cols-[minmax(180px,1.2fr)_minmax(160px,1fr)_minmax(170px,1fr)_minmax(180px,1.15fr)]",
+        compact && "lg:grid lg:grid-cols-[minmax(180px,1.2fr)_minmax(160px,1fr)_minmax(170px,1fr)] lg:items-center lg:gap-4",
       )}
       data-testid={`concierge-service-${service.id}`}
     >
@@ -323,6 +335,14 @@ function ServiceCard({
               {labels.overdue}
             </Badge>
           ) : null}
+          <Badge
+            variant="outline"
+            className="rounded-full border-border/70 bg-card font-mono text-[9px] font-medium text-muted-foreground"
+            title={service.id}
+            data-testid={`concierge-service-id-${service.id}`}
+          >
+            #{service.id.slice(0, 8)}
+          </Badge>
         </div>
         <h3 className="mt-2 truncate text-sm font-semibold text-foreground" title={displayTitle}>
           {displayTitle}
@@ -332,7 +352,13 @@ function ServiceCard({
 
       <div className={cn("mt-3 min-w-0 space-y-2.5 border-t border-border/60 pt-3", compact && "lg:mt-0 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0")}>
         <ServiceFact icon={UserRound} label={labels.patient}>
-          <span className="truncate">{service.patient_name}</span>
+          <Badge
+            variant="outline"
+            className="max-w-full rounded-full border-emerald-200 bg-emerald-50 text-[10px] font-medium text-emerald-800"
+            title={`${labels.patient}: ${service.patient_name}`}
+          >
+            <span className="truncate">{service.patient_name}</span>
+          </Badge>
           <span className="font-mono text-[10px] text-muted-foreground">{service.patient_pid}</span>
         </ServiceFact>
         <ServiceFact icon={CalendarClock} label={labels.schedule}>
@@ -342,7 +368,17 @@ function ServiceCard({
 
       <div className={cn("mt-3 min-w-0 space-y-2.5 border-t border-border/60 pt-3", compact && "lg:mt-0 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0")}>
         <ServiceFact icon={Clock3} label={labels.provider}>
-          <span className="truncate">{provider || labels.notSet}</span>
+          {provider ? (
+            <Badge
+              variant="outline"
+              className="max-w-full rounded-full border-amber-200 bg-amber-50 text-[10px] font-medium text-amber-800"
+              title={`${labels.provider}: ${provider}`}
+            >
+              <span className="truncate">{provider}</span>
+            </Badge>
+          ) : (
+            <span className="truncate">{labels.notSet}</span>
+          )}
           {service.vendor_contact ? (
             <span className="truncate text-[10px] text-muted-foreground">{service.vendor_contact}</span>
           ) : null}
@@ -369,7 +405,7 @@ function ServiceCard({
 
       <div className={cn(
         "mt-3 grid min-w-0 grid-cols-2 gap-2 border-t border-border/60 pt-3",
-        compact && "lg:col-span-3 lg:flex lg:max-w-full lg:flex-wrap lg:justify-end lg:justify-self-stretch 2xl:col-span-1 2xl:mt-0 2xl:border-t-0 2xl:pt-0",
+        compact && "lg:col-span-3 lg:flex lg:max-w-full lg:flex-wrap lg:justify-end lg:justify-self-stretch",
       )}>
         {onOpenPartner ? (
           <Button
@@ -423,7 +459,7 @@ function ServiceFact({
 }) {
   return (
     <div className="grid min-w-0 grid-cols-[1.1rem_minmax(0,1fr)] gap-1.5 text-xs">
-      <Icon aria-hidden="true" className="mt-3.5 size-3.5 shrink-0 text-primary/75" />
+      <Icon aria-hidden="true" className="mt-3.5 size-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
         <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80">{label}</p>
         <div className="flex min-w-0 items-center justify-between gap-2 text-foreground">{children}</div>
@@ -444,12 +480,12 @@ function MetricCard({
   icon: typeof CalendarDays;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-xl border border-border/70 bg-card px-2.5 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.035)] sm:gap-3 sm:px-3 sm:py-2.5">
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 shadow-sm">
       <div className="min-w-0">
         <p className="truncate text-[10px] font-medium text-muted-foreground sm:text-[11px]">{label}</p>
         <p className={cn("mt-0.5 font-mono text-lg font-semibold tabular-nums text-foreground sm:text-xl", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>{value}</p>
       </div>
-      <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/8 text-primary sm:size-8", tone === "danger" && value > 0 && "bg-rose-500/10 text-rose-600", tone === "success" && value > 0 && "bg-emerald-500/10 text-emerald-600")}>
+      <span className={cn("flex size-7 shrink-0 items-center justify-center text-muted-foreground sm:size-8", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>
         <Icon className="size-3 sm:size-3.5" />
       </span>
     </div>
@@ -476,6 +512,8 @@ export function ConciergeWorkspacePage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
@@ -538,7 +576,7 @@ export function ConciergeWorkspacePage() {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
-          apiFetch<ConciergeTask[]>("/concierge-operational-items", {
+          apiFetch<ConciergeTask[]>("/concierge-operational-items?archive=all", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
@@ -854,7 +892,7 @@ export function ConciergeWorkspacePage() {
         current.map((item) => item.id === updated.id ? updated : item),
       );
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : labels.taskUpdateFailed);
+      setError(conciergeTaskErrorMessage(updateError, lang, labels.taskUpdateFailed));
     } finally {
       setUpdatingTaskId(null);
     }
@@ -931,7 +969,7 @@ export function ConciergeWorkspacePage() {
       });
       return saved;
     } catch (saveError) {
-      setTaskError(saveError instanceof Error ? saveError.message : labels.taskUpdateFailed);
+      setTaskError(conciergeTaskErrorMessage(saveError, lang, labels.taskUpdateFailed));
       throw saveError;
     } finally {
       setSubmittingTask(false);
@@ -940,17 +978,41 @@ export function ConciergeWorkspacePage() {
 
   async function deleteTask(task: ConciergeTask) {
     if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
-    if (!window.confirm(labels.taskDeleteConfirm)) return;
     setDeletingTaskId(task.id);
     setError("");
     try {
       await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.filter((item) => item.id !== task.id));
+      setPendingDeleteTask(null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : labels.taskDeleteFailed);
+      setError(conciergeTaskErrorMessage(deleteError, lang, labels.taskDeleteFailed));
     } finally {
       setDeletingTaskId(null);
+    }
+  }
+
+  async function changeArchiveState(task: ConciergeTask, archive: boolean) {
+    if (archivingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    setArchivingTaskId(task.id);
+    setError("");
+    try {
+      const updated = await apiFetch<ConciergeTask>(
+        `/concierge-operational-items/${task.id}/${archive ? "archive" : "restore"}`,
+        { method: "POST" },
+      );
+      clearApiCache("/concierge-operational-items");
+      setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (archiveError) {
+      setError(
+        conciergeTaskErrorMessage(
+          archiveError,
+          lang,
+          archive ? labels.taskArchiveFailed : labels.taskRestoreFailed,
+        ),
+      );
+    } finally {
+      setArchivingTaskId(null);
     }
   }
 
@@ -964,7 +1026,7 @@ export function ConciergeWorkspacePage() {
   }
 
   return (
-    <div className="space-y-4" data-testid="concierge-workspace">
+    <div className="space-y-3" data-testid="concierge-workspace">
       <PageHeader
         title={viewMode === "tasks" ? labels.taskManagerTitle : labels.title}
         description={viewMode === "tasks" ? labels.taskManagerSubtitle : labels.subtitle}
@@ -998,25 +1060,8 @@ export function ConciergeWorkspacePage() {
         </div>
       ) : null}
 
-      <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
-      <div className="mx-auto flex w-max flex-nowrap rounded-lg border border-border bg-card p-1">
-        {([
-          ["board", Columns3, labels.board],
-          ["list", List, labels.list],
-          ["calendar", CalendarDays, labels.calendar],
-          ["map", MapPinned, labels.map],
-          ["tasks", ListChecks, labels.taskManager],
-        ] as const).map(([mode, Icon, label]) => (
-          <Button key={mode} type="button" size="sm" variant={viewMode === mode ? "default" : "ghost"} className="h-8 rounded-md px-3 text-xs" aria-pressed={viewMode === mode} onClick={() => selectViewMode(mode)}>
-            <Icon className="size-3.5" />
-            {label}
-          </Button>
-        ))}
-      </div>
-      </div>
-
-      {viewMode !== "tasks" ? <div className="relative z-30 flex flex-nowrap items-end gap-1.5 overflow-x-auto rounded-xl border border-border/70 bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.035)]">
-        <ToolbarField label={labels.searchLabel} className="w-full">
+      {viewMode !== "tasks" ? (
+        <div className="relative z-30 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:px-3 sm:py-2">
           <div className="relative min-w-0">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -1025,11 +1070,28 @@ export function ConciergeWorkspacePage() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={labels.search}
             aria-label={labels.search}
-            className="h-9 rounded-lg bg-card pl-8 text-xs shadow-none focus-visible:border-primary/40"
+            className="h-10 rounded-md bg-field pl-8 text-xs shadow-none sm:h-8"
           />
           </div>
-        </ToolbarField>
-      </div> : null}
+        </div>
+      ) : null}
+
+      <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
+        <div className="mx-auto flex w-max min-w-full flex-nowrap justify-center gap-1 sm:min-w-0">
+          {([
+            ["board", Columns3, labels.board],
+            ["list", List, labels.list],
+            ["calendar", CalendarDays, labels.calendar],
+            ["map", MapPinned, labels.map],
+            ["tasks", ListChecks, labels.taskManager],
+          ] as const).map(([mode, Icon, label]) => (
+            <Button key={mode} type="button" size="sm" variant={viewMode === mode ? "default" : "ghost"} className="h-9 shrink-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" aria-pressed={viewMode === mode} onClick={() => selectViewMode(mode)}>
+              <Icon className="size-3.5" />
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
 
       {viewMode === "tasks" ? (
         <ConciergeTaskManager
@@ -1040,9 +1102,12 @@ export function ConciergeWorkspacePage() {
           canManageTeam={user?.role === "ceo"}
           updatingTaskId={updatingTaskId}
           deletingTaskId={deletingTaskId}
+          archivingTaskId={archivingTaskId}
           canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
           onEdit={openEditTask}
-          onDelete={(task) => void deleteTask(task)}
+          onDelete={setPendingDeleteTask}
+          onArchive={(task) => void changeArchiveState(task, true)}
+          onRestore={(task) => void changeArchiveState(task, false)}
           onOpen={openTaskDetail}
           onStatusChange={(task, status) => void changeTaskStatus(task, status)}
         />
@@ -1066,7 +1131,7 @@ export function ConciergeWorkspacePage() {
         <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="min-w-0">
             {visibleServices.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+              <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">
                 {labels.empty}
               </div>
             ) : viewMode === "board" ? (
@@ -1074,12 +1139,12 @@ export function ConciergeWorkspacePage() {
                 {CONCIERGE_BOARD_COLUMNS.map((column) => {
                   const rows = servicesByColumn.get(column.id) ?? [];
                   return (
-                    <div key={column.id} className="min-w-0 rounded-xl border border-border/70 bg-card p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.035)]">
-                      <div className="flex items-center justify-between gap-2 px-1 pb-2.5 pt-0.5">
+                    <div key={column.id} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2">
+                      <div className="mb-2 flex items-center justify-between gap-2 px-1">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           {labels[column.id]}
                         </h2>
-                        <Badge variant="outline" className="rounded-full border-primary/15 bg-primary/8 text-[10px] text-primary">{rows.length}</Badge>
+                        <Badge variant="secondary" className="rounded-full">{rows.length}</Badge>
                       </div>
                       <div className="space-y-2">
                         {rows.length === 0 ? (
@@ -1227,6 +1292,21 @@ export function ConciergeWorkspacePage() {
           setSearchParams(next, { replace: true });
         }}
         onChanged={requestRefresh}
+      />
+      <DirtyDismissConfirmDialog
+        open={Boolean(pendingDeleteTask)}
+        title={labels.taskDeleteTitle}
+        message={labels.taskDeleteMessage}
+        cancelLabel={labels.taskDeleteCancel}
+        confirmLabel={labels.taskDelete}
+        destructive
+        confirmDisabled={Boolean(deletingTaskId)}
+        onCancel={() => {
+          if (!deletingTaskId) setPendingDeleteTask(null);
+        }}
+        onConfirm={() => {
+          if (pendingDeleteTask) void deleteTask(pendingDeleteTask);
+        }}
       />
     </div>
   );

@@ -62,6 +62,50 @@ _SPECIALTY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ALLMED", ("allgemeinmedizin", "hausarzt", "general practice", "family medicine")),
 )
 
+_CATEGORY_SPECIALTY_CODES: dict[str, str] = {
+    "medical_gastro": "GASTRO",
+    "medical_onko": "ONKO",
+    "medical_kardio": "KARDIO",
+    "medical_kardch": "KARDCH",
+    "medical_derma": "DERMA",
+    "medical_dermch": "DERMCH",
+    "medical_radiology": "RAD",
+    "medical_lab": "LAB",
+    "medical_patho_histo": "HISTO/PATHO",
+    "medical_neuro": "NEURO",
+    "medical_neurch": "NEURCH",
+    "medical_chir": "CHIR",
+    "medical_gyn": "GYN",
+    "medical_gynch": "GYNCH",
+    "medical_auge": "AUGE",
+    "medical_augch": "AUGCH",
+    "medical_hamat": "HÄMAT",
+    "medical_uro": "URO",
+    "medical_uroch": "UROCH",
+    "medical_schlaf": "SCHLAF",
+    "medical_endo": "ENDO",
+    "medical_endoch": "ENDOCH",
+    "medical_vask": "VASK",
+    "medical_orthol": "ORTHOL",
+    "medical_unfal": "UNFAL",
+    "medical_mkg": "MKG",
+    "medical_dent": "DENT",
+    "medical_kfo": "KFO",
+    "medical_plastchir": "PLASTCHIR",
+    "medical_pad": "PÄD",
+    "medical_physio_reha": "PHYSIO/REHA",
+    "medical_hno": "HNO",
+    "medical_infekt": "INFEKT",
+    "medical_ana": "ANA",
+    "medical_nephro": "NEPHRO",
+    "medical_psych": "PSYCH",
+    "medical_pneumo_resp": "PNEUMO/RESP",
+    "medical_prokto": "PROKTO",
+    "medical_rheum": "RHEUM",
+    "medical_ger": "GER",
+    "medical_allmed": "ALLMED",
+}
+
 _DOCUMENT_TYPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Entlassungsbrief", ("entlassungsbrief", "entlassbericht", "discharge letter", "discharge summary")),
     ("Arztbrief", ("arztbrief", "arztlicher brief", "medical letter", "doctor's letter")),
@@ -133,7 +177,9 @@ def suggest_document_name(
     filename_stem = _filename_stem(original_filename)
     evidence = "\n".join(part for part in (filename_stem, category or "", art or "", extracted_text[:30_000]) if part)
     normalized_evidence = _normalize_lookup(evidence)
-    specialty_code = _find_specialty_code(normalized_evidence)
+    specialty_code = _CATEGORY_SPECIALTY_CODES.get((category or "").strip().casefold(), "")
+    if not specialty_code:
+        specialty_code = _find_specialty_code(normalized_evidence)
     document_type = _find_document_type(normalized_evidence, art, filename_stem)
     detected_date = _find_document_date(extracted_text)
     source_person = _find_source_person(extracted_text)
@@ -296,6 +342,9 @@ def _category_code(category: str | None, art: str | None, medical: bool) -> str:
 
 
 def _specialty_category(code: str) -> str:
+    for category, specialty_code in _CATEGORY_SPECIALTY_CODES.items():
+        if specialty_code == code:
+            return category
     normalized = re.sub(r"[^a-z0-9]+", "_", _normalize_lookup(code)).strip("_")
     return f"medical_{normalized}"
 

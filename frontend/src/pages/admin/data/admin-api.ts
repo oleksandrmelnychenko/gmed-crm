@@ -31,6 +31,10 @@ export function resetAdminUserPassword(userId: string, payload: JsonPayload) {
   return postJson(`/users/${userId}/reset-password`, payload);
 }
 
+export function unlockAdminUser(userId: string) {
+  return postJson(`/users/${userId}/unlock`);
+}
+
 export function setAdminUserActive(userId: string, isActive: boolean) {
   return postJson(isActive ? `/users/${userId}/activate` : `/users/${userId}/deactivate`);
 }

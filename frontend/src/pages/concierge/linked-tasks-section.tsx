@@ -19,6 +19,7 @@ import type { PatientSummary } from "@/pages/patients/model/list-model";
 
 import {
   assignableConciergeTaskUsers,
+  conciergeTaskCode,
   filterConciergeTaskAssignees,
   isConciergeTaskActive,
   type ConciergeAssignee,
@@ -337,7 +338,10 @@ export function LinkedTasksSection({
               onClick={() => staffGo(`/task-manager?task=${encodeURIComponent(task.id)}`)}
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-foreground">{task.title}</p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="shrink-0 font-mono text-[10px] font-medium text-muted-foreground">{conciergeTaskCode(task)}</span>
+                  <p className="truncate text-sm font-semibold text-foreground">{task.title}</p>
+                </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {task.kind === "event" ? labels.event_kind : labels.task_kind}
                 </p>

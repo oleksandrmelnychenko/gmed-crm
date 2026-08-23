@@ -6122,7 +6122,12 @@ async fn activate_patient_portal_account(
             r#"UPDATE users
                SET email = $2,
                    name = $3,
+                   password_history = COALESCE(password_history, '[]'::jsonb)
+                                      || jsonb_build_array(password_hash),
                    password_hash = $4,
+                   password_changed_at = now(),
+                   failed_login_attempts = 0,
+                   locked_until = NULL,
                    is_active = true,
                    updated_at = now()
                WHERE id = $1"#,

@@ -40,6 +40,9 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("concierge_expense"), "billing")).toBe(
       "/company-finance?tab=concierge-expenses&expense=entity-1",
     );
+    expect(notificationHrefForRole(notification("concierge_expense"), "ceo")).toBe(
+      "/company-finance?tab=concierge-expenses&expense=entity-1",
+    );
     expect(notificationHrefForRole(notification("concierge_expense"), "concierge")).toBe("/concierge");
     expect(notificationHrefForRole(notification("concierge_expense"), "patient_manager")).toBeNull();
   });

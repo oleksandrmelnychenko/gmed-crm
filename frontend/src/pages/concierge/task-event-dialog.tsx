@@ -47,6 +47,7 @@ const copy = {
     linkedService: "Zugewiesener Service",
     assignee: "Zuständig",
     chooseAssignee: "Zuständige Person auswählen",
+    searchAssignee: "Zuständige Person suchen",
     noService: "Ohne Servicebezug",
     dueAt: "Fällig am",
     startsAt: "Beginn",
@@ -107,6 +108,7 @@ const copy = {
     linkedService: "Назначенная услуга",
     assignee: "Исполнитель",
     chooseAssignee: "Выберите исполнителя",
+    searchAssignee: "Найти исполнителя",
     noService: "Без привязки к услуге",
     dueAt: "Срок",
     startsAt: "Начало",
@@ -475,10 +477,10 @@ export function ConciergeTaskEventDialog({
                       ) : null}
                     {canAssign ? (
                       <ConciergeField label={audience === "external" ? labels.internalOwner : labels.assignee}>
-                        <select className={selectClass} value={assigneeId} required onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
+                        <NativeComboboxSelect className={selectClass} value={assigneeId} required searchPlaceholder={labels.searchAssignee} onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
                           <option value="" disabled>{labels.chooseAssignee}</option>
                           {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name} · {assigneeRoleLabel(assignee.role, lang)}</option>)}
-                        </select>
+                        </NativeComboboxSelect>
                       </ConciergeField>
                     ) : null}
                     </div>

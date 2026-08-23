@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileHeart, FileText, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
+import { Download, FileText, LoaderCircle, Paperclip, Plus, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,6 @@ type ProviderDocument = {
 const copy = {
   de: {
     title: "Dokumente",
-    description: "Dokumente des Providers sowie medizinische Unterlagen mit Patientenzuordnung",
     upload: "Dokument hochladen",
     search: "Dokument oder Patient suchen",
     allPatients: "Alle Patienten",
@@ -54,7 +53,6 @@ const copy = {
   },
   ru: {
     title: "Документы",
-    description: "Документы провайдера и медицинские документы с привязкой к пациенту",
     upload: "Загрузить документ",
     search: "Поиск по документу или пациенту",
     allPatients: "Все пациенты",
@@ -197,25 +195,23 @@ export function ProviderDocumentsSection({
   }
 
   return (
-    <section className="space-y-4 rounded-lg border border-border/70 bg-card px-5 py-4 sm:px-6 sm:py-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><FileHeart className="size-4 text-orange-600" />{labels.title}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">{labels.description}</p>
-        </div>
-        {canManage ? <Button type="button" size="sm" onClick={openUpload}><Plus />{labels.upload}</Button> : null}
-      </div>
-
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} /></div>
-        <select className="h-9 rounded-md border border-input bg-field px-3 text-sm" value={patientFilter} onChange={(event) => setPatientFilter(event.target.value)}>
+    <section className="space-y-0 overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+      <div className="relative z-30 flex flex-wrap items-center gap-2 border-b border-border/70 bg-card p-2.5 sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
+        <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+          {labels.title}
+        </span>
+        {canManage ? <Button type="button" size="sm" className="h-8 shrink-0 self-center rounded-lg" onClick={openUpload}><Plus className="size-3.5" />{labels.upload}</Button> : null}
+        <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+        <div className="relative min-w-[240px] flex-1"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 bg-field pl-8 text-xs" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} /></div>
+        <select className="h-8 w-[220px] shrink-0 rounded-md border border-input bg-field px-3 text-xs" value={patientFilter} onChange={(event) => setPatientFilter(event.target.value)}>
           <option value="">{labels.allPatients}</option>
           {patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
         </select>
       </div>
 
-      {error && !dialogOpen ? <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      <div className="overflow-x-auto rounded-lg border">
+      {error && !dialogOpen ? <p className="border-b border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2">{labels.name}</th><th className="px-3 py-2">{labels.patient}</th><th className="px-3 py-2">{labels.type}</th><th className="px-3 py-2">{labels.uploaded}</th><th className="px-3 py-2 text-right">{labels.actions}</th></tr></thead>
           <tbody className="divide-y">

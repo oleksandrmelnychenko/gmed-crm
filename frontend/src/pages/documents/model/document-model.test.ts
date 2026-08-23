@@ -163,6 +163,67 @@ describe("buildStandardDocumentName", () => {
     ).toBe("MED-Medikationsplan vom 04.06.2026");
   });
 
+  it("uses every configured medical specialty abbreviation in generated names", () => {
+    const specialties = {
+      medical_gastro: "GASTRO",
+      medical_onko: "ONKO",
+      medical_kardio: "KARDIO",
+      medical_kardch: "KARDCH",
+      medical_derma: "DERMA",
+      medical_dermch: "DERMCH",
+      medical_radiology: "RAD",
+      medical_lab: "LAB",
+      medical_patho_histo: "HISTO/PATHO",
+      medical_neuro: "NEURO",
+      medical_neurch: "NEURCH",
+      medical_chir: "CHIR",
+      medical_gyn: "GYN",
+      medical_gynch: "GYNCH",
+      medical_auge: "AUGE",
+      medical_augch: "AUGCH",
+      medical_hamat: "HÄMAT",
+      medical_uro: "URO",
+      medical_uroch: "UROCH",
+      medical_schlaf: "SCHLAF",
+      medical_endo: "ENDO",
+      medical_endoch: "ENDOCH",
+      medical_vask: "VASK",
+      medical_orthol: "ORTHOL",
+      medical_unfal: "UNFAL",
+      medical_mkg: "MKG",
+      medical_dent: "DENT",
+      medical_kfo: "KFO",
+      medical_plastchir: "PLASTCHIR",
+      medical_pad: "PÄD",
+      medical_physio_reha: "PHYSIO/REHA",
+      medical_hno: "HNO",
+      medical_infekt: "INFEKT",
+      medical_ana: "ANA",
+      medical_nephro: "NEPHRO",
+      medical_psych: "PSYCH",
+      medical_pneumo_resp: "PNEUMO/RESP",
+      medical_prokto: "PROKTO",
+      medical_rheum: "RHEUM",
+      medical_ger: "GER",
+      medical_allmed: "ALLMED",
+    } as const;
+
+    for (const [category, code] of Object.entries(specialties)) {
+      expect(
+        buildStandardDocumentName({
+          category,
+          art: "Befund",
+          isMedical: true,
+          documentDate: "2026-08-23",
+          source: "Dr. Test, Klinikum Test",
+          addressee: "Max Mustermann",
+        }),
+      ).toBe(
+        `${code}-Befund vom 23.08.2026-Dr. Test, Klinikum Test-Max Mustermann`,
+      );
+    }
+  });
+
   it("uses a stable fallback code for other documents", () => {
     expect(
       buildStandardDocumentName({

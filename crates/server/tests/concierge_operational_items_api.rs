@@ -332,6 +332,144 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
 }
 
 #[tokio::test]
+async fn terminal_tasks_can_be_archived_filtered_restored_and_keep_history() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let creator_id = seed_user(&ctx.pool, "concierge", &format!("archive-owner-{tag}")).await;
+    let creator_bearer = auth_header_for(creator_id, "concierge");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, created) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &creator_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Archive completed coordination",
+            "due_at": "2026-08-23T12:00:00Z",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let task_id = Uuid::parse_str(created["id"].as_str().expect("task id")).unwrap();
+    let archive_path = format!("{path}/{task_id}/archive");
+    let restore_path = format!("{path}/{task_id}/restore");
+
+    let (status, active_rejected) =
+        json_request(&ctx.app, "POST", &archive_path, &ceo_bearer, None).await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{active_rejected}"
+    );
+
+    let (status, completed) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{path}/{task_id}/update"),
+        &creator_bearer,
+        Some(json!({
+            "expected_updated_at": created["updated_at"],
+            "kind": "task",
+            "title": created["title"],
+            "note": created["note"],
+            "due_at": created["due_at"],
+            "priority": created["priority"],
+            "status": "completed",
+            "assigned_to": created["assigned_to"],
+            "task_audience": created["task_audience"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed}");
+
+    let (status, archived) = json_request(&ctx.app, "POST", &archive_path, &ceo_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{archived}");
+    assert_eq!(archived["status"], "completed");
+    assert!(archived["archived_at"].is_string());
+    assert_eq!(archived["archived_by"], ctx.admin_id.to_string());
+
+    let (status, default_list) = json_request(&ctx.app, "GET", path, &creator_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{default_list}");
+    assert!(
+        !default_list
+            .as_array()
+            .expect("default task list")
+            .iter()
+            .any(|item| item["id"] == task_id.to_string())
+    );
+    let (status, archive_list) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}?archive=archived"),
+        &creator_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{archive_list}");
+    assert!(
+        archive_list
+            .as_array()
+            .expect("archive task list")
+            .iter()
+            .any(|item| item["id"] == task_id.to_string())
+    );
+
+    let (status, detail) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}/{task_id}"),
+        &creator_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(
+        detail["history"]
+            .as_array()
+            .expect("task history")
+            .iter()
+            .any(|event| event["event_type"] == "archived")
+    );
+
+    let (status, restored) = json_request(&ctx.app, "POST", &restore_path, &ceo_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["status"], "completed");
+    assert!(restored["archived_at"].is_null());
+    assert!(restored["archived_by"].is_null());
+
+    let event_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND event_type IN ('archived', 'restored')"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count, 2);
+    let notification_count: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM user_notifications
+           WHERE user_id = $1
+             AND entity_id = $2
+             AND kind IN ('operational_task_archived', 'operational_task_restored')"#,
+    )
+    .bind(creator_id)
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(notification_count, 2);
+}
+
+#[tokio::test]
 async fn ceo_can_assign_operational_items_to_ceo_and_billing() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;

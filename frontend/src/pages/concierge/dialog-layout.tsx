@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { Section } from "@/components/ui-shell";
 import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +95,30 @@ export function ConciergeDialogSection({
       </h3>
       {children}
     </section>
+  );
+}
+
+export function ConciergeProfileDialogSection({
+  title,
+  className,
+  children,
+}: {
+  title: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Section
+      title={title}
+      className={cn(
+        "!space-y-0 overflow-hidden rounded-xl border border-border/70 bg-card",
+        "[&>div:first-child]:border-b [&>div:first-child]:border-border/60 [&>div:first-child]:px-4 [&>div:first-child]:py-3",
+        "[&>div:last-child]:space-y-2.5 [&>div:last-child]:p-4",
+        className,
+      )}
+    >
+      {children}
+    </Section>
   );
 }
 

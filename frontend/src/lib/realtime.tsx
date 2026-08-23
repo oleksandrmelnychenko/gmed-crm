@@ -46,22 +46,37 @@ const STATS_CACHE_EVENT_PREFIXES = [
   "appointment_checklist.",
   "appointment_request.",
   "case.",
+  "company_financial_account.",
+  "concierge_expense.",
   "concierge_service.",
   "consent.",
   "document.",
   "feedback.",
   "framework_contract.",
   "invoice.",
+  "accounting_entry.",
   "lead.",
   "order.",
   "patient.",
   "privacy_request.",
   "provider.",
+  "provider_payment.",
   "quote.",
   "reminder.",
   "task.",
   "user.",
   "workflow_checklist_item.",
+] as const;
+
+const COMPANY_FINANCE_EVENT_PREFIXES = [
+  "accounting_entry.",
+  "company_financial_account.",
+  "concierge_expense.",
+  "invoice.",
+  "order.external_invoice_",
+  "order.leistung_",
+  "patient.balance_adjustment_",
+  "provider_payment.",
 ] as const;
 
 type RealtimeCustomEvent = CustomEvent<RealtimeEvent>;
@@ -157,6 +172,12 @@ function invalidateStatsCacheForEvent(event: RealtimeEvent) {
   if (event.type.startsWith("invoice.")) {
     clearApiCache("/invoices");
     clearApiCache("/me/invoices");
+  }
+  if (COMPANY_FINANCE_EVENT_PREFIXES.some((prefix) => event.type.startsWith(prefix))) {
+    clearApiCache("/company-financial-position");
+    clearApiCache("/company-financial-accounts");
+    clearApiCache("/company-provider-liabilities");
+    clearApiCache("/company-provider-statements");
   }
   if (event.type.startsWith("document.")) {
     clearApiCache("/documents");

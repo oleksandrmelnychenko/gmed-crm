@@ -197,6 +197,7 @@ import type {
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
 import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
+import { DocumentWorkspaceNav } from "./ui/document-workspace-nav";
 
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
@@ -2834,6 +2835,7 @@ function StaffDocumentsPage({
 
   return (
     <div className="space-y-4">
+      <DocumentWorkspaceNav />
       {!embedDetailOnly ? (
         <>
       <PageHeader

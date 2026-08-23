@@ -307,6 +307,20 @@ async fn create_company_financial_account_transfer(
             "currency": source_currency,
         }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.transfer_created",
+        "company_financial_account_transfer",
+        transfer_id,
+        json!({
+            "source_account_id": body.source_account_id,
+            "target_account_id": body.target_account_id,
+            "amount": amount.to_string(),
+            "currency": source_currency,
+        }),
+    )
+    .await;
     (
         StatusCode::CREATED,
         Json(json!({ "id": transfer_id, "idempotent_replay": false })),
@@ -496,5 +510,14 @@ async fn reverse_company_financial_account_transfer(
         Some(reversal_id),
         json!({ "reverses_transfer_id": transfer_id }),
     ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.transfer_reversed",
+        "company_financial_account_transfer",
+        reversal_id,
+        json!({ "reverses_transfer_id": transfer_id }),
+    )
+    .await;
     Json(json!({ "id": reversal_id, "idempotent_replay": false })).into_response()
 }

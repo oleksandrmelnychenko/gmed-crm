@@ -184,6 +184,50 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   visa_invitation_letter: "Einladungsschreiben (Visum)",
 };
 
+const MEDICAL_DOCUMENT_CATEGORY_CODES: Record<string, string> = {
+  medical_gastro: "GASTRO",
+  medical_onko: "ONKO",
+  medical_kardio: "KARDIO",
+  medical_kardch: "KARDCH",
+  medical_derma: "DERMA",
+  medical_dermch: "DERMCH",
+  medical_radiology: "RAD",
+  medical_lab: "LAB",
+  medical_patho_histo: "HISTO/PATHO",
+  medical_neuro: "NEURO",
+  medical_neurch: "NEURCH",
+  medical_chir: "CHIR",
+  medical_gyn: "GYN",
+  medical_gynch: "GYNCH",
+  medical_auge: "AUGE",
+  medical_augch: "AUGCH",
+  medical_hamat: "HÄMAT",
+  medical_uro: "URO",
+  medical_uroch: "UROCH",
+  medical_schlaf: "SCHLAF",
+  medical_endo: "ENDO",
+  medical_endoch: "ENDOCH",
+  medical_vask: "VASK",
+  medical_orthol: "ORTHOL",
+  medical_unfal: "UNFAL",
+  medical_mkg: "MKG",
+  medical_dent: "DENT",
+  medical_kfo: "KFO",
+  medical_plastchir: "PLASTCHIR",
+  medical_pad: "PÄD",
+  medical_physio_reha: "PHYSIO/REHA",
+  medical_hno: "HNO",
+  medical_infekt: "INFEKT",
+  medical_ana: "ANA",
+  medical_nephro: "NEPHRO",
+  medical_psych: "PSYCH",
+  medical_pneumo_resp: "PNEUMO/RESP",
+  medical_prokto: "PROKTO",
+  medical_rheum: "RHEUM",
+  medical_ger: "GER",
+  medical_allmed: "ALLMED",
+};
+
 function normalizeDocumentLookup(value?: string | null) {
   return (value ?? "")
     .normalize("NFD")
@@ -238,6 +282,11 @@ function formatDocumentDate(value?: string | Date | null) {
 }
 
 function medicalDocumentCode(input: StandardDocumentNameInput) {
+  const categoryCode = MEDICAL_DOCUMENT_CATEGORY_CODES[
+    input.category?.trim().toLowerCase() ?? ""
+  ];
+  if (categoryCode) return categoryCode;
+
   const haystack = normalizeDocumentLookup(
     [input.category, input.art, input.source].filter(Boolean).join(" "),
   );

@@ -30,7 +30,11 @@ import type {
   ConciergeTaskComment,
   ConciergeTaskDetail,
 } from "./model";
-import { canModifyConciergeTask } from "./model";
+import {
+  canModifyConciergeTask,
+  conciergeTaskCode,
+  conciergeTaskErrorMessage,
+} from "./model";
 import {
   conciergeDialogContentClassName,
   ConciergeDialogBody,
@@ -84,6 +88,8 @@ const copy = {
     checklist_item_toggled: "Checklistenpunkt aktualisiert",
     attachment_added: "Anhang hinzugefügt",
     attachment_deleted: "Anhang entfernt",
+    archived: "Aufgabe archiviert",
+    restored: "Aufgabe wiederhergestellt",
     delete: "Löschen",
     deleteTitle: "Aufgabe löschen?",
     deleteMessage: "Die Aufgabe verschwindet aus dem Aufgabenmanager. Der Audit-Verlauf bleibt erhalten.",
@@ -136,6 +142,8 @@ const copy = {
     checklist_item_toggled: "Пункт чек-листа изменён",
     attachment_added: "Файл прикреплён",
     attachment_deleted: "Файл удалён",
+    archived: "Задача перемещена в архив",
+    restored: "Задача восстановлена из архива",
     delete: "Удалить",
     deleteTitle: "Удалить задачу?",
     deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
@@ -289,7 +297,7 @@ export function ConciergeTaskDetailDialog({
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : labels.addComment);
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.addComment));
     } finally {
       setBusy(false);
     }
@@ -322,7 +330,7 @@ export function ConciergeTaskDetailDialog({
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : labels.addChecklist);
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.addChecklist));
     } finally {
       setBusy(false);
     }
@@ -359,7 +367,7 @@ export function ConciergeTaskDetailDialog({
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
-      setError(mutationError instanceof Error ? mutationError.message : labels.checklist);
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.checklist));
     } finally {
       setBusy(false);
     }
@@ -376,7 +384,7 @@ export function ConciergeTaskDetailDialog({
       onOpenChange(false);
       onChanged();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : labels.delete);
+      setError(conciergeTaskErrorMessage(deleteError, lang, labels.delete));
     } finally {
       setBusy(false);
     }
@@ -389,7 +397,7 @@ export function ConciergeTaskDetailDialog({
           icon={ListChecks}
           tone="dot"
           title={detail?.item.title ?? labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canModify ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canModify ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}

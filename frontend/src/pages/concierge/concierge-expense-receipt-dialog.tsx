@@ -5,11 +5,8 @@ import {
   CheckCircle2,
   Download,
   FileText,
-  History,
   LoaderCircle,
-  ReceiptText,
   Upload,
-  WalletCards,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -34,17 +31,15 @@ import {
 import type { ConciergeService } from "./model";
 import {
   ConciergeDialogBody,
-  ConciergeDialogFooter,
   ConciergeDialogHeader,
-  ConciergeDialogSection,
   ConciergeField,
+  ConciergeProfileDialogSection,
   conciergeDialogContentClassName,
 } from "./dialog-layout";
 
 const copy = {
   de: {
     title: "Ausgabe und Beleg erfassen",
-    description: "Der Beleg wird intern zur Finanzprüfung eingereicht. Erst die Freigabe durch CEO oder Abrechnung verändert Salden.",
     context: "Kunde",
     patient: "Kunde",
     receipt: "Beleg",
@@ -90,7 +85,6 @@ const copy = {
   },
   ru: {
     title: "Расход и подтверждение",
-    description: "Документ отправляется на внутреннюю финансовую проверку. Баланс изменится только после подтверждения CEO или бухгалтерией.",
     context: "Клиент",
     patient: "Клиент",
     receipt: "Подтверждение расхода",
@@ -337,10 +331,8 @@ export function ConciergeExpenseReceiptDialog({
     }}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
-          icon={ReceiptText}
-          tone="orange"
+          tone="dot"
           title={labels.title}
-          description={labels.description}
           meta={<Badge variant="outline" className="rounded-full font-mono text-[10px]">{service.patient_pid}</Badge>}
         />
 
@@ -351,22 +343,28 @@ export function ConciergeExpenseReceiptDialog({
                 <LoaderCircle className="size-4 animate-spin" />{labels.loading}
               </div>
             ) : (
-              <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.86fr)]">
-                <div className="space-y-4">
-                  <ConciergeDialogSection title={labels.context} icon={WalletCards}>
-                    <div className="grid gap-3">
-                      <ConciergeField label={labels.patient}>
-                        <Input readOnly value={context ? `${context.patient.display_name} · ${context.patient.pid}` : service.patient_name} />
-                      </ConciergeField>
+              <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.92fr)_minmax(20rem,1.08fr)]">
+                <div className="space-y-3">
+                  <ConciergeProfileDialogSection title={labels.context}>
+                    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-xs text-muted-foreground">{labels.patient}</span>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+                        <span className="truncate text-sm font-medium text-foreground">
+                          {context?.patient.display_name || service.patient_name}
+                        </span>
+                        <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+                          {context?.patient.pid || service.patient_pid}
+                        </Badge>
+                      </div>
                     </div>
-                  </ConciergeDialogSection>
+                  </ConciergeProfileDialogSection>
 
-                  <ConciergeDialogSection title={labels.receipt} icon={FileText}>
+                  <ConciergeProfileDialogSection title={labels.receipt}>
                     <input ref={cameraInputRef} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={chooseFile} />
                     <input ref={fileInputRef} className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={chooseFile} />
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Button type="button" variant="outline" className="h-10" onClick={() => cameraInputRef.current?.click()}><Camera />{labels.camera}</Button>
-                      <Button type="button" variant="outline" className="h-10" onClick={() => fileInputRef.current?.click()}><Upload />{labels.chooseFile}</Button>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => cameraInputRef.current?.click()}><Camera />{labels.camera}</Button>
+                      <Button type="button" variant="outline" className="h-9 rounded-lg" onClick={() => fileInputRef.current?.click()}><Upload />{labels.chooseFile}</Button>
                     </div>
                     <p className="mt-2 text-[11px] text-muted-foreground">{labels.fileHint}</p>
                     {file && previewUrl ? (
@@ -391,10 +389,10 @@ export function ConciergeExpenseReceiptDialog({
                         </div>
                       </div>
                     ) : null}
-                  </ConciergeDialogSection>
+                  </ConciergeProfileDialogSection>
 
-                  <ConciergeDialogSection title={labels.history} icon={History}>
-                    {expenses.length === 0 ? <p className="rounded-lg border border-dashed px-3 py-8 text-center text-xs text-muted-foreground">{labels.historyEmpty}</p> : (
+                  <ConciergeProfileDialogSection title={labels.history}>
+                    {expenses.length === 0 ? <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{labels.historyEmpty}</p> : (
                       <ol className="space-y-2">
                         {expenses.map((item) => (
                           <li key={item.id} className="rounded-lg border border-border/70 bg-muted/15 p-3">
@@ -413,11 +411,11 @@ export function ConciergeExpenseReceiptDialog({
                         ))}
                       </ol>
                     )}
-                  </ConciergeDialogSection>
+                  </ConciergeProfileDialogSection>
                 </div>
 
-                <div className="space-y-4 lg:sticky lg:top-0">
-                  <ConciergeDialogSection title={labels.expense} icon={ReceiptText}>
+                <div className="space-y-3 lg:sticky lg:top-0">
+                  <ConciergeProfileDialogSection title={labels.expense}>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <ConciergeField label={labels.vendor} className="sm:col-span-2"><Input value={vendor} maxLength={255} required onChange={(event) => setVendor(event.target.value)} /></ConciergeField>
                       <ConciergeField label={labels.expenseDate}><Input type="date" value={expenseDate} max={todayInputValue()} required onChange={(event) => setExpenseDate(event.target.value)} /></ConciergeField>
@@ -438,21 +436,21 @@ export function ConciergeExpenseReceiptDialog({
                       </label>
                       <ConciergeField label={labels.note} className="sm:col-span-2"><textarea className="min-h-24 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={note} maxLength={2000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} /></ConciergeField>
                     </div>
-                  </ConciergeDialogSection>
+                  </ConciergeProfileDialogSection>
 
-                  <ConciergeDialogSection title={labels.consequence} icon={WalletCards}>
+                  <ConciergeProfileDialogSection title={labels.consequence}>
                     <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">{labels.pendingWarning}</p>
-                    <dl className="mt-3 grid gap-2">
+                    <dl className="mt-3 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60">
                       {([
                         [labels.patientReceivable, consequence.patientReceivableGross],
                         [labels.providerLiability, consequence.providerLiabilityGross],
                         [labels.companyPaid, consequence.companyPaidGross],
                       ] as const).map(([label, value]) => (
-                        <div key={label} className="flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-mono text-xs font-semibold">{formatMoney(value, currency, lang)}</dd></div>
+                        <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-mono text-xs font-semibold">{formatMoney(value, currency, lang)}</dd></div>
                       ))}
                     </dl>
                     {providerMissing ? <p className="mt-3 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-800"><AlertCircle className="mt-0.5 size-4 shrink-0" />{labels.missingProvider}</p> : null}
-                  </ConciergeDialogSection>
+                  </ConciergeProfileDialogSection>
 
                   {success ? <p role="status" className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800"><CheckCircle2 className="size-4 shrink-0" />{success}</p> : null}
                   {error ? <p role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive"><AlertCircle className="size-4 shrink-0" />{error}</p> : null}
@@ -460,10 +458,10 @@ export function ConciergeExpenseReceiptDialog({
               </div>
             )}
           </ConciergeDialogBody>
-          <ConciergeDialogFooter>
+          <div className="flex flex-col-reverse gap-2 border-t border-border/70 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-end sm:px-5">
             <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
             <Button type="submit" disabled={!canSubmit}>{submitting ? <LoaderCircle className="animate-spin" /> : <Upload />}{submitting ? labels.submitting : labels.submit}</Button>
-          </ConciergeDialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

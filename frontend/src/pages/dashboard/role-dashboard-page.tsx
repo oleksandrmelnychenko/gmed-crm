@@ -26,6 +26,7 @@ import {
   roleDashboardDefinition,
   type RoleDashboardMetric,
 } from "./model/role-dashboard-config";
+import { OpenTaskQueueLink } from "./ui/open-task-queue-link";
 
 type RoleKpiResponse = {
   section: string;
@@ -193,9 +194,12 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
             {definition.subtitle}
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2 text-[12px] text-muted-foreground">
-          <ShieldCheck className="size-4 text-[var(--brand)]" />
-          {roleTitle}
+        <div className="flex flex-wrap items-center gap-2">
+          <OpenTaskQueueLink />
+          <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2 text-[12px] text-muted-foreground">
+            <ShieldCheck className="size-4 text-[var(--brand)]" />
+            {roleTitle}
+          </div>
         </div>
       </header>
 

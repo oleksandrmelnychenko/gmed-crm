@@ -14,6 +14,7 @@ import {
   ChartSkeleton,
   type DashboardTranslations,
 } from "../shared/staff-dashboard-surface-primitives";
+import { OpenTaskQueueLink } from "../open-task-queue-link";
 
 const MonthlyLeadAreaChart = lazy(async () => {
   const {
@@ -114,7 +115,10 @@ export function StaffDashboardOverviewSection({
             {tr.dash_subtitle ?? tr.common_unknown}
           </p>
         </div>
-        <PeriodSwitcher value={period} onChange={onPeriodChange} tr={tr} />
+        <div className="flex flex-wrap items-center gap-2">
+          <OpenTaskQueueLink />
+          <PeriodSwitcher value={period} onChange={onPeriodChange} tr={tr} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
