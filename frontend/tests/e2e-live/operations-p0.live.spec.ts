@@ -126,7 +126,9 @@ test.describe("P0 operations modules", () => {
 
     await page.goto("/notes");
     await page.getByText(noteTitle).first().click();
-    await expect(page.locator("main input").first()).toHaveValue(noteTitle);
+    await expect(
+      page.locator('[data-testid="internal-notes-page"] main input').first(),
+    ).toHaveValue(noteTitle);
     await expect(page.getByText(attachmentName)).toBeVisible();
   });
 
@@ -170,8 +172,14 @@ test.describe("P0 operations modules", () => {
 
     await page.goto(`/patients/${scenario.patient.id}?tab=invoices`);
     await expect(page.getByText(/Konto aktiv|Account active/i).first()).toBeVisible();
+    const portalAccountButton = page
+      .getByRole("button")
+      .filter({ hasText: /Konto aktiv|Account active/i })
+      .first();
+    await expect(portalAccountButton).toBeVisible();
+    await portalAccountButton.click();
     await expect(
-      page.getByRole("button", { name: /Patientenkonto bearbeiten|Edit patient account/i }),
+      page.getByText(/Patientenkonto bearbeiten|Edit patient account/i).first(),
     ).toBeVisible();
   });
 
