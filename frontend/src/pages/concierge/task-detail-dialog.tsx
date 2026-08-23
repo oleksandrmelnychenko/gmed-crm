@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
+  Building2,
+  Cake,
   Check,
   Circle,
   Clock3,
   History,
+  ExternalLink,
   ListChecks,
   LoaderCircle,
   MessageSquareText,
@@ -12,6 +15,7 @@ import {
   UserRound,
 } from "lucide-react";
 
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -57,6 +61,8 @@ const copy = {
     internal: "Intern",
     external: "Extern",
     patient: "Patient / Kunde",
+    provider: "Provider",
+    birthDate: "Geburtsdatum",
     externalAssignee: "Externer Ausführender",
     open: "Offen",
     in_progress: "In Arbeit",
@@ -100,6 +106,8 @@ const copy = {
     internal: "Внутренняя",
     external: "Внешняя",
     patient: "Пациент / клиент",
+    provider: "Провайдер",
+    birthDate: "Дата рождения",
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
     in_progress: "В работе",
@@ -135,6 +143,13 @@ function dateTime(value: string | null, lang: Lang) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
+}
+
+function dateOnly(value: string | null, lang: Lang) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
 }
 
 export function ConciergeTaskDetailDialog({
@@ -330,7 +345,28 @@ export function ConciergeTaskDetailDialog({
                   <Badge variant="outline">{labels.priority}: {labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>
                   <Badge variant="outline">{labels.category}: {detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>
                 </div>
-                {detail.item.patient_name ? <div><p className="text-xs font-medium text-muted-foreground">{labels.patient}</p><p className="mt-1">{detail.item.patient_name}</p></div> : null}
+                {detail.item.patient_id && detail.item.patient_name ? (
+                  <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 rounded-lg border border-border/70 bg-muted/25 p-3 transition-colors hover:border-primary/30 hover:bg-primary/5">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><UserRound className="size-4" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium text-muted-foreground">{labels.patient}</span>
+                      <strong className="block truncate text-sm">{detail.item.patient_name}</strong>
+                      <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span>
+                    </span>
+                    <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+                  </StaffLink>
+                ) : null}
+                {detail.item.provider_id && detail.item.provider_name ? (
+                  <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-3 rounded-lg border border-border/70 bg-muted/25 p-3 transition-colors hover:border-primary/30 hover:bg-primary/5">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Building2 className="size-4" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-xs font-medium text-muted-foreground">{labels.provider}</span>
+                      <strong className="block truncate text-sm">{detail.item.provider_name}</strong>
+                      <span className="block truncate text-xs text-muted-foreground">{[detail.item.provider_phone, detail.item.provider_email].filter(Boolean).join(" · ") || "—"}</span>
+                    </span>
+                    <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+                  </StaffLink>
+                ) : null}
                 {detail.item.task_audience === "external" ? <div><p className="text-xs font-medium text-muted-foreground">{labels.externalAssignee}</p><p className="mt-1 font-medium">{detail.item.external_assignee_name || "—"}</p><p className="text-xs text-muted-foreground">{[detail.item.external_assignee_phone, detail.item.external_assignee_email].filter(Boolean).join(" · ")}</p></div> : null}
               </section>
 

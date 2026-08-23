@@ -64,6 +64,7 @@ import {
 } from "./provider-booking-dialog";
 import {
   ConciergeTaskEventDialog,
+  type ConciergeTaskPatientOption,
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
 import {
@@ -84,6 +85,7 @@ import type {
   ConciergeExpenseMutationResponse,
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
+import type { PatientSummary } from "@/pages/patients/model/list-model";
 
 const REALTIME_EVENTS = [
   "concierge_service.created",
@@ -457,6 +459,8 @@ export function ConciergeWorkspacePage() {
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
   const [assignees, setAssignees] = useState<ConciergeAssignee[]>([]);
   const [providers, setProviders] = useState<ConciergeProvider[]>([]);
+  const [taskProviders, setTaskProviders] = useState<ConciergeProvider[]>([]);
+  const [taskPatients, setTaskPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -521,7 +525,7 @@ export function ConciergeWorkspacePage() {
       else setLoading(true);
       setError("");
       try {
-        const [serviceRows, taskRows, providerRows, assigneeRows] = await Promise.all([
+        const [serviceRows, taskRows, providerRows, assigneeRows, taskProviderRows, patientRows] = await Promise.all([
           apiFetch<ConciergeService[]>(user?.role === "ceo" ? "/concierge-services" : "/concierge-services?mine_only=true", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
@@ -540,12 +544,25 @@ export function ConciergeWorkspacePage() {
                 forceFresh: version > 0,
               }).then(filterConciergeTaskAssignees)
             : Promise.resolve(user ? [{ id: user.id, name: user.name, email: user.email, role: user.role, is_active: true }] : []),
+          apiFetch<ConciergeProvider[]>("/providers?active_only=true", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }),
+          apiFetch<PatientSummary[]>("/patients?active_only=true", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }),
         ]);
         if (!cancelled) {
           setServices(serviceRows);
           setTasks(taskRows);
           setProviders(providerRows);
           setAssignees(assigneeRows);
+          setTaskProviders(taskProviderRows.sort((left, right) => left.name.localeCompare(right.name)));
+          setTaskPatients(patientRows.map((patient) => ({
+            id: patient.id,
+            name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
+          })).sort((left, right) => left.name.localeCompare(right.name)));
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -817,6 +834,7 @@ export function ConciergeWorkspacePage() {
           reminder_at: task.reminder_at,
           task_audience: task.task_audience,
           patient_id: task.patient_id,
+          provider_id: task.provider_id,
           external_assignee_type: task.external_assignee_type,
           external_assignee_name: task.external_assignee_name,
           external_assignee_phone: task.external_assignee_phone,
@@ -1154,6 +1172,8 @@ export function ConciergeWorkspacePage() {
         assignees={assignees}
         currentUserId={user?.id ?? null}
         canAssign={user?.role === "ceo"}
+        patients={taskPatients}
+        providers={taskProviders}
         lang={lang}
         open={taskDialogOpen}
         submitting={submittingTask}

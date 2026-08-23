@@ -51,6 +51,7 @@ struct ListItemsQuery {
     assigned_to: Option<Uuid>,
     audience: Option<String>,
     patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +71,7 @@ struct CreateItemRequest {
     reminder_at: Option<String>,
     task_audience: Option<String>,
     patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -94,6 +96,7 @@ struct UpdateItemRequest {
     reminder_at: Option<String>,
     task_audience: Option<String>,
     patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -134,6 +137,7 @@ struct ValidatedItemFields {
     reminder_at: Option<DateTime<Utc>>,
     task_audience: String,
     patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -150,14 +154,17 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           END AS concierge_service_id,
           t.task_kind, t.due_date, t.starts_at, t.ends_at,
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
-          t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id,
+          t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.is_completed) AS checklist_completed,
           (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id) AS comment_count,
           assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
-          NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name
+          NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
+          patient.birth_date AS patient_birth_date,
+          task_provider.name AS provider_name, task_provider.phone AS provider_phone,
+          task_provider.email AS provider_email
    FROM tasks t
    JOIN users assignee ON assignee.id = t.assigned_to
    JOIN users assigner ON assigner.id = t.assigned_by
@@ -165,6 +172,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    LEFT JOIN providers linked_provider ON linked_provider.id = cs.provider_id
    LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
    LEFT JOIN patients patient ON patient.id = t.patient_id
+   LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
    WHERE t.id = $1 AND t.task_scope = 'concierge_operational'"#;
 
 const COMMENT_RESPONSE_QUERY: &str = r#"SELECT comment.id, comment.body, comment.created_by,
@@ -224,14 +232,17 @@ async fn list_items(
                   END AS concierge_service_id,
                   t.task_kind, t.due_date, t.starts_at, t.ends_at,
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
-                  t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id,
+                  t.completed_at, t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.is_completed) AS checklist_completed,
                   (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id) AS comment_count,
                   assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
-                  NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name
+                  NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
+                  patient.birth_date AS patient_birth_date,
+                  task_provider.name AS provider_name, task_provider.phone AS provider_phone,
+                  task_provider.email AS provider_email
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
@@ -239,12 +250,14 @@ async fn list_items(
            LEFT JOIN providers linked_provider ON linked_provider.id = cs.provider_id
            LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
            LEFT JOIN patients patient ON patient.id = t.patient_id
+           LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
            WHERE t.task_scope = 'concierge_operational'
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
              AND ($2::text IS NULL OR t.status = $2)
              AND ($3::text IS NULL OR t.task_kind = $3)
              AND ($4::text IS NULL OR t.task_audience = $4)
              AND ($5::uuid IS NULL OR t.patient_id = $5)
+             AND ($6::uuid IS NULL OR t.provider_id = $6)
            ORDER BY
                CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
                CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
@@ -256,6 +269,7 @@ async fn list_items(
     .bind(query.kind)
     .bind(query.audience)
     .bind(query.patient_id)
+    .bind(query.provider_id)
     .fetch_all(&state.db)
     .await
     {
@@ -294,6 +308,7 @@ async fn create_item(
         body.reminder_at.as_deref(),
         body.task_audience.as_deref().unwrap_or("internal"),
         body.patient_id,
+        body.provider_id,
         body.external_assignee_type.as_deref(),
         body.external_assignee_name.as_deref(),
         body.external_assignee_phone.as_deref(),
@@ -394,14 +409,28 @@ async fn create_item(
             );
         }
     }
+    if let Some(provider_id) = fields.provider_id {
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1)")
+                .bind(provider_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap_or(false);
+        if !exists {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_id must reference a provider",
+            );
+        }
+    }
     let item_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO tasks (
                title, description, assigned_to, assigned_by, due_date, priority,
                task_scope, task_kind, concierge_service_id, starts_at, ends_at, location,
-               reminder_at, task_audience, patient_id, external_assignee_type,
+               reminder_at, task_audience, patient_id, provider_id, external_assignee_type,
                external_assignee_name, external_assignee_phone, external_assignee_email
            ) VALUES ($1, $2, $3, $4, $5, $6, 'concierge_operational', $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18)
+                     $13, $14, $15, $16, $17, $18, $19)
            RETURNING id"#,
     )
     .bind(&fields.title)
@@ -418,6 +447,7 @@ async fn create_item(
     .bind(fields.reminder_at.as_ref())
     .bind(&fields.task_audience)
     .bind(fields.patient_id)
+    .bind(fields.provider_id)
     .bind(fields.external_assignee_type.as_deref())
     .bind(fields.external_assignee_name.as_deref())
     .bind(fields.external_assignee_phone.as_deref())
@@ -448,6 +478,7 @@ async fn create_item(
         "reminder_at": fields.reminder_at.as_ref().map(|value| value.to_rfc3339()),
         "task_audience": fields.task_audience.as_str(),
         "patient_id": fields.patient_id,
+        "provider_id": fields.provider_id,
     }))
     .execute(&mut *tx)
     .await
@@ -588,6 +619,7 @@ async fn update_item(
         body.reminder_at.as_deref(),
         body.task_audience.as_deref().unwrap_or("internal"),
         body.patient_id,
+        body.provider_id,
         body.external_assignee_type.as_deref(),
         body.external_assignee_name.as_deref(),
         body.external_assignee_phone.as_deref(),
@@ -615,6 +647,20 @@ async fn update_item(
             );
         }
     }
+    if let Some(provider_id) = fields.provider_id {
+        let exists =
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1)")
+                .bind(provider_id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap_or(false);
+        if !exists {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_id must reference a provider",
+            );
+        }
+    }
 
     let result = sqlx::query(
         r#"UPDATE tasks
@@ -637,10 +683,11 @@ async fn update_item(
                reminder_at = $13,
                task_audience = $16,
                patient_id = $17,
-               external_assignee_type = $18,
-               external_assignee_name = $19,
-               external_assignee_phone = $20,
-               external_assignee_email = $21,
+               provider_id = $18,
+               external_assignee_type = $19,
+               external_assignee_name = $20,
+               external_assignee_phone = $21,
+               external_assignee_email = $22,
                updated_at = now()
            WHERE id = $1
              AND task_scope = 'concierge_operational'
@@ -663,6 +710,7 @@ async fn update_item(
     .bind(auth.user_id)
     .bind(&fields.task_audience)
     .bind(fields.patient_id)
+    .bind(fields.provider_id)
     .bind(fields.external_assignee_type.as_deref())
     .bind(fields.external_assignee_name.as_deref())
     .bind(fields.external_assignee_phone.as_deref())
@@ -705,6 +753,7 @@ async fn update_item(
         "reminder_at": fields.reminder_at.as_ref().map(|value| value.to_rfc3339()),
         "task_audience": fields.task_audience.as_str(),
         "patient_id": fields.patient_id,
+        "provider_id": fields.provider_id,
     }))
     .execute(&mut *tx)
     .await
@@ -1468,6 +1517,7 @@ fn validate_item_fields(
     reminder_at: Option<&str>,
     task_audience: &str,
     patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
     external_assignee_type: Option<&str>,
     external_assignee_name: Option<&str>,
     external_assignee_phone: Option<&str>,
@@ -1591,6 +1641,7 @@ fn validate_item_fields(
         reminder_at,
         task_audience: task_audience.to_string(),
         patient_id,
+        provider_id,
         external_assignee_type,
         external_assignee_name,
         external_assignee_phone,
@@ -1613,6 +1664,7 @@ fn create_item_payload_fingerprint(assigned_to: Uuid, fields: &ValidatedItemFiel
         "reminder_at": fields.reminder_at.as_ref().map(DateTime::to_rfc3339),
         "task_audience": fields.task_audience,
         "patient_id": fields.patient_id,
+        "provider_id": fields.provider_id,
         "external_assignee_type": fields.external_assignee_type,
         "external_assignee_name": fields.external_assignee_name,
         "external_assignee_phone": fields.external_assignee_phone,
@@ -1708,6 +1760,11 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "task_audience": row.try_get::<String, _>("task_audience").unwrap_or_else(|_| "internal".to_string()),
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+        "patient_birth_date": row.try_get::<Option<chrono::NaiveDate>, _>("patient_birth_date").unwrap_or_default().map(|value| value.to_string()),
+        "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+        "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "provider_phone": row.try_get::<Option<String>, _>("provider_phone").unwrap_or_default(),
+        "provider_email": row.try_get::<Option<String>, _>("provider_email").unwrap_or_default(),
         "external_assignee_type": row.try_get::<Option<String>, _>("external_assignee_type").unwrap_or_default(),
         "external_assignee_name": row.try_get::<Option<String>, _>("external_assignee_name").unwrap_or_default(),
         "external_assignee_phone": row.try_get::<Option<String>, _>("external_assignee_phone").unwrap_or_default(),
@@ -1771,6 +1828,7 @@ async fn publish_operational_event(
             "ends_at": fields.ends_at.as_ref().map(|value| value.to_rfc3339()),
             "task_audience": fields.task_audience.as_str(),
             "patient_id": fields.patient_id,
+            "provider_id": fields.provider_id,
         }),
     )
     .await;

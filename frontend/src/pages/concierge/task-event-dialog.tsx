@@ -69,6 +69,8 @@ const copy = {
     external: "Extern",
     patient: "Patient / Kunde",
     noPatient: "Ohne Patientenzuordnung",
+    provider: "Provider",
+    noProvider: "Ohne Providerzuordnung",
     internalOwner: "Verantwortlich in GMED",
     externalType: "Externer Ausführender",
     externalName: "Name / Unternehmen",
@@ -124,6 +126,8 @@ const copy = {
     external: "Внешняя",
     patient: "Пациент / клиент",
     noPatient: "Без привязки к пациенту",
+    provider: "Провайдер",
+    noProvider: "Без привязки к провайдеру",
     internalOwner: "Ответственный в GMED",
     externalType: "Внешний исполнитель",
     externalName: "Имя / компания",
@@ -168,6 +172,7 @@ export type SaveConciergeOperationalItemInput = {
   reminder_at: string | null;
   task_audience: "internal" | "external";
   patient_id: string | null;
+  provider_id: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -177,6 +182,13 @@ export type SaveConciergeOperationalItemInput = {
 export type ConciergeTaskPatientOption = {
   id: string;
   name: string;
+};
+
+export type ConciergeTaskProviderOption = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
 };
 
 function localDateTimeValue(value: Date | string | null) {
@@ -210,7 +222,9 @@ export function ConciergeTaskEventDialog({
   canAssign,
   showServiceLink = true,
   patients = [],
+  providers = [],
   initialPatientId = null,
+  initialProviderId = null,
   initialDate = null,
   lang,
   open,
@@ -226,7 +240,9 @@ export function ConciergeTaskEventDialog({
   canAssign: boolean;
   showServiceLink?: boolean;
   patients?: ConciergeTaskPatientOption[];
+  providers?: ConciergeTaskProviderOption[];
   initialPatientId?: string | null;
+  initialProviderId?: string | null;
   initialDate?: Date | null;
   lang: Lang;
   open: boolean;
@@ -250,6 +266,7 @@ export function ConciergeTaskEventDialog({
   const [reminderAt, setReminderAt] = useState("");
   const [audience, setAudience] = useState<"internal" | "external">("internal");
   const [patientId, setPatientId] = useState("");
+  const [providerId, setProviderId] = useState("");
   const [externalType, setExternalType] = useState("driver");
   const [externalName, setExternalName] = useState("");
   const [externalPhone, setExternalPhone] = useState("");
@@ -281,11 +298,12 @@ export function ConciergeTaskEventDialog({
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
     setAudience(item?.task_audience ?? "internal");
     setPatientId(item?.patient_id ?? initialPatientId ?? "");
+    setProviderId(item?.provider_id ?? initialProviderId ?? "");
     setExternalType(item?.external_assignee_type ?? "driver");
     setExternalName(item?.external_assignee_name ?? "");
     setExternalPhone(item?.external_assignee_phone ?? "");
     setExternalEmail(item?.external_assignee_email ?? "");
-  }, [assignees, currentUserId, initialDate, initialPatientId, item, open]);
+  }, [assignees, currentUserId, initialDate, initialPatientId, initialProviderId, item, open]);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -309,6 +327,7 @@ export function ConciergeTaskEventDialog({
         reminder_at: toIso(reminderAt),
         task_audience: audience,
         patient_id: patientId || null,
+        provider_id: providerId || null,
         external_assignee_type: audience === "external" ? externalType : null,
         external_assignee_name: audience === "external" ? externalName.trim() || null : null,
         external_assignee_phone: audience === "external" ? externalPhone.trim() || null : null,
@@ -356,10 +375,16 @@ export function ConciergeTaskEventDialog({
                     ))}
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <ConciergeField label={labels.patient} className="sm:col-span-2">
+                    <ConciergeField label={labels.patient}>
                       <select className={selectClass} value={patientId} onChange={(event) => setPatientId(event.target.value)}>
                         <option value="">{labels.noPatient}</option>
                         {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}
+                      </select>
+                    </ConciergeField>
+                    <ConciergeField label={labels.provider}>
+                      <select className={selectClass} value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+                        <option value="">{labels.noProvider}</option>
+                        {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
                       </select>
                     </ConciergeField>
                     {audience === "external" ? (

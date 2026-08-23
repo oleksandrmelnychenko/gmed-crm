@@ -152,6 +152,11 @@ export type ConciergeTask = {
   task_audience: "internal" | "external";
   patient_id: string | null;
   patient_name: string | null;
+  patient_birth_date: string | null;
+  provider_id: string | null;
+  provider_name: string | null;
+  provider_phone: string | null;
+  provider_email: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;

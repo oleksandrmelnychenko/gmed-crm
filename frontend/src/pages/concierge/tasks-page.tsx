@@ -12,6 +12,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
+  type ConciergeProvider,
   type ConciergeTask,
 } from "./model";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
@@ -71,6 +72,7 @@ export function ConciergeTaskManagerPage() {
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
   const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
+  const [providers, setProviders] = useState<ConciergeProvider[]>([]);
   const [initialTaskDate, setInitialTaskDate] = useState<Date | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const hasLoadedRef = useRef(false);
@@ -81,6 +83,8 @@ export function ConciergeTaskManagerPage() {
   const requestRefresh = useCallback(() => {
     clearApiCache("/concierge-operational-items");
     clearApiCache("/users");
+    clearApiCache("/patients");
+    clearApiCache("/providers");
     setVersion((current) => current + 1);
   }, []);
 
@@ -97,7 +101,7 @@ export function ConciergeTaskManagerPage() {
       if (!hasLoadedRef.current) setLoading(true);
       setError("");
       try {
-        const [taskRows, assigneeRows, patientRows] = await Promise.all([
+        const [taskRows, assigneeRows, patientRows, providerRows] = await Promise.all([
           apiFetch<ConciergeTask[]>("/concierge-operational-items", {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
@@ -122,6 +126,10 @@ export function ConciergeTaskManagerPage() {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
           }),
+          apiFetch<ConciergeProvider[]>("/providers?active_only=true", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }),
         ]);
         if (!cancelled) {
           setTasks(taskRows);
@@ -130,6 +138,7 @@ export function ConciergeTaskManagerPage() {
             id: patient.id,
             name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
           })).sort((left, right) => left.name.localeCompare(right.name)));
+          setProviders(providerRows.sort((left, right) => left.name.localeCompare(right.name)));
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -172,6 +181,7 @@ export function ConciergeTaskManagerPage() {
           reminder_at: task.reminder_at,
           task_audience: task.task_audience,
           patient_id: task.patient_id,
+          provider_id: task.provider_id,
           external_assignee_type: task.external_assignee_type,
           external_assignee_name: task.external_assignee_name,
           external_assignee_phone: task.external_assignee_phone,
@@ -313,7 +323,9 @@ export function ConciergeTaskManagerPage() {
         canAssign={user?.role === "ceo"}
         showServiceLink={false}
         patients={patients}
+        providers={providers}
         initialPatientId={searchParams.get("patient")}
+        initialProviderId={searchParams.get("provider")}
         initialDate={initialTaskDate}
         lang={lang}
         open={taskDialogOpen}
@@ -328,6 +340,7 @@ export function ConciergeTaskManagerPage() {
             const next = new URLSearchParams(searchParams);
             next.delete("create");
             next.delete("patient");
+            next.delete("provider");
             setSearchParams(next, { replace: true });
           }
         }}
