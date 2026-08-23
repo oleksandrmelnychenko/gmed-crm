@@ -313,8 +313,18 @@ async fn assigned_concierge_can_submit_expense_without_document_when_declared_mi
     .fetch_one(&context.pool)
     .await
     .unwrap();
-    assert!(stored.try_get::<Option<Uuid>, _>("receipt_document_id").unwrap().is_none());
-    assert!(stored.try_get::<Option<String>, _>("receipt_sha256").unwrap().is_none());
+    assert!(
+        stored
+            .try_get::<Option<Uuid>, _>("receipt_document_id")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        stored
+            .try_get::<Option<String>, _>("receipt_sha256")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
