@@ -3,7 +3,7 @@ use axum::{
     extract::{DefaultBodyLimit, Extension, Multipart, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::get,
 };
 use serde::Deserialize;
 use sqlx::Row;
