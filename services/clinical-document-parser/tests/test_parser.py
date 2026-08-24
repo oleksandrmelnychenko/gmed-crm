@@ -383,6 +383,54 @@ Ausdruck vom 15.02.2023
     assert ptt.normalized["unit"] == "sec"
 
 
+def test_laboratory_reference_legends_are_not_imported_as_analytes() -> None:
+    text = """
+Testbezeichnung
+07.01.26
+Normwert
+Lipidstatus
+Cholesterin, Gesamt\t< 200 (mg/dl)\t180
+grenzwertig\t200 - 239 (mg/dl)\t200
+abklärungsbedürftig\t>= 240 (mg/dl)\t240
+HDL-Cholesterin\t> 40 (mg/dl)\t52
+bei moderatem Risiko\t< 130 (mg/dl)\t130
+bei hohem Risiko\t< 100 (mg/dl)\t100
+bei sehr hohem Risiko\t< 85 (mg/dl)\t85
+niedrig\t< 1\t1
+mittel\t1 - 3\t3
+hoch\t> 3\t3
+Vitamine
+Vitamin D, 25-Hydroxy\t> 30 (ng/ml)\t34
+Graubereich\t20 - 29 (ng/ml)\t29
+Mangel\t< 20 (ng/ml)\t20
+Toxischer Bereich\t> 150 (ng/ml)\t150
+"""
+
+    rows = [
+        item for item in parse_clinical_text(text).candidates if item.target == "lab_result"
+    ]
+
+    assert [row.normalized["analyte_name"] for row in rows] == [
+        "Cholesterin, Gesamt",
+        "HDL-Cholesterin",
+        "Vitamin D, 25-Hydroxy",
+    ]
+    assert rows[0].normalized["unit"] == "mg/dl"
+    assert rows[0].normalized["reference_text"] == "< 200"
+    assert rows[2].normalized["unit"] == "ng/ml"
+    assert rows[2].normalized["reference_text"] == "> 30"
+
+
+def test_malformed_laboratory_reference_requires_manual_confirmation() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\nFerritin\t(\t250"
+    )
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+
+    assert row.selected is False
+    assert "laboratory_reference_requires_confirmation" in row.normalized["review_reasons"]
+
+
 def test_dated_normwert_scan_recovers_headerless_first_page_and_split_rows() -> None:
     text = """
 Blutbild

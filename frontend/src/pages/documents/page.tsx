@@ -3995,29 +3995,30 @@ function StaffDocumentsPage({
                       />
                     </Field>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        onClick={() =>
-                          setGenerateForm((current) => ({
-                            ...current,
-                            manualText: "",
-                            manualTextDirty: false,
-                          }))
-                        }
-                      >
-                        {selectedTemplateIsFreeText
-                          ? metaText.clearGeneratedText
-                          : metaText.resetGeneratedText}
-                      </Button>
-                    </div>
+                  <div className="pt-1">
                     <Field
                       label={metaText.finalGeneratedText}
                       required={selectedTemplateIsFreeText}
+                      action={(
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 rounded-md px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+                          disabled={!displayedGeneratedManualText.trim()}
+                          onClick={() =>
+                            setGenerateForm((current) => ({
+                              ...current,
+                              manualText: "",
+                              manualTextDirty: selectedTemplateIsFreeText,
+                            }))
+                          }
+                        >
+                          {selectedTemplateIsFreeText
+                            ? metaText.clearGeneratedText
+                            : metaText.resetGeneratedText}
+                        </Button>
+                      )}
                     >
                       <textarea
                         value={displayedGeneratedManualText}
@@ -7966,10 +7967,12 @@ function Field({
   label,
   children,
   required = false,
+  action,
 }: {
   label: string;
   children: ReactNode;
   required?: boolean;
+  action?: ReactNode;
 }) {
   const generatedId = useId();
   let htmlFor: string | undefined;
@@ -7983,10 +7986,18 @@ function Field({
   }
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor={htmlFor} className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-        {label}
-        {required ? <span className="ml-1 text-rose-600">*</span> : null}
-      </Label>
+      <div
+        className={cn(
+          "flex items-center gap-3",
+          action ? "min-h-7 justify-between" : "",
+        )}
+      >
+        <Label htmlFor={htmlFor} className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+          {label}
+          {required ? <span className="ml-1 text-rose-600">*</span> : null}
+        </Label>
+        {action}
+      </div>
       {content}
     </div>
   );

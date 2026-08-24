@@ -39,6 +39,39 @@ final result: passed
 
 ---
 
+# Design QA — Free document text spacing
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-b36b1617-fcee-4807-8058-967b2e804b6c.png`
+- Implementation screenshot: `C:/Users/oleks/AppData/Local/Temp/gmed-documents-free-text-after.png`
+- Combined comparison: `C:/Users/oleks/AppData/Local/Temp/gmed-documents-free-text-comparison.png`
+- Source pixels: 1759 × 615; implementation pixels and viewport: 1792 × 1272 at density 1.
+- State: authenticated CEO user, Russian locale, `Freies Dokument` generator open at the text section.
+
+## Comparison evidence
+
+The clear action now shares the final-text label row instead of occupying an extra row between the optional introduction fields and the required PDF text. Its compact ghost treatment preserves the form hierarchy, and the disabled state clearly indicates that an empty field has nothing to clear. Typography, input sizes, borders, colors, and the surrounding section spacing remain aligned with the existing document form.
+
+## Interaction verification
+
+- The final text field accepts input.
+- `Очистить текст` becomes enabled after input and clears the field on click.
+- The action returns to its disabled state after clearing.
+- TypeScript and targeted ESLint checks passed.
+
+## Required fidelity surfaces
+
+- Fonts and typography: passed; existing product typography and label hierarchy are unchanged.
+- Spacing and layout rhythm: passed; the redundant action row is removed and the label/action baseline is aligned.
+- Colors and visual tokens: passed; the action uses the existing ghost, muted, hover, and disabled tokens.
+- Image quality and asset fidelity: not applicable; this form section contains no image assets.
+- Copy and content: passed; all field labels and localized action copy are preserved.
+
+No actionable P0, P1, or P2 differences remain.
+
+final result: passed
+
+---
+
 # Design QA — CEO Business Map dashboard
 
 - Source visual truth: `C:/Users/oleks/.codex/generated_images/01a01c03-bf56-7d01-89a5-46ca626f0683/exec-acccf5ae-eeeb-440b-b0ba-399ce91b4728.png`

@@ -1246,7 +1246,7 @@ def _looks_like_lab_unit(value: str) -> bool:
         re.fullmatch(
             r"(?:%|s|sec|fl|fL|pg|pg/Ery|g|mg|ng|µg|μg|ug|"
             r"pmol|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
-            r"(?:Mio\.|Tsd\.)?/(?:nl|nL|pl|pL|ul|µl|μl)|"
+            r"(?:Mio\.?|Tsd\.?)?/(?:nl|nL|pl|pL|ul|µl|μl)|"
             r"ml/min(?:/1[.,]73m2)?|"
             r"(?:AU|m?IU|m?IE|g|mg|ng|µg|μg|ug|pmol|µmol|μmol|mmol|mol|"
             r"U|IU|[uµμ]UI|µIU|μIU|G|T)/(?:l|L|I|dl|ml))",
@@ -1281,9 +1281,25 @@ LAB_ROW_LEADING_ARTIFACT_RE = re.compile(
     re.IGNORECASE,
 )
 
+LAB_INTERPRETATION_ROW_RE = re.compile(
+    r"^(?:"
+    r"grenzwertig|abkl[aä]rungsbed[uü]rftig|"
+    r"niedrig|mittel|hoch|graubereich|mangel|toxischer\s+bereich|"
+    r"bei\s+(?:(?:sehr|besonders)\s+)?(?:niedrigem|moderatem|hohem)\s+risiko"
+    r")$",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_lab_panel_heading(value: str) -> bool:
     return bool(LAB_PANEL_HEADING_RE.fullmatch(value.strip().rstrip(":")))
+
+
+def _looks_like_lab_interpretation_row(value: str) -> bool:
+    """Return true for reference legends that are not measured analytes."""
+
+    normalized = " ".join(value.strip().strip(":").split())
+    return bool(LAB_INTERPRETATION_ROW_RE.fullmatch(normalized))
 
 
 def _lab_row_metadata(
@@ -1490,6 +1506,17 @@ def _lab_candidate(
     source_text: str,
     review_reasons: tuple[str, ...] = (),
 ) -> ClinicalCandidate:
+    if reference_text and not unit:
+        reference_match = (
+            LAB_REFERENCE_RANGE_RE.search(reference_text)
+            or LAB_REFERENCE_LIMIT_RE.search(reference_text)
+        )
+        if reference_match:
+            trailing_unit = reference_text[reference_match.end() :].strip("()[] ")
+            if trailing_unit and _looks_like_lab_unit(trailing_unit):
+                unit = trailing_unit
+                reference_text = reference_text[: reference_match.end()].strip()
+
     result_match = LAB_RESULT_RE.fullmatch(result_text)
     numeric_result = _parse_localized_number(result_match.group("number")) if result_match else None
     comparator = result_match.group("comparator") if result_match else None
@@ -1530,6 +1557,21 @@ def _lab_candidate(
     reasons = list(review_reasons)
     if measured_on is None:
         reasons.append("laboratory_date_requires_confirmation")
+    if reference_text and reference_low is None and reference_high is None:
+        normalized_reference = reference_text.casefold().strip(" .()[]")
+        recognized_text_reference = normalized_reference in {
+            "neg",
+            "negativ",
+            "nicht nachweisbar",
+            "pos",
+            "positiv",
+            "reaktiv",
+            "nachweisbar",
+            "normal",
+            "unauffällig",
+        }
+        if not recognized_text_reference:
+            reasons.append("laboratory_reference_requires_confirmation")
     return _candidate(
         "lab_result",
         value,
@@ -1978,6 +2020,13 @@ def _laboratory_candidates(
                         source_text=line,
                     )
                 )
+    candidates = [
+        candidate
+        for candidate in candidates
+        if not _looks_like_lab_interpretation_row(
+            str(candidate.normalized.get("analyte_name") or "")
+        )
+    ]
     for candidate in candidates:
         candidate.normalized["laboratory_name"] = laboratory_name
     return candidates
