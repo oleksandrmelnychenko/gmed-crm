@@ -989,16 +989,70 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
     }
 
+    let status_path = format!("{path}/{task_id}/status");
+    let (status, denied_status) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &same_rank_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_status}");
+
+    let (status, rejected_status_edit) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &assignee_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "status": "in_progress",
+            "title": "Assignee must not edit task content through status endpoint"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{rejected_status_edit}"
+    );
+
+    let (status, assignee_updated) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &assignee_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assignee_updated}");
+    assert_eq!(assignee_updated["status"], "in_progress");
+    assert_eq!(assignee_updated["title"], "Arrange transfer");
+
     let (status, updated) = json_request(
         &ctx.app,
         "POST",
         &update_path,
         &billing_bearer,
-        Some(update_body),
+        Some(json!({
+            "expected_updated_at": assignee_updated["updated_at"],
+            "kind": "task",
+            "title": "Arrange transfer and driver",
+            "assigned_to": assignee_id,
+            "priority": "high",
+            "status": "completed"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
-    assert_eq!(updated["status"], "in_progress");
+    assert_eq!(updated["status"], "completed");
 
     let creator_update_notifications: i64 = sqlx::query_scalar(
         r#"SELECT count(*) FROM user_notifications
@@ -1010,7 +1064,7 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(creator_update_notifications, 1);
+    assert_eq!(creator_update_notifications, 2);
 
     let delete_path = format!("{path}/{task_id}");
     let (status, denied) =

@@ -18,6 +18,7 @@ import {
   conciergeTaskCode,
   assignableConciergeTaskUsers,
   canAssignConciergeTaskToRole,
+  canChangeConciergeTaskStatus,
   canModifyConciergeTask,
   filterConciergeServices,
   filterConciergeTasks,
@@ -78,6 +79,13 @@ describe("filterConciergeTaskAssignees", () => {
       "Nur der Ersteller oder eine Person mit einer höheren Rolle darf diese Aufgabe ändern.",
     );
     expect(
+      conciergeTaskErrorMessage(
+        new Error("Only the task assignee, creator, or a higher role can change task status"),
+        "ru",
+        "fallback",
+      ),
+    ).toBe("Статус задачи может менять исполнитель, автор или сотрудник с более высокой ролью.");
+    expect(
       conciergeTaskErrorMessage(new Error("Specific error"), "ru", "fallback"),
     ).toBe("Specific error");
     expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
@@ -108,6 +116,19 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canModifyConciergeTask(createdByConcierge, "manager", "patient_manager")).toBe(true);
     expect(canModifyConciergeTask(task({ assigned_by_role: "billing" }), "lead", "teamlead_interpreter")).toBe(false);
     expect(canModifyConciergeTask(task({ assigned_by_role: null }), "ceo", "ceo")).toBe(true);
+  });
+
+  it("allows the assignee to change status without granting full edit rights", () => {
+    const assignedTask = task({
+      assigned_by: "creator",
+      assigned_by_role: "patient_manager",
+      assigned_to: "assignee",
+    });
+
+    expect(canModifyConciergeTask(assignedTask, "assignee", "concierge")).toBe(false);
+    expect(canChangeConciergeTaskStatus(assignedTask, "assignee", "concierge")).toBe(true);
+    expect(canChangeConciergeTaskStatus(assignedTask, "peer", "concierge")).toBe(false);
+    expect(canChangeConciergeTaskStatus(assignedTask, "ceo", "ceo")).toBe(true);
   });
 });
 

@@ -235,8 +235,21 @@ export function canModifyConciergeTask(
   return actorLevel !== undefined && authorLevel !== undefined && actorLevel > authorLevel;
 }
 
+export function canChangeConciergeTaskStatus(
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return Boolean(
+    actorId
+    && (task.assigned_to === actorId || canModifyConciergeTask(task, actorId, actorRole)),
+  );
+}
+
 const TASK_PERMISSION_ERROR_PREFIX =
   "Only the task creator or a higher role can";
+const TASK_STATUS_PERMISSION_ERROR =
+  "Only the task assignee, creator, or a higher role can change task status";
 
 export function conciergeTaskErrorMessage(
   error: unknown,
@@ -249,6 +262,12 @@ export function conciergeTaskErrorMessage(
       : typeof error === "string"
         ? error
         : "";
+
+  if (message === TASK_STATUS_PERMISSION_ERROR) {
+    return lang === "ru"
+      ? "Статус задачи может менять исполнитель, автор или сотрудник с более высокой ролью."
+      : "Den Aufgabenstatus dürfen der Zuständige, der Ersteller oder eine Person mit einer höheren Rolle ändern.";
+  }
 
   if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {
     return lang === "ru"

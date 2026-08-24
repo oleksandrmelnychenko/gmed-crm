@@ -7,11 +7,12 @@ import {
   normalizeFunctionalLabel,
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
-import { formatUiText } from "@/lib/i18n";
+import { formatUiText, getLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
+import { nationalityNameForDisplay } from "../model/nationalities";
 
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -386,7 +387,7 @@ export function buildPatientColumns(
       render: (p: PatientSummary) => (
         <PillCell
           renderId="nationality"
-          value={p.nationality}
+          value={nationalityNameForDisplay(p.nationality, getLang())}
           emptyLabel={tr.common_not_set}
         />
       ),

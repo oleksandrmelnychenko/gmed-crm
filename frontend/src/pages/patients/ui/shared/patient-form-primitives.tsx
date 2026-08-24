@@ -14,9 +14,9 @@ import {
   inputClass,
   textareaClass,
 } from "@/components/ui-shell";
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect as ComprehensiveCountrySelect } from "@/components/ui/country-select";
 import { LanguageMultiSelect } from "@/components/ui/language-multi-select";
+import { nationalityCountryCode } from "../../model/nationalities";
 
 // Re-export shell primitives so existing screens keep working.
 // New code should import from "@/components/ui-shell" directly.
@@ -28,55 +28,6 @@ export function FormSection(props: ComponentProps<typeof ShellSection>) {
 
 export const formInputClassName = inputClass;
 export const textareaClassName = textareaClass;
-
-type PatientSelectOption = {
-  value: string;
-  fallbackLabel: string;
-  labelKey?: string;
-};
-
-const NATIONALITY_OPTIONS: PatientSelectOption[] = [
-  { value: "German", fallbackLabel: "German", labelKey: "patients_nationality_german" },
-  { value: "Ukrainian", fallbackLabel: "Ukrainian", labelKey: "patients_nationality_ukrainian" },
-  { value: "Austrian", fallbackLabel: "Austrian", labelKey: "patients_nationality_austrian" },
-  { value: "Swiss", fallbackLabel: "Swiss", labelKey: "patients_nationality_swiss" },
-  { value: "Polish", fallbackLabel: "Polish", labelKey: "patients_nationality_polish" },
-  { value: "Czech", fallbackLabel: "Czech", labelKey: "patients_nationality_czech" },
-  { value: "Danish", fallbackLabel: "Danish", labelKey: "patients_nationality_danish" },
-  { value: "Latvian", fallbackLabel: "Latvian", labelKey: "patients_nationality_latvian" },
-  { value: "Greek", fallbackLabel: "Greek", labelKey: "patients_nationality_greek" },
-  { value: "Turkish", fallbackLabel: "Turkish", labelKey: "patients_nationality_turkish" },
-  { value: "Emirati", fallbackLabel: "Emirati", labelKey: "patients_nationality_emirati" },
-  { value: "Saudi", fallbackLabel: "Saudi", labelKey: "patients_nationality_saudi" },
-  { value: "Egyptian", fallbackLabel: "Egyptian", labelKey: "patients_nationality_egyptian" },
-  { value: "Nigerian", fallbackLabel: "Nigerian", labelKey: "patients_nationality_nigerian" },
-  { value: "Ghanaian", fallbackLabel: "Ghanaian", labelKey: "patients_nationality_ghanaian" },
-  { value: "Brazilian", fallbackLabel: "Brazilian", labelKey: "patients_nationality_brazilian" },
-  { value: "Chinese", fallbackLabel: "Chinese", labelKey: "patients_nationality_chinese" },
-  { value: "Russian", fallbackLabel: "Russian", labelKey: "patients_nationality_russian" },
-  { value: "Pakistani", fallbackLabel: "Pakistani", labelKey: "patients_nationality_pakistani" },
-  { value: "British", fallbackLabel: "British", labelKey: "patients_nationality_british" },
-  { value: "American", fallbackLabel: "American", labelKey: "patients_nationality_american" },
-];
-
-function normalizeSelectKey(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function optionExists(options: PatientSelectOption[], value: string) {
-  const key = normalizeSelectKey(value);
-  return options.some((option) => normalizeSelectKey(option.value) === key);
-}
-
-function optionsWithCurrent(options: PatientSelectOption[], value: string) {
-  const trimmed = value.trim();
-  if (!trimmed || optionExists(options, trimmed)) return options;
-  return [{ value: trimmed, fallbackLabel: trimmed }, ...options];
-}
-
-function nationalityOptionLabel(option: PatientSelectOption, lang: "de" | "ru") {
-  return option.labelKey ? uiText(option.labelKey, lang) : option.fallbackLabel;
-}
 
 export function CountrySelect({
   value,
@@ -118,19 +69,14 @@ export function NationalitySelect({
 }) {
   const { lang } = useLang();
   return (
-    <NativeComboboxSelect
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
+    <ComprehensiveCountrySelect
+      value={nationalityCountryCode(value)}
+      onChange={(next) => onChange(next ?? "")}
+      lang={lang}
       className={cn("w-full", formInputClassName)}
+      emptyLabel={placeholder}
       disabled={disabled}
-    >
-      <option value="">{placeholder}</option>
-      {optionsWithCurrent(NATIONALITY_OPTIONS, value).map((option) => (
-        <option key={option.value} value={option.value}>
-          {nationalityOptionLabel(option, lang)}
-        </option>
-      ))}
-    </NativeComboboxSelect>
+    />
   );
 }
 

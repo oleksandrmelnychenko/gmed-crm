@@ -1,6 +1,8 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import type { RelationItem } from "../model/detail-tab-types";
 
+export const PATIENT_RELATIONS_UPDATED_EVENT = "gmed:patient-relations-updated";
+
 export function fetchPatientRelations(patientId: string) {
   return apiFetch<RelationItem[]>(`/patients/${patientId}/relations`);
 }

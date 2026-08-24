@@ -13,7 +13,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { Translations } from "@/lib/i18n";
+import { getLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
 import {
@@ -32,6 +32,8 @@ import {
 } from "@/pages/leads/model/leads-model";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
+import { nationalityNameForDisplay } from "../../model/nationalities";
+import { PATIENT_RELATIONS_UPDATED_EVENT } from "../../data/patient-detail-mutations";
 
 import {
   fetchPatientRelations,
@@ -92,16 +94,25 @@ function useLivePatientRelations(patientId: string): LiveRelationsState {
 
   useEffect(() => {
     let active = true;
-    void fetchPatientRelations(patientId)
-      .then((items) => {
-        if (active) setState({ patientId, status: "loaded", items });
-      })
-      .catch(() => {
-        if (active) setState({ patientId, status: "unavailable", items: [] });
-      });
+    const load = () => {
+      void fetchPatientRelations(patientId)
+        .then((items) => {
+          if (active) setState({ patientId, status: "loaded", items });
+        })
+        .catch(() => {
+          if (active) setState({ patientId, status: "unavailable", items: [] });
+        });
+    };
+    const handleRelationsUpdated = (event: Event) => {
+      const updatedPatientId = (event as CustomEvent<{ patientId?: string }>).detail?.patientId;
+      if (!updatedPatientId || updatedPatientId === patientId) load();
+    };
+    load();
+    window.addEventListener(PATIENT_RELATIONS_UPDATED_EVENT, handleRelationsUpdated);
 
     return () => {
       active = false;
+      window.removeEventListener(PATIENT_RELATIONS_UPDATED_EVENT, handleRelationsUpdated);
     };
   }, [patientId]);
 
@@ -615,7 +626,10 @@ function usePatientProfileTabContent({
         >
           <ProfileSummaryLine
             label={t.patients_nationality}
-            value={fieldValue(detail.nationality, t.common_not_set)}
+            value={fieldValue(
+              nationalityNameForDisplay(detail.nationality, getLang()),
+              t.common_not_set,
+            )}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_nationality, t.patient_profile_edit_field_aria)}
           />

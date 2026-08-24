@@ -1,10 +1,11 @@
 import {
   memo,
   useCallback,
+  useEffect,
   useState,
   type FormEvent,
 } from "react";
-import { Mail, Phone, Trash2 } from "lucide-react";
+import { Mail, Phone, Plus, Trash2 } from "lucide-react";
 
 import {
   CountrySelect,
@@ -28,6 +29,12 @@ import { cn } from "@/lib/utils";
 
 import { updatePatient } from "../../data/patient-mutations";
 import {
+  deletePatientRelation,
+  fetchPatientRelations,
+  PATIENT_RELATIONS_UPDATED_EVENT,
+  upsertPatientRelation,
+} from "../../data/patient-detail-mutations";
+import {
   computeAge,
   makePatientContactFormId,
   normalizePatientContactForms,
@@ -35,6 +42,8 @@ import {
   type PatientContactFormState,
   type PatientDetail,
 } from "../../model/list-model";
+import { createPatientLeadOrigin } from "../../model/patient-lead-origin";
+import type { RelationItem } from "../../model/detail-tab-types";
 import {
   patientToEditForm,
   type PatientEditFormState,
@@ -61,6 +70,98 @@ type PatientProfileEditorSheetProps = {
 
 const contactAddButtonClassName =
   "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
+
+type TrustedContactFormState = {
+  id: string;
+  persistedId: string | null;
+  name: string;
+  phone: string;
+  relation: string;
+  notes: string;
+};
+
+function emptyTrustedContact(relation = "other"): TrustedContactFormState {
+  return {
+    id: makePatientContactFormId("trusted-contact"),
+    persistedId: null,
+    name: "",
+    phone: "",
+    relation,
+    notes: "",
+  };
+}
+
+function trustedContactRecordString(
+  record: Record<string, unknown>,
+  key: string,
+) {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeTrustedContactRelation(value: string) {
+  const normalized = value.trim().toLocaleLowerCase();
+  if (/spouse|partner|ehe|супруг/.test(normalized)) return "spouse";
+  if (/parent|father|mother|vater|mutter|родител|мам|пап/.test(normalized)) return "parent";
+  if (/child|son|daughter|kind|ребен|сын|доч/.test(normalized)) return "child";
+  if (/sibling|brother|sister|bruder|schwester|брат|сестр/.test(normalized)) return "sibling";
+  if (/guardian|vormund|опек/.test(normalized)) return "guardian";
+  if (/caregiver|betreuung|сопровож/.test(normalized)) return "caregiver";
+  if (/friend|freund|друг/.test(normalized)) return "friend";
+  if (/relative|angehör|родствен/.test(normalized)) return "relative";
+  return "other";
+}
+
+function trustedContactsFromDetail(detail: PatientDetail): TrustedContactFormState[] {
+  const leadOrigin = createPatientLeadOrigin(detail);
+  const leadContacts = leadOrigin.records("trusted_contacts").flatMap((contact) => {
+    const name = trustedContactRecordString(contact, "name");
+    if (!name) return [];
+    const extraNotes = [
+      trustedContactRecordString(contact, "email")
+        ? `Email: ${trustedContactRecordString(contact, "email")}`
+        : "",
+      trustedContactRecordString(contact, "birth_date")
+        ? `Geburtsdatum: ${trustedContactRecordString(contact, "birth_date")}`
+        : "",
+      trustedContactRecordString(contact, "address")
+        ? `Adresse: ${trustedContactRecordString(contact, "address")}`
+        : "",
+    ].filter(Boolean).join("\n");
+    return [{
+      id: makePatientContactFormId("trusted-contact-lead"),
+      persistedId: null,
+      name,
+      phone: trustedContactRecordString(contact, "phone"),
+      relation: normalizeTrustedContactRelation(trustedContactRecordString(contact, "relation")),
+      notes: extraNotes,
+    }];
+  });
+  if (leadContacts.length > 0) return leadContacts;
+
+  const legacyName = detail.emergency_contact_name?.trim() ?? "";
+  const legacyPhone = detail.emergency_contact_phone?.trim() ?? "";
+  const legacyRelation = detail.emergency_contact_relation?.trim() ?? "";
+  if (!legacyName && !legacyPhone && !legacyRelation) return [];
+  return [{
+    ...emptyTrustedContact(normalizeTrustedContactRelation(legacyRelation)),
+    name: legacyName,
+    phone: legacyPhone,
+  }];
+}
+
+function trustedContactsFromRelations(relations: RelationItem[]): TrustedContactFormState[] {
+  return relations
+    .filter((relation) => relation.is_emergency_contact)
+    .map((relation) => ({
+      id: relation.id,
+      persistedId: relation.id,
+      name: relation.related_display_name || relation.related_name,
+      phone: relation.phone ?? "",
+      relation: normalizeTrustedContactRelation(relation.relation_type),
+      notes: relation.notes ?? "",
+    }));
+}
 
 function contactAddLabel(
   contactKind: PatientContactFormState["contactKind"],
@@ -148,9 +249,12 @@ type PatientProfileEditorFormSectionsProps = {
   dictionary: Record<string, string> & { uiText?: Record<string, string> };
   lang: string;
   form: PatientEditFormState;
+  trustedContacts: TrustedContactFormState[];
+  trustedContactsLoading: boolean;
   statusLabel: (status: string) => string;
   updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
   updateContacts: (contacts: PatientContactFormState[]) => void;
+  updateTrustedContacts: (contacts: TrustedContactFormState[]) => void;
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
 };
 
@@ -158,9 +262,12 @@ function PatientProfileEditorFormSections({
   dictionary,
   lang,
   form,
+  trustedContacts,
+  trustedContactsLoading,
   statusLabel,
   updateField,
   updateContacts,
+  updateTrustedContacts,
   updateLegalStatusField,
 }: PatientProfileEditorFormSectionsProps) {
   const age = computeAge(form.birthDate);
@@ -174,6 +281,17 @@ function PatientProfileEditorFormSections({
     dictionary.patient_relation_type_parent ??
     text.patients_detail_parent ??
     dictionary.common_not_set;
+  const trustedRelationOptions = [
+    ["spouse", dictionary.patient_relation_type_spouse],
+    ["parent", parentLabel],
+    ["child", dictionary.patient_relation_type_child],
+    ["sibling", dictionary.patient_relation_type_sibling],
+    ["relative", dictionary.patient_relation_type_relative],
+    ["guardian", guardianLabel],
+    ["caregiver", dictionary.patient_relation_type_caregiver],
+    ["friend", dictionary.patient_relation_type_friend],
+    ["other", dictionary.patient_relation_type_other],
+  ] as const;
   const label = (key: string, fallback: string) => text[key] ?? dictionary[key] ?? fallback;
   const contactTypeLabel = (value: PatientContactFormState["contactType"]) => {
     if (value === "work") return label("providers_contact_type_work", dictionary.common_not_set);
@@ -183,6 +301,23 @@ function PatientProfileEditorFormSections({
   const contactValueLabel = (contactKind: PatientContactFormState["contactKind"]) =>
     contactKind === "email" ? dictionary.field_email : dictionary.field_phone;
   const contacts = patientEditFormContacts(form);
+  const addTrustedContact = () => {
+    updateTrustedContacts([
+      ...trustedContacts,
+      emptyTrustedContact(isMinor ? "guardian" : "other"),
+    ]);
+  };
+  const patchTrustedContact = (
+    contactId: string,
+    patch: Partial<TrustedContactFormState>,
+  ) => {
+    updateTrustedContacts(trustedContacts.map((contact) => (
+      contact.id === contactId ? { ...contact, ...patch } : contact
+    )));
+  };
+  const removeTrustedContact = (contactId: string) => {
+    updateTrustedContacts(trustedContacts.filter((contact) => contact.id !== contactId));
+  };
 
   function updateContact(
     contactId: string,
@@ -570,58 +705,96 @@ function PatientProfileEditorFormSections({
                     : dictionary.patient_profile_editor_emergency_contact
                 }
               >
-                <div className="grid gap-2.5 md:grid-cols-3">
-                  <FormField label={dictionary.patient_profile_editor_contact_2}>
-                    <Input
-                      value={form.emergencyContactName}
-                      onChange={(event) =>
-                        updateField("emergencyContactName", event.target.value)
-                      }
-                      required={isMinor}
-                      className={formInputClassName}
-                    />
-                  </FormField>
-                  <FormField label={dictionary.patient_profile_editor_phone}>
-                    <Input
-                      value={form.emergencyContactPhone}
-                      onChange={(event) =>
-                        updateField("emergencyContactPhone", event.target.value)
-                      }
-                      required={isMinor}
-                      className={formInputClassName}
-                    />
-                  </FormField>
-                  <FormField label={dictionary.patient_profile_editor_relation}>
-                    {isMinor ? (
-                      <NativeComboboxSelect
-                        value={
-                          isGuardianOrParentRelation(form.emergencyContactRelation)
-                            ? form.emergencyContactRelation
-                            : "guardian"
-                        }
-                        onChange={(event) =>
-                          updateField(
-                            "emergencyContactRelation",
-                            event.target.value ?? "guardian",
-                          )
-                        }
-                        required
-                        className={cn("w-full", formInputClassName)}
-                      >
-                        <option value="guardian">{guardianLabel}</option>
-                        <option value="parent">{parentLabel}</option>
-                      </NativeComboboxSelect>
-                    ) : (
-                      <Input
-                        value={form.emergencyContactRelation}
-                        onChange={(event) =>
-                          updateField("emergencyContactRelation", event.target.value)
-                        }
-                        className={formInputClassName}
-                      />
-                    )}
-                  </FormField>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {lang === "de"
+                      ? "Mehrere Vertrauenskontakte können hinterlegt werden."
+                      : "Можно добавить несколько доверенных контактов."}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    onClick={addTrustedContact}
+                  >
+                    <Plus className="size-3.5" />
+                    {lang === "de" ? "Kontakt hinzufügen" : "Добавить контакт"}
+                  </Button>
                 </div>
+                {trustedContactsLoading ? (
+                  <div className="py-4 text-center text-sm text-muted-foreground">
+                    {dictionary.common_loading}
+                  </div>
+                ) : trustedContacts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
+                    {lang === "de"
+                      ? "Noch keine Vertrauenskontakte hinzugefügt."
+                      : "Доверенные контакты пока не добавлены."}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {trustedContacts.map((contact, index) => (
+                      <div key={contact.id} className="rounded-lg border border-border/70 bg-card p-3">
+                        <div className="mb-2.5 flex items-center justify-between gap-3">
+                          <p className="text-xs font-semibold text-foreground">
+                            {lang === "de" ? "Vertrauenskontakt" : "Доверенный контакт"} {index + 1}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-muted-foreground hover:text-destructive"
+                            aria-label={lang === "de" ? "Kontakt entfernen" : "Удалить контакт"}
+                            onClick={() => removeTrustedContact(contact.id)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                        <div className="grid gap-2.5 md:grid-cols-3">
+                          <FormField label={dictionary.patient_profile_editor_contact_2}>
+                            <Input
+                              value={contact.name}
+                              onChange={(event) => patchTrustedContact(contact.id, { name: event.target.value })}
+                              required={isMinor || Boolean(contact.phone || contact.relation || contact.notes)}
+                              className={formInputClassName}
+                            />
+                          </FormField>
+                          <FormField label={dictionary.patient_profile_editor_phone}>
+                            <Input
+                              value={contact.phone}
+                              onChange={(event) => patchTrustedContact(contact.id, { phone: event.target.value })}
+                              required={isMinor}
+                              className={formInputClassName}
+                            />
+                          </FormField>
+                          <FormField label={dictionary.patient_profile_editor_relation}>
+                            <NativeComboboxSelect
+                              value={isMinor && !isGuardianOrParentRelation(contact.relation) ? "guardian" : contact.relation}
+                              onChange={(event) => patchTrustedContact(contact.id, { relation: event.target.value ?? (isMinor ? "guardian" : "other") })}
+                              required
+                              className={cn("w-full", formInputClassName)}
+                            >
+                              {(isMinor
+                                ? trustedRelationOptions.filter(([value]) => isGuardianOrParentRelation(value))
+                                : trustedRelationOptions
+                              ).map(([value, optionLabel]) => (
+                                <option key={value} value={value}>{optionLabel}</option>
+                              ))}
+                            </NativeComboboxSelect>
+                          </FormField>
+                        </div>
+                        <FormField label={dictionary.patient_profile_editor_notes}>
+                          <textarea
+                            className={cn(formTextareaClassName, "min-h-20")}
+                            value={contact.notes}
+                            onChange={(event) => patchTrustedContact(contact.id, { notes: event.target.value })}
+                          />
+                        </FormField>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </FormSection>
 
               <PatientProfileLegalStatusSection
@@ -792,7 +965,39 @@ function PatientProfileEditorSheetContent({
         )
       : null,
   );
+  const [trustedContacts, setTrustedContacts] = useState<TrustedContactFormState[]>(() =>
+    open && detail ? trustedContactsFromDetail(detail) : [],
+  );
+  const [initialTrustedContactIds, setInitialTrustedContactIds] = useState<string[]>([]);
+  const [trustedContactsLoading, setTrustedContactsLoading] = useState(Boolean(open && patientId));
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || !patientId) {
+      setTrustedContactsLoading(false);
+      return;
+    }
+    let active = true;
+    setTrustedContactsLoading(true);
+    fetchPatientRelations(patientId)
+      .then((relations) => {
+        if (!active) return;
+        const loadedContacts = trustedContactsFromRelations(relations);
+        if (loadedContacts.length > 0) setTrustedContacts(loadedContacts);
+        setInitialTrustedContactIds(loadedContacts.flatMap((contact) => (
+          contact.persistedId ? [contact.persistedId] : []
+        )));
+      })
+      .catch(() => {
+        // Keep contacts transferred in the lead snapshot as a safe fallback.
+      })
+      .finally(() => {
+        if (active) setTrustedContactsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [open, patientId]);
 
   function updateField<K extends keyof PatientEditFormState>(
     field: K,
@@ -826,6 +1031,31 @@ function PatientProfileEditorSheetContent({
       setBusy(true);
       onError("");
       try {
+        const normalizedTrustedContacts = trustedContacts.flatMap((contact) => {
+          const name = contact.name.trim();
+          const phone = contact.phone.trim();
+          const relation = contact.relation.trim() || "other";
+          const notes = contact.notes.trim();
+          if (!name && !phone && !notes) return [];
+          if (!name) {
+            throw new Error(
+              lang === "de"
+                ? "Name des Vertrauenskontakts angeben"
+                : "Укажите имя доверенного контакта",
+            );
+          }
+          return [{ ...contact, name, phone, relation, notes }];
+        });
+        const patientAge = computeAge(form.birthDate);
+        const isMinor = patientAge !== null && patientAge < 18;
+        if (isMinor && normalizedTrustedContacts.length === 0) {
+          throw new Error(
+            lang === "de"
+              ? "Für Minderjährige ist ein Elternteil oder Vormund erforderlich"
+              : "Для несовершеннолетнего укажите родителя или опекуна",
+          );
+        }
+        const primaryTrustedContact = normalizedTrustedContacts[0];
         const contactPayload = patientContactFormsToPayload(
           patientEditFormContacts(form),
         );
@@ -853,15 +1083,40 @@ function PatientProfileEditorSheetContent({
           insurance_provider: form.insuranceProvider,
           insurance_number: form.insuranceNumber,
           insurance_type: form.insuranceType,
-          emergency_contact_name: form.emergencyContactName,
-          emergency_contact_phone: form.emergencyContactPhone,
-          emergency_contact_relation: form.emergencyContactRelation,
+          emergency_contact_name: primaryTrustedContact?.name ?? "",
+          emergency_contact_phone: primaryTrustedContact?.phone ?? "",
+          emergency_contact_relation: primaryTrustedContact?.relation ?? "",
           passport_number: form.passportNumber,
           passport_expiry: form.passportExpiry,
           legal_status: serializePatientLegalStatus(form.legalStatus),
           clinical_warnings: form.clinicalWarnings,
           notes: form.notes,
         });
+        for (const contact of normalizedTrustedContacts) {
+          await upsertPatientRelation(
+            patientId,
+            {
+              related_patient_id: null,
+              related_name: contact.name,
+              relation_type: contact.relation,
+              is_emergency_contact: true,
+              phone: contact.phone || null,
+              notes: contact.notes || null,
+            },
+            contact.persistedId,
+          );
+        }
+        const retainedIds = new Set(normalizedTrustedContacts.flatMap((contact) => (
+          contact.persistedId ? [contact.persistedId] : []
+        )));
+        for (const relationId of initialTrustedContactIds) {
+          if (!retainedIds.has(relationId)) {
+            await deletePatientRelation(patientId, relationId);
+          }
+        }
+        window.dispatchEvent(new CustomEvent(PATIENT_RELATIONS_UPDATED_EVENT, {
+          detail: { patientId },
+        }));
         toast.success(dictionary.common_active);
         onOpenChange(false);
         onSaved();
@@ -877,10 +1132,13 @@ function PatientProfileEditorSheetContent({
       dictionary.common_active,
       dictionary.common_failed_update,
       form,
+      initialTrustedContactIds,
+      lang,
       onError,
       onOpenChange,
       onSaved,
       patientId,
+      trustedContacts,
     ]
   );
 
@@ -919,9 +1177,12 @@ function PatientProfileEditorSheetContent({
           dictionary={dictionary}
           lang={lang}
           form={form}
+          trustedContacts={trustedContacts}
+          trustedContactsLoading={trustedContactsLoading}
           statusLabel={statusLabel}
           updateField={updateField}
           updateContacts={updateContacts}
+          updateTrustedContacts={setTrustedContacts}
           updateLegalStatusField={updateLegalStatusField}
         />
       ) : null}

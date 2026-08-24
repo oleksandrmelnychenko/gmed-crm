@@ -1283,6 +1283,24 @@ const ALLOWED_PATIENT_COUNTRIES: [&str; 21] = [
     "United Kingdom",
     "United States",
 ];
+const ISO_3166_ALPHA_2_COUNTRY_CODES: &[&str] = &[
+    "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX", "AZ",
+    "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS",
+    "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN",
+    "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO", "DZ", "EC", "EE",
+    "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF",
+    "GG", "GH", "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM",
+    "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT", "JE", "JM",
+    "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC",
+    "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK",
+    "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA",
+    "NC", "NE", "NF", "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG",
+    "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW",
+    "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS",
+    "ST", "SV", "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO",
+    "TR", "TT", "TV", "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
+    "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW",
+];
 const ALLOWED_PATIENT_NATIONALITIES: [&str; 21] = [
     "German",
     "Ukrainian",
@@ -1535,7 +1553,10 @@ fn validate_optional_patient_select(
         return Ok(());
     };
     let value = value.trim();
-    if value.is_empty() || allowed_values.contains(&value) {
+    if value.is_empty()
+        || allowed_values.contains(&value)
+        || is_iso_3166_alpha_2_country_code(value)
+    {
         return Ok(());
     }
     match field_name {
@@ -1556,7 +1577,10 @@ fn validate_optional_patient_select_update(
         return Ok(());
     };
     let value = value.trim();
-    if value.is_empty() || allowed_values.contains(&value) {
+    if value.is_empty()
+        || allowed_values.contains(&value)
+        || is_iso_3166_alpha_2_country_code(value)
+    {
         return Ok(());
     }
     if current.is_some_and(|current| current.trim() == value) {
@@ -1567,6 +1591,52 @@ fn validate_optional_patient_select_update(
         "residence_country" => Err("Invalid residence_country"),
         "address_country" => Err("Invalid address_country"),
         _ => Err("Invalid select value"),
+    }
+}
+
+fn is_iso_3166_alpha_2_country_code(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_uppercase();
+    ISO_3166_ALPHA_2_COUNTRY_CODES.contains(&normalized.as_str())
+}
+
+#[cfg(test)]
+mod nationality_validation_tests {
+    use super::{ALLOWED_PATIENT_NATIONALITIES, validate_optional_patient_select};
+
+    #[test]
+    fn accepts_comprehensive_iso_citizenship_codes_and_legacy_values() {
+        assert!(
+            validate_optional_patient_select(
+                Some("FR"),
+                &ALLOWED_PATIENT_NATIONALITIES,
+                "nationality",
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_optional_patient_select(
+                Some("JP"),
+                &ALLOWED_PATIENT_NATIONALITIES,
+                "nationality",
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_optional_patient_select(
+                Some("German"),
+                &ALLOWED_PATIENT_NATIONALITIES,
+                "nationality",
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_optional_patient_select(
+                Some("ZZ"),
+                &ALLOWED_PATIENT_NATIONALITIES,
+                "nationality",
+            )
+            .is_err()
+        );
     }
 }
 

@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/select-field";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Lang } from "@/lib/i18n";
@@ -31,6 +32,7 @@ import type {
   ConciergeTaskDetail,
 } from "./model";
 import {
+  canChangeConciergeTaskStatus,
   canModifyConciergeTask,
   conciergeTaskCode,
   conciergeTaskErrorMessage,
@@ -235,6 +237,9 @@ export function ConciergeTaskDetailDialog({
   const [busy, setBusy] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
+  const canChangeStatus = detail
+    ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
+    : false;
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
   const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
@@ -390,6 +395,28 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function changeStatus(status: string) {
+    if (!taskId || !detail || !canChangeStatus || busy || status === detail.item.status) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/concierge-operational-items/${taskId}/status`, {
+        method: "POST",
+        body: JSON.stringify({
+          expected_updated_at: detail.item.updated_at,
+          status,
+        }),
+      });
+      clearApiCache("/concierge-operational-items");
+      await load();
+      onChanged();
+    } catch (statusError) {
+      setError(conciergeTaskErrorMessage(statusError, lang, labels.status));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName} style={{ maxWidth: "64rem" }}>
@@ -411,7 +438,24 @@ export function ConciergeTaskDetailDialog({
                   <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at, lang)} />
                   <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{detail.item.note || "—"}</p>} />
                   <TaskDetailRow label={labels.location} value={detail.item.location || "—"} />
-                  <TaskDetailRow label={labels.status} value={<Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>} />
+                  <TaskDetailRow
+                    label={labels.status}
+                    value={canChangeStatus ? (
+                      <SelectField
+                        className="h-9 min-w-40"
+                        value={detail.item.status}
+                        disabled={busy || Boolean(detail.item.archived_at)}
+                        aria-label={labels.status}
+                        options={(["open", "in_progress", "completed", "cancelled"] as const).map((status) => ({
+                          value: status,
+                          label: labels[status],
+                        }))}
+                        onValueChange={(status) => void changeStatus(status)}
+                      />
+                    ) : (
+                      <Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
+                    )}
+                  />
                   <TaskDetailRow label={labels.priority} value={<Badge variant="outline" className="rounded-full">{labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>} />
                   <TaskDetailRow label={labels.category} value={<Badge variant="outline" className="rounded-full">{detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>} />
                 </div>

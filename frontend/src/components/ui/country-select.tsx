@@ -43,7 +43,7 @@ function countryNameKey(value: string) {
   return value.trim().toLocaleLowerCase();
 }
 
-function countryCodeFromStoredValue(value: string | null | undefined) {
+export function countryCodeFromStoredValue(value: string | null | undefined) {
   const trimmed = value?.trim();
   if (!trimmed) return "";
 

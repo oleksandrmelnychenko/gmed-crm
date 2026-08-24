@@ -63,6 +63,10 @@ pub fn router() -> Router<AppState> {
             post(update_item),
         )
         .route(
+            "/concierge-operational-items/{item_id}/status",
+            post(update_item_status),
+        )
+        .route(
             "/concierge-operational-items/{item_id}/archive",
             post(archive_item),
         )
@@ -156,6 +160,13 @@ struct UpdateItemRequest {
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
     external_assignee_email: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateItemStatusRequest {
+    expected_updated_at: String,
+    status: String,
 }
 
 #[derive(Clone, Copy)]
@@ -1430,6 +1441,189 @@ async fn update_item(
         assigned_to,
         &fields,
         &body.status,
+    )
+    .await;
+    if let Some(notification) = creator_notification {
+        publish_pending_notification(&state, notification, item_id).await;
+    }
+
+    match load_item(&state, item_id).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(response) => response,
+    }
+}
+
+async fn update_item_status(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(item_id): Path<Uuid>,
+    Json(body): Json<UpdateItemStatusRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    if !is_valid_status(&body.status) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
+    }
+    let expected_updated_at = match parse_datetime(
+        Some(&body.expected_updated_at),
+        "Invalid expected_updated_at (RFC3339)",
+    ) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "expected_updated_at is required",
+            );
+        }
+        Err(response) => return response,
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge task status update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let existing = match sqlx::query(
+        r#"SELECT task.assigned_to, task.assigned_by, task.title, task.status,
+                  task.archived_at, task.updated_at, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1
+             AND task.task_scope = 'concierge_operational'
+             AND task.deleted_at IS NULL
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge task status context");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = existing
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by = existing
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by_role = existing
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    if auth.user_id != assigned_to
+        && !can_mutate_operational_item(&auth, assigned_by, &assigned_by_role)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the task assignee, creator, or a higher role can change task status",
+        );
+    }
+    if existing
+        .try_get::<Option<DateTime<Utc>>, _>("archived_at")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Restore the archived task before changing its status",
+        );
+    }
+    if existing.try_get::<DateTime<Utc>, _>("updated_at").ok() != Some(expected_updated_at) {
+        return err(
+            StatusCode::CONFLICT,
+            "Operational item was changed by another user",
+        );
+    }
+    let previous_status = existing.try_get::<String, _>("status").unwrap_or_default();
+    let title = existing.try_get::<String, _>("title").unwrap_or_default();
+
+    if let Err(error) = sqlx::query(
+        r#"UPDATE tasks
+           SET status = $2,
+               completed_at = CASE
+                   WHEN $2 = 'completed' THEN COALESCE(completed_at, now())
+                   ELSE NULL
+               END,
+               updated_at = now()
+           WHERE id = $1
+             AND task_scope = 'concierge_operational'
+             AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(&body.status)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, "update concierge task status");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (
+               task_id, event_type, actor_id, payload
+           ) VALUES ($1, 'status_changed', $2, $3)"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .bind(serde_json::json!({
+        "assigned_to": assigned_to,
+        "status": body.status.as_str(),
+        "previous_status": previous_status,
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, "record concierge task status history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let creator_notification = if auth.user_id != assigned_by {
+        match insert_task_notification(
+            &mut tx,
+            assigned_by,
+            "operational_task_updated",
+            "Task status changed",
+            &title,
+            item_id,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    } else {
+        None
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "update_concierge_operational_item_status",
+        Some(auth.user_id),
+        "task",
+        Some(item_id),
+        serde_json::json!({
+            "assigned_to": assigned_to,
+            "status": body.status.as_str(),
+            "previous_status": previous_status,
+        }),
+    ));
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.updated",
+        item_id,
+        assigned_to,
+        serde_json::json!({
+            "status": body.status.as_str(),
+            "previous_status": previous_status,
+        }),
     )
     .await;
     if let Some(notification) = creator_notification {

@@ -12,6 +12,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
   assignableConciergeTaskUsers,
+  canChangeConciergeTaskStatus,
   canModifyConciergeTask,
   conciergeTaskErrorMessage,
   filterConciergeTaskAssignees,
@@ -179,33 +180,15 @@ export function ConciergeTaskManagerPage() {
   }, [labels.loadFailed, user, version]);
 
   async function changeTaskStatus(task: ConciergeTask, status: string) {
-    if (updatingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    if (updatingTaskId || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return;
     setUpdatingTaskId(task.id);
     setError("");
     try {
-      const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${task.id}/update`, {
+      const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${task.id}/status`, {
         method: "POST",
         body: JSON.stringify({
           expected_updated_at: task.updated_at,
-          kind: task.kind,
-          title: task.title,
-          note: task.note,
-          concierge_service_id: task.concierge_service_id,
-          due_at: task.due_at,
-          starts_at: task.starts_at,
-          ends_at: task.ends_at,
-          location: task.location,
-          priority: task.priority,
           status,
-          assigned_to: task.assigned_to,
-          reminder_at: task.reminder_at,
-          task_audience: task.task_audience,
-          patient_id: task.patient_id,
-          provider_id: task.provider_id,
-          external_assignee_type: task.external_assignee_type,
-          external_assignee_name: task.external_assignee_name,
-          external_assignee_phone: task.external_assignee_phone,
-          external_assignee_email: task.external_assignee_email,
         }),
       });
       clearApiCache("/concierge-operational-items");
@@ -378,6 +361,7 @@ export function ConciergeTaskManagerPage() {
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
         canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
+        canChangeTaskStatus={(task) => canChangeConciergeTaskStatus(task, user?.id, user?.role)}
         onEdit={openEditTask}
         onDelete={setPendingDeleteTask}
         onArchive={(task) => void changeArchiveState(task, true)}

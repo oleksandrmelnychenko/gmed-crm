@@ -91,6 +91,7 @@ const copy = {
     edit: "Bearbeiten",
     delete: "Löschen",
     noPermission: "Nur der Ersteller oder eine übergeordnete Rolle darf diese Aufgabe ändern",
+    noStatusPermission: "Nur der Zuständige, der Ersteller oder eine übergeordnete Rolle darf den Status ändern",
     moveTo: "Status ändern",
     unplanned: "Ohne Termin",
     more: "weitere",
@@ -148,6 +149,7 @@ const copy = {
     edit: "Изменить",
     delete: "Удалить",
     noPermission: "Изменять задачу может только её автор или вышестоящий сотрудник",
+    noStatusPermission: "Статус может менять исполнитель, автор или вышестоящий сотрудник",
     moveTo: "Изменить статус",
     unplanned: "Без даты",
     more: "ещё",
@@ -206,6 +208,7 @@ function TaskCard({
   deleting,
   archiving,
   canModify,
+  canChangeStatus,
   onOpen,
   onEdit,
   onDelete,
@@ -221,6 +224,7 @@ function TaskCard({
   deleting: boolean;
   archiving: boolean;
   canModify: boolean;
+  canChangeStatus: boolean;
   onOpen: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
@@ -288,8 +292,8 @@ function TaskCard({
       <SelectField
         className="h-8 min-w-[130px] rounded-md bg-background text-xs"
         value={task.status}
-        disabled={archived || !canModify || updating || deleting || archiving}
-        title={canModify ? labels.moveTo : labels.noPermission}
+        disabled={archived || !canChangeStatus || updating || deleting || archiving}
+        title={canChangeStatus ? labels.moveTo : labels.noStatusPermission}
         aria-label={labels.moveTo}
         options={statuses.map((status) => ({ value: status, label: labels[status] }))}
         onValueChange={(status) => onStatusChange(task, status)}
@@ -308,6 +312,7 @@ export function ConciergeTaskManager({
   deletingTaskId,
   archivingTaskId,
   canModifyTask,
+  canChangeTaskStatus,
   onEdit,
   onDelete,
   onArchive,
@@ -325,6 +330,7 @@ export function ConciergeTaskManager({
   deletingTaskId: string | null;
   archivingTaskId: string | null;
   canModifyTask: (task: ConciergeTask) => boolean;
+  canChangeTaskStatus: (task: ConciergeTask) => boolean;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
   onArchive: (task: ConciergeTask) => void;
@@ -423,12 +429,12 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-4")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canChangeStatus={canChangeTaskStatus(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canChangeStatus={canChangeTaskStatus(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">
