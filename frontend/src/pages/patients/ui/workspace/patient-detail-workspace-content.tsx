@@ -49,6 +49,7 @@ import type {
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientAssignment, PatientDetail, PatientsDictionary, StaffOption } from "../../model/list-model";
 import {
+  createClinicalDocumentImport,
   fetchClinicalDocumentImports,
   type ClinicalDocumentImportSummary,
 } from "../../data/clinical-document-import";
@@ -630,6 +631,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     setClinicalDocumentImportOpen(true);
   }
 
+  async function recognizeExistingPatientDocument(documentId: string) {
+    if (!id) return;
+    await createClinicalDocumentImport(id, documentId);
+    openClinicalDocumentImport();
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -928,6 +935,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onResetDocumentFilters={onResetDocumentFilters}
               canManageDocuments={canManageDocuments}
               onOpenUpload={onOpenUpload}
+              onRecognizeDocument={recognizeExistingPatientDocument}
               statusColors={statusColors}
               statusLabel={patientDetailStatusLabel}
               formatDate={formatDate}

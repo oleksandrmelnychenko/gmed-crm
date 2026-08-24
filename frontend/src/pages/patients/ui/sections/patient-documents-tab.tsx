@@ -5,6 +5,7 @@ import {
   FileWarning,
   LoaderCircle,
   PencilLine,
+  ScanText,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -25,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import { EmptyCell, TabLoader } from "@/components/ui-shell";
 import {
   localizeDocumentCode,
@@ -95,6 +97,7 @@ type PatientDocumentsTabProps = {
   onResetDocumentFilters: () => void;
   canManageDocuments: boolean;
   onOpenUpload: () => void;
+  onRecognizeDocument: (documentId: string) => Promise<void>;
   statusColors: Record<string, string>;
   statusLabel: StatusLabelFn;
   formatDate: DateFormatter;
@@ -156,6 +159,22 @@ function supportsInlinePreview(contentType?: string) {
   );
 }
 
+const CLINICAL_IMPORT_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+]);
+
+export function canRecognizePatientDocument(
+  doc: Pick<DocumentItem, "category" | "filename" | "is_medical" | "mime_type">,
+) {
+  const isMedical = doc.is_medical ?? doc.category?.startsWith("medical") ?? false;
+  if (!isMedical) return false;
+  const mimeType = doc.mime_type?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mimeType) return CLINICAL_IMPORT_MIME_TYPES.has(mimeType);
+  return /\.(?:pdf|png|jpe?g)$/i.test(doc.filename.trim());
+}
+
 export function PatientDocumentsTab({
   l,
   patientId,
@@ -182,6 +201,7 @@ export function PatientDocumentsTab({
   onResetDocumentFilters,
   canManageDocuments,
   onOpenUpload,
+  onRecognizeDocument,
   statusColors,
   statusLabel,
   formatDate,
@@ -196,6 +216,7 @@ export function PatientDocumentsTab({
     useState<PatientDocumentPreview | null>(null);
   const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
+  const [recognizingDocumentId, setRecognizingDocumentId] = useState<string | null>(null);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const documentPreviewRequestRef = useRef(0);
   const documentPagination = useDataTablePagination(
@@ -279,6 +300,24 @@ export function PatientDocumentsTab({
       if (documentPreviewRequestRef.current === requestId) {
         setDocumentPreviewBusy(false);
       }
+    }
+  }
+
+  async function recognizePatientDocument(doc: DocumentItem) {
+    if (recognizingDocumentId) return;
+    setRecognizingDocumentId(doc.id);
+    try {
+      await onRecognizeDocument(doc.id);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : lang === "de"
+            ? "Dokument konnte nicht zur Erkennung gesendet werden"
+            : "Не удалось отправить документ на распознавание",
+      );
+    } finally {
+      setRecognizingDocumentId(null);
     }
   }
 
@@ -509,20 +548,43 @@ export function PatientDocumentsTab({
           rowActions={(doc) => (
             <>
               {canManageDocuments ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  title={lang === "de" ? "Bearbeiten" : "Редактировать"}
-                  aria-label={
-                    lang === "de"
-                      ? "Dokument bearbeiten"
-                      : "Редактировать документ"
-                  }
-                  onClick={() => setEditDocumentId(doc.id)}
-                >
-                  <PencilLine className="size-3.5" />
-                </Button>
+                <>
+                  {canRecognizePatientDocument(doc) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      title={lang === "de" ? "Erkennen" : "Распознать"}
+                      aria-label={
+                        lang === "de"
+                          ? "Dokument erkennen"
+                          : "Распознать документ"
+                      }
+                      disabled={recognizingDocumentId !== null}
+                      onClick={() => void recognizePatientDocument(doc)}
+                    >
+                      {recognizingDocumentId === doc.id ? (
+                        <LoaderCircle className="size-3.5 animate-spin" />
+                      ) : (
+                        <ScanText className="size-3.5" />
+                      )}
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title={lang === "de" ? "Bearbeiten" : "Редактировать"}
+                    aria-label={
+                      lang === "de"
+                        ? "Dokument bearbeiten"
+                        : "Редактировать документ"
+                    }
+                    onClick={() => setEditDocumentId(doc.id)}
+                  >
+                    <PencilLine className="size-3.5" />
+                  </Button>
+                </>
               ) : null}
               <Button
                 type="button"
@@ -548,7 +610,7 @@ export function PatientDocumentsTab({
               </Button>
             </>
           )}
-          rowActionsWidth={canManageDocuments ? 116 : 82}
+          rowActionsWidth={canManageDocuments ? 150 : 82}
           emptyState={
             <EmptyCell>
               {documents.length === 0

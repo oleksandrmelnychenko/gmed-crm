@@ -9540,6 +9540,7 @@ async fn patient_profile_nested_endpoints_return_only_linked_records() {
     let documents = documents_body.as_array().expect("documents array");
     assert_eq!(documents.len(), 1);
     assert_eq!(documents[0]["id"], document_id.to_string());
+    assert_eq!(documents[0]["is_medical"], true);
     assert_ne!(documents[0]["id"], hidden_document_id.to_string());
 
     let (status, contracts_body) = json_request(

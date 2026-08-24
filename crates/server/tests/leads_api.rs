@@ -2165,6 +2165,38 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         contact.0 == "phone" && contact.1 == "work" && contact.2 == "+49 30 4444"
     }));
 
+    let trusted_contacts: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"SELECT related_name, relation_type, phone, notes
+               FROM patient_relations
+               WHERE patient_id = $1 AND is_emergency_contact = true
+               ORDER BY related_name"#,
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(trusted_contacts.len(), 2);
+    assert!(trusted_contacts.iter().any(|contact| {
+        contact.0 == "Olena Onboarding"
+            && contact.1 == "sibling"
+            && contact.2.as_deref() == Some("+380 44 555 0101")
+            && contact.3.as_deref().is_some_and(|notes| {
+                notes.contains("olena@example.test")
+                    && notes.contains("1985-02-03")
+                    && notes.contains("Khreshchatyk 1, Kyiv")
+            })
+    }));
+    assert!(trusted_contacts.iter().any(|contact| {
+        contact.0 == "Petro Onboarding"
+            && contact.1 == "sibling"
+            && contact.2.as_deref() == Some("+380 44 555 0102")
+            && contact.3.as_deref().is_some_and(|notes| {
+                notes.contains("petro@example.test")
+                    && notes.contains("1987-04-05")
+                    && notes.contains("Volodymyrska 2, Kyiv")
+            })
+    }));
+
     let imported_document: (
         Option<Uuid>,
         Option<Uuid>,

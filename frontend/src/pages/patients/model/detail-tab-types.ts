@@ -68,6 +68,8 @@ export type DocumentItem = {
   replaces_document_id?: string | null;
   version_number?: number | null;
   file_size?: number | null;
+  is_medical?: boolean;
+  mime_type?: string | null;
   filename: string;
   category?: string | null;
   status?: string | null;
