@@ -138,7 +138,7 @@ export function PatientWorkspaceNav() {
   return (
     <aside
       data-workspace-rail="patient"
-      className="hidden lg:flex lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+      className="hidden lg:ml-1 lg:mt-1 lg:flex lg:w-64 xl:w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
     >
       <div className="px-6 pt-4">
         <StaffLink

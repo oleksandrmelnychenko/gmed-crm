@@ -39,6 +39,23 @@ export type PatientSummary = {
   created_at: string;
 };
 
+export type ExecutiveFinanceSnapshot = {
+  actual_cash_balance: string;
+  patient_receivables: string;
+  provider_payables: string;
+  cash_inflow: string;
+  cash_outflow: string;
+  net_cash_flow: string;
+  reconciliation_required: boolean;
+  reconciliation_patient_count: number;
+  unassigned_movement_count: number;
+  cash_movements: Array<{
+    entry_date: string;
+    movement: "inflow" | "outflow";
+    signed_amount: string;
+  }>;
+};
+
 export type DemographicsPayload = {
   period: string;
   total: number;

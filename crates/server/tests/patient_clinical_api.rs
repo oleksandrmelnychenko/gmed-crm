@@ -3763,6 +3763,7 @@ async fn patient_clinical_master_round_trip_with_provider_doctor() {
     assert_eq!(medications[0]["dose_abends"], "1");
     assert_eq!(medications[0]["einheit"], "Stück");
     assert_eq!(medications[0]["on_hold"], true);
+    assert_eq!(medications[0]["status"], "pausiert");
     assert_eq!(medications[0]["hold_until"], "2026-07-15");
     assert_eq!(
         medications[0]["hold_note"],

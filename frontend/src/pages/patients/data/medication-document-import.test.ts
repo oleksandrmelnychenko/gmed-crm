@@ -8,6 +8,7 @@ import {
   groupMedicationImportHistory,
   medicationCandidateDisplay,
   medicationCandidateNeedsWirkstoff,
+  medicationCandidateNeedsStatusConfirmation,
   medicationCandidateReviewDecision,
   medicationCandidateReviewBlockReason,
   medicationFieldConfidence,
@@ -16,6 +17,7 @@ import {
   partitionMedicationReviewSelection,
   setMedicationCandidateReviewDecision,
   updateMedicationCandidateField,
+  updateMedicationCandidateLifecycle,
 } from "./medication-document-import";
 import type { ClinicalMedication } from "./patient-clinical";
 
@@ -102,6 +104,80 @@ describe("structured medication document import", () => {
 
     expect(medicationCandidateNeedsWirkstoff(item)).toBe(true);
     expect(medicationImportPayload(item, "DE")).toBeNull();
+  });
+
+  it("requires an explicit medication status review before building the import payload", () => {
+    const inferredActive = candidate({
+      ...structured,
+      review_reasons: ["medication_active_status_requires_confirmation"],
+    });
+
+    expect(medicationCandidateNeedsStatusConfirmation(inferredActive)).toBe(true);
+    expect(medicationCandidateReviewBlockReason(inferredActive, 0)).toBe("unconfirmed_status");
+    expect(medicationImportPayload(inferredActive, "DE")).toBeNull();
+
+    const reviewed = updateMedicationCandidateField(inferredActive, "status", "aktiv");
+    const confirmed = { ...inferredActive, ...reviewed };
+    expect(medicationCandidateNeedsStatusConfirmation(confirmed)).toBe(false);
+    expect(medicationCandidateReviewBlockReason(confirmed, 0)).toBeNull();
+    expect(medicationImportPayload(confirmed, "DE")).toMatchObject({ status: "aktiv" });
+  });
+
+  it("keeps lifecycle status, hold flag, and hold metadata consistent", () => {
+    const active = candidate({
+      ...structured,
+      on_hold: false,
+      hold_from: null,
+      hold_until: null,
+      hold_note: null,
+    });
+
+    const pausedPatch = updateMedicationCandidateLifecycle(active, { onHold: true });
+    expect(pausedPatch.normalized).toMatchObject({ status: "pausiert", on_hold: true });
+
+    const paused = { ...active, ...pausedPatch };
+    const resumedPatch = updateMedicationCandidateLifecycle(
+      {
+        ...paused,
+        normalized: {
+          ...paused.normalized,
+          hold_from: "2026-08-10",
+          hold_until: "2026-08-20",
+          hold_note: "Nebenwirkung",
+        },
+      },
+      { onHold: false },
+    );
+    expect(resumedPatch.normalized).toMatchObject({
+      status: "aktiv",
+      on_hold: false,
+      hold_from: null,
+      hold_until: null,
+      hold_note: null,
+    });
+
+    const statusPatch = updateMedicationCandidateLifecycle(active, { status: "pausiert" });
+    expect(statusPatch.normalized).toMatchObject({ status: "pausiert", on_hold: true });
+  });
+
+  it("blocks invalid intake and hold date ranges before submission", () => {
+    const invalidIntake = candidate({
+      ...structured,
+      einnahme_von: "2026-08-20",
+      einnahme_bis: "2026-08-10",
+    });
+    expect(medicationCandidateReviewBlockReason(invalidIntake, 0)).toBe("invalid_date_range");
+    expect(medicationImportPayload(invalidIntake, "DE")).toBeNull();
+
+    const invalidHold = candidate({
+      ...structured,
+      status: "pausiert",
+      on_hold: true,
+      hold_from: "2026-08-20",
+      hold_until: "2026-08-10",
+    });
+    expect(medicationCandidateReviewBlockReason(invalidHold, 0)).toBe("invalid_hold_range");
+    expect(medicationImportPayload(invalidHold, "DE")).toBeNull();
   });
 
   it("keeps checked but blocked medication candidates visible to the staged review", () => {

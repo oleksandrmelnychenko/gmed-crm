@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { CountrySelect } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,7 @@ import {
 } from "@/pages/patients/data/clinical-document-subject";
 import {
   medicationCandidateNeedsWirkstoff,
+  medicationCandidateNeedsStatusConfirmation,
   medicationCandidateReviewDecision,
   medicationCandidateReviewBlockReason,
   medicationCandidateDisplay,
@@ -84,6 +85,7 @@ import {
   partitionMedicationReviewSelection,
   setMedicationCandidateReviewDecision,
   updateMedicationCandidateField,
+  updateMedicationCandidateLifecycle,
 } from "@/pages/patients/data/medication-document-import";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -100,8 +102,11 @@ const IMPORT_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]
 const IMPORT_POLL_BASE_DELAY_MS = 1_800;
 const IMPORT_POLL_MAX_DELAY_MS = 15_000;
 const IMPORT_HISTORY_POLL_DELAY_MS = 4_000;
-const builderTabClassName =
-  "h-14 min-w-0 justify-start gap-2 rounded-none border-0 border-r border-border bg-transparent px-3 py-3 text-left text-muted-foreground whitespace-normal last:border-r-0 hover:bg-muted/30 hover:text-foreground data-active:bg-muted/50 data-active:text-foreground data-active:shadow-none after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--brand)]";
+const builderTabClassName = (active: boolean) =>
+  cn(
+    buttonVariants({ variant: active ? "default" : "ghost", size: "sm" }),
+    "h-9 min-w-0 shrink-0 rounded-md px-3 text-xs text-foreground data-active:!bg-primary data-active:!text-primary-foreground data-active:shadow-none data-active:[&_[data-count]]:bg-white/20 data-active:[&_[data-count]]:text-primary-foreground sm:h-8",
+  );
 
 export type ExistingClinicalImportItem = {
   id: string;
@@ -157,13 +162,13 @@ const targetTone: Record<ClinicalDocumentImportTarget, string> = {
 };
 
 const targetCardTone: Record<ClinicalDocumentImportTarget, string> = {
-  diagnosis: "border-rose-200 bg-rose-50/35",
-  anamnesis: "border-violet-200 bg-violet-50/35",
-  medication: "border-sky-200 bg-sky-50/35",
-  examination: "border-amber-200 bg-amber-50/35",
-  lab_result: "border-cyan-200 bg-cyan-50/35",
-  vital: "border-pink-200 bg-pink-50/35",
-  recommendation: "border-emerald-200 bg-emerald-50/35",
+  diagnosis: "border-border/80 bg-white",
+  anamnesis: "border-border/80 bg-white",
+  medication: "border-border/80 bg-white",
+  examination: "border-border/80 bg-white",
+  lab_result: "border-border/80 bg-white",
+  vital: "border-border/80 bg-white",
+  recommendation: "border-border/80 bg-white",
 };
 
 function localizedLabNumber(value: string): number | null {
@@ -174,6 +179,12 @@ function localizedLabNumber(value: string): number | null {
     : compact;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function autosizeCandidateTextArea(element: HTMLTextAreaElement | null) {
+  if (!element) return;
+  element.style.height = "auto";
+  element.style.height = `${element.scrollHeight}px`;
 }
 
 function labCandidateDisplay(normalized: Record<string, unknown>): string {
@@ -217,6 +228,14 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
     ru: "Проверьте распознанную схему дозирования",
     de: "Erkanntes Dosierschema prüfen",
   },
+  dose_time_requires_confirmation: {
+    ru: "Проверьте время и кратность приёма",
+    de: "Einnahmezeiten und Häufigkeit prüfen",
+  },
+  atc_requires_confirmation: {
+    ru: "Проверьте распознанный код ATC",
+    de: "Erkannten ATC-Code prüfen",
+  },
   medication_active_ingredient_requires_confirmation: {
     ru: "Проверьте действующее вещество по оригиналу документа",
     de: "Wirkstoff mit dem Originaldokument abgleichen",
@@ -228,6 +247,14 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
   medication_status_requires_confirmation: {
     ru: "Проверьте статус и даты приёма",
     de: "Status und Einnahmedaten prüfen",
+  },
+  medication_active_status_requires_confirmation: {
+    ru: "Подтвердите, что медикамент активен",
+    de: "Bestätigen Sie, dass die Medikation aktiv ist",
+  },
+  planned_medication_requires_confirmation: {
+    ru: "Подтвердите запланированный статус медикамента",
+    de: "Geplanten Medikationsstatus bestätigen",
   },
   medication_country_requires_confirmation: {
     ru: "Проверьте страну происхождения препарата",
@@ -352,22 +379,6 @@ function isRiskyCandidate(candidate: ClinicalDocumentImportCandidate) {
   );
 }
 
-function medicationDispositionLabel(
-  disposition: MedicationReviewDisposition,
-  tx: Bilingual,
-) {
-  if (disposition === "blocked") {
-    return tx(
-      "Укажите действующее вещество — без него запись нельзя импортировать",
-      "Wirkstoff ergänzen – ohne Wirkstoff ist kein Import möglich",
-    );
-  }
-  return tx(
-    "Проверьте все поля — дублирование, изменение схемы и статуса система определит при сохранении",
-    "Alle Felder prüfen – Deduplizierung, Schema- und Statusänderungen werden beim Speichern ermittelt",
-  );
-}
-
 function MedicationCandidateEditor({
   candidate,
   disabled,
@@ -401,6 +412,14 @@ function MedicationCandidateEditor({
   };
   const update = (field: string, value: string | boolean) => {
     onPatch(updateMedicationCandidateField(candidate, field, value));
+  };
+  const updateStatus = (value: string) => {
+    onPatch(updateMedicationCandidateLifecycle(candidate, {
+      status: value as "aktiv" | "pausiert" | "abgesetzt" | "geplant",
+    }));
+  };
+  const updateOnHold = (checked: boolean) => {
+    onPatch(updateMedicationCandidateLifecycle(candidate, { onHold: checked }));
   };
   const confidence = (field: string) => medicationFieldConfidence(candidate, field);
   const identifiers = medicationIdentifiers(candidate);
@@ -437,11 +456,15 @@ function MedicationCandidateEditor({
     );
   };
   const onHold = candidate.normalized.on_hold === true || candidate.normalized.on_hold === "true";
+  const statusNeedsConfirmation = medicationCandidateNeedsStatusConfirmation(candidate);
   const asNeeded = candidate.normalized.as_needed === true || candidate.normalized.as_needed === "true";
   const country = defaultSourceCountry;
   const start = normalizedValue("einnahme_von");
   const end = normalizedValue("einnahme_bis");
   const invalidDateRange = Boolean(start && end && end < start);
+  const holdStart = normalizedValue("hold_from");
+  const holdEnd = normalizedValue("hold_until");
+  const invalidHoldRange = Boolean(holdStart && holdEnd && holdEnd < holdStart);
   const selectedSeriesId = normalizedValue("medication_series_id");
   const createsNewSeries = candidate.normalized.create_new_series === true;
   const seriesSelection = createsNewSeries ? CREATE_NEW_MEDICATION_SERIES : selectedSeriesId;
@@ -464,25 +487,17 @@ function MedicationCandidateEditor({
       className="space-y-4 rounded-lg border border-white/70 bg-white/55 p-4"
       onClick={(event) => event.stopPropagation()}
     >
-      <div
-        className={cn(
-          "flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs leading-5",
-          disposition === "blocked"
-            ? "border-amber-200 bg-amber-50 text-amber-900"
-            : "border-slate-200 bg-slate-50 text-slate-700",
-        )}
-      >
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-medium">{medicationDispositionLabel(disposition, tx)}</p>
-          <p className="text-[11px] opacity-80">
+      {disposition === "blocked" ? (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <p className="font-medium">
             {tx(
-              "OCR не подтверждает препарат и не подбирает замену автоматически.",
-              "OCR bestätigt das Arzneimittel nicht und führt keine automatische Substitution durch.",
+              "Укажите действующее вещество — без него запись нельзя импортировать",
+              "Wirkstoff ergänzen – ohne Wirkstoff ist kein Import möglich",
             )}
           </p>
         </div>
-      </div>
+      ) : null}
 
       {seriesOptions.length > 0 || requiresExplicitSeries ? (
         <label className="block space-y-1 rounded-lg border border-sky-200 bg-sky-50/70 p-3">
@@ -574,11 +589,16 @@ function MedicationCandidateEditor({
             {tx("Статус", "Status")}
           </span>
           <select
-            value={normalizedValue("status") || "aktiv"}
+            value={statusNeedsConfirmation ? "" : normalizedValue("status") || "aktiv"}
             disabled={disabled}
-            className="h-11 w-full rounded-md border border-input bg-white px-3 text-sm"
-            onChange={(event) => update("status", event.target.value)}
+            aria-invalid={statusNeedsConfirmation}
+            className={cn(
+              "h-11 w-full rounded-md border bg-white px-3 text-sm",
+              statusNeedsConfirmation ? "border-amber-400" : "border-input",
+            )}
+            onChange={(event) => updateStatus(event.target.value)}
           >
+            <option value="" disabled>{tx("Подтвердите статус", "Status bestätigen")}</option>
             <option value="aktiv">{tx("Активный", "Aktiv")}</option>
             <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
             <option value="abgesetzt">{tx("Отменён", "Abgesetzt")}</option>
@@ -641,7 +661,7 @@ function MedicationCandidateEditor({
             checked={onHold}
             disabled={disabled}
             className="size-4 rounded border-border accent-orange-500"
-            onChange={(event) => update("on_hold", event.target.checked)}
+            onChange={(event) => updateOnHold(event.target.checked)}
           />
           {tx("Приём приостановлен", "Einnahme pausiert")}
         </label>
@@ -649,6 +669,11 @@ function MedicationCandidateEditor({
         {onHold ? field("hold_until", tx("Пауза до", "Pause bis"), { type: "date" }) : null}
         {onHold ? field("hold_note", tx("Причина паузы", "Pausengrund"), { className: "sm:col-span-2 xl:col-span-4" }) : null}
       </div>
+      {invalidHoldRange ? (
+        <p className="text-xs font-medium text-destructive">
+          {tx("Дата завершения паузы раньше даты начала.", "Das Ende der Pause liegt vor ihrem Beginn.")}
+        </p>
+      ) : null}
 
       {identifiers ? (
         <p className="break-words rounded-md border border-border/60 bg-white px-3 py-2 text-[11px] text-muted-foreground">
@@ -884,7 +909,7 @@ function mergeReviewCandidates(
       target: item.target,
       normalized,
     });
-    return {
+    const merged = {
       ...item,
       value: existing?.value ?? item.value,
       normalized,
@@ -898,6 +923,9 @@ function mergeReviewCandidates(
               !isRiskyCandidate(item)
             ),
     };
+    return item.target === "medication" && medicationDecision === null
+      ? setMedicationCandidateReviewDecision(merged, "exclude")
+      : merged;
   });
 }
 
@@ -1381,7 +1409,9 @@ export function ClinicalDocumentImportSheet({
     if (!documentImport) return;
     setBusy(true);
     try {
-      const rescanned = await rescanClinicalDocumentImport(patientId, documentImport.id);
+      const rescanned = documentImport.status === "applied"
+        ? await createClinicalDocumentImport(patientId, documentImport.document_id)
+        : await rescanClinicalDocumentImport(patientId, documentImport.id);
       setDocumentImport(rescanned);
       setCandidates([]);
       setActiveCandidateId(null);
@@ -1513,10 +1543,25 @@ export function ClinicalDocumentImportSheet({
               "У выбранного медикамента нет действующего вещества. Заполните это поле перед импортом.",
               "Für das ausgewählte Medikament fehlt der Wirkstoff. Bitte vor dem Import ergänzen.",
             )
-          : tx(
-              "Для выбранного медикамента нужно выбрать существующую линию или создать новую.",
-              "Für das ausgewählte Medikament muss eine bestehende Serie gewählt oder eine neue erstellt werden.",
-            ),
+          : reason === "unconfirmed_status"
+            ? tx(
+                "Подтвердите статус выбранного медикамента.",
+                "Status des ausgewählten Medikaments bestätigen.",
+              )
+            : reason === "invalid_date_range"
+              ? tx(
+                  "Дата окончания приёма раньше даты начала.",
+                  "Das Einnahme-Enddatum liegt vor dem Startdatum.",
+                )
+              : reason === "invalid_hold_range"
+                ? tx(
+                    "Дата завершения паузы раньше даты начала.",
+                    "Das Ende der Pause liegt vor ihrem Beginn.",
+                  )
+            : tx(
+                "Для выбранного медикамента нужно выбрать существующую линию или создать новую.",
+                "Für das ausgewählte Medikament muss eine bestehende Serie gewählt oder eine neue erstellt werden.",
+              ),
       );
       return;
     }
@@ -1631,8 +1676,8 @@ export function ClinicalDocumentImportSheet({
                   "Markierte Vitalwert-Felder korrigieren: Datum, Ursprungsland, Wertebereiche, Blutdruckpaar und BMI-Konsistenz.",
                 )
             : tx(
-                "Для выбранного медикамента нужны действующее вещество и страна документа.",
-                "Für das ausgewählte Medikament sind Wirkstoff und das Ursprungsland des Dokuments erforderlich.",
+                "Для выбранного медикамента нужны действующее вещество, подтверждённый статус и страна документа.",
+                "Für das ausgewählte Medikament sind Wirkstoff, bestätigter Status und Ursprungsland erforderlich.",
               ),
         );
       }
@@ -2007,68 +2052,46 @@ export function ClinicalDocumentImportSheet({
                 if (nextTab === "source") setActiveCandidateId(null);
               }}
             >
-              <TabsList
-                variant="line"
-                aria-label={tx("Разделы конструктора импорта", "Bereiche des Importassistenten")}
-                className="grid !h-14 !w-full min-w-[80rem] grid-cols-9 gap-0 rounded-none border-0 bg-transparent p-0 xl:min-w-0"
-              >
-                <TabsTrigger value="source" className={builderTabClassName}>
-                  <span
-                    className={cn(
-                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
-                      activeTab === "source"
-                        ? "border-[var(--brand)] text-[var(--brand)]"
-                        : "border-muted-foreground/40 text-muted-foreground",
-                    )}
-                  >
-                    <FileText aria-hidden="true" className="size-3.5" />
-                  </span>
-                  <span className="min-w-0 text-[11px] font-medium leading-tight">
-                    {tx("Полный текст", "Volltext")}
-                  </span>
-                </TabsTrigger>
-                <TabsTrigger value="all" className={builderTabClassName}>
-                  <span
-                    className={cn(
-                      "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
-                      activeTab === "all"
-                        ? "border-[var(--brand)] text-[var(--brand)]"
-                        : "border-muted-foreground/40 text-muted-foreground",
-                    )}
-                  >
-                    <ListChecks aria-hidden="true" className="size-3.5" />
-                  </span>
-                  <span className="min-w-0 text-[11px] font-medium leading-tight">
-                    {tx("Все", "Alle")}
-                  </span>
-                  <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
-                    {candidates.length}
-                  </span>
-                </TabsTrigger>
-                {targetOrder.map((target) => {
-                  const TargetIcon = targetIcons[target];
-                  return (
-                    <TabsTrigger key={target} value={target} className={builderTabClassName}>
-                      <span
-                        className={cn(
-                          "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
-                          activeTab === target
-                            ? "border-[var(--brand)] text-[var(--brand)]"
-                            : "border-muted-foreground/40 text-muted-foreground",
-                        )}
+              <div className="flex w-max min-w-full justify-center px-3 py-2">
+                <TabsList
+                  aria-label={tx("Разделы конструктора импорта", "Bereiche des Importassistenten")}
+                  className="h-auto w-max max-w-none flex-nowrap gap-1 rounded-none bg-transparent p-0"
+                >
+                  <TabsTrigger value="source" className={builderTabClassName(activeTab === "source")}>
+                    <FileText aria-hidden="true" className="size-4" />
+                    <span>{tx("Полный текст", "Volltext")}</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="all" className={builderTabClassName(activeTab === "all")}>
+                    <ListChecks aria-hidden="true" className="size-4" />
+                    <span>{tx("Все", "Alle")}</span>
+                    <span
+                      data-count
+                      className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground"
+                    >
+                      {candidates.length}
+                    </span>
+                  </TabsTrigger>
+                  {targetOrder.map((target) => {
+                    const TargetIcon = targetIcons[target];
+                    return (
+                      <TabsTrigger
+                        key={target}
+                        value={target}
+                        className={builderTabClassName(activeTab === target)}
                       >
-                        <TargetIcon aria-hidden="true" className="size-3.5" />
-                      </span>
-                      <span className="min-w-0 text-[11px] font-medium leading-tight">
-                        {targetLabels[target][lang === "de" ? "de" : "ru"]}
-                      </span>
-                      <span className="rounded-full bg-orange-50 px-1.5 text-[10px] text-orange-700">
-                        {newCount(target)}
-                      </span>
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+                        <TargetIcon aria-hidden="true" className="size-4" />
+                        <span>{targetLabels[target][lang === "de" ? "de" : "ru"]}</span>
+                        <span
+                          data-count
+                          className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground"
+                        >
+                          {newCount(target)}
+                        </span>
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              </div>
             </Tabs>
           </div>
         ) : documentImport ? (
@@ -2114,9 +2137,9 @@ export function ClinicalDocumentImportSheet({
                   <button
                     type="button"
                     className={cn(
-                      "flex min-h-36 w-full flex-col items-center justify-center rounded-xl border border-dashed bg-white px-5 py-5 text-center transition-colors",
+                      "flex min-h-36 w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed bg-white px-5 py-5 text-center transition-colors",
                       "hover:border-[var(--brand)]/60 hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/35 focus-visible:ring-offset-2",
-                      file ? "border-[var(--brand)]/60" : "border-border/80",
+                      file ? "border-[var(--brand)]/60" : "border-border",
                     )}
                     onClick={() => fileRef.current?.click()}
                     onDragOver={(event) => {
@@ -2165,13 +2188,6 @@ export function ClinicalDocumentImportSheet({
                     {busy ? <LoaderCircle className="size-4 animate-spin" /> : <FileUp className="size-4" />}
                     {tx("Загрузить и построить черновик", "Hochladen und Entwurf erstellen")}
                   </Button>
-                  <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground">
-                    <Check className="size-3" />
-                    {tx(
-                      "Данные попадут в карту только после вашего подтверждения",
-                      "Daten gelangen erst nach Ihrer Bestätigung in die Akte",
-                    )}
-                  </div>
                 </section>
 
                 <section className="overflow-hidden rounded-xl border border-border/70 bg-white">
@@ -2182,12 +2198,6 @@ export function ClinicalDocumentImportSheet({
                         <h4 className="text-sm font-semibold">
                           {tx("История обработки", "Verarbeitungsverlauf")}
                         </h4>
-                        <p className="text-xs text-muted-foreground">
-                          {tx(
-                            "Снимки документов этого пациента",
-                            "Dokument-Snapshots dieses Patienten",
-                          )}
-                        </p>
                       </div>
                     </div>
                     <Button
@@ -2238,18 +2248,6 @@ export function ClinicalDocumentImportSheet({
                               disabled={historyBusyId === item.id}
                               onClick={() => void openImportSnapshot(item)}
                             >
-                              <div
-                                className={cn(
-                                  "flex size-9 shrink-0 items-center justify-center rounded-xl border",
-                                  importStatusTone[item.status],
-                                )}
-                              >
-                                {historyBusyId === item.id ? (
-                                  <LoaderCircle className="size-4 animate-spin" />
-                                ) : (
-                                  <ImportStatusGlyph status={item.status} />
-                                )}
-                              </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="max-w-full truncate text-sm font-medium">
@@ -2259,13 +2257,18 @@ export function ClinicalDocumentImportSheet({
                                     {importStatusLabels[item.status][lang === "de" ? "de" : "ru"]}
                                   </Badge>
                                 </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {formatImportDate(item.created_at)} · {item.candidate_count}{" "}
-                                  {tx("объектов найдено", "Objekte erkannt")}
-                                  {item.status === "applied"
-                                    ? ` · ${appliedCount} ${tx("добавлено", "übernommen")}`
-                                    : ""}
-                                </p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                  <span className="inline-flex h-5 items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 text-[10px] font-medium tabular-nums text-orange-700">
+                                    <Clock3 className="size-3" />
+                                    {formatImportDate(item.created_at)}
+                                  </span>
+                                  <span>
+                                    {item.candidate_count} {tx("объектов найдено", "Objekte erkannt")}
+                                    {item.status === "applied"
+                                      ? ` · ${appliedCount} ${tx("добавлено", "übernommen")}`
+                                      : ""}
+                                  </span>
+                                </div>
                               </div>
                               <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                             </button>
@@ -2770,21 +2773,12 @@ export function ClinicalDocumentImportSheet({
                               className={cn(
                                 "rounded-xl border px-4 py-4 transition-all",
                                 targetCardTone[candidate.target],
-                                active
-                                  ? "border-orange-400 shadow-sm ring-2 ring-orange-100"
-                                  : "hover:border-orange-300 hover:shadow-sm",
                                 !candidateSelected && candidate.target !== "medication" && "opacity-60",
-                                candidate.target === "medication" && medicationDecision === "include" &&
-                                  "border-emerald-300 bg-emerald-50/45",
-                                candidate.target === "medication" && medicationDecision === "exclude" &&
-                                  "border-slate-300 bg-slate-50",
-                                candidate.target === "medication" && medicationDecision === null &&
-                                  "border-amber-400 bg-amber-50/55",
                               )}
                               onClick={() => setActiveCandidateId(candidate.id)}
                             >
                               <div className="flex items-start gap-3">
-                                {candidate.target !== "medication" ? (
+                                {candidate.target !== "medication" && candidate.target !== "lab_result" ? (
                                   <input
                                     type="checkbox"
                                     className="mt-2 size-4 shrink-0 rounded border-border accent-orange-500"
@@ -2799,73 +2793,72 @@ export function ClinicalDocumentImportSheet({
                                 ) : null}
                                 <div className="min-w-0 flex-1">
                                   {candidate.target === "medication" ? (
-                                    <div
-                                      role="group"
-                                      aria-label={tx("Решение по медикаменту", "Entscheidung zum Medikament")}
-                                      className={cn(
-                                        "mb-3 flex flex-col gap-3 rounded-lg border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between",
-                                        medicationDecision === "include"
-                                          ? "border-emerald-300 bg-emerald-100/80 text-emerald-950"
-                                          : medicationDecision === "exclude"
-                                            ? "border-slate-300 bg-slate-100 text-slate-900"
-                                            : "border-amber-400 bg-amber-100 text-amber-950",
-                                      )}
-                                      onClick={(event) => event.stopPropagation()}
-                                    >
-                                      <div className="flex min-w-0 items-start gap-2">
-                                        {medicationDecision === "include" ? (
-                                          <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                                        ) : (
-                                          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                                        )}
-                                        <div>
-                                          <p className="text-xs font-bold">
+                                    snapshotReadOnly ? (
+                                      <div className="mb-3 flex flex-wrap items-center gap-3">
+                                        <p className="text-sm font-medium text-muted-foreground">
+                                          {candidateSelected
+                                            ? tx("Добавлен в карту пациента", "In die Patientenakte übernommen")
+                                            : tx("Не добавлен в карту пациента", "Nicht in die Patientenakte übernommen")}
+                                        </p>
+                                        {!candidateSelected && documentImport?.status === "applied" ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            className="h-8"
+                                            disabled={busy}
+                                            title={tx(
+                                              "Создать новую проверку документа и добавить медикамент",
+                                              "Neue Dokumentprüfung erstellen und Medikament übernehmen",
+                                            )}
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              void rescan();
+                                            }}
+                                          >
+                                            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                                            {tx("Добавить", "Übernehmen")}
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <div className="mb-3 flex flex-wrap items-center gap-3">
+                                        <label
+                                          className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground"
+                                          onClick={(event) => event.stopPropagation()}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="size-4 shrink-0 rounded border-border accent-orange-500"
+                                            checked={medicationDecision === "include"}
+                                            onChange={(event) =>
+                                              setMedicationDecision(
+                                                candidate.id,
+                                                event.target.checked ? "include" : "exclude",
+                                              )
+                                            }
+                                          />
+                                          <span>
                                             {medicationDecision === "include"
                                               ? tx("Будет добавлен в карту пациента", "Wird in die Patientenakte übernommen")
-                                              : medicationDecision === "exclude"
-                                                ? tx("Не будет добавлен в карту пациента", "Wird nicht in die Patientenakte übernommen")
-                                                : tx("Решение не принято — в карту не попадёт", "Keine Entscheidung – wird nicht in die Akte übernommen")}
-                                          </p>
-                                          {medicationDecision === null ? (
-                                            <p className="mt-0.5 text-[11px] leading-4">
-                                              {tx(
-                                                "Редактирование карточки не включает медикамент автоматически.",
-                                                "Das Bearbeiten der Karte übernimmt das Medikament nicht automatisch.",
-                                              )}
-                                            </p>
-                                          ) : null}
-                                        </div>
+                                              : tx("Не будет добавлен в карту пациента", "Wird nicht in die Patientenakte übernommen")}
+                                          </span>
+                                        </label>
+                                        {medicationDecision !== "include" ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            className="h-8"
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              setMedicationDecision(candidate.id, "include");
+                                            }}
+                                          >
+                                            <Plus className="size-3.5" />
+                                            {tx("Добавить", "Übernehmen")}
+                                          </Button>
+                                        ) : null}
                                       </div>
-                                      <div className="flex shrink-0 flex-wrap gap-2">
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant={medicationDecision === "include" ? "default" : "outline"}
-                                          className={cn(
-                                            "h-8 bg-white",
-                                            medicationDecision === "include" && "bg-emerald-700 text-white hover:bg-emerald-800",
-                                          )}
-                                          disabled={snapshotReadOnly || selectionBlocked}
-                                          onClick={() => setMedicationDecision(candidate.id, "include")}
-                                        >
-                                          <Check className="size-3.5" />
-                                          {tx("Добавить", "Übernehmen")}
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant={medicationDecision === "exclude" ? "default" : "outline"}
-                                          className={cn(
-                                            "h-8 bg-white",
-                                            medicationDecision === "exclude" && "bg-slate-700 text-white hover:bg-slate-800",
-                                          )}
-                                          disabled={snapshotReadOnly}
-                                          onClick={() => setMedicationDecision(candidate.id, "exclude")}
-                                        >
-                                          {tx("Не добавлять", "Nicht übernehmen")}
-                                        </Button>
-                                      </div>
-                                    </div>
+                                    )
                                   ) : null}
                                   {candidate.target === "medication" && medicationDisposition ? (
                                     <MedicationCandidateEditor
@@ -2897,7 +2890,7 @@ export function ClinicalDocumentImportSheet({
                                   ) : candidate.target === "lab_result" ? (
                                     <div
                                       data-clinical-import-candidate-editor
-                                      className="grid gap-3 rounded-lg border border-white/70 bg-white/55 p-3 sm:grid-cols-2 xl:grid-cols-4"
+                                      className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
                                       onClick={(event) => event.stopPropagation()}
                                     >
                                       {([
@@ -2905,33 +2898,56 @@ export function ClinicalDocumentImportSheet({
                                         ["result_text", tx("Значение", "Wert")],
                                         ["unit", tx("Единица", "Einheit")],
                                         ["reference_text", tx("Референс", "Referenz")],
-                                      ] as const).map(([field, label]) => (
-                                        <label key={field} className="space-y-1">
-                                          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
-                                          <Input
-                                            value={typeof candidate.normalized[field] === "string" ? candidate.normalized[field] as string : ""}
-                                            disabled={snapshotReadOnly || !candidate.selected}
-                                            className="h-10 bg-white"
-                                            onFocus={() => setActiveCandidateId(candidate.id)}
-                                            onChange={(event) => {
-                                              const nextNormalized = { ...candidate.normalized, [field]: event.target.value };
-                                              if (field === "result_text") {
-                                                nextNormalized.numeric_result = localizedLabNumber(event.target.value.replace(/^(?:<=|>=|<|>|=)\s*/, ""));
-                                                nextNormalized.comparator = event.target.value.match(/^(<=|>=|<|>|=)/)?.[1] ?? null;
-                                              }
-                                              if (field === "reference_text") {
-                                                nextNormalized.reference_low = null;
-                                                nextNormalized.reference_high = null;
-                                                nextNormalized.abnormal_flag = "unknown";
-                                              }
-                                              patchCandidate(candidate.id, {
-                                                normalized: nextNormalized,
-                                                value: labCandidateDisplay(nextNormalized),
-                                              });
-                                            }}
-                                          />
-                                        </label>
-                                      ))}
+                                      ] as const).map(([field, label]) => {
+                                        const inputId = `clinical-import-${candidate.id}-${field}`;
+                                        return (
+                                          <div key={field} className="space-y-1">
+                                            <label
+                                              htmlFor={inputId}
+                                              className="block min-h-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                                            >
+                                              {label}
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                              {field === "analyte_name" ? (
+                                                <input
+                                                  type="checkbox"
+                                                  className="size-4 shrink-0 rounded border-border accent-orange-500"
+                                                  checked={candidateSelected}
+                                                  disabled={snapshotReadOnly || selectionBlocked}
+                                                  onChange={(event) =>
+                                                    patchCandidate(candidate.id, { selected: event.target.checked })
+                                                  }
+                                                  aria-label={tx("Импортировать запись", "Eintrag importieren")}
+                                                />
+                                              ) : null}
+                                              <Input
+                                                id={inputId}
+                                                value={typeof candidate.normalized[field] === "string" ? candidate.normalized[field] as string : ""}
+                                                disabled={snapshotReadOnly || !candidate.selected}
+                                                className="h-10 min-w-0 flex-1 bg-white"
+                                                onFocus={() => setActiveCandidateId(candidate.id)}
+                                                onChange={(event) => {
+                                                  const nextNormalized = { ...candidate.normalized, [field]: event.target.value };
+                                                  if (field === "result_text") {
+                                                    nextNormalized.numeric_result = localizedLabNumber(event.target.value.replace(/^(?:<=|>=|<|>|=)\s*/, ""));
+                                                    nextNormalized.comparator = event.target.value.match(/^(<=|>=|<|>|=)/)?.[1] ?? null;
+                                                  }
+                                                  if (field === "reference_text") {
+                                                    nextNormalized.reference_low = null;
+                                                    nextNormalized.reference_high = null;
+                                                    nextNormalized.abnormal_flag = "unknown";
+                                                  }
+                                                  patchCandidate(candidate.id, {
+                                                    normalized: nextNormalized,
+                                                    value: labCandidateDisplay(nextNormalized),
+                                                  });
+                                                }}
+                                              />
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
                                       <label className="space-y-1 sm:col-span-2 xl:col-span-2">
                                         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{tx("Лаборатория", "Labor")}</span>
                                         <Input
@@ -2994,15 +3010,21 @@ export function ClinicalDocumentImportSheet({
                                   ) : (
                                     <textarea
                                       data-clinical-import-candidate-editor
+                                      ref={candidate.target === "diagnosis" ? autosizeCandidateTextArea : undefined}
                                       value={candidate.value}
                                       disabled={snapshotReadOnly || !candidate.selected}
                                       className={cn(
-                                        "max-h-[55vh] w-full resize-y rounded-lg border border-white/70 bg-white/45 px-3 py-2.5 text-sm font-medium leading-6 text-foreground outline-none transition-colors hover:border-white hover:bg-white/70 focus:border-orange-300 focus:bg-white focus:ring-2 focus:ring-orange-100 disabled:cursor-default disabled:opacity-55",
-                                        active ? "min-h-44" : "min-h-32",
+                                        "max-h-[55vh] w-full overflow-y-auto resize-y rounded-lg border-0 bg-transparent px-3 py-2.5 text-sm font-medium leading-6 text-foreground outline-none disabled:cursor-default disabled:text-foreground disabled:opacity-100",
+                                        candidate.target === "diagnosis"
+                                          ? "min-h-14 resize-none"
+                                          : active ? "min-h-44" : "min-h-32",
                                       )}
-                                      onChange={(event) =>
-                                        patchCandidate(candidate.id, { value: event.target.value })
-                                      }
+                                      onChange={(event) => {
+                                        if (candidate.target === "diagnosis") {
+                                          autosizeCandidateTextArea(event.currentTarget);
+                                        }
+                                        patchCandidate(candidate.id, { value: event.target.value });
+                                      }}
                                       onFocus={() => setActiveCandidateId(candidate.id)}
                                       onClick={(event) => event.stopPropagation()}
                                     />
@@ -3101,12 +3123,6 @@ export function ClinicalDocumentImportSheet({
               <div className="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-white p-6 text-center">
                 <FileText className="size-10 text-muted-foreground/60" />
                 <p className="text-sm font-medium">{tx("Документ появится здесь", "Dokument erscheint hier")}</p>
-                <p className="max-w-xs text-xs text-muted-foreground">
-                  {tx(
-                    "Предпросмотр останется открытым, пока вы переходите между медицинскими объектами.",
-                    "Die Vorschau bleibt beim Wechsel zwischen medizinischen Objekten geöffnet.",
-                  )}
-                </p>
               </div>
             )}
           </div>

@@ -8,6 +8,8 @@ import {
   Users as UsersIcon,
 } from "lucide-react";
 
+import { localizeTimelineTitle } from "@/lib/timeline-labels";
+
 import {
   formatDay,
   formatMonth,
@@ -138,7 +140,7 @@ export function StaffDashboardActivitySection({
                   <PriorityDot priority={task.priority} />
                   <div className="min-w-0 flex-1">
                     <div className="min-w-0 max-w-full break-words text-[13px] font-medium text-foreground">
-                      {task.title}
+                      {localizeTimelineTitle(task.title, (key) => tr[key] ?? key)}
                     </div>
                     <div className="min-w-0 max-w-full break-words text-[11.5px] text-muted-foreground">
                       {task.due_date

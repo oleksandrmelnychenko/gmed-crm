@@ -19,6 +19,12 @@ const medicationStatuses = new Set<MedicationStatus>([
 const medicationCategories = new Set<MedicationCategory>(["dauer", "besondere", "selbst"]);
 
 export type MedicationReviewDecision = "include" | "exclude";
+export type MedicationReviewBlockReason =
+  | "missing_wirkstoff"
+  | "unconfirmed_status"
+  | "invalid_date_range"
+  | "invalid_hold_range"
+  | "ambiguous_series";
 
 export type MedicationReviewDecisionSummary = {
   total: number;
@@ -27,6 +33,14 @@ export type MedicationReviewDecisionSummary = {
   unresolved: number;
   unresolvedCandidates: ClinicalDocumentImportCandidate[];
 };
+
+const medicationStatusConfirmationReasons = new Set([
+  "medication_active_status_requires_confirmation",
+  "medication_status_requires_confirmation",
+  "medication_lifecycle_change_requires_confirmation",
+  "planned_medication_requires_confirmation",
+  "conflicting_medication_status",
+]);
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -97,6 +111,16 @@ function confidenceObject(value: unknown): Record<string, number> {
   );
 }
 
+function medicationDateRangeInvalid(
+  normalized: Record<string, unknown>,
+  startKey: string,
+  endKey: string,
+): boolean {
+  const start = text(normalized[startKey]);
+  const end = text(normalized[endKey]);
+  return Boolean(start && end && end < start);
+}
+
 function omitUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
@@ -113,6 +137,17 @@ export function medicationCandidateNeedsWirkstoff(
   candidate: Pick<ClinicalDocumentImportCandidate, "normalized" | "target">,
 ): boolean {
   return candidate.target === "medication" && !medicationCandidateWirkstoff(candidate);
+}
+
+export function medicationCandidateNeedsStatusConfirmation(
+  candidate: Pick<ClinicalDocumentImportCandidate, "normalized" | "target">,
+): boolean {
+  if (candidate.target !== "medication") return false;
+  const reasons = candidate.normalized.review_reasons;
+  return Array.isArray(reasons)
+    && reasons.some(
+      (reason) => typeof reason === "string" && medicationStatusConfirmationReasons.has(reason),
+    );
 }
 
 export function medicationCandidateReviewDecision(
@@ -169,8 +204,15 @@ export function medicationCandidateReviewBlockReason(
   candidate: Pick<ClinicalDocumentImportCandidate, "normalized" | "target">,
   matchingSeriesCount: number,
   matchingBatchCandidateCount = 1,
-): "missing_wirkstoff" | "ambiguous_series" | null {
+): MedicationReviewBlockReason | null {
   if (medicationCandidateNeedsWirkstoff(candidate)) return "missing_wirkstoff";
+  if (medicationCandidateNeedsStatusConfirmation(candidate)) return "unconfirmed_status";
+  if (medicationDateRangeInvalid(candidate.normalized, "einnahme_von", "einnahme_bis")) {
+    return "invalid_date_range";
+  }
+  if (medicationDateRangeInvalid(candidate.normalized, "hold_from", "hold_until")) {
+    return "invalid_hold_range";
+  }
   const seriesId = text(candidate.normalized.medication_series_id);
   const createsNewSeries = boolean(candidate.normalized.create_new_series);
   const requiresExplicitSeries = matchingSeriesCount > 1 || matchingBatchCandidateCount > 1;
@@ -243,10 +285,43 @@ export function updateMedicationCandidateField(
       : [];
     normalized.review_reasons = reviewReasons;
   }
+  if (field === "status" && typeof value === "string" && medicationStatuses.has(value as MedicationStatus)) {
+    const reviewReasons = Array.isArray(candidate.normalized.review_reasons)
+      ? candidate.normalized.review_reasons.filter(
+          (reason) => typeof reason !== "string" || !medicationStatusConfirmationReasons.has(reason),
+        )
+      : [];
+    normalized.review_reasons = reviewReasons;
+  }
   return omitUndefined({
     normalized,
     value: medicationCandidateDisplay(normalized),
   });
+}
+
+export function updateMedicationCandidateLifecycle(
+  candidate: ClinicalDocumentImportCandidate,
+  change: { status?: MedicationStatus; onHold?: boolean },
+): Pick<ClinicalDocumentImportCandidate, "normalized" | "value"> {
+  const currentStatus = text(candidate.normalized.status);
+  const requestedStatus = change.status
+    ?? (currentStatus && medicationStatuses.has(currentStatus as MedicationStatus)
+      ? currentStatus as MedicationStatus
+      : "aktiv");
+  const status = change.onHold === true
+    ? "pausiert"
+    : change.onHold === false && requestedStatus === "pausiert"
+      ? "aktiv"
+      : requestedStatus;
+  const onHold = status === "pausiert";
+  const reviewed = updateMedicationCandidateField(candidate, "status", status);
+  const normalized: Record<string, unknown> = { ...reviewed.normalized, on_hold: onHold };
+  if (!onHold) {
+    normalized.hold_from = null;
+    normalized.hold_until = null;
+    normalized.hold_note = null;
+  }
+  return { normalized, value: medicationCandidateDisplay(normalized) };
 }
 
 export function medicationFieldConfidence(
@@ -271,7 +346,12 @@ export function medicationImportPayload(
 ): ImportedMedicationPayload | null {
   const normalized = candidate.normalized;
   const wirkstoff = medicationCandidateWirkstoff(candidate);
-  if (!wirkstoff) return null;
+  if (
+    !wirkstoff
+    || medicationCandidateNeedsStatusConfirmation(candidate)
+    || medicationDateRangeInvalid(normalized, "einnahme_von", "einnahme_bis")
+    || medicationDateRangeInvalid(normalized, "hold_from", "hold_until")
+  ) return null;
   const normalizedHinweis = text(normalized.hinweis);
   const asNeeded = optionalBoolean(normalized, "as_needed");
   const hinweis = [

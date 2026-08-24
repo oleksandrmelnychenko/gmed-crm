@@ -6,11 +6,12 @@ vi.mock("@/lib/api", () => ({
   apiFetch: apiFetchMock,
 }));
 
-import type { AllDoctorOption, ClinicalNarrative } from "./patient-clinical";
+import type { AllDoctorOption, ClinicalMedication, ClinicalNarrative } from "./patient-clinical";
 import {
   deduplicateAllDoctorOptions,
   fetchAllDoctors,
   savePatientNarrative,
+  updateClinicalMedicationLifecycle,
 } from "./patient-clinical";
 
 function narrative(): ClinicalNarrative {
@@ -161,5 +162,65 @@ describe("doctor options", () => {
 
     await expect(fetchAllDoctors()).resolves.toEqual([doctor()]);
     expect(apiFetchMock).toHaveBeenCalledWith("/doctors", { cacheTtlMs: 60_000 });
+  });
+});
+
+describe("medication lifecycle", () => {
+  const medication = {
+    category: "dauer",
+    wirkstoff: "Metoprolol",
+    handelsname: "Metohexal",
+    staerke: "50 mg",
+    form: "Tablette",
+    einnahmeform: "oral",
+    dose_morgens: "1",
+    dose_mittags: "0",
+    dose_abends: "1",
+    dose_nachts: "0",
+    einheit: "Tablette",
+    hinweis: null,
+    grund: null,
+    verordnet_am: null,
+    einnahme_von: null,
+    einnahme_bis: null,
+    status: "aktiv",
+    apothekenpflichtig: false,
+    rezeptpflichtig: false,
+    btm: false,
+    aut_idem_sperre: false,
+    abgabebeschraenkung: false,
+    sonstige_vermerke: null,
+    on_hold: false,
+    hold_from: null,
+    hold_until: null,
+    hold_note: null,
+    provider_id: null,
+    provider_name: null,
+    doctor_id: null,
+    doctor_name: null,
+    doctor_title: null,
+    doctor_fachbereich: null,
+  } satisfies ClinicalMedication;
+
+  it("synchronizes paused status with hold and clears stale hold metadata on resume", () => {
+    const paused = updateClinicalMedicationLifecycle(medication, { status: "pausiert" });
+    expect(paused).toMatchObject({ status: "pausiert", on_hold: true });
+
+    const resumed = updateClinicalMedicationLifecycle(
+      {
+        ...paused,
+        hold_from: "2026-08-10",
+        hold_until: "2026-08-20",
+        hold_note: "Nebenwirkung",
+      },
+      { onHold: false },
+    );
+    expect(resumed).toMatchObject({
+      status: "aktiv",
+      on_hold: false,
+      hold_from: null,
+      hold_until: null,
+      hold_note: null,
+    });
   });
 });

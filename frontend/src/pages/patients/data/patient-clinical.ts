@@ -162,6 +162,28 @@ export type ClinicalMedication = ClinicalAttribution & {
   hold_note: string | null;
 };
 
+export function updateClinicalMedicationLifecycle(
+  medication: ClinicalMedication,
+  change: { status?: MedicationStatus; onHold?: boolean },
+): ClinicalMedication {
+  const requestedStatus = change.status ?? medication.status;
+  const status = change.onHold === true
+    ? "pausiert"
+    : change.onHold === false && requestedStatus === "pausiert"
+      ? "aktiv"
+      : requestedStatus;
+  const onHold = status === "pausiert";
+
+  return {
+    ...medication,
+    status,
+    on_hold: onHold,
+    hold_from: onHold ? medication.hold_from : null,
+    hold_until: onHold ? medication.hold_until : null,
+    hold_note: onHold ? medication.hold_note : null,
+  };
+}
+
 export type ClinicalExamination = ClinicalAttribution & {
   id?: string;
   /** Episode (case) this entry was established in, if any. */

@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -26,6 +32,7 @@ import {
   buildGenerateDocumentPayload,
   documentTemplateRequiresOrder,
   emptyGenerateForm,
+  isFreeTextDocumentTemplate,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
   resolveGeneratedDocumentAccessCategory,
@@ -51,6 +58,7 @@ type PatientDocumentGenerateDialogProps = {
   open: boolean;
   patientId: string | undefined;
   patient?: PatientOption;
+  initialTemplateId?: string | null;
   onOpenChange: (open: boolean) => void;
   /** Called after a document is generated (the list also refreshes via realtime). */
   onGenerated?: () => void;
@@ -60,6 +68,7 @@ export function PatientDocumentGenerateDialog({
   open,
   patientId,
   patient,
+  initialTemplateId = null,
   onOpenChange,
   onGenerated,
 }: PatientDocumentGenerateDialogProps) {
@@ -150,7 +159,68 @@ export function PatientDocumentGenerateDialog({
     };
   }, [open, patientId]);
 
+  const buildFormForTemplate = useCallback(
+    (template: DocumentTemplate) => {
+      const nextForm = emptyGenerateForm(patientId ?? "");
+      const nextLanguage = resolveTemplateLanguage(
+        patientId ?? "",
+        template,
+        patientOptions,
+      );
+      const patientAddressee = patientDocumentAddresseeLabel(
+        patientId ?? "",
+        patientOptions,
+      );
+      const formWithTemplate: GenerateFormState = {
+        ...nextForm,
+        templateId: template.id,
+        autoName: template.default_auto_name,
+        status: template.default_status,
+        visibility: template.default_visibility,
+        language: nextLanguage,
+        documentLanguage: nextLanguage,
+        accessCategory: resolveGeneratedDocumentAccessCategory(
+          template,
+          nextForm.accessCategory,
+        ),
+        addresseePerson: patientAddressee,
+        bindings: {
+          ...patientPartyBindingDefaults(patientProfile),
+          ...(template.id === "enhanced_due_diligence"
+            ? enhancedDueDiligenceBindingDefaults()
+            : {}),
+        },
+      };
+      return {
+        ...formWithTemplate,
+        autoName:
+          buildGenerateDocumentAutoName({
+            template,
+            form: formWithTemplate,
+            patients: patientOptions,
+          }) || template.default_auto_name,
+      };
+    },
+    [patientId, patientOptions, patientProfile],
+  );
+
+  useEffect(() => {
+    if (!open || !templatesLoaded || !initialTemplateId || form.templateId) {
+      return;
+    }
+    const template = templates.find((item) => item.id === initialTemplateId);
+    if (template) setForm(buildFormForTemplate(template));
+  }, [
+    buildFormForTemplate,
+    form.templateId,
+    initialTemplateId,
+    open,
+    templates,
+    templatesLoaded,
+  ]);
+
   const selectedTemplate = templates.find((t) => t.id === form.templateId) ?? null;
+  const isFreeTextDocument = isFreeTextDocumentTemplate(selectedTemplate?.id);
   const bindingFields = selectedTemplate ? DOCUMENT_BINDING_FIELDS[selectedTemplate.id] ?? [] : [];
   const designedAgencyTemplate = Boolean(
     selectedTemplate &&
@@ -213,44 +283,7 @@ export function PatientDocumentGenerateDialog({
       setForm({ ...nextForm, templateId: id });
       return;
     }
-    const nextLanguage = resolveTemplateLanguage(
-      patientId ?? "",
-      template,
-      patientOptions,
-    );
-    const patientAddressee = patientDocumentAddresseeLabel(
-      patientId ?? "",
-      patientOptions,
-    );
-    const formWithTemplate: GenerateFormState = {
-      ...nextForm,
-      templateId: template.id,
-      autoName: template.default_auto_name,
-      status: template.default_status,
-      visibility: template.default_visibility,
-      language: nextLanguage,
-      documentLanguage: nextLanguage,
-      accessCategory: resolveGeneratedDocumentAccessCategory(
-        template,
-        nextForm.accessCategory,
-      ),
-      addresseePerson: patientAddressee,
-      bindings: {
-        ...patientPartyBindingDefaults(patientProfile),
-        ...(template.id === "enhanced_due_diligence"
-          ? enhancedDueDiligenceBindingDefaults()
-          : {}),
-      },
-    };
-    setForm({
-      ...formWithTemplate,
-      autoName:
-        buildGenerateDocumentAutoName({
-          template,
-          form: formWithTemplate,
-          patients: patientOptions,
-        }) || template.default_auto_name,
-    });
+    setForm(buildFormForTemplate(template));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -258,6 +291,15 @@ export function PatientDocumentGenerateDialog({
     if (!selectedTemplate || !patientId || busy) return;
     if (selectedTemplateRequiresOrder && !form.orderId) {
       setValidationError(orderContextRequiredMessage);
+      return;
+    }
+    if (isFreeTextDocument && !displayedGeneratedManualText.trim()) {
+      setValidationError(
+        tx(
+          "Введите текст документа.",
+          "Geben Sie den Dokumenttext ein.",
+        ),
+      );
       return;
     }
     if (selectedTemplate.id === "enhanced_due_diligence") {
@@ -305,7 +347,11 @@ export function PatientDocumentGenerateDialog({
       onOpenChange={onOpenChange}
       width="form-heavy"
       onSubmit={handleSubmit}
-      title={tx("Сгенерировать из шаблона", "Aus Vorlage erstellen")}
+      title={
+        initialTemplateId && isFreeTextDocumentTemplate(initialTemplateId)
+          ? tx("Создать документ", "Dokument erstellen")
+          : tx("Сгенерировать из шаблона", "Aus Vorlage erstellen")
+      }
       description={tx(
         "Документ создаётся для этого пациента и появится в списке.",
         "Das Dokument wird für diesen Patienten erstellt und erscheint in der Liste.",
@@ -323,10 +369,15 @@ export function PatientDocumentGenerateDialog({
               busy ||
               !selectedTemplate ||
               !patientId ||
-              frameworkContractMissing
+              frameworkContractMissing ||
+              (isFreeTextDocument && !displayedGeneratedManualText.trim())
             }
           >
-            {busy ? tx("Создаётся…", "Wird erstellt…") : tx("Сгенерировать", "Erstellen")}
+            {busy
+              ? tx("Создаётся…", "Wird erstellt…")
+              : isFreeTextDocument
+                ? tx("Создать", "Erstellen")
+                : tx("Сгенерировать", "Erstellen")}
           </Button>
         </div>
       }
@@ -371,6 +422,26 @@ export function PatientDocumentGenerateDialog({
         <>
           {selectedTemplate.description ? (
             <p className="text-xs text-muted-foreground">{selectedTemplate.description}</p>
+          ) : null}
+
+          {isFreeTextDocument ? (
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                {tx("Заголовок документа", "Dokumenttitel")}
+              </span>
+              <Input
+                value={form.titleOverride}
+                onChange={(event) => {
+                  setValidationError("");
+                  setForm((current) => ({
+                    ...current,
+                    titleOverride: event.target.value,
+                  }));
+                }}
+                className={fieldInputClass}
+                placeholder={tx("Введите заголовок", "Titel eingeben")}
+              />
+            </label>
           ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -534,39 +605,56 @@ export function PatientDocumentGenerateDialog({
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[11px] font-medium text-muted-foreground">
-                  {tx("Финальный текст PDF", "Finaler PDF-Text")}
+                  {isFreeTextDocument
+                    ? tx("Текст документа", "Dokumenttext")
+                    : tx("Финальный текст PDF", "Finaler PDF-Text")}
                 </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  disabled={!form.manualTextDirty}
-                  onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      manualText: "",
-                      manualTextDirty: false,
-                    }))
-                  }
-                >
-                  {tx("Вернуть текст шаблона", "Vorlagentext wiederherstellen")}
-                </Button>
+                {!isFreeTextDocument ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    disabled={!form.manualTextDirty}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        manualText: "",
+                        manualTextDirty: false,
+                      }))
+                    }
+                  >
+                    {tx("Вернуть текст шаблона", "Vorlagentext wiederherstellen")}
+                  </Button>
+                ) : null}
               </div>
               <textarea
                 value={displayedGeneratedManualText}
-                onChange={(e) =>
+                aria-invalid={isFreeTextDocument && Boolean(validationError)}
+                placeholder={
+                  isFreeTextDocument
+                    ? tx(
+                        "Введите индивидуальный текст документа…",
+                        "Individuellen Dokumenttext eingeben…",
+                      )
+                    : undefined
+                }
+                onChange={(e) => {
+                  setValidationError("");
                   setForm((current) => ({
                     ...current,
                     manualText: e.target.value,
                     manualTextDirty: true,
-                  }))
-                }
+                  }));
+                }}
                 className={cn(
                   fieldInputClass,
                   "min-h-[220px] py-2 leading-relaxed",
                 )}
               />
+              {isFreeTextDocument && validationError ? (
+                <p className="text-xs text-destructive">{validationError}</p>
+              ) : null}
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 {tx(
                   "Если изменить текст, PDF будет создан именно из этой версии.",

@@ -11918,8 +11918,15 @@ async fn save_patient_medications(
         let handelsname = clinical_opt_text(item.handelsname).unwrap_or_default();
         let category = clinical_one_of(item.category, &["dauer", "besondere", "selbst"])
             .unwrap_or_else(|| "dauer".to_string());
-        let status = clinical_one_of(item.status, &["aktiv", "pausiert", "abgesetzt", "geplant"])
-            .unwrap_or_else(|| "aktiv".to_string());
+        let requested_status =
+            clinical_one_of(item.status, &["aktiv", "pausiert", "abgesetzt", "geplant"])
+                .unwrap_or_else(|| "aktiv".to_string());
+        let on_hold = item.on_hold.unwrap_or(false) || requested_status == "pausiert";
+        let status = if on_hold {
+            "pausiert".to_string()
+        } else {
+            requested_status
+        };
         let verordnet_am = match clinical_parse_date(item.verordnet_am, "verordnet_am") {
             Ok(value) => value,
             Err(response) => return response,
@@ -11959,9 +11966,15 @@ async fn save_patient_medications(
         let verordnet_am = verordnet_am.map(|value| value.to_string());
         let einnahme_von = einnahme_von.map(|value| value.to_string());
         let einnahme_bis = einnahme_bis.map(|value| value.to_string());
-        let hold_from = hold_from.map(|value| value.to_string());
-        let hold_until = hold_until.map(|value| value.to_string());
-        let on_hold = item.on_hold.unwrap_or(false);
+        let (hold_from, hold_until, hold_note) = if on_hold {
+            (
+                hold_from.map(|value| value.to_string()),
+                hold_until.map(|value| value.to_string()),
+                clinical_opt_text(item.hold_note),
+            )
+        } else {
+            (None, None, None)
+        };
         let (provider_id, doctor_id) =
             match clinical_resolve_attribution(&state, item.provider_id, item.doctor_id).await {
                 Ok(pair) => pair,
@@ -12018,7 +12031,7 @@ async fn save_patient_medications(
             .bind(on_hold)
             .bind(hold_from)
             .bind(hold_until)
-            .bind(clinical_opt_text(item.hold_note))
+            .bind(hold_note)
             .bind(saved);
         if let Some(id) = row_id {
             query = query.bind(id);

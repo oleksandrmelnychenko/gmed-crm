@@ -1,6 +1,7 @@
 import {
   Download,
   Eye,
+  FilePlus2,
   FileWarning,
   LoaderCircle,
   PencilLine,
@@ -31,7 +32,10 @@ import {
 } from "@/lib/required-document-labels";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { formatBusinessDocumentNumber } from "@/pages/documents/model/document-model";
+import {
+  formatBusinessDocumentNumber,
+  FREE_TEXT_DOCUMENT_TEMPLATE_ID,
+} from "@/pages/documents/model/document-model";
 import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
 import {
   createDocumentPreviewObjectUrl,
@@ -184,6 +188,9 @@ export function PatientDocumentsTab({
 }: PatientDocumentsTabProps) {
   const { lang, t } = useLang();
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateTemplateId, setGenerateTemplateId] = useState<string | null>(
+    null,
+  );
   const [editDocumentId, setEditDocumentId] = useState<string | null>(null);
   const [documentPreview, setDocumentPreview] =
     useState<PatientDocumentPreview | null>(null);
@@ -229,6 +236,11 @@ export function PatientDocumentsTab({
     setDocumentPreview(null);
     setDocumentPreviewBusy(false);
     setDocumentPreviewError("");
+  }
+
+  function openDocumentGenerator(initialTemplateId: string | null = null) {
+    setGenerateTemplateId(initialTemplateId);
+    setGenerateOpen(true);
   }
 
   async function openPatientDocumentPreview(doc: DocumentItem) {
@@ -487,10 +499,6 @@ export function PatientDocumentsTab({
 
       {tabLoading ? (
         <TabLoader />
-      ) : documents.length === 0 ? (
-        <EmptyCell>
-          {l("patients_no_documents_have_been_uploaded_for_this_patient_yet")}
-        </EmptyCell>
       ) : (
         <DataTableSurface
           rows={documentPagination.pagedRows}
@@ -543,7 +551,11 @@ export function PatientDocumentsTab({
           rowActionsWidth={canManageDocuments ? 116 : 82}
           emptyState={
             <EmptyCell>
-              {l("patients_no_document_matches_the_current_filters")}
+              {documents.length === 0
+                ? l(
+                    "patients_no_documents_have_been_uploaded_for_this_patient_yet",
+                  )
+                : l("patients_no_document_matches_the_current_filters")}
             </EmptyCell>
           }
           toolbarStart={
@@ -553,9 +565,20 @@ export function PatientDocumentsTab({
                   <Button
                     type="button"
                     size="sm"
+                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    onClick={() =>
+                      openDocumentGenerator(FREE_TEXT_DOCUMENT_TEMPLATE_ID)
+                    }
+                  >
+                    <FilePlus2 className="size-3.5" />
+                    {lang === "de" ? "Dokument erstellen" : "Создать документ"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
                     variant="outline"
                     className="h-8 shrink-0 rounded-lg gap-1.5"
-                    onClick={() => setGenerateOpen(true)}
+                    onClick={() => openDocumentGenerator()}
                   >
                     {l("documents_generate_from_template")}
                   </Button>
@@ -711,7 +734,11 @@ export function PatientDocumentsTab({
             open={generateOpen}
             patientId={patientId}
             patient={generatePatient}
-            onOpenChange={setGenerateOpen}
+            initialTemplateId={generateTemplateId}
+            onOpenChange={(open) => {
+              setGenerateOpen(open);
+              if (!open) setGenerateTemplateId(null);
+            }}
             onGenerated={onDocumentGenerated}
           />
           <PatientDocumentEditSheet

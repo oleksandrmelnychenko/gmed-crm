@@ -39,6 +39,114 @@ final result: passed
 
 ---
 
+# Design QA — CEO Business Map dashboard
+
+- Source visual truth: `C:/Users/oleks/.codex/generated_images/01a01c03-bf56-7d01-89a5-46ca626f0683/exec-acccf5ae-eeeb-440b-b0ba-399ce91b4728.png`
+- Initial implementation: `C:/Users/oleks/Developer/gmed/artifacts/ceo-business-map-implementation-01.png`
+- Final implementation: `C:/Users/oleks/Developer/gmed/artifacts/ceo-business-map-implementation-final.png`
+- Mobile implementation: `C:/Users/oleks/Developer/gmed/artifacts/ceo-business-map-mobile-final.png`
+- Full comparison: `C:/Users/oleks/Developer/gmed/artifacts/ceo-business-map-qa-comparison-final.png`
+- Focused comparison: `C:/Users/oleks/Developer/gmed/artifacts/ceo-business-map-qa-focus-final.png`
+- Source pixels: 1487 × 1058; normalized to 1440 × 1024 for comparison.
+- Implementation pixels and CSS viewport: 1440 × 1024 at density 1.
+- Responsive check: 390 × 844 CSS px with document and body scroll width equal to 390 px.
+- State: authenticated CEO, Russian locale, populated live finance, patient, order, provider, task, and appointment data.
+
+## Full-view comparison evidence
+
+The final CEO dashboard follows selected direction 2: a flat four-signal header, unified 2 × 2 business matrix, persistent management decision rail, cash-movement view, and upcoming milestones. The prior peach gradients and stacked analytical card inventory are absent. Existing shell navigation, GMED branding, product typography, and semantic colors are preserved.
+
+## Focused-region comparison evidence
+
+- Header signals use the same four-column rhythm, thin separators, compact labels, and large tabular values as the selected design.
+- The main business map preserves the source order and proportion: Money / Patients above Orders / Providers, with a narrow decision rail on the right.
+- Business domains use live values and semantic status dots. Sparklines are rendered with the existing chart library and no area fill or gradient.
+- Decision rows open their exact task; finance and domain actions open the corresponding operational screen.
+- The implementation intentionally omits fictional comparison deltas and mock decisions that are not supplied by current APIs. It shows real reconciliation, movement, task, provider, and appointment data instead.
+
+## Comparison history
+
+### Pass 1
+
+- [P2] Order count used only the visible valued pipeline phases (`3`) instead of the executive overview total (`13`).
+- [P2] Mobile matrix order was Money, Orders, Patients, Providers because the desktop columns remained nested at the narrow breakpoint.
+- Fixes: sourced the main order count from the overview payload and changed the matrix to a direct responsive grid so mobile reads Money, Patients, Orders, Providers.
+
+### Pass 2
+
+- Post-fix desktop and focused comparisons show the selected information hierarchy and flat visual language without actionable P0, P1, or P2 drift.
+- Mobile values load correctly, content order is logical, and no horizontal overflow remains.
+
+## Required fidelity surfaces
+
+- Fonts and typography: passed; the existing Onest product stack, compact uppercase labels, restrained weights, wrapping, and tabular money values match the selected direction.
+- Spacing and layout rhythm: passed; flat page sections, hairline dividers, 2 × 2 matrix geometry, right decision rail, and compact vertical rhythm match the source at 1440 × 1024.
+- Colors and visual tokens: passed; no gradients are present. Existing neutral, border, brand-orange, emerald, amber, and rose tokens are used semantically.
+- Image quality and asset fidelity: passed; the selected design contains no raster content beyond the existing GMED brand asset. UI icons use the product's existing icon library.
+- Copy and content: passed with intentional live-data substitution; the UI uses real API values rather than the fictional values in the generated concept.
+- Interactions and states: passed; finance navigation, exact task navigation, responsive layout, loading state, and realtime-backed data were checked.
+- Console: no browser errors after desktop and mobile checks.
+- Static verification: TypeScript, targeted ESLint, and production Vite build passed.
+
+## Follow-up polish
+
+- [P3] When historical comparison data becomes available, the four top signals can gain true period-over-period deltas without changing the current layout.
+
+final result: passed
+
+---
+
+# Design QA — Smart role dashboard
+
+- Source visual truth: `C:/Users/oleks/Developer/gmed/role-dashboard-concierge.png`
+- Implementation screenshot: `C:/Users/oleks/Developer/gmed/artifacts/role-dashboard-concierge-smart-implementation-v2.png`
+- Mobile implementation: `C:/Users/oleks/Developer/gmed/artifacts/role-dashboard-concierge-smart-mobile.png`
+- Combined comparison: `C:/Users/oleks/Developer/gmed/artifacts/role-dashboard-concierge-qa-comparison.png`
+- Viewport: 1280 × 720 CSS px; source and implementation are both 1280 × 720 px at 1 CSS px per output pixel.
+- Responsive check: 390 × 844 CSS px; document width and client width both remained 390 px.
+- State: authenticated CEO user, Russian locale, concierge role preview with seeded KPI values and recommendation state.
+
+## Full-view comparison evidence
+
+The implementation preserves the selected role-dashboard composition: compact greeting, four equal KPI cards, a wide secondary-metrics surface, a narrow focus surface, and four quick links. The new KPI affordances add only small north-east arrows and quiet hover/focus states; card dimensions remain fixed. Current-shell identity, the live task counter, and role-aware quick-link destinations intentionally reflect the running product rather than the older source account state.
+
+## Focused-region comparison evidence
+
+- KPI cards retain the same four-column desktop and two-column mobile grid, orange leading accent, typography, spacing, borders, and icon scale.
+- The focus card keeps the source's three recommendation rows in preview mode; live users receive the new ranked task rows without changing the surface shell.
+- The mobile view has no document-level horizontal overflow, long copy wraps, and two-column KPI cards remain readable.
+- A KPI navigation check opened `/concierge` from the `Активные сервисы` card and browser history returned to the dashboard successfully.
+
+## Comparison history
+
+### Pass 1
+
+- [P2] Preview-state mismatch: an empty live queue replaced the three-row source focus state and reduced the paired cards' visual balance.
+- Fix: keep source recommendations for role previews while enabling live ranked tasks only for the authenticated role dashboard.
+
+### Pass 2
+
+- The source recommendation state and implementation now match in structure and density.
+- No actionable P0, P1, or P2 differences remain for the dashboard changes.
+
+## Required fidelity surfaces
+
+- Fonts and typography: passed; the existing Onest product stack, weights, line heights, wrapping, and muted metadata hierarchy are preserved.
+- Spacing and layout rhythm: passed; card tracks, gaps, padding, 8 px radii, borders, and section rhythm match the source pattern.
+- Colors and visual tokens: passed; brand orange, semantic task dots, card, muted, border, and focus-ring tokens come from the existing design system.
+- Image quality and asset fidelity: not applicable; the screen contains no raster content and continues to use the existing Lucide icon set.
+- Copy and content: passed; role-specific metrics and recommendations remain intact, while live task rows add task IDs, due state, and linked patient/provider context.
+- Interactions and states: passed; loading, empty, recommendation, KPI navigation, keyboard focus, realtime refresh, and mobile layout were checked.
+- Console: no browser console errors after reload and KPI navigation.
+
+## Follow-up polish
+
+The live focus panel should be revisited after representative production task data is available to tune whether four or five ranked rows is the better default.
+
+final result: passed
+
+---
+
 # Design QA — Patient workspace submenu spacing
 
 - Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-773603a9-eef3-4de7-96d2-da875c19bee2.png`

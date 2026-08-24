@@ -1000,7 +1000,7 @@ async fn ceo_dashboard_exposes_supported_finance_operational_and_feedback_kpis()
     .await;
     seed_interpreter_report(&pool, appointment_id, interpreter_id).await;
 
-    let active_concierge_service_id = seed_concierge_service(
+    seed_concierge_service(
         &pool,
         patient_a,
         concierge_id,
@@ -1505,7 +1505,7 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
     .await;
     seed_interpreter_report(&pool, appointment_id, teamlead_id).await;
 
-    seed_concierge_service(
+    let active_concierge_service_id = seed_concierge_service(
         &pool,
         patient_id,
         concierge_id,
@@ -1529,7 +1529,6 @@ async fn operational_roles_can_fetch_their_own_kpi_scorecards() {
         true,
     )
     .await;
-
     seed_feedback(
         &pool,
         patient_id,

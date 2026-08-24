@@ -2,10 +2,15 @@ import { startTransition, useEffect, useMemo, useReducer, useRef, type SetStateA
 
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import {
+  fetchCompanyFinancialAccounts,
+  fetchCompanyFinancialPosition,
+} from "@/pages/company-finance/data";
 
 import type {
   ClinicalPayload,
   DemographicsPayload,
+  ExecutiveFinanceSnapshot,
   MonthlyEntry,
   OperationsPayload,
   OverviewStats,
@@ -56,6 +61,16 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
   "invoice.status_changed",
   "invoice.dunning_created",
   "invoice.overdue_marked",
+  "accounting_entry.created",
+  "accounting_entry.financial_account_assigned",
+  "company_financial_account.created",
+  "company_financial_account.updated",
+  "company_financial_account.adjustment_created",
+  "company_financial_account.adjustment_reversed",
+  "company_financial_account.transfer_created",
+  "company_financial_account.transfer_reversed",
+  "concierge_expense.posted",
+  "concierge_expense.reversed",
   "document.uploaded",
   "document.payment_proof_uploaded",
   "document.generated",
@@ -104,6 +119,53 @@ function clearStaffDashboardCache() {
   clearApiCache("/stats");
   clearApiCache("/patients");
   clearApiCache("/tasks");
+  clearApiCache("/company-financial-position");
+  clearApiCache("/company-financial-accounts");
+}
+
+function localIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+async function fetchExecutiveFinanceSnapshot(): Promise<ExecutiveFinanceSnapshot | null> {
+  const today = new Date();
+  const from = new Date(today.getFullYear(), today.getMonth(), 1);
+  try {
+    const [position, accounts] = await Promise.all([
+      fetchCompanyFinancialPosition({
+        from: localIsoDate(from),
+        to: localIsoDate(today),
+        currency: "EUR",
+        movement: "all",
+        search: "",
+      }, true),
+      fetchCompanyFinancialAccounts("EUR", true),
+    ]);
+    const actualCashBalance = accounts.items
+      .filter((account) => account.is_active && account.currency === "EUR")
+      .reduce((sum, account) => sum + (Number(account.current_balance) || 0), 0);
+    return {
+      actual_cash_balance: actualCashBalance.toFixed(2),
+      patient_receivables: position.summary.patient_receivables_calculated,
+      provider_payables: position.summary.provider_payables,
+      cash_inflow: position.summary.cash_inflow,
+      cash_outflow: position.summary.cash_outflow,
+      net_cash_flow: position.summary.net_cash_flow,
+      reconciliation_required: position.summary.reconciliation_required,
+      reconciliation_patient_count: position.summary.reconciliation_patient_count,
+      unassigned_movement_count: accounts.unassigned_movement_count,
+      cash_movements: position.cash_movements.map((movement) => ({
+        entry_date: movement.entry_date,
+        movement: movement.movement,
+        signed_amount: movement.signed_amount,
+      })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 type StaffDashboardDataState = {
@@ -112,6 +174,7 @@ type StaffDashboardDataState = {
   upcoming: UpcomingAppointment[];
   tasks: TaskItem[];
   patients: PatientSummary[];
+  finance: ExecutiveFinanceSnapshot | null;
   loading: boolean;
   demographics: DemographicsPayload | null;
   clinical: ClinicalPayload | null;
@@ -128,6 +191,7 @@ type StaffDashboardDataAction =
       upcoming: UpcomingAppointment[];
       tasks: TaskItem[];
       patients: PatientSummary[];
+      finance: ExecutiveFinanceSnapshot | null;
     }
   | {
       type: "sections-success";
@@ -145,6 +209,7 @@ const STAFF_DASHBOARD_INITIAL_STATE: StaffDashboardDataState = {
   upcoming: [],
   tasks: [],
   patients: [],
+  finance: null,
   loading: true,
   demographics: null,
   clinical: null,
@@ -166,6 +231,7 @@ function staffDashboardDataReducer(
         upcoming: action.upcoming,
         tasks: action.tasks,
         patients: action.patients,
+        finance: action.finance,
         loading: false,
       };
     case "sections-success":
@@ -201,6 +267,7 @@ export function useStaffDashboardData(period: Period) {
       upcoming,
       tasks,
       patients,
+      finance,
       loading,
       demographics,
       clinical,
@@ -233,7 +300,8 @@ export function useStaffDashboardData(period: Period) {
       apiFetch<PatientSummary[]>("/patients", {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
       }).catch(() => [] as PatientSummary[]),
-    ]).then(([ov, mm, up, tk, pts]) => {
+      fetchExecutiveFinanceSnapshot(),
+    ]).then(([ov, mm, up, tk, pts, financeSnapshot]) => {
       if (cancelled) return;
       startTransition(() => {
         dispatchDashboardData({
@@ -243,6 +311,7 @@ export function useStaffDashboardData(period: Period) {
           upcoming: up,
           tasks: tk,
           patients: pts,
+          finance: financeSnapshot,
         });
       });
       overviewLoadedRef.current = true;
@@ -320,6 +389,7 @@ export function useStaffDashboardData(period: Period) {
     operations,
     overview,
     patients,
+    finance,
     sectionsLoading,
     setSectionsLoading,
     tasks,

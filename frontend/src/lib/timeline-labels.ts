@@ -162,12 +162,31 @@ export function localizeTimelineTitle(
 ): string {
   if (!value) return "";
 
+  const workflowTitle = value
+    .replace(/^(?:Order|Patient) checklist:\s*/i, "")
+    .trim();
   const exactKey = {
     "Prepare provider and doctor shortlist for execution":
       "workflow_item_provider_shortlist",
     "Review order scope and convert needs into service blocks":
       "workflow_item_scope_review",
-  }[value];
+    "Confirm intake prerequisites and appointment dependencies":
+      "workflow_item_intake_prerequisites",
+    "Check supporting documents for linked clinics or doctors":
+      "workflow_item_supporting_documents",
+    "Track delivered Leistungen and pending approvals":
+      "workflow_item_leistungen_tracking",
+    "Coordinate travel, accommodation or external support handoff":
+      "workflow_item_concierge_handoff",
+    "Validate order closure and billing handoff readiness":
+      "workflow_item_closure_readiness",
+    "Capture medical and operational closure notes":
+      "workflow_item_closure_notes",
+    "Plan follow-up visits and post-treatment outreach":
+      "workflow_item_followup_plan",
+    "Confirm final document release and patient communication":
+      "workflow_item_final_release",
+  }[workflowTitle];
   if (exactKey) return l(exactKey);
 
   const prefixes: Array<[string, string]> = [

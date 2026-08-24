@@ -22,11 +22,12 @@ import {
   EINNAHMEFORM_OPTIONS,
   darreichungsformLabel,
 } from "@/pages/patients/data/medication-options";
-import type {
-  ClinicalAttribution,
-  ClinicalMedication,
-  ClinicalWarning,
-  ClinicalWarningKind,
+import {
+  updateClinicalMedicationLifecycle,
+  type ClinicalAttribution,
+  type ClinicalMedication,
+  type ClinicalWarning,
+  type ClinicalWarningKind,
 } from "@/pages/patients/data/patient-clinical";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
@@ -845,8 +846,7 @@ export function PatientMedicationSection({
     const next = holdEditor.medications.map((item, index) =>
       index === holdEditor.index
         ? trimDraftStrings({
-            ...item,
-            on_hold: holdEditor.draft.on_hold,
+            ...updateClinicalMedicationLifecycle(item, { onHold: holdEditor.draft.on_hold }),
             hold_from: holdEditor.draft.on_hold ? holdEditor.draft.hold_from : null,
             hold_until: holdEditor.draft.on_hold ? holdEditor.draft.hold_until : null,
             hold_note: holdEditor.draft.on_hold ? holdEditor.draft.hold_note : null,
@@ -949,7 +949,7 @@ export function PatientMedicationSection({
                 </NativeComboboxSelect>
               </Field>
               <Field label={tx("Статус", "Status")}>
-                <NativeComboboxSelect value={draft.status} aria-label={tx("Статус", "Status")} className={inputClass} onChange={(event) => set({ status: event.target.value as ClinicalMedication["status"] })}>
+                <NativeComboboxSelect value={draft.status} aria-label={tx("Статус", "Status")} className={inputClass} onChange={(event) => set(updateClinicalMedicationLifecycle(draft, { status: event.target.value as ClinicalMedication["status"] }))}>
                   <option value="aktiv">{tx("Активный", "Aktiv")}</option>
                   <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
                   <option value="abgesetzt">{tx("Отменён", "Abgesetzt")}</option>

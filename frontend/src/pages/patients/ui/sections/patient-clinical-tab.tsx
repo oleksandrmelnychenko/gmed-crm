@@ -64,6 +64,7 @@ import {
   savePatientNarrative,
   savePatientProcedures,
   savePatientVerlauf,
+  updateClinicalMedicationLifecycle,
   updatePatientRecommendation,
   type AllDoctorOption,
   type ClinicalAttribution,
@@ -3010,8 +3011,7 @@ export function PatientClinicalTab({
     const next = medications.map((item, index) =>
       index === medicationHoldEditor.index
         ? trimDraftStrings({
-            ...item,
-            on_hold: draft.on_hold,
+            ...updateClinicalMedicationLifecycle(item, { onHold: draft.on_hold }),
             hold_from: draft.on_hold ? draft.hold_from : null,
             hold_until: draft.on_hold ? draft.hold_until : null,
             hold_note: draft.on_hold ? draft.hold_note : null,
@@ -3697,7 +3697,9 @@ export function PatientClinicalTab({
                   value={draft.status}
                   aria-label={tx("Статус", "Status")}
                   className={inputClass}
-                  onChange={(e) => set({ status: e.target.value as ClinicalMedication["status"] })}
+                  onChange={(e) => set(updateClinicalMedicationLifecycle(draft, {
+                    status: e.target.value as ClinicalMedication["status"],
+                  }))}
                 >
                   <option value="aktiv">{tx("Активный", "Aktiv")}</option>
                   <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
