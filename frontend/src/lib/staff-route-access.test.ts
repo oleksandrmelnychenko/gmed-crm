@@ -212,6 +212,14 @@ describe("first-release staff RBAC", () => {
     expect(canAccessStaffRoute("sales", "/leads")).toBe(false);
     expect(staffHrefIfAllowed("it_admin", "/admin/users")).toBe("/");
   });
+
+  it("keeps the new-order route available to patient managers", () => {
+    const href = "/orders?create=1&patient=patient-1";
+
+    expect(canAccessStaffRoute("patient_manager", href)).toBe(true);
+    expect(staffHrefIfAllowed("patient_manager", href)).toBe(href);
+    expect(listStaffNavItems("patient_manager").map((item) => item.to)).toContain("/orders");
+  });
 });
 
 describe("patient portal routes", () => {
