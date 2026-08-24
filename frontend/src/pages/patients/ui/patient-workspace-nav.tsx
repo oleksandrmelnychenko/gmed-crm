@@ -151,7 +151,7 @@ export function PatientWorkspaceNav() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-4">
-        <div className="space-y-1">
+        <div className="flex flex-col gap-0.5">
           {items.map((item) => {
             const isActive = currentTab !== null && currentTab === item.key;
             const Icon = item.icon;
@@ -165,7 +165,7 @@ export function PatientWorkspaceNav() {
                 to={to}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "group relative flex items-center gap-3 rounded-lg px-3 h-10 text-sm transition-colors",
+                  "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
                   isActive
                     ? "bg-muted/60 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
