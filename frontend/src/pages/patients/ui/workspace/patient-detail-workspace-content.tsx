@@ -77,6 +77,7 @@ const loadPatientContractsTab = () => import("../sections/patient-contracts-tab"
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
 const loadPatientWorkflowTab = () => import("../sections/patient-workflow-section");
 const loadPatientTimelineTab = () => import("../sections/patient-timeline-section");
+const loadLeadWizard = () => import("@/pages/leads/ui/lead-wizard");
 
 const LazyPatientProfileTab = lazy(async () => {
   const mod = await loadPatientProfileTab();
@@ -131,6 +132,11 @@ const LazyPatientWorkflowTab = lazy(async () => {
 const LazyPatientTimelineTab = lazy(async () => {
   const mod = await loadPatientTimelineTab();
   return { default: mod.PatientTimelineTab };
+});
+
+const LazyLeadWizard = lazy(async () => {
+  const mod = await loadLeadWizard();
+  return { default: mod.LeadWizard };
 });
 
 function preloadPatientWorkspaceTab(tab: string) {
@@ -560,6 +566,8 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImportsError, setClinicalImportsError] = useState(false);
   const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
   const [accountStatementLoading, setAccountStatementLoading] = useState(false);
+  const [repeatIntakeOpen, setRepeatIntakeOpen] = useState(false);
+  const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !canViewInvoices) {
@@ -751,10 +759,15 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             size="sm"
             variant="outline"
             className="h-9 rounded-lg gap-1.5 px-3.5 whitespace-nowrap"
-            onClick={() => staffGo(buildPatientOrderCreateHref(id))}
+            onMouseEnter={() => void loadLeadWizard()}
+            onFocus={() => void loadLeadWizard()}
+            onClick={() => {
+              setRepeatIntakeLeadId(null);
+              setRepeatIntakeOpen(true);
+            }}
           >
             <Plus className="size-3.5" />
-            {l("patients_new_order")}
+            {l("patients_repeat_intake")}
           </Button>
         ) : null}
         {canEditPatientProfile ? (
@@ -1187,6 +1200,47 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           ) : null}
         </Suspense>
       </Tabs>
+
+      {repeatIntakeOpen ? (
+        <Suspense
+          fallback={(
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-2">
+              <div className="flex h-[90vh] w-full items-center justify-center rounded-lg border border-border bg-background shadow-xl sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)]">
+                <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                  {lang === "de" ? "Anfrage wird geladen…" : "Загрузка обращения…"}
+                </div>
+              </div>
+            </div>
+          )}
+        >
+          <LazyLeadWizard
+            leadId={repeatIntakeLeadId}
+            open
+            createMode={repeatIntakeLeadId === null}
+            existingPatient={detail}
+            onCreated={setRepeatIntakeLeadId}
+            onOpenChange={(open) => {
+              if (open) return;
+              setRepeatIntakeOpen(false);
+              setRepeatIntakeLeadId(null);
+              reload();
+            }}
+            onArchived={() => {
+              setRepeatIntakeOpen(false);
+              setRepeatIntakeLeadId(null);
+              reload();
+            }}
+            onShowDetails={(leadId) => staffGo(`/leads?lead=${encodeURIComponent(leadId)}`)}
+            onConverted={() => {
+              setRepeatIntakeOpen(false);
+              setRepeatIntakeLeadId(null);
+              reload();
+            }}
+            onOrderCreated={(orderId) => staffGo(`/orders/${orderId}`)}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

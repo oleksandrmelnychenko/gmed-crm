@@ -112,6 +112,7 @@ import {
   type PatientClinicalProfile,
   type ClinicalWarning,
 } from "@/pages/patients/data/patient-clinical";
+import type { PatientDetail } from "@/pages/patients/model/list-model";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import {
@@ -158,6 +159,7 @@ type LeadWizardProps = {
   leadId: string | null;
   open: boolean;
   createMode?: boolean;
+  existingPatient?: PatientDetail | null;
   onOpenChange: (open: boolean) => void;
   onCreated?: (leadId: string) => void;
   onConverted?: (patientId: string) => void;
@@ -1344,6 +1346,46 @@ function blankDraft(): Draft {
   };
 }
 
+function patientLegalSex(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  if (["male", "m", "mann", "männlich", "м", "мужской"].includes(normalized ?? "")) {
+    return "male";
+  }
+  if (["female", "f", "frau", "weiblich", "ж", "женский"].includes(normalized ?? "")) {
+    return "female";
+  }
+  if (["diverse", "divers", "other", "другое"].includes(normalized ?? "")) {
+    return "diverse";
+  }
+  return "";
+}
+
+function draftFromExistingPatient(patient: PatientDetail): Draft {
+  const draft = blankDraft();
+  const insuranceProvider = patient.insurance_provider?.trim() ?? "";
+  const insuranceNumber = patient.insurance_number?.trim() ?? "";
+  const insuranceType = patient.insurance_type?.trim() ?? "";
+
+  return {
+    ...draft,
+    firstName: patient.first_name?.trim() ?? "",
+    lastName: patient.last_name?.trim() ?? "",
+    birthDate: patient.birth_date?.trim() ?? "",
+    legalSex: patientLegalSex(patient.gender),
+    email: patient.email?.trim() ?? "",
+    phone: patient.phone_primary?.trim() ?? "",
+    street: patient.address_street?.trim() ?? "",
+    city: patient.address_city?.trim() ?? "",
+    zip: patient.address_zip?.trim() ?? "",
+    country: patient.address_country?.trim() || patient.residence_country?.trim() || "",
+    language: normalizedLanguageCode(patient.languages?.[0]),
+    hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
+    insuranceType,
+    insuranceProvider,
+    insuranceNumber,
+  };
+}
+
 function intakeTypeLabel(lead: LeadDetail, tx: Tx) {
   switch (leadIntakeTypeFromLead(lead)) {
     case "questionnaire":
@@ -2146,6 +2188,7 @@ export function LeadWizard({
   leadId: requestedLeadId,
   open,
   createMode = false,
+  existingPatient = null,
   onOpenChange,
   onCreated,
   onConverted,
@@ -2586,7 +2629,9 @@ export function LeadWizard({
   useEffect(() => {
     if (!open || !createMode || leadId || hydrated.current === "__new__") return;
 
-    const nextDraft = blankDraft();
+    const nextDraft = existingPatient
+      ? draftFromExistingPatient(existingPatient)
+      : blankDraft();
     const signature = autosaveSnapshotSignature({
       draft: nextDraft,
       lines: [],
@@ -2636,7 +2681,7 @@ export function LeadWizard({
     prospectPatientIdRef.current = null;
     prospectMergeOnlyRef.current = false;
     initialServiceOptionsRef.current = [];
-  }, [createMode, leadId, open]);
+  }, [createMode, existingPatient, leadId, open]);
 
   useEffect(() => {
     if (open && leadId) void reload(hydrated.current !== leadId);
@@ -3044,6 +3089,28 @@ export function LeadWizard({
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
 
+        if (
+          existingPatient?.id
+          && !prospectPatientIdRef.current
+          && !lead?.prospect_patient_id
+        ) {
+          const prospect = await createLeadProspect(targetLeadId, {
+            attach_patient_id: existingPatient.id,
+            hauptanfragegrund: snapshot.draft.concern.trim(),
+            zuweiser: snapshot.draft.referrer.trim(),
+          });
+          if (!prospect.patient_id || !prospect.case_id) {
+            throw new Error(tx(
+              "Не удалось привязать повторное обращение к пациенту",
+              "Die erneute Anfrage konnte dem Patienten nicht zugeordnet werden",
+            ));
+          }
+          prospectPatientIdRef.current = prospect.patient_id;
+          caseIdRef.current = prospect.case_id;
+          prospectMergeOnlyRef.current = true;
+          setCases([{ id: prospect.case_id }]);
+        }
+
         wizardStateBaseRef.current = payload.wizard_state;
         if (createdNow) setLead(await fetchLeadDetail(targetLeadId));
         lastSavedAutosaveSignatureRef.current = signature;
@@ -3071,7 +3138,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [lead?.prospect_patient_id, leadId, onCreated, tx]);
+  }, [existingPatient?.id, lead?.prospect_patient_id, leadId, onCreated, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
