@@ -259,7 +259,9 @@ export function selectTaskAssigneeId(
   const itemAssignee = assignees.find((assignee) => assignee.id === itemAssignedTo);
   if (itemAssignee) return itemAssignee.id;
   const currentUserAssignee = assignees.find((assignee) => assignee.id === currentUserId);
-  return currentUserAssignee?.id ?? assignees[0]?.id ?? "";
+  if (currentUserAssignee?.role === "concierge") return currentUserAssignee.id;
+  const firstConcierge = assignees.find((assignee) => assignee.role === "concierge");
+  return firstConcierge?.id ?? currentUserAssignee?.id ?? assignees[0]?.id ?? "";
 }
 
 export function ConciergeTaskEventDialog({

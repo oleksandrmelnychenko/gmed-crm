@@ -4,6 +4,7 @@ import type { ConciergeAssignee } from "./model";
 import { selectTaskAssigneeId } from "./task-event-dialog";
 
 const assignees: ConciergeAssignee[] = [
+  { id: "ceo-1", name: "Oleksandr", email: "ceo@example.com", role: "ceo", is_active: true },
   { id: "concierge-1", name: "Anna", email: "anna@example.com", role: "concierge", is_active: true },
   { id: "concierge-2", name: "Max", email: "max@example.com", role: "concierge", is_active: true },
 ];
