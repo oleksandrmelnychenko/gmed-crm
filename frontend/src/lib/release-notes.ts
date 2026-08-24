@@ -22,7 +22,99 @@ type ReleaseEnvironment = {
   buildTimestamp?: string;
 };
 
+const DAILY_RELEASE_NOTES: CustomerReleaseNote[] = [
+  {
+    commit: "dfbe82d",
+    title: {
+      ru: "Импорт медицинских документов и анализов",
+      de: "Import medizinischer Dokumente und Laborwerte",
+    },
+    description: {
+      ru: "Обновлены распознавание и повторное сканирование документов, предпросмотр источника и импорт лабораторных таблиц. Результаты сохраняют связь с документом и показывают лабораторию как источник.",
+      de: "Dokumentenerkennung, erneutes Scannen, Quellenvorschau und der Import von Labortabellen wurden aktualisiert. Ergebnisse bleiben mit dem Dokument verknüpft und zeigen das Labor als Quelle.",
+    },
+  },
+  {
+    commit: "edacb62",
+    title: {
+      ru: "Задачи, события и файлы",
+      de: "Aufgaben, Ereignisse und Dateien",
+    },
+    description: {
+      ru: "Задачи получили читаемые номера, вложения, комментарии, архив и связи с пациентами и провайдерами. Исполнитель может менять статус своей задачи, а история действий и уведомления сохраняются.",
+      de: "Aufgaben haben lesbare Nummern, Anhänge, Kommentare, Archivierung sowie Verknüpfungen mit Patienten und Providern erhalten. Zuständige können den Status eigener Aufgaben ändern; Verlauf und Benachrichtigungen bleiben erhalten.",
+    },
+  },
+  {
+    commit: "d06d0c4",
+    title: {
+      ru: "Чат и уведомления",
+      de: "Chat und Benachrichtigungen",
+    },
+    description: {
+      ru: "Улучшена отправка сообщений, отображение непрочитанных чатов и онлайн-пользователей. События задач, комментарии и новые сообщения собраны в центре уведомлений.",
+      de: "Nachrichtenversand, ungelesene Chats und die Anzeige aktiver Benutzer wurden verbessert. Aufgabenereignisse, Kommentare und neue Nachrichten erscheinen im Benachrichtigungszentrum.",
+    },
+  },
+  {
+    commit: "577ec21",
+    title: {
+      ru: "Concierge и взаиморасчёты",
+      de: "Concierge und Abrechnung",
+    },
+    description: {
+      ru: "Запросы Concierge можно редактировать и сразу превращать в связанную задачу. Доработаны расходы с чеками, расчётом нетто, налога и брутто, финансовой проверкой и отражением на балансе пациента.",
+      de: "Concierge-Anfragen lassen sich bearbeiten und direkt in eine verknüpfte Aufgabe überführen. Auslagen mit Belegen, Netto-, Steuer- und Bruttoberechnung, Finanzprüfung und Patientenbelastung wurden erweitert.",
+    },
+  },
+  {
+    commit: "26f22bf",
+    title: {
+      ru: "Повторный маршрут пациента",
+      de: "Erneuter Patientenprozess",
+    },
+    description: {
+      ru: "Для существующего пациента можно запустить повторный визард прямо из профиля, проверить актуальность данных и создать новый заказ без повторного превращения пациента в лид.",
+      de: "Für bestehende Patienten kann der erneute Assistent direkt aus dem Profil gestartet werden, um Daten zu prüfen und einen neuen Auftrag ohne erneute Lead-Erfassung anzulegen.",
+    },
+  },
+  {
+    commit: "f694c51",
+    title: {
+      ru: "Профили пациентов и провайдеров",
+      de: "Patienten- und Providerprofile",
+    },
+    description: {
+      ru: "В профилях собраны связанные задачи, документы и открытые действия. Медицинские документы можно связать одновременно с пациентом и провайдером, а доверенные контакты пациента больше не ограничены одной записью.",
+      de: "Profile bündeln zugeordnete Aufgaben, Dokumente und offene Aktionen. Medizinische Dokumente lassen sich gleichzeitig Patient und Provider zuordnen; Vertrauenskontakte sind nicht mehr auf einen Eintrag begrenzt.",
+    },
+  },
+  {
+    commit: "dfbe82d",
+    title: {
+      ru: "Документы с индивидуальным текстом",
+      de: "Dokumente mit individuellem Text",
+    },
+    description: {
+      ru: "Добавлено создание PDF-документа для пациента с собственным вступлением, основным текстом и заключительной заметкой. Форма показывает только действительно обязательные поля.",
+      de: "PDF-Dokumente für Patienten können mit eigener Einleitung, Haupttext und Schlussbemerkung erstellt werden. Das Formular kennzeichnet nur tatsächlich erforderliche Felder.",
+    },
+  },
+  {
+    commit: "dfbe82d",
+    title: {
+      ru: "Языки пациента",
+      de: "Patientensprachen",
+    },
+    description: {
+      ru: "Список языков пациента синхронизирован между интерфейсом и сервером. Поддерживаются стандартные двухбуквенные коды, включая узбекский язык.",
+      de: "Die Liste der Patientensprachen ist zwischen Oberfläche und Server synchronisiert. Standardisierte zweistellige Sprachcodes einschließlich Usbekisch werden unterstützt.",
+    },
+  },
+];
+
 const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
+  ...DAILY_RELEASE_NOTES,
   {
     commit: "448f24b",
     title: {
@@ -147,6 +239,7 @@ const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
 ];
 
 const PRODUCTION_RELEASE_NOTES: CustomerReleaseNote[] = [
+  ...DAILY_RELEASE_NOTES,
   {
     commit: "e47e5ab",
     title: { ru: "Рабочие панели", de: "Arbeitsbereiche" },
@@ -190,8 +283,8 @@ export function resolveCustomerRelease(environment: ReleaseEnvironment): Custome
     builtAt: environment.buildTimestamp?.trim() || "2026-08-11T20:20:00+03:00",
     title: isDevelopment
       ? {
-          ru: "Новое: от Concierge до бухгалтерии",
-          de: "Neu: vom Concierge bis zur Buchhaltung",
+          ru: "Обновления за сегодня",
+          de: "Heutige Aktualisierungen",
         }
       : {
           ru: "Изменения в PROD-сборке",

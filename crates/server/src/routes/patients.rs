@@ -1324,9 +1324,19 @@ const ALLOWED_PATIENT_NATIONALITIES: [&str; 21] = [
     "British",
     "American",
 ];
-const ALLOWED_PATIENT_LANGUAGES: [&str; 17] = [
-    "de", "uk", "ru", "en", "ar", "pt", "fr", "es", "it", "tr", "pl", "cs", "da", "el", "lv", "zh",
-    "ur",
+const ALLOWED_PATIENT_LANGUAGES: &[&str] = &[
+    "aa", "ab", "ae", "af", "ak", "am", "an", "ar", "as", "av", "ay", "az", "ba", "be", "bg", "bh",
+    "bi", "bm", "bn", "bo", "br", "bs", "ca", "ce", "ch", "co", "cr", "cs", "cu", "cv", "cy", "da",
+    "de", "dv", "dz", "ee", "el", "en", "eo", "es", "et", "eu", "fa", "ff", "fi", "fj", "fo", "fr",
+    "fy", "ga", "gd", "gl", "gn", "gu", "gv", "ha", "he", "hi", "ho", "hr", "ht", "hu", "hy", "hz",
+    "ia", "id", "ie", "ig", "ii", "ik", "io", "is", "it", "iu", "ja", "jv", "ka", "kg", "ki", "kj",
+    "kk", "kl", "km", "kn", "ko", "kr", "ks", "ku", "kv", "kw", "ky", "la", "lb", "lg", "li", "ln",
+    "lo", "lt", "lu", "lv", "mg", "mh", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "na", "nb",
+    "nd", "ne", "ng", "nl", "nn", "no", "nr", "nv", "ny", "oc", "oj", "om", "or", "os", "pa", "pi",
+    "pl", "ps", "pt", "qu", "rm", "rn", "ro", "ru", "rw", "sa", "sc", "sd", "se", "sg", "si", "sk",
+    "sl", "sm", "sn", "so", "sq", "sr", "ss", "st", "su", "sv", "sw", "ta", "te", "tg", "th", "ti",
+    "tk", "tl", "tn", "to", "tr", "ts", "tt", "tw", "ty", "ug", "uk", "ur", "uz", "ve", "vi", "vo",
+    "wa", "wo", "xh", "yi", "yo", "za", "zh", "zu",
 ];
 
 fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
@@ -1645,8 +1655,8 @@ fn validate_patient_languages(languages: Option<&[String]>) -> Result<(), &'stat
         return Ok(());
     };
     for language in languages {
-        let language = language.trim();
-        if !language.is_empty() && !ALLOWED_PATIENT_LANGUAGES.contains(&language) {
+        let language = language.trim().to_ascii_lowercase();
+        if !language.is_empty() && !ALLOWED_PATIENT_LANGUAGES.contains(&language.as_str()) {
             return Err("Invalid patient language");
         }
     }
@@ -1665,15 +1675,15 @@ fn normalize_patient_language_values(
 ) -> Result<Vec<String>, &'static str> {
     let mut normalized = Vec::new();
     for language in languages.unwrap_or_default() {
-        let language = language.trim();
+        let language = language.trim().to_ascii_lowercase();
         if language.is_empty() {
             continue;
         }
-        if !ALLOWED_PATIENT_LANGUAGES.contains(&language) {
+        if !ALLOWED_PATIENT_LANGUAGES.contains(&language.as_str()) {
             return Err("Invalid patient language");
         }
-        if !normalized.iter().any(|item| item == language) {
-            normalized.push(language.to_string());
+        if !normalized.iter().any(|item| item == &language) {
+            normalized.push(language);
         }
     }
     Ok(normalized)
@@ -1685,20 +1695,68 @@ fn normalize_patient_language_values_for_update(
 ) -> Result<Vec<String>, &'static str> {
     let mut normalized = Vec::new();
     for language in languages {
-        let language = language.trim();
+        let language = language.trim().to_ascii_lowercase();
         if language.is_empty() {
             continue;
         }
-        if !ALLOWED_PATIENT_LANGUAGES.contains(&language)
-            && !current.iter().any(|current| current == language)
+        let language = if ALLOWED_PATIENT_LANGUAGES.contains(&language.as_str()) {
+            language
+        } else if let Some(current) = current
+            .iter()
+            .find(|current| current.trim().eq_ignore_ascii_case(&language))
         {
+            current.trim().to_string()
+        } else {
             return Err("Invalid patient language");
-        }
-        if !normalized.iter().any(|item| item == language) {
-            normalized.push(language.to_string());
+        };
+        if !normalized.iter().any(|item| item == &language) {
+            normalized.push(language);
         }
     }
     Ok(normalized)
+}
+
+#[cfg(test)]
+mod patient_language_validation_tests {
+    use super::{
+        normalize_patient_language_values, normalize_patient_language_values_for_update,
+        validate_patient_languages,
+    };
+
+    #[test]
+    fn accepts_and_normalizes_iso_639_1_languages() {
+        let input = vec!["uz".to_string(), " UZ ".to_string(), "de".to_string()];
+
+        assert!(validate_patient_languages(Some(&input)).is_ok());
+        assert_eq!(
+            normalize_patient_language_values(Some(input)).unwrap(),
+            vec!["uz".to_string(), "de".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_language_codes() {
+        let input = vec!["xx".to_string()];
+
+        assert_eq!(
+            validate_patient_languages(Some(&input)),
+            Err("Invalid patient language")
+        );
+    }
+
+    #[test]
+    fn preserves_legacy_values_during_update() {
+        let current = vec!["Legacy language".to_string()];
+
+        assert_eq!(
+            normalize_patient_language_values_for_update(
+                vec![" legacy LANGUAGE ".to_string()],
+                &current,
+            )
+            .unwrap(),
+            current
+        );
+    }
 }
 
 fn is_minor_birth_date(birth_date: chrono::NaiveDate, today: chrono::NaiveDate) -> bool {

@@ -272,6 +272,9 @@ export function ConciergeTaskEventDialog({
   showServiceLink = true,
   patients = [],
   providers = [],
+  initialTitle = "",
+  initialServiceId = null,
+  initialAssigneeId = null,
   initialPatientId = null,
   initialProviderId = null,
   initialDate = null,
@@ -291,6 +294,9 @@ export function ConciergeTaskEventDialog({
   showServiceLink?: boolean;
   patients?: ConciergeTaskPatientOption[];
   providers?: ConciergeTaskProviderOption[];
+  initialTitle?: string;
+  initialServiceId?: string | null;
+  initialAssigneeId?: string | null;
   initialPatientId?: string | null;
   initialProviderId?: string | null;
   initialDate?: Date | null;
@@ -345,16 +351,16 @@ export function ConciergeTaskEventDialog({
     if (initialDate) start.setHours(9, 0, 0, 0);
     const end = new Date(start.getTime() + 60 * 60_000);
     setKind(item?.kind ?? "task");
-    setTitle(item?.title ?? "");
+    setTitle(item?.title ?? initialTitle);
     setNote(item?.note ?? "");
-    setServiceId(item?.concierge_service_id ?? "");
+    setServiceId(item?.concierge_service_id ?? initialServiceId ?? "");
     setDueAt(localDateTimeValue(item?.due_at ?? start));
     setStartsAt(localDateTimeValue(item?.starts_at ?? start));
     setEndsAt(localDateTimeValue(item?.ends_at ?? end));
     setLocation(item?.location ?? "");
     setPriority(item?.priority ?? "normal");
     setStatus(item?.status ?? "open");
-    setAssigneeId(selectTaskAssigneeId(item?.assigned_to, currentUserId, assignees));
+    setAssigneeId(selectTaskAssigneeId(item?.assigned_to ?? initialAssigneeId, currentUserId, assignees));
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
     setAudience(item?.task_audience ?? "internal");
     setPatientId(item?.patient_id ?? initialPatientId ?? "");
@@ -363,7 +369,7 @@ export function ConciergeTaskEventDialog({
     setExternalName(item?.external_assignee_name ?? "");
     setExternalPhone(item?.external_assignee_phone ?? "");
     setExternalEmail(item?.external_assignee_email ?? "");
-  }, [assignees, currentUserId, initialDate, initialPatientId, initialProviderId, item, open]);
+  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialPatientId, initialProviderId, initialServiceId, initialTitle, item, open]);
 
   useEffect(() => {
     if (!open) return;

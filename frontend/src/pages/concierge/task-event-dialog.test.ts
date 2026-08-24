@@ -18,6 +18,10 @@ describe("selectTaskAssigneeId", () => {
     expect(selectTaskAssigneeId("concierge-2", "ceo-1", assignees)).toBe("concierge-2");
   });
 
+  it("prefills the Concierge assigned to the source request", () => {
+    expect(selectTaskAssigneeId("concierge-1", "ceo-1", assignees)).toBe("concierge-1");
+  });
+
   it("does not keep an assignee that is absent from the active Concierge list", () => {
     expect(selectTaskAssigneeId("inactive-concierge", "ceo-1", assignees)).toBe("concierge-1");
   });

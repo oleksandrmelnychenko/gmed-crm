@@ -4,11 +4,13 @@ import {
   CalendarClock,
   CalendarDays,
   CheckCircle2,
+  ClipboardPenLine,
   CircleDollarSign,
   Clock3,
   Columns3,
   List,
   ListChecks,
+  ListPlus,
   LoaderCircle,
   MapPinned,
   MessageSquareText,
@@ -23,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { SelectField } from "@/components/ui/select-field";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -43,7 +46,6 @@ import {
   filterConciergeServices,
   filterConciergeTaskAssignees,
   isConciergeServiceOverdue,
-  nextConciergeServiceStatus,
   nextConciergeTaskStatus,
   sortConciergeServices,
   type ApplyPartnerQuoteResponse,
@@ -76,6 +78,11 @@ import {
   ConciergeTaskQueue,
 } from "./workspace-views";
 import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
+import {
+  ConciergeServiceRequestDialog,
+  requestStatusOptions,
+  type UpdateConciergeServiceInput,
+} from "./service-request-dialog";
 import {
   downloadConciergeExpenseReceipt,
   getConciergeExpenseContext,
@@ -170,6 +177,9 @@ const text = {
     cancelled: "Storniert",
     partner: "Partner",
     expenseReceipt: "Ausgabe / Beleg",
+    editRequest: "Bearbeiten",
+    createTaskFromRequest: "Aufgabe anlegen",
+    status: "Status",
   },
   ru: {
     title: "Рабочее пространство консьержа",
@@ -225,6 +235,9 @@ const text = {
     cancelled: "Отменено",
     partner: "Партнёр",
     expenseReceipt: "Расход / документ",
+    editRequest: "Изменить",
+    createTaskFromRequest: "Создать задачу",
+    status: "Статус",
   },
 } as const;
 
@@ -288,7 +301,9 @@ function ServiceCard({
   labels,
   updating,
   now,
-  onAdvance,
+  onStatusChange,
+  onEdit,
+  onCreateTask,
   onOpenPartner,
   onOpenExpense,
   compact = false,
@@ -298,12 +313,13 @@ function ServiceCard({
   labels: ConciergeText;
   updating: boolean;
   now: Date;
-  onAdvance: (service: ConciergeService) => void;
+  onStatusChange: (service: ConciergeService, status: string) => void;
+  onEdit: (service: ConciergeService) => void;
+  onCreateTask: (service: ConciergeService) => void;
   onOpenPartner?: (service: ConciergeService) => void;
   onOpenExpense: (service: ConciergeService) => void;
   compact?: boolean;
 }) {
-  const nextStatus = nextConciergeServiceStatus(service.status);
   const taxonomy = conciergeServiceTaxonomyLabel(service, lang);
   const displayTitle = conciergeServiceDisplayTitle(service, lang);
   const provider = service.appointment_id
@@ -408,6 +424,26 @@ function ServiceCard({
         "mt-3 grid min-w-0 grid-cols-2 gap-2 border-t border-border/60 pt-3",
         compact && "lg:col-span-3 lg:flex lg:max-w-full lg:flex-wrap lg:justify-end lg:justify-self-stretch",
       )}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+          onClick={() => onEdit(service)}
+        >
+          <ClipboardPenLine />
+          {labels.editRequest}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+          onClick={() => onCreateTask(service)}
+        >
+          <ListPlus />
+          {labels.createTaskFromRequest}
+        </Button>
         {onOpenPartner ? (
           <Button
             type="button"
@@ -430,20 +466,14 @@ function ServiceCard({
           <ReceiptText />
           {labels.expenseReceipt}
         </Button>
-        {nextStatus ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="col-span-2 h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:col-span-1 sm:w-auto"
-            disabled={updating}
-            aria-label={labels.advance.replace("{status}", serviceStatusLabel(nextStatus, labels))}
-            onClick={() => onAdvance(service)}
-          >
-            {updating ? <LoaderCircle className="animate-spin" /> : <CheckCircle2 />}
-            {serviceStatusLabel(nextStatus, labels)}
-          </Button>
-        ) : null}
+        <SelectField
+          value={service.status}
+          options={requestStatusOptions(lang)}
+          disabled={updating}
+          aria-label={labels.status}
+          className="col-span-2 h-8 min-w-40 text-xs sm:col-span-1 sm:w-auto"
+          onValueChange={(status) => onStatusChange(service, status)}
+        />
       </div>
     </article>
   );
@@ -517,8 +547,12 @@ export function ConciergeWorkspacePage() {
   const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
+  const [taskSourceService, setTaskSourceService] = useState<ConciergeService | null>(null);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestError, setRequestError] = useState("");
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const createTaskRequestIdRef = useRef<string | null>(null);
   const [partnerServiceId, setPartnerServiceId] = useState<string | null>(null);
@@ -664,6 +698,10 @@ export function ConciergeWorkspacePage() {
   const expenseService = useMemo(
     () => services.find((service) => service.id === expenseServiceId) ?? null,
     [expenseServiceId, services],
+  );
+  const editingRequest = useMemo(
+    () => services.find((service) => service.id === editingRequestId) ?? null,
+    [editingRequestId, services],
   );
 
   async function openExpenseReceipt(service: ConciergeService) {
@@ -836,9 +874,8 @@ export function ConciergeWorkspacePage() {
     }
   }
 
-  async function advanceService(service: ConciergeService) {
-    const status = nextConciergeServiceStatus(service.status);
-    if (!status || updatingId) return;
+  async function changeServiceStatus(service: ConciergeService, status: string) {
+    if (status === service.status || updatingId) return;
 
     setUpdatingId(service.id);
     setError("");
@@ -888,14 +925,50 @@ export function ConciergeWorkspacePage() {
   function openCreateTask() {
     setTaskError("");
     setEditingTask(null);
+    setTaskSourceService(null);
     createTaskRequestIdRef.current = crypto.randomUUID();
     setTaskDialogOpen(true);
+  }
+
+  function openCreateTaskFromRequest(service: ConciergeService) {
+    setTaskError("");
+    setEditingTask(null);
+    setTaskSourceService(service);
+    createTaskRequestIdRef.current = crypto.randomUUID();
+    setTaskDialogOpen(true);
+  }
+
+  function openEditRequest(service: ConciergeService) {
+    setRequestError("");
+    setEditingRequestId(service.id);
+  }
+
+  async function saveRequest(input: UpdateConciergeServiceInput) {
+    if (!editingRequest || submittingRequest) return;
+    setSubmittingRequest(true);
+    setRequestError("");
+    setError("");
+    try {
+      const updated = await apiFetch<ConciergeService>(
+        `/concierge-services/${editingRequest.id}/update`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+      clearApiCache("/concierge-services");
+      setServices((current) => current.map((service) => service.id === updated.id ? updated : service));
+      setEditingRequestId(null);
+    } catch (saveError) {
+      setRequestError(saveError instanceof Error ? saveError.message : labels.updateFailed);
+      throw saveError;
+    } finally {
+      setSubmittingRequest(false);
+    }
   }
 
   function openEditTask(task: ConciergeTask) {
     if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
+    setTaskSourceService(null);
     setTaskDialogOpen(true);
   }
 
@@ -1152,7 +1225,9 @@ export function ConciergeWorkspacePage() {
                               labels={labels}
                               updating={updatingId === service.id}
                               now={now}
-                              onAdvance={advanceService}
+                              onStatusChange={(item, status) => void changeServiceStatus(item, status)}
+                              onEdit={openEditRequest}
+                              onCreateTask={openCreateTaskFromRequest}
                               onOpenExpense={(item) => void openExpenseReceipt(item)}
                               onOpenPartner={
                                 service.provider_id && providersById.has(service.provider_id)
@@ -1177,7 +1252,9 @@ export function ConciergeWorkspacePage() {
                     labels={labels}
                     updating={updatingId === service.id}
                     now={now}
-                    onAdvance={advanceService}
+                    onStatusChange={(item, status) => void changeServiceStatus(item, status)}
+                    onEdit={openEditRequest}
+                    onCreateTask={openCreateTaskFromRequest}
                     onOpenExpense={(item) => void openExpenseReceipt(item)}
                     onOpenPartner={
                       service.provider_id && providersById.has(service.provider_id)
@@ -1265,6 +1342,20 @@ export function ConciergeWorkspacePage() {
         onSubmit={submitExpense}
         onDownload={downloadExpenseReceipt}
       />
+      <ConciergeServiceRequestDialog
+        service={editingRequest}
+        lang={lang}
+        open={Boolean(editingRequestId)}
+        submitting={submittingRequest}
+        error={requestError}
+        canEditTitle={user?.role === "ceo" || user?.role === "patient_manager"}
+        onOpenChange={(open) => {
+          if (open) return;
+          setEditingRequestId(null);
+          setRequestError("");
+        }}
+        onSave={saveRequest}
+      />
       <ConciergeTaskEventDialog
         item={editingTask}
         services={services}
@@ -1274,6 +1365,11 @@ export function ConciergeWorkspacePage() {
         canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
         patients={taskPatients}
         providers={taskProviders}
+        initialTitle={taskSourceService ? `${lang === "ru" ? "Запрос" : "Anfrage"}: ${conciergeServiceDisplayTitle(taskSourceService, lang)}` : ""}
+        initialServiceId={taskSourceService?.id ?? null}
+        initialAssigneeId={taskSourceService?.assigned_concierge_id ?? null}
+        initialPatientId={taskSourceService?.patient_id ?? null}
+        initialProviderId={taskSourceService?.provider_id ?? null}
         lang={lang}
         open={taskDialogOpen}
         submitting={submittingTask}
@@ -1282,6 +1378,7 @@ export function ConciergeWorkspacePage() {
           setTaskDialogOpen(open);
           if (!open) {
             setEditingTask(null);
+            setTaskSourceService(null);
             createTaskRequestIdRef.current = null;
           }
         }}

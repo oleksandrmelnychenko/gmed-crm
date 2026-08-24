@@ -44,6 +44,7 @@ export type ConciergeService = {
   actual_cost: string | null;
   currency: string;
   billing_status: string;
+  service_notes?: string | null;
   key_status: ConciergeKeyAction | null;
   key_responsible_user_id: string | null;
   key_responsible_user_name: string | null;

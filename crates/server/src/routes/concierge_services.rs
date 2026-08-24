@@ -137,6 +137,7 @@ struct UpdateConciergeServiceRequest {
     booking_reference: NullablePatchValue,
     vendor_name: NullablePatchValue,
     vendor_contact: NullablePatchValue,
+    service_address: NullablePatchValue,
     starts_at: NullablePatchValue,
     ends_at: NullablePatchValue,
     cost_estimate: NullablePatchValue,
@@ -2537,6 +2538,25 @@ async fn update_concierge_service(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let service_address = match parse_optional_text_patch(
+        &body.service_address,
+        existing
+            .try_get::<Option<String>, _>("service_address")
+            .unwrap_or_default(),
+        "service_address",
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if service_address
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 500)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_address must not exceed 500 characters",
+        );
+    }
     let starts_at = match parse_optional_datetime_patch(
         &body.starts_at,
         existing
@@ -2689,19 +2709,20 @@ async fn update_concierge_service(
                booking_reference = $8,
                vendor_name = $9,
                vendor_contact = $10,
-               starts_at = $11,
-               ends_at = $12,
-               cost_estimate = $13,
-               actual_cost = $14,
-               currency = COALESCE($15, currency),
-               service_notes = $16,
-               billing_notes = $17,
-               completed_at = COALESCE($18, completed_at),
-               billed_at = COALESCE($19, billed_at),
-               taxonomy_node_id = COALESCE($20, taxonomy_node_id),
-               provider_service_id = COALESCE($21, provider_service_id),
-               quantity = COALESCE($22, quantity),
-               unit_price = COALESCE($23, unit_price)
+               service_address = $11,
+               starts_at = $12,
+               ends_at = $13,
+               cost_estimate = $14,
+               actual_cost = $15,
+               currency = COALESCE($16, currency),
+               service_notes = $17,
+               billing_notes = $18,
+               completed_at = COALESCE($19, completed_at),
+               billed_at = COALESCE($20, billed_at),
+               taxonomy_node_id = COALESCE($21, taxonomy_node_id),
+               provider_service_id = COALESCE($22, provider_service_id),
+               quantity = COALESCE($23, quantity),
+               unit_price = COALESCE($24, unit_price)
            WHERE id = $1"#,
     )
     .bind(service_id)
@@ -2714,6 +2735,7 @@ async fn update_concierge_service(
     .bind(booking_reference)
     .bind(vendor_name)
     .bind(vendor_contact)
+    .bind(service_address)
     .bind(starts_at)
     .bind(ends_at)
     .bind(cost_estimate)
@@ -3210,6 +3232,7 @@ fn validate_update_fields_for_role(
             || body.booking_reference.is_present()
             || body.vendor_name.is_present()
             || body.vendor_contact.is_present()
+            || body.service_address.is_present()
             || body.starts_at.is_present()
             || body.ends_at.is_present()
             || body.cost_estimate.is_present()
@@ -3333,6 +3356,7 @@ fn parse_optional_text_patch(
             "booking_reference" => Err("booking_reference must be text or null"),
             "vendor_name" => Err("vendor_name must be text or null"),
             "vendor_contact" => Err("vendor_contact must be text or null"),
+            "service_address" => Err("service_address must be text or null"),
             "service_notes" => Err("service_notes must be text or null"),
             "billing_notes" => Err("billing_notes must be text or null"),
             _ => Err("field must be text or null"),

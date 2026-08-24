@@ -11751,7 +11751,7 @@ async fn create_and_update_patient_reject_noncanonical_select_fields() {
             "nationality": "Ukrainian",
             "residence_country": "Germany",
             "address_country": "Germany",
-            "languages": ["de", "uk"],
+            "languages": ["de", "uz"],
         })),
     )
     .await;

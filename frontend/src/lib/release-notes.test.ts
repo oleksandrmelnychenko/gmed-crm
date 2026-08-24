@@ -37,18 +37,18 @@ describe("customer release notes", () => {
     expect(development.channel).toBe("development");
     expect(development.build).toBe("dev-42");
     expect(development.builtAt).toBe("2026-08-10T10:15:00Z");
-    expect(development.title.ru).toBe("Новое: от Concierge до бухгалтерии");
+    expect(development.title.ru).toBe("Обновления за сегодня");
     expect(development.notes[0]).toMatchObject({
-      commit: "448f24b",
-      title: { ru: "Рабочее место Concierge" },
+      commit: "dfbe82d",
+      title: { ru: "Импорт медицинских документов и анализов" },
     });
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
     expect(production.builtAt).toBe("2026-08-11T11:30:00Z");
     expect(production.title.ru).toBe("Изменения в PROD-сборке");
     expect(production.notes[0]).toMatchObject({
-      commit: "e47e5ab",
-      title: { ru: "Рабочие панели" },
+      commit: "dfbe82d",
+      title: { ru: "Импорт медицинских документов и анализов" },
     });
   });
 });
