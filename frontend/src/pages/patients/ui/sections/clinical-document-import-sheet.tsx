@@ -27,6 +27,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CountrySelect } from "@/components/ui/country-select";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -679,7 +680,7 @@ const vitalValidationLabels: Record<VitalImportValidationIssue, { ru: string; de
   incomplete_blood_pressure: { ru: "Для давления нужны оба значения", de: "Für den Blutdruck sind beide Werte erforderlich" },
   invalid_blood_pressure: { ru: "Верхнее давление должно быть выше нижнего", de: "Der systolische Wert muss über dem diastolischen liegen" },
   bmi_conflict: { ru: "BMI не совпадает с весом и ростом", de: "BMI stimmt nicht mit Gewicht und Größe überein" },
-  invalid_source_country: { ru: "Подтвердите страну документа", de: "Ursprungsland des Dokuments bestätigen" },
+  invalid_source_country: { ru: "Выберите страну документа", de: "Ursprungsland des Dokuments auswählen" },
   invalid_source_page: { ru: "Проверьте страницу источника", de: "Quellseite prüfen" },
 };
 
@@ -1522,8 +1523,8 @@ export function ClinicalDocumentImportSheet({
     if (hasCountryScopedCandidate && !isCanonicalClinicalImportSourceCountry(sourceCountry)) {
       toast.error(
         tx(
-          "Укажите страну документа кодом ISO",
-          "Bitte Ursprungsland als ISO-Code angeben",
+          "Выберите страну документа",
+          "Ursprungsland des Dokuments auswählen",
         ),
       );
       return;
@@ -1621,17 +1622,17 @@ export function ClinicalDocumentImportSheet({
         throw new Error(
           invalidCandidate.target === "lab_result"
             ? tx(
-                "Для выбранного анализа нужны показатель, значение, дата и подтверждённая страна.",
-                "Für den ausgewählten Laborwert sind Parameter, Wert, Datum und ein bestätigtes Land erforderlich.",
+                "Для выбранного анализа нужны показатель, значение, дата и страна документа.",
+                "Für den ausgewählten Laborwert sind Parameter, Wert, Datum und das Ursprungsland des Dokuments erforderlich.",
               )
             : invalidCandidate.target === "vital"
               ? tx(
-                  "Исправьте отмеченные поля показателей: дата, страна, диапазоны, пара давления и соответствие BMI.",
-                  "Markierte Vitalwert-Felder korrigieren: Datum, Land, Wertebereiche, Blutdruckpaar und BMI-Konsistenz.",
+                  "Исправьте отмеченные поля показателей: дата, страна документа, диапазоны, пара давления и соответствие BMI.",
+                  "Markierte Vitalwert-Felder korrigieren: Datum, Ursprungsland, Wertebereiche, Blutdruckpaar und BMI-Konsistenz.",
                 )
             : tx(
-                "Для выбранного медикамента нужны действующее вещество и подтверждённая страна.",
-                "Für das ausgewählte Medikament sind Wirkstoff und ein bestätigtes Land erforderlich.",
+                "Для выбранного медикамента нужны действующее вещество и страна документа.",
+                "Für das ausgewählte Medikament sind Wirkstoff und das Ursprungsland des Dokuments erforderlich.",
               ),
         );
       }
@@ -2541,6 +2542,43 @@ export function ClinicalDocumentImportSheet({
                     </div>
                   </div>
                 </div>
+                {hasCountryScopedCandidate ? (
+                  <section
+                    className={cn(
+                      "mb-4 grid gap-3 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(240px,360px)] sm:items-center",
+                      isCanonicalClinicalImportSourceCountry(sourceCountry)
+                        ? "border-border/70 bg-white"
+                        : "border-amber-300 bg-amber-50/70",
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground">
+                        {tx("Страна документа", "Ursprungsland des Dokuments")}
+                      </p>
+                      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                        {tx(
+                          "Выберите страну, где документ был выдан. Она сохранится как часть источника для всех выбранных медицинских данных.",
+                          "Land auswählen, in dem das Dokument ausgestellt wurde. Es wird als Teil der Quelle aller ausgewählten medizinischen Daten gespeichert.",
+                        )}
+                      </p>
+                    </div>
+                    <label className="space-y-1">
+                      <span className="sr-only">
+                        {tx("Страна документа", "Ursprungsland des Dokuments")}
+                      </span>
+                      <CountrySelect
+                        value={sourceCountry || null}
+                        lang={lang}
+                        required
+                        disabled={snapshotReadOnly}
+                        emptyLabel={tx("Выберите страну", "Land auswählen")}
+                        aria-label={tx("Страна документа", "Ursprungsland des Dokuments")}
+                        className="h-11 w-full bg-white"
+                        onChange={(country) => updateSourceCountry(country ?? "")}
+                      />
+                    </label>
+                  </section>
+                ) : null}
                 {documentImport.draft.warnings.map((warning) => (
                   <div key={warning} className="mb-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                     <AlertTriangle className="size-4 shrink-0" />
