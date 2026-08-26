@@ -85,6 +85,38 @@ jobs:
       - name: Test
         run: npm --prefix frontend run test
 
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Capacitor dependencies
+        run: npm --prefix frontend ci
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            frontend/android/*.gradle
+            frontend/android/gradle/wrapper/gradle-wrapper.properties
+            frontend/android/app/*.gradle
+
+      - name: Test, lint and shrink Android app
+        working-directory: frontend/android
+        run: ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon
+
   operations-live-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 45
