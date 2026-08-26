@@ -87,7 +87,9 @@ export function canConfirmMedicationBmpPreview(
     && preview.identity_match.status === "matched"
     && preview.summary.blocked_medications === 0
     && medications.length > 0
-    && medications.every((item) => item.importable && item.substances.length > 0);
+    && medications.every((item) => (
+      item.importable && item.substances.some((substance) => substance.name.trim())
+    ));
 }
 
 function issueText(issue: MedicationBmpIssue, language: Language): string {
@@ -238,6 +240,7 @@ function IdentityReview({
   };
   return (
     <section
+      role={matched ? "status" : "alert"}
       aria-label={tx("Проверка пациента", "Patientenabgleich")}
       className={cn(
         "rounded-xl border p-3",
@@ -469,6 +472,9 @@ export function MedicationBmpImportAction({
 
   const busy = operation === "previewing" || operation === "confirming";
   const confirmable = preview ? canConfirmMedicationBmpPreview(preview) : false;
+  const requiresFreshPreview = operation === "stale"
+    || operation === "identity_mismatch"
+    || operation === "idempotency_conflict";
 
   function resetPreview(nextXml = carrierXml) {
     setCarrierXml(nextXml);
@@ -542,7 +548,9 @@ export function MedicationBmpImportAction({
       setOperation("idle");
       onImported?.(response);
     } catch (error) {
-      setOperation(medicationBmpOperationForError(error));
+      const nextOperation = medicationBmpOperationForError(error);
+      if (nextOperation !== "error") setAcknowledged(false);
+      setOperation(nextOperation);
     }
   }
 
@@ -586,7 +594,7 @@ export function MedicationBmpImportAction({
                 type="button"
                 size="sm"
                 className="h-8 rounded-lg"
-                disabled={busy || !acknowledged || !confirmable}
+                disabled={busy || requiresFreshPreview || !acknowledged || !confirmable}
                 onClick={() => void confirmImport()}
               >
                 {operation === "confirming" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
@@ -709,10 +717,15 @@ export function MedicationBmpImportAction({
                 </label>
                 {!confirmable ? (
                   <p className="text-xs leading-5 text-muted-foreground">
-                    {tx(
-                      "Подтверждение станет доступно только после устранения всех блокирующих пунктов. Торговое название или PZN не заменяют отсутствующее действующее вещество.",
-                      "Die Bestätigung wird erst möglich, wenn alle blockierenden Punkte geklärt sind. Handelsname oder PZN ersetzen keinen fehlenden Wirkstoff.",
-                    )}
+                    {!preview.permissions.can_confirm
+                      ? tx(
+                          "Сервер не разрешает подтверждение этой версии BMP. Проверьте блокирующие пункты и права доступа.",
+                          "Der Server erlaubt die Bestätigung dieser BMP-Version nicht. Prüfen Sie blockierende Punkte und Zugriffsrechte.",
+                        )
+                      : tx(
+                          "Подтверждение станет доступно только после устранения всех блокирующих пунктов. Торговое название или PZN не заменяют отсутствующее действующее вещество.",
+                          "Die Bestätigung wird erst möglich, wenn alle blockierenden Punkte geklärt sind. Handelsname oder PZN ersetzen keinen fehlenden Wirkstoff.",
+                        )}
                   </p>
                 ) : null}
               </>

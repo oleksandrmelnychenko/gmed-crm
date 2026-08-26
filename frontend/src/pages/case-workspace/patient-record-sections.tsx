@@ -295,6 +295,7 @@ export function CaseRecordDiagnosesSection() {
 export function CaseRecordMedicationsSection() {
   const { patientId, caseUuid, canEdit, lang } = useRecordContext();
   const record = usePatientRecord(patientId);
+  const [bmpImportVersion, setBmpImportVersion] = useState(0);
   void caseUuid;
   if (!patientId) return null;
   if (record.loading) return <RecordLoading />;
@@ -325,7 +326,10 @@ export function CaseRecordMedicationsSection() {
         headerAction={canEdit ? (
           <MedicationBmpImportAction
             patientId={patientId}
-            onImported={() => record.reload()}
+            onImported={() => {
+              setBmpImportVersion((current) => current + 1);
+              record.reload();
+            }}
           />
         ) : null}
         onSave={(next: ClinicalMedication[]) =>
@@ -334,11 +338,11 @@ export function CaseRecordMedicationsSection() {
       />
       <MedicationIntelligencePanel
         patientId={patientId}
-        refreshKey={medicationRefreshKey}
+        refreshKey={`${bmpImportVersion}:${medicationRefreshKey}`}
       />
       <MedicationEvidenceReviewPanel
         patientId={patientId}
-        refreshKey={medicationRefreshKey}
+        refreshKey={`${bmpImportVersion}:${medicationRefreshKey}`}
       />
     </div>
   );

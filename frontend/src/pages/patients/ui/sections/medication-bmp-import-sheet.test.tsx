@@ -7,8 +7,11 @@ import type { MedicationBmpImportPreview } from "@/lib/api/medication-bmp-import
 import { PatientMedicationSection } from "./patient-clinical-entry-sections";
 import {
   canConfirmMedicationBmpPreview,
+  decodeMedicationBmpCarrierBytes,
+  MEDICATION_BMP_MAX_BYTES,
   MedicationBmpImportPreviewContent,
   medicationBmpOperationForError,
+  medicationBmpOperationMessage,
   resolveMedicationBmpIdempotencyKey,
 } from "./medication-bmp-import-sheet";
 
@@ -155,6 +158,7 @@ describe("MedicationBmpImportPreviewContent", () => {
     expect(html).toContain("1960-01-01");
     expect(html).toContain("1961-01-01");
     expect(html).toContain("Дата рождения не совпадает");
+    expect(html).toContain('role="alert"');
   });
 
   it("does not substitute trade name or PZN for a missing Wirkstoff", () => {
@@ -163,6 +167,14 @@ describe("MedicationBmpImportPreviewContent", () => {
       ...missingSubstance.sections[0].medications[0],
       substances: [],
       importable: false,
+      dose: {
+        morning: "1",
+        noon: null,
+        evening: null,
+        night: null,
+        free_text: null,
+        weekly_day: 5,
+      },
       blocking_reasons: [{
         code: "wirkstoff_missing",
         path: "sections[0].medications[0].substances",
@@ -184,6 +196,7 @@ describe("MedicationBmpImportPreviewContent", () => {
     expect(html).toContain("Metformin Atid");
     expect(html).toContain("PZN 01234567");
     expect(html).toContain("Wirkstoff fehlt: Klärung erforderlich");
+    expect(html).toContain("Wochentag: 5");
     expect(html).toContain("Blockiert");
     expect(canConfirmMedicationBmpPreview(missingSubstance)).toBe(false);
   });
@@ -212,6 +225,20 @@ describe("MedicationBmpImportPreviewContent", () => {
 });
 
 describe("BMP import confirmation guard", () => {
+  it("decodes UTF-8 XML first and falls back to single-byte BMP carrier text", () => {
+    const utf8 = new TextEncoder().encode('<MP n="Grüße"/>').buffer;
+    const latin1 = new Uint8Array([0x4d, 0xfc, 0x6e, 0x63, 0x68, 0x65, 0x6e]).buffer;
+
+    expect(decodeMedicationBmpCarrierBytes(utf8)).toBe('<MP n="Grüße"/>');
+    expect(decodeMedicationBmpCarrierBytes(latin1)).toBe("München");
+  });
+
+  it("uses the server-aligned file limit and a localized oversize message", () => {
+    expect(MEDICATION_BMP_MAX_BYTES).toBe(128 * 1024);
+    expect(medicationBmpOperationMessage("file_too_large", "ru")).toContain("128 КиБ");
+    expect(medicationBmpOperationMessage("file_too_large", "de")).toContain("128 KiB");
+  });
+
   it("requires server permission, matched identity, no blocked rows, and explicit substances", () => {
     expect(canConfirmMedicationBmpPreview(preview())).toBe(true);
     expect(canConfirmMedicationBmpPreview(preview({
@@ -224,7 +251,7 @@ describe("BMP import confirmation guard", () => {
     const misleading = preview();
     misleading.sections[0].medications[0] = {
       ...misleading.sections[0].medications[0],
-      substances: [],
+      substances: [{ name: "", strength: null }],
       importable: true,
     };
     expect(canConfirmMedicationBmpPreview(misleading)).toBe(false);

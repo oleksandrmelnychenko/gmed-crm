@@ -409,12 +409,12 @@ function ClinicalListSection<T extends { id?: string | null }>({
   const indexed = list.map((item, index) => ({ item, index }));
   return (
     <section className={cn("rounded-xl border", toneClasses.section)}>
-      <header className={cn("flex items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
+      <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className={cn("flex flex-wrap items-center justify-end gap-2", headerAction && "w-full sm:w-auto")}>
           {headerAction}
           {canManage ? (
             <Button
