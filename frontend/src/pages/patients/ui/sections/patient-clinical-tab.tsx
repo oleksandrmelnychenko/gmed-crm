@@ -106,6 +106,7 @@ import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
 import { MedicationEvidenceReviewPanel } from "./medication-evidence-review-panel";
+import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
 import { MedicationIntelligencePanel } from "./medication-intelligence-panel";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
@@ -894,6 +895,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   tone = "neutral",
   sectionClassName,
   rowClassName,
+  headerAction,
 }: {
   title: string;
   count?: ReactNode;
@@ -913,6 +915,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   tone?: ClinicalSectionTone;
   sectionClassName?: string;
   rowClassName?: string;
+  headerAction?: ReactNode;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -1005,18 +1008,21 @@ function ClinicalSection<T extends { id?: string | null }>({
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           {count ?? <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>}
         </div>
-        {canManage ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className={cn("h-8 rounded-lg", toneClasses.addButton)}
-            onClick={() => setEditing({ index: null, draft: blank() })}
-          >
-            <Plus className="size-3.5" />
-            {tx("Добавить", "Hinzufügen")}
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {headerAction}
+          {canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn("h-8 rounded-lg", toneClasses.addButton)}
+              onClick={() => setEditing({ index: null, draft: blank() })}
+            >
+              <Plus className="size-3.5" />
+              {tx("Добавить", "Hinzufügen")}
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       <div className="space-y-1.5 p-3">
@@ -3578,6 +3584,12 @@ export function PatientClinicalTab({
       {/* ---- Medications (Medikationsplan) ---- */}
       <ClinicalSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
+        headerAction={canManage ? (
+          <MedicationBmpImportAction
+            patientId={patientId}
+            onImported={() => setVersion((current) => current + 1)}
+          />
+        ) : null}
         sectionClassName="bg-slate-50/60"
         rowClassName="border-border/40 bg-white"
         items={medications}

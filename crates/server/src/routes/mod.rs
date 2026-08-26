@@ -5,6 +5,7 @@ pub mod admin_settings;
 pub mod announcements;
 pub mod appointments;
 pub mod auth;
+pub mod bmp_imports;
 pub mod cases;
 pub mod clinical_document_imports;
 pub mod company_financial_account_transfers;
@@ -96,6 +97,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(medication_evidence_reviews::router())
         .merge(medication_intelligence::router())
         .merge(appointments::router())
+        .merge(bmp_imports::router())
         .merge(tasks::router())
         .merge(stats::router())
         .merge(invoices::router())

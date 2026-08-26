@@ -24,6 +24,10 @@
 use datamatrix::{DataMatrix, SymbolList};
 
 /// BMP specification version encoded in the carrier (`MP.v`).
+// This renderer intentionally remains the legacy BMP 2.2 exporter. It must
+// not be presented as a BMP 2.8-conformant carrier generator: v2.8 adds
+// semantics (including structured weekly dosing) which this renderer does not
+// yet model. The conservative carrier import lives in services::bmp_import.
 pub const BMP_VERSION: &str = "022";
 
 #[derive(Debug, Default, Clone)]

@@ -39,6 +39,7 @@ import {
   clinicalMedicalProviderRows,
 } from "@/pages/patients/ui/sections/patient-clinical-tab";
 import { MedicationEvidenceReviewPanel } from "@/pages/patients/ui/sections/medication-evidence-review-panel";
+import { MedicationBmpImportAction } from "@/pages/patients/ui/sections/medication-bmp-import-sheet";
 import { MedicationIntelligencePanel } from "@/pages/patients/ui/sections/medication-intelligence-panel";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
@@ -321,6 +322,12 @@ export function CaseRecordMedicationsSection() {
         providers={record.providers}
         canManage={canEdit}
         lang={lang}
+        headerAction={canEdit ? (
+          <MedicationBmpImportAction
+            patientId={patientId}
+            onImported={() => record.reload()}
+          />
+        ) : null}
         onSave={(next: ClinicalMedication[]) =>
           record.runSave(() => savePatientMedications(patientId, next))
         }

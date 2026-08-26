@@ -1378,6 +1378,7 @@ dependencies = [
  "metrics",
  "pdf-extract",
  "printpdf",
+ "quick-xml",
  "rand 0.10.1",
  "reqwest",
  "rss",

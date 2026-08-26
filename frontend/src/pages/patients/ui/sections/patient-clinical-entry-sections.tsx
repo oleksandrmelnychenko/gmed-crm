@@ -322,6 +322,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
   groups,
   groupOf,
   tone = "neutral",
+  headerAction,
 }: {
   title: string;
   items: T[];
@@ -336,6 +337,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
   groups?: SectionGroup[];
   groupOf?: (item: T) => string;
   tone?: SectionTone;
+  headerAction?: ReactNode;
 }) {
   const [list, setList] = useState(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -412,18 +414,21 @@ function ClinicalListSection<T extends { id?: string | null }>({
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>
         </div>
-        {canManage ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className={cn("h-8 rounded-lg", toneClasses.addButton)}
-            onClick={() => setEditing({ index: null, draft: blank() })}
-          >
-            <Plus className="size-3.5" />
-            {tx("Добавить", "Hinzufügen")}
-          </Button>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {headerAction}
+          {canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn("h-8 rounded-lg", toneClasses.addButton)}
+              onClick={() => setEditing({ index: null, draft: blank() })}
+            >
+              <Plus className="size-3.5" />
+              {tx("Добавить", "Hinzufügen")}
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       <div className="space-y-1.5 p-3">
@@ -830,12 +835,14 @@ export function PatientMedicationSection({
   canManage,
   lang,
   onSave,
+  headerAction,
 }: {
   items: ClinicalMedication[];
   providers: ProviderSummary[];
   canManage: boolean;
   lang: string;
   onSave: (next: ClinicalMedication[]) => Promise<unknown>;
+  headerAction?: ReactNode;
 }) {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const [holdEditor, setHoldEditor] = useState<HoldEditor | null>(null);
@@ -868,6 +875,7 @@ export function PatientMedicationSection({
     <>
       <ClinicalListSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
+        headerAction={headerAction}
         items={items}
         blank={blankMedication}
         isValid={(medication) =>

@@ -50,6 +50,7 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unicode-normalization = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 rss = "2"
+quick-xml = "0.41"
 
 secrecy = { version = "0.10", features = ["serde"] }
 gmed-domain = { path = "../domain" }

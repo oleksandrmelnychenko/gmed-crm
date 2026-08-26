@@ -322,6 +322,7 @@ fn analyze(
         let display_substance = group
             .iter()
             .find_map(|medication| medication.substance.as_deref())
+            .map(str::trim)
             .unwrap_or(normalized_substance);
         findings.push(Finding {
             id: stable_finding_id("duplicate-active-ingredient", normalized_substance),
