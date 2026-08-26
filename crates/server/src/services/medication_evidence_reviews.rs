@@ -543,19 +543,29 @@ fn prepare_snapshot(
         .collect::<Vec<_>>();
     findings.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let mut missing_data = intelligence
+    let unique_missing = intelligence
         .missing_data
         .iter()
         .map(|entry| {
+            (
+                entry.code.to_string(),
+                entry.reason_ru.clone(),
+                entry.reason_de.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let mut missing_data = unique_missing
+        .into_iter()
+        .map(|(code, reason_ru, reason_de)| {
             let identity = json!({
-                "code": entry.code,
-                "reason_ru": entry.reason_ru,
-                "reason_de": entry.reason_de,
+                "code": code,
+                "reason_ru": reason_ru,
+                "reason_de": reason_de,
             });
             Ok(EvidenceMissingData {
-                code: entry.code.to_string(),
-                reason_ru: entry.reason_ru.clone(),
-                reason_de: entry.reason_de.clone(),
+                code,
+                reason_ru,
+                reason_de,
                 citation_ref: format!("missing-data:{}", sha256_json(&identity)?),
             })
         })
@@ -915,7 +925,7 @@ fn sorted_unique(mut values: Vec<String>) -> Vec<String> {
 
 fn sha256_json(value: &Value) -> Result<String, serde_json::Error> {
     let bytes = serde_json::to_vec(value)?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 #[cfg(test)]
