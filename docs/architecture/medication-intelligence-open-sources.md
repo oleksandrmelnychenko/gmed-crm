@@ -177,7 +177,10 @@ source provenance, and an internal citation registry. It does not contain the
 patient ID, name, contact data, date of birth, medication brand names, or other
 demographic identifiers. Finding detail and missing-data labels are deliberately
 excluded because the existing Medication Intelligence text may contain a
-medication display name.
+medication display name. Once those labels are removed, identical missing-data
+code/reason tuples are stored once in the privacy-minimized list; the summary's
+`missing_data_total` still preserves the number reported by Medication
+Intelligence.
 
 Every draft item can contain only bilingual evidence text and citation
 references. Draft citations must be members of the immutable bundle registry;

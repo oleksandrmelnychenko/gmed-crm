@@ -98,6 +98,20 @@ async fn ceo_creates_privacy_minimized_local_review_with_bound_citations() {
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, "PrivateGivenName").await;
     let substance = format!("EvidenceSubstance-{}", Uuid::new_v4().simple());
     seed_duplicate_medications(&ctx.pool, patient_id, &substance).await;
+    sqlx::query(
+        r#"INSERT INTO patient_medications (
+               patient_id, wirkstoff, handelsname, status, on_hold,
+               source_identifiers, sort_order
+           ) VALUES
+               ($1, 'Unresolved Evidence One', 'Private Brand Gamma',
+                'aktiv', false, '{}'::jsonb, 2),
+               ($1, 'Unresolved Evidence Two', 'Private Brand Delta',
+                'aktiv', false, '{}'::jsonb, 3)"#,
+    )
+    .bind(patient_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
     let manager_id = seed_user(&ctx.pool, "patient_manager").await;
     let ceo = auth_header_for(ctx.admin_id, "ceo");
     let manager = auth_header_for(manager_id, "patient_manager");
@@ -117,7 +131,8 @@ async fn ceo_creates_privacy_minimized_local_review_with_bound_citations() {
     assert_eq!(preview["clinical_review"]["can_approve"], false);
     assert_eq!(preview["permissions"]["can_create_review"], true);
     assert_eq!(preview["permissions"]["can_read_review"], true);
-    assert_eq!(preview["medication_ids"].as_array().unwrap().len(), 2);
+    assert_eq!(preview["medication_ids"].as_array().unwrap().len(), 4);
+    assert_eq!(preview["summary"]["missing_data_total"], 2);
 
     let collection_path = format!("/api/v1/patients/{patient_id}/medication-evidence-reviews");
     let body = json!({
@@ -138,6 +153,10 @@ async fn ceo_creates_privacy_minimized_local_review_with_bound_citations() {
     assert_eq!(created["clinical_review"]["can_approve"], false);
     assert!(created.get("approve").is_none());
     assert!(created.get("model").is_none());
+    assert_eq!(
+        created["bundle"]["missing_data"].as_array().unwrap().len(),
+        1
+    );
 
     let duplicate = created["bundle"]["findings"]
         .as_array()
@@ -182,6 +201,8 @@ async fn ceo_creates_privacy_minimized_local_review_with_bound_citations() {
     assert!(!serialized.contains("1990-01-01"));
     assert!(!serialized.contains("Private Brand Alpha"));
     assert!(!serialized.contains("Private Brand Beta"));
+    assert!(!serialized.contains("Private Brand Gamma"));
+    assert!(!serialized.contains("Private Brand Delta"));
     assert!(!serialized.contains("dosage_change"));
     assert!(!serialized.contains("treatment_change"));
 

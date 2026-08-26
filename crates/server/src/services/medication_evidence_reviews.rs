@@ -234,7 +234,7 @@ pub fn permissions() -> EvidenceReviewPermissions {
     }
 }
 
-pub async fn build_preview(
+pub(crate) async fn build_preview(
     pool: &PgPool,
     patient_id: Uuid,
     intelligence: &MedicationIntelligenceResponse,
@@ -269,7 +269,7 @@ pub async fn build_preview(
     })
 }
 
-pub async fn create_review(
+pub(crate) async fn create_review(
     pool: &PgPool,
     patient_id: Uuid,
     actor_id: Uuid,
