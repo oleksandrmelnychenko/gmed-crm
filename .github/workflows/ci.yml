@@ -115,7 +115,7 @@ jobs:
 
       - name: Test, lint and shrink Android app
         working-directory: frontend/android
-        run: ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon
+        run: bash ./gradlew testDebugUnitTest lintDebug assembleRelease --no-daemon
 
   operations-live-e2e:
     runs-on: ubuntu-latest
