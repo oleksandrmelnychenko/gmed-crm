@@ -3,13 +3,13 @@
 //! The module parses already decoded carrier XML only. It neither decodes a
 //! DataMatrix image nor resolves PZN/product identity remotely.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::str;
 
 use chrono::{NaiveDate, NaiveDateTime, Utc};
 use gmed_db::DbPool;
-use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -252,6 +252,7 @@ struct ParserState {
     root_closed: bool,
     patient_seen: bool,
     issuer_seen: bool,
+    parameters_seen: bool,
     phase: u8,
     stack: Vec<String>,
     ignored_depth: usize,
@@ -273,12 +274,12 @@ pub async fn build_preview(
     let patient = load_patient_identity(pool, patient_id).await?;
     let (current_medications_replaced, current_snapshot) =
         load_current_medication_snapshot(pool, patient_id).await?;
-    Ok(assemble_preview(
+    assemble_preview(
         parsed,
         patient,
         current_medications_replaced,
         &current_snapshot,
-    )?)
+    )
 }
 
 fn assemble_preview(
@@ -553,11 +554,12 @@ fn process_element(
         }
         "O" => {
             require_root_child(state, "O")?;
-            if state.phase != 2 {
+            if state.phase != 2 || state.parameters_seen {
                 return Err(BmpImportError::InvalidCarrier(
-                    "O must occur after A and before S".to_string(),
+                    "O must occur at most once after A and before S".to_string(),
                 ));
             }
+            state.parameters_seen = true;
             warn_unknown_attributes(
                 &attrs,
                 &["ai", "aii", "xs", "r"],
@@ -579,14 +581,31 @@ fn process_element(
                     "S must be a non-empty root section after A".to_string(),
                 ));
             }
+            if state.sections.len() >= 23 {
+                return Err(BmpImportError::InvalidCarrier(
+                    "BMP may contain at most 23 sections".to_string(),
+                ));
+            }
             state.phase = 3;
             let section_index = state.sections.len();
             state.current_section = Some(parse_section(attrs, section_index, &mut state.warnings));
         }
         "M" => {
-            if state.current_section.is_none() || state.current_medication.is_some() {
+            if state.current_section.is_none()
+                || state.current_medication.is_some()
+                || state.stack.last().map(String::as_str) != Some("S")
+            {
                 return Err(BmpImportError::InvalidCarrier(
                     "M must be directly inside S".to_string(),
+                ));
+            }
+            if state
+                .current_section
+                .as_ref()
+                .is_some_and(|section| section.medications.len() >= 45)
+            {
+                return Err(BmpImportError::InvalidCarrier(
+                    "BMP section may contain at most 45 entries".to_string(),
                 ));
             }
             let index = state
@@ -605,9 +624,21 @@ fn process_element(
             }
         }
         "W" => {
-            if !empty || state.current_medication.is_none() {
+            if !empty
+                || state.current_medication.is_none()
+                || state.stack.last().map(String::as_str) != Some("M")
+            {
                 return Err(BmpImportError::InvalidCarrier(
                     "W must be an empty element inside M".to_string(),
+                ));
+            }
+            if state
+                .current_medication
+                .as_ref()
+                .is_some_and(|medication| medication.substances.len() >= 3)
+            {
+                return Err(BmpImportError::InvalidCarrier(
+                    "BMP medication may contain at most three W elements".to_string(),
                 ));
             }
             parse_substance(
@@ -616,7 +647,10 @@ fn process_element(
             );
         }
         "X" | "R" => {
-            if state.current_section.is_none() || state.current_medication.is_some() {
+            if state.current_section.is_none()
+                || state.current_medication.is_some()
+                || state.stack.last().map(String::as_str) != Some("S")
+            {
                 return Err(BmpImportError::InvalidCarrier(format!(
                     "{name} must be directly inside S"
                 )));
@@ -728,6 +762,15 @@ fn parse_patient(
             "P.s contains an unsupported gender code".to_string(),
         ));
     }
+    if ["t", "v", "z"].iter().any(|key| attrs.contains_key(*key)) {
+        warnings.push(issue(
+            "patient_name_extensions_not_imported",
+            "/MP/P",
+            "Титул, приставка или суффикс имени показаны предупреждением и не изменяют профиль пациента.",
+            "Titel, Vorsatzwort oder Namenszusatz werden als Hinweis erfasst und ändern das Patientenprofil nicht.",
+            false,
+        ));
+    }
     Ok(BmpPatientView {
         given_name,
         family_name,
@@ -837,12 +880,11 @@ fn parse_medication(attrs: BTreeMap<String, String>, index: usize) -> BmpMedicat
             true,
         ));
     }
-    let pzn = attrs.get("p").cloned().filter(|value| !value.is_empty());
-    if pzn.as_deref().is_some_and(|value| {
-        value
-            .parse::<u32>()
-            .map_or(true, |number| number == 0 || number > 99_999_999)
-    }) {
+    let pzn_raw = attrs.get("p").cloned().filter(|value| !value.is_empty());
+    let pzn_number = pzn_raw
+        .as_deref()
+        .and_then(|value| value.parse::<u32>().ok());
+    if pzn_raw.is_some() && pzn_number.is_none_or(|number| number == 0 || number > 99_999_999) {
         blocks.push(issue(
             "invalid_pzn",
             &format!("{path}/@p"),
@@ -851,6 +893,10 @@ fn parse_medication(attrs: BTreeMap<String, String>, index: usize) -> BmpMedicat
             true,
         ));
     }
+    let pzn = pzn_number
+        .filter(|number| (1..=99_999_999).contains(number))
+        .map(|number| format!("{number:08}"))
+        .or(pzn_raw);
     let form = code_or_free(&attrs, "f", "fd", "form", &path, &mut blocks);
     let unit = code_or_free(&attrs, "du", "dud", "unit", &path, &mut blocks);
     let structured = ["m", "d", "v", "h"]
@@ -1103,7 +1149,7 @@ fn xml_attributes(
             attribute.map_err(|error| BmpImportError::InvalidCarrier(error.to_string()))?;
         let key = xml_name(attribute.key.as_ref())?;
         let value = attribute
-            .decode_and_unescape_value(reader.decoder())
+            .decoded_and_normalized_value(XmlVersion::default(), reader.decoder())
             .map_err(|error| BmpImportError::InvalidCarrier(error.to_string()))?
             .into_owned();
         if value.chars().count() > 256 {
@@ -1460,12 +1506,14 @@ pub async fn confirm_import(
         {
             return Err(BmpImportError::IdempotencyConflict);
         }
+        tx.rollback().await?;
         return Ok(ConfirmBmpImportResult {
             response: existing.into_response(true),
             created: false,
         });
     }
 
+    let retention_years = load_clinical_retention_years_tx(&mut tx).await?;
     let patient = load_patient_identity_tx(&mut tx, patient_id).await?;
     let (superseded_count, old_snapshot) =
         load_current_medication_snapshot_tx(&mut tx, patient_id).await?;
@@ -1535,7 +1583,7 @@ pub async fn confirm_import(
                        $8, $9, $10, $11, $12,
                        $13, $14, 'aktiv', $15, false, $16,
                        $17, 'DE', $18, $19,
-                       $20, '{"source":"carrier_exact"}'::jsonb
+                       $20, '{}'::jsonb
                    )"#,
             )
             .bind(medication_id)
@@ -1581,11 +1629,12 @@ pub async fn confirm_import(
            SET last_clinical_update_at = now(),
                clinical_retention_until = GREATEST(
                    COALESCE(clinical_retention_until, now()),
-                   now() + interval '30 years'
+                   now() + ($2 * interval '1 year')
                )
            WHERE id = $1"#,
     )
     .bind(patient_id)
+    .bind(retention_years)
     .execute(&mut *tx)
     .await?;
 
@@ -1728,6 +1777,22 @@ async fn advisory_lock(
     Ok(())
 }
 
+async fn load_clinical_retention_years_tx(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<i64, BmpImportError> {
+    let value = sqlx::query_scalar::<_, String>(
+        "SELECT value::TEXT FROM system_settings WHERE key = 'clinical_case_retention_years'",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(value
+        .as_deref()
+        .map(|value| value.trim_matches('"'))
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(30)
+        .max(1))
+}
+
 fn free_value(value: &Option<BmpCodeOrTextView>) -> Option<&str> {
     value
         .as_ref()
@@ -1740,4 +1805,161 @@ fn valid_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INSTANCE_ID: &str = "0123456789ABCDEF0123456789ABCDEF";
+
+    fn carrier(patient_birth: &str, medication: &str) -> String {
+        format!(
+            r#"<MP v="028" U="{INSTANCE_ID}" l="de-DE"><P g="Erika" f="Mustermann" b="{patient_birth}" s="W"/><A n="Praxis Beispiel" t="2026-08-26T10:15:30"/><S c="412">{medication}</S></MP>"#
+        )
+    }
+
+    fn valid_medication() -> &'static str {
+        r#"<M p="12345678" a="Ibu Beispiel" fd="Tablette" m="1" d="1/2" dud="Stück" i="mit Wasser" r="Dokumentierter Grund"><W w="Ibuprofen" s="400 mg"/></M>"#
+    }
+
+    fn patient() -> PatientIdentity {
+        PatientIdentity {
+            given_name: "Erika".to_string(),
+            family_name: "Mustermann".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(1980, 1, 2).expect("date"),
+        }
+    }
+
+    #[test]
+    fn parses_supported_v28_carrier_without_inference() {
+        let parsed = parse_carrier_xml(&carrier("19800102", valid_medication())).expect("parse");
+        assert_eq!(parsed.plan.version, "028");
+        assert_eq!(parsed.plan.locale, "de-DE");
+        assert_eq!(parsed.plan.printed_at, "2026-08-26T10:15:30");
+        assert_eq!(parsed.sections.len(), 1);
+        let medication = &parsed.sections[0].medications[0];
+        assert!(medication.importable);
+        assert_eq!(medication.substances[0].name, "Ibuprofen");
+        assert_eq!(medication.trade_name.as_deref(), Some("Ibu Beispiel"));
+    }
+
+    #[test]
+    fn partial_birth_date_is_carrier_incomplete_and_never_panics() {
+        let parsed = parse_carrier_xml(&carrier("19800000", valid_medication())).expect("parse");
+        let preview = assemble_preview(parsed, patient(), 0, &json!([])).expect("preview");
+        assert_eq!(preview.identity_match.status, "carrier_incomplete");
+        assert!(!preview.permissions.can_confirm);
+    }
+
+    #[test]
+    fn lowercase_plan_instance_id_is_rejected() {
+        let xml = carrier("19800102", valid_medication())
+            .replace(INSTANCE_ID, "0123456789abcdef0123456789abcdef");
+        assert!(matches!(
+            parse_carrier_xml(&xml),
+            Err(BmpImportError::InvalidCarrier(_))
+        ));
+    }
+
+    #[test]
+    fn pzn_or_trade_name_without_explicit_substance_is_blocked() {
+        let parsed = parse_carrier_xml(&carrier(
+            "19800102",
+            r#"<M p="12345678" a="Unknown Product" fd="Tablette" m="1"/>"#,
+        ))
+        .expect("parse");
+        let medication = &parsed.sections[0].medications[0];
+        assert!(!medication.importable);
+        assert!(
+            medication
+                .blocking_reasons
+                .iter()
+                .any(|reason| reason.code == "unresolved_substance")
+        );
+        assert!(medication.substances.is_empty());
+    }
+
+    #[test]
+    fn weekly_and_free_text_dose_are_blocked_until_lossless_storage_exists() {
+        let weekly = parse_carrier_xml(&carrier(
+            "19800102",
+            r#"<M a="Weekly" fd="Tablette" m="1" wo="1"><W w="Methotrexat" s="10 mg"/></M>"#,
+        ))
+        .expect("parse");
+        assert!(
+            weekly.sections[0].medications[0]
+                .blocking_reasons
+                .iter()
+                .any(|reason| reason.code == "weekly_dose_not_supported")
+        );
+        let free = parse_carrier_xml(&carrier(
+            "19800102",
+            r#"<M a="Free" fd="Tablette" t="nach ärztlicher Anweisung"><W w="Beispielstoff"/></M>"#,
+        ))
+        .expect("parse");
+        assert!(
+            free.sections[0].medications[0]
+                .blocking_reasons
+                .iter()
+                .any(|reason| reason.code == "free_text_dose_not_supported")
+        );
+    }
+
+    #[test]
+    fn dtd_declaration_and_entities_are_rejected() {
+        let xml = format!(
+            r#"<!DOCTYPE MP [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><MP v="028" U="{INSTANCE_ID}" l="de-DE"><P g="&xxe;" f="Mustermann" b="19800102"/><A n="Praxis" t="2026-08-26T10:15:30"/></MP>"#
+        );
+        assert!(matches!(
+            parse_carrier_xml(&xml),
+            Err(BmpImportError::InvalidCarrier(_))
+        ));
+    }
+
+    #[test]
+    fn unknown_attributes_are_visible_and_block_confirmation() {
+        let xml = carrier("19800102", valid_medication())
+            .replace("<S c=\"412\">", "<S c=\"412\" future=\"preserve-me\">");
+        let parsed = parse_carrier_xml(&xml).expect("parse");
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "unknown_attribute" && warning.blocking)
+        );
+        let preview = assemble_preview(parsed, patient(), 0, &json!([])).expect("preview");
+        assert!(!preview.permissions.can_confirm);
+    }
+
+    #[test]
+    fn only_lossless_three_category_section_mappings_are_accepted() {
+        assert_eq!(section_category(Some("411"), None), Some("besondere"));
+        assert_eq!(section_category(Some("412"), None), Some("dauer"));
+        assert_eq!(section_category(Some("418"), None), Some("selbst"));
+        assert_eq!(section_category(Some("423"), None), Some("besondere"));
+        assert_eq!(section_category(Some("425"), None), None);
+        assert_eq!(
+            section_category(None, Some("Dauermedikation")),
+            Some("dauer")
+        );
+        assert_eq!(section_category(None, Some("custom heading")), None);
+    }
+
+    #[test]
+    fn identity_requires_exact_normalized_name_and_birth_date() {
+        let parsed = parse_carrier_xml(&carrier("19800102", valid_medication())).expect("parse");
+        let preview = assemble_preview(
+            parsed,
+            PatientIdentity {
+                given_name: "Different".to_string(),
+                ..patient()
+            },
+            0,
+            &json!([]),
+        )
+        .expect("preview");
+        assert_eq!(preview.identity_match.status, "mismatch");
+        assert!(!preview.permissions.can_confirm);
+    }
 }

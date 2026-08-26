@@ -5,7 +5,7 @@
 CREATE TABLE patient_bmp_imports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    plan_instance_id TEXT NOT NULL,
+    plan_instance_id TEXT NOT NULL CHECK (plan_instance_id ~ '^[A-F0-9]{32}$'),
     bmp_version TEXT NOT NULL CHECK (bmp_version = '028'),
     locale TEXT NOT NULL CHECK (locale = 'de-DE'),
     parser_version TEXT NOT NULL CHECK (parser_version = 'gmed-bmp-import-v1'),
@@ -48,3 +48,6 @@ CREATE TRIGGER patient_bmp_imports_immutable_update
 
 COMMENT ON TABLE patient_bmp_imports IS
     'Append-only under normal application operation; deletion is permitted only through patient-owned privacy erasure cascade.';
+
+COMMENT ON COLUMN patient_bmp_imports.confirmed_by IS
+    'Historical actor UUID intentionally has no user FK so staff erasure cannot rewrite the immutable clinical import audit.';

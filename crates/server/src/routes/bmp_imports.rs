@@ -204,6 +204,15 @@ fn service_error(error_value: BmpImportError, patient_id: Uuid) -> axum::respons
             "bmp_request_invalid",
             "BMP import request is invalid",
         ),
+        BmpImportError::Database(sqlx::Error::Database(database_error))
+            if database_error.code().as_deref() == Some("40001") =>
+        {
+            (
+                StatusCode::CONFLICT,
+                "bmp_preview_stale",
+                "Concurrent medication change detected; refresh the BMP preview",
+            )
+        }
         BmpImportError::Database(_) | BmpImportError::Json(_) => {
             tracing::error!(error = %error_value, patient_id = %patient_id, "BMP import workflow");
             (

@@ -222,6 +222,38 @@ review. This is not a legal classification conclusion; it is a mandatory
 cross-functional review checkpoint. Configuring or replacing an AI provider
 does not satisfy the gate and must not enable those capabilities.
 
+## KBV BMP 2.8 carrier import (Phase 6)
+
+The import accepts already decoded carrier XML only. It does not decode a
+DataMatrix image, resolve a PZN, call a product database, or infer a Wirkstoff.
+The supported carrier profile is the official KBV BMP 2.8 root
+`MP.v = 028`, `MP.l = de-DE`, based on the [KBV BMP Anlage 3
+specification](https://update.kbv.de/ita-update/Verordnungen/Arzneimittel/BMP/EXT_ITA_VGEX_BMP_Anlage3.pdf).
+The existing PDF/DataMatrix renderer remains explicitly legacy BMP 2.2 until
+all v2.8 output semantics can be represented.
+
+The parser is deliberately bounded and rejects declarations, DTDs, processing
+instructions, CDATA, entity references, excessive input/nodes, unsupported
+versions/locales, malformed sequence/attributes, and incomplete multi-page
+plans. Unknown elements and attributes appear as blocking bilingual warnings;
+they are never dropped silently. The initial slice maps only lossless section
+categories: unheaded/412 to `dauer`, 411/423 to `besondere`, and 418 to
+`selbst`.
+
+Current medication storage requires one explicit non-empty Wirkstoff per row.
+Therefore PZN/Handelsname-only rows and multi-Wirkstoff rows are not importable.
+Coded form/unit values, BMP free-text dosing, weekly dosing, and other section
+entries are also blocked until exact reference data or lossless fields exist.
+Handelsname is never copied into Wirkstoff.
+
+Preview compares normalized given name, family name, and the complete birth
+date against the selected patient. Partial BMP dates and every mismatch hard
+block this conservative CRM import. Confirmation requires an unchanged server
+fingerprint and explicit staff acknowledgement, supersedes current medication
+rows, and inserts all validated carrier rows atomically. The immutable audit
+record stores a checksum plus the bounded normalized snapshot, not raw XML.
+Idempotent replay does not repeat clinical, audit, or realtime events.
+
 ## Next implementation slices
 
 1. Ship the read-only patient preflight endpoint and profile panel.
@@ -231,6 +263,8 @@ does not satisfy the gate and must not enable those capabilities.
 4. Add the local-curated, versioned identity-candidate and staff-confirmation
    workflow. Keep EMA PMS lookup disabled in production until its terms permit
    the intended business use and the organisation records source-owner approval.
-5. Add BMP/DataMatrix import.
+5. Extend the BMP carrier import only after adding lossless weekly/free-text
+   dosing fields and an approved current code/PZN reference source; add image
+   decoding as a separate bounded preprocessing slice.
 6. Complete intended-purpose/MDR review before patient-specific therapeutic
    decision support.
