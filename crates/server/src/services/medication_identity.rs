@@ -476,7 +476,7 @@ pub async fn confirm_identity(
     .bind(input.candidate_set_id)
     .bind(input.candidate_id)
     .bind(&current_version)
-    .bind(&product_snapshot)
+    .bind(&current_product_snapshot)
     .bind(&normalized_note)
     .bind(&normalized_idempotency)
     .bind(actor_id)
