@@ -34,8 +34,8 @@ CREATE INDEX idx_medication_evidence_bundles_patient_created
 
 CREATE TABLE medication_evidence_review_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    bundle_id UUID NOT NULL REFERENCES medication_evidence_bundles(id) ON DELETE RESTRICT,
+    patient_id UUID NOT NULL,
+    bundle_id UUID NOT NULL,
     status TEXT NOT NULL DEFAULT 'requested'
         CHECK (status IN ('requested', 'draft_ready', 'failed', 'superseded')),
     requested_fingerprint TEXT NOT NULL
@@ -59,7 +59,7 @@ CREATE TABLE medication_evidence_review_requests (
     CONSTRAINT medication_evidence_request_bundle_patient_fk
         FOREIGN KEY (bundle_id, patient_id)
         REFERENCES medication_evidence_bundles(id, patient_id)
-        ON DELETE RESTRICT,
+        ON DELETE CASCADE,
     UNIQUE (requested_by, idempotency_key),
     UNIQUE (id, patient_id, bundle_id),
     UNIQUE (id, bundle_id)
@@ -72,7 +72,7 @@ CREATE TABLE medication_evidence_review_drafts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     request_id UUID NOT NULL UNIQUE
         REFERENCES medication_evidence_review_requests(id) ON DELETE CASCADE,
-    bundle_id UUID NOT NULL REFERENCES medication_evidence_bundles(id) ON DELETE RESTRICT,
+    bundle_id UUID NOT NULL,
     status TEXT NOT NULL DEFAULT 'ready' CHECK (status = 'ready'),
     evidence_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
     verification_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
