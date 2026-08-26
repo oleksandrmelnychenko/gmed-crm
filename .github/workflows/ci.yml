@@ -102,6 +102,10 @@ jobs:
       - name: Install Capacitor dependencies
         run: npm --prefix frontend ci
 
+      - name: Generate Capacitor Android dependencies
+        working-directory: frontend
+        run: npx cap update android
+
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
