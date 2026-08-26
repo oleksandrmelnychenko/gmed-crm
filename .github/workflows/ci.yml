@@ -104,6 +104,8 @@ jobs:
 
       - name: Build mobile assets and generate Capacitor Android dependencies
         working-directory: frontend
+        env:
+          VITE_API_BASE_URL: https://console.gmed-health.com
         run: npm run mobile:sync:release
 
       - name: Setup Java
