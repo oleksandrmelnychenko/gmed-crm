@@ -438,7 +438,7 @@ pub async fn confirm_identity(
         return Ok(decision_result(existing));
     }
 
-    let product_snapshot = candidate_row.try_get::<Value, _>("product_snapshot")?;
+    let stored_product_snapshot = candidate_row.try_get::<Value, _>("product_snapshot")?;
     let drug_product_id = candidate_row.try_get::<Uuid, _>("drug_product_id")?;
     // Catalog confirmations are rare and safety-sensitive. Share-lock the
     // complete local catalog relation set so neither a product edit nor a
@@ -457,7 +457,7 @@ pub async fn confirm_identity(
             current_product.verification_status.as_str(),
             "curated" | "verified"
         )
-        || fingerprint_json(&current_product_snapshot) != fingerprint_json(&product_snapshot)
+        || fingerprint_json(&current_product_snapshot) != fingerprint_json(&stored_product_snapshot)
     {
         return Err(MedicationIdentityError::StaleCandidate);
     }

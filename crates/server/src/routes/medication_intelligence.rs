@@ -45,15 +45,15 @@ pub fn router() -> Router<AppState> {
 }
 
 #[derive(Debug, Serialize)]
-struct MedicationIntelligenceResponse {
-    mode: &'static str,
-    generated_at: String,
+pub(crate) struct MedicationIntelligenceResponse {
+    pub(crate) mode: &'static str,
+    pub(crate) generated_at: String,
     disclaimer: LocalizedDisclaimer,
-    summary: IntelligenceSummary,
-    medications: Vec<MedicationView>,
-    findings: Vec<Finding>,
-    missing_data: Vec<MissingData>,
-    sources: Vec<OfficialSourceStatus>,
+    pub(crate) summary: IntelligenceSummary,
+    pub(crate) medications: Vec<MedicationView>,
+    pub(crate) findings: Vec<Finding>,
+    pub(crate) missing_data: Vec<MissingData>,
+    pub(crate) sources: Vec<OfficialSourceStatus>,
     identity_permissions: MedicationIdentityPermissions,
 }
 
@@ -64,18 +64,18 @@ struct LocalizedDisclaimer {
 }
 
 #[derive(Debug, Serialize)]
-struct IntelligenceSummary {
-    active_medications: usize,
-    identified_medications: usize,
-    unresolved_medications: usize,
-    findings_total: usize,
-    high_priority_findings: usize,
-    missing_data_total: usize,
+pub(crate) struct IntelligenceSummary {
+    pub(crate) active_medications: usize,
+    pub(crate) identified_medications: usize,
+    pub(crate) unresolved_medications: usize,
+    pub(crate) findings_total: usize,
+    pub(crate) high_priority_findings: usize,
+    pub(crate) missing_data_total: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct MedicationView {
-    id: Uuid,
+pub(crate) struct MedicationView {
+    pub(crate) id: Uuid,
     name: String,
     substance: Option<String>,
     status: String,
@@ -90,24 +90,24 @@ struct MedicationView {
 }
 
 #[derive(Debug, Serialize)]
-struct Finding {
-    id: String,
-    severity: &'static str,
-    category: &'static str,
-    title_ru: String,
-    title_de: String,
+pub(crate) struct Finding {
+    pub(crate) id: String,
+    pub(crate) severity: &'static str,
+    pub(crate) category: &'static str,
+    pub(crate) title_ru: String,
+    pub(crate) title_de: String,
     detail_ru: String,
     detail_de: String,
-    medication_ids: Vec<Uuid>,
-    evidence_refs: Vec<String>,
+    pub(crate) medication_ids: Vec<Uuid>,
+    pub(crate) evidence_refs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_id: Option<String>,
+    pub(crate) source_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    published_at: Option<Option<String>>,
+    pub(crate) published_at: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    source_url: Option<String>,
+    pub(crate) source_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    substances: Option<Vec<String>>,
+    pub(crate) substances: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,12 +122,12 @@ struct OfficialSafetyAlert {
 }
 
 #[derive(Debug, Serialize)]
-struct MissingData {
-    code: &'static str,
+pub(crate) struct MissingData {
+    pub(crate) code: &'static str,
     label_ru: String,
     label_de: String,
-    reason_ru: String,
-    reason_de: String,
+    pub(crate) reason_ru: String,
+    pub(crate) reason_de: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,7 +185,27 @@ async fn get_patient_medication_intelligence(
     audit_context.set_action("read_patient_medication_intelligence");
     audit_context.set_context(json!({ "mode": "open_sources_only" }));
 
-    let rows = match sqlx::query(
+    match build_patient_medication_intelligence(&state.db, patient_id).await {
+        Ok(response) => Json(response).into_response(),
+        Err(error_value) => {
+            tracing::error!(
+                error = %error_value,
+                patient_id = %patient_id,
+                "build patient medication intelligence"
+            );
+            error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load medication intelligence",
+            )
+        }
+    }
+}
+
+pub(crate) async fn build_patient_medication_intelligence(
+    pool: &sqlx::PgPool,
+    patient_id: Uuid,
+) -> Result<MedicationIntelligenceResponse, sqlx::Error> {
+    let rows = sqlx::query(
         r#"SELECT pm.id, pm.wirkstoff, pm.handelsname, pm.status, pm.on_hold,
                   pm.source_country, pm.source_identifiers,
                   verified.atc_code AS verified_atc_code,
@@ -207,22 +227,8 @@ async fn get_patient_medication_intelligence(
            ORDER BY pm.sort_order, pm.created_at, pm.id"#,
     )
     .bind(patient_id)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(error_value) => {
-            tracing::error!(
-                error = %error_value,
-                patient_id = %patient_id,
-                "load medication intelligence inputs"
-            );
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load medication intelligence",
-            );
-        }
-    };
+    .fetch_all(pool)
+    .await?;
 
     let medications = rows
         .into_iter()
@@ -273,37 +279,9 @@ async fn get_patient_medication_intelligence(
         })
         .collect::<Vec<_>>();
 
-    let sources = match load_source_statuses(&state.db).await {
-        Ok(sources) => sources,
-        Err(error_value) => {
-            tracing::error!(
-                error = %error_value,
-                patient_id = %patient_id,
-                "load medication intelligence source status for patient review"
-            );
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load medication intelligence source status",
-            );
-        }
-    };
-
-    let official_alerts = match load_latest_official_safety_alerts(&state.db).await {
-        Ok(alerts) => alerts,
-        Err(error_value) => {
-            tracing::error!(
-                error = %error_value,
-                patient_id = %patient_id,
-                "load normalized official safety alerts"
-            );
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load medication intelligence source findings",
-            );
-        }
-    };
-
-    Json(analyze(medications, sources, official_alerts)).into_response()
+    let sources = load_source_statuses(pool).await?;
+    let official_alerts = load_latest_official_safety_alerts(pool).await?;
+    Ok(analyze(medications, sources, official_alerts))
 }
 
 fn analyze(
