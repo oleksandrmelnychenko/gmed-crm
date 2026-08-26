@@ -104,7 +104,9 @@ jobs:
 
       - name: Generate Capacitor Android dependencies
         working-directory: frontend
-        run: npx cap update android
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx cap update android
 
       - name: Setup Java
         uses: actions/setup-java@v5
