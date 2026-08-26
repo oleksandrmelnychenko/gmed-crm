@@ -102,11 +102,9 @@ jobs:
       - name: Install Capacitor dependencies
         run: npm --prefix frontend ci
 
-      - name: Generate Capacitor Android dependencies
+      - name: Build mobile assets and generate Capacitor Android dependencies
         working-directory: frontend
-        run: |
-          mkdir -p android/app/src/main/assets
-          npx cap update android
+        run: npm run mobile:sync:release
 
       - name: Setup Java
         uses: actions/setup-java@v5
