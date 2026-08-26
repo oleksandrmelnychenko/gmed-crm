@@ -61,7 +61,9 @@ test.describe("live RBAC denied route normalization", () => {
     await page.goto("/notes");
     await expect(page.getByTestId("internal-notes-page")).toBeVisible();
     await page.goto("/task-manager");
-    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Meine Aufgaben|Мои задачи|My tasks/i }),
+    ).toBeVisible();
     await expectForbiddenRouteRedirect(page, "/company-finance");
   });
 

@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(GmedSecureStoragePlugin.class);
+        registerPlugin(GmedBmpScannerPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Staff screens can contain patient and financial data. Keep them out of

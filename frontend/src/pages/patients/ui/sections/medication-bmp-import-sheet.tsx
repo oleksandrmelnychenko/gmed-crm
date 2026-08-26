@@ -8,6 +8,7 @@ import {
   FileUp,
   LoaderCircle,
   RefreshCw,
+  ScanLine,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,11 @@ import {
   type MedicationBmpMedication,
 } from "@/lib/api/medication-bmp-import";
 import { useLang } from "@/lib/i18n";
+import {
+  isMedicationBmpScannerAvailable,
+  MedicationBmpScannerError,
+  scanMedicationBmpCarrier,
+} from "@/lib/mobile/bmp-carrier-scanner";
 import { cn } from "@/lib/utils";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -31,10 +37,14 @@ export type BmpImportOperation =
   | "idle"
   | "previewing"
   | "confirming"
+  | "scanning"
   | "stale"
   | "identity_mismatch"
   | "idempotency_conflict"
   | "file_too_large"
+  | "camera_permission_denied"
+  | "scanner_invalid"
+  | "scanner_error"
   | "error";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -442,6 +452,24 @@ export function medicationBmpOperationMessage(
       "Die BMP-Datei überschreitet die zulässigen 128 KiB. Wählen Sie das ursprüngliche XML des BMP-Datenträgers.",
     );
   }
+  if (operation === "camera_permission_denied") {
+    return tx(
+      "Для сканирования BMP разрешите приложению доступ к камере в настройках Android.",
+      "Erlauben Sie der App in den Android-Einstellungen den Kamerazugriff, um den BMP zu scannen.",
+    );
+  }
+  if (operation === "scanner_invalid") {
+    return tx(
+      "Распознанный Data Matrix не содержит поддерживаемый BMP. Наведите камеру на код печатного плана медикаментов.",
+      "Der erkannte Data Matrix enthält keinen unterstützten BMP. Richten Sie die Kamera auf den Code des ausgedruckten Medikationsplans.",
+    );
+  }
+  if (operation === "scanner_error") {
+    return tx(
+      "Не удалось запустить сканирование BMP. Повторите попытку или загрузите декодированный XML.",
+      "Der BMP-Scanner konnte nicht gestartet werden. Versuchen Sie es erneut oder laden Sie dekodiertes XML hoch.",
+    );
+  }
   return tx(
     "Не удалось обработать BMP. Проверьте XML и повторите попытку.",
     "Der BMP konnte nicht verarbeitet werden. Prüfen Sie das XML und versuchen Sie es erneut.",
@@ -469,8 +497,9 @@ export function MedicationBmpImportAction({
   const [result, setResult] = useState<ConfirmMedicationBmpImportResult | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [operation, setOperation] = useState<BmpImportOperation>("idle");
+  const scannerAvailable = isMedicationBmpScannerAvailable();
 
-  const busy = operation === "previewing" || operation === "confirming";
+  const busy = operation === "previewing" || operation === "confirming" || operation === "scanning";
   const confirmable = preview ? canConfirmMedicationBmpPreview(preview) : false;
   const requiresFreshPreview = operation === "stale"
     || operation === "identity_mismatch"
@@ -532,6 +561,53 @@ export function MedicationBmpImportAction({
     }
   }
 
+  async function scanCarrier() {
+    setOperation("scanning");
+    setPreview(null);
+    setResult(null);
+    setAcknowledged(false);
+    idempotencyKeyRef.current = null;
+    try {
+      const scan = await scanMedicationBmpCarrier({
+        instruction: tx(
+          "Поместите Data Matrix с плана BMP в центр рамки",
+          "Data Matrix des BMP mittig im Rahmen platzieren",
+        ),
+        cancel: tx("Отмена", "Abbrechen"),
+        torchOn: tx("Включить свет", "Licht an"),
+        torchOff: tx("Выключить свет", "Licht aus"),
+        invalid: tx(
+          "Это не поддерживаемый BMP Data Matrix",
+          "Dies ist kein unterstützter BMP Data Matrix",
+        ),
+      });
+      setCarrierXml(scan.carrierXml);
+      setFileName(tx("BMP · скан камеры", "BMP · Kamera-Scan"));
+      setOperation("previewing");
+      const response = await previewMedicationBmpImport(patientId, scan.carrierXml.trim());
+      setPreview(response);
+      setOperation("idle");
+    } catch (error) {
+      if (error instanceof MedicationBmpScannerError) {
+        if (error.code === "scan_cancelled") {
+          setOperation("idle");
+          return;
+        }
+        if (error.code === "camera_permission_denied") {
+          setOperation("camera_permission_denied");
+          return;
+        }
+        if (error.code === "invalid_bmp_carrier") {
+          setOperation("scanner_invalid");
+          return;
+        }
+        setOperation("scanner_error");
+        return;
+      }
+      setOperation(medicationBmpOperationForError(error));
+    }
+  }
+
   async function confirmImport() {
     if (!preview || !acknowledged || !canConfirmMedicationBmpPreview(preview)) return;
     const idempotencyKey = resolveMedicationBmpIdempotencyKey(idempotencyKeyRef.current);
@@ -577,8 +653,8 @@ export function MedicationBmpImportAction({
         width="detail-wide"
         title={tx("Импорт плана медикаментов BMP", "BMP-Medikationsplan importieren")}
         description={tx(
-          "Вставьте или загрузите уже декодированный XML из носителя BMP. Камера и декодирование DataMatrix пока не выполняются.",
-          "Fügen Sie bereits dekodiertes XML aus dem BMP-Datenträger ein oder laden Sie es hoch. Kamera- und DataMatrix-Dekodierung sind noch nicht enthalten.",
+          "В Android-приложении отсканируйте Data Matrix с печатного BMP или загрузите уже декодированный XML. До подтверждения план не изменяется.",
+          "Scannen Sie in der Android-App den Data Matrix des ausgedruckten BMP oder laden Sie bereits dekodiertes XML hoch. Vor der Bestätigung wird der Plan nicht geändert.",
         )}
         footer={result ? (
           <Button type="button" size="sm" className="h-8 rounded-lg" onClick={closeSheet}>
@@ -648,10 +724,18 @@ export function MedicationBmpImportAction({
                     )}
                   </p>
                 </div>
-                <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg" disabled={busy} onClick={() => fileInputRef.current?.click()}>
-                  <FileUp className="size-3.5" />
-                  {tx("Загрузить XML", "XML laden")}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {scannerAvailable ? (
+                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={busy} onClick={() => void scanCarrier()}>
+                      {operation === "scanning" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ScanLine className="size-3.5" />}
+                      {tx("Сканировать BMP", "BMP scannen")}
+                    </Button>
+                  ) : null}
+                  <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                    <FileUp className="size-3.5" />
+                    {tx("Загрузить XML", "XML laden")}
+                  </Button>
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -682,6 +766,9 @@ export function MedicationBmpImportAction({
               || operation === "identity_mismatch"
               || operation === "idempotency_conflict"
               || operation === "file_too_large"
+              || operation === "camera_permission_denied"
+              || operation === "scanner_invalid"
+              || operation === "scanner_error"
               || operation === "error" ? (
                 <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-800">
                   <p>{medicationBmpOperationMessage(operation, language)}</p>

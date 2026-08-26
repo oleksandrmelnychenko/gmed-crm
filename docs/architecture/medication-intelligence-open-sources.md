@@ -224,8 +224,8 @@ does not satisfy the gate and must not enable those capabilities.
 
 ## KBV BMP 2.8 carrier import (Phase 6)
 
-The import accepts already decoded carrier XML only. It does not decode a
-DataMatrix image, resolve a PZN, call a product database, or infer a Wirkstoff.
+The backend import accepts decoded carrier XML only. It does not resolve a PZN,
+call a product database, or infer a Wirkstoff.
 The supported carrier profile is the official KBV BMP 2.8 root
 `MP.v = 028`, `MP.l = de-DE`, based on the [KBV BMP Anlage 3
 specification](https://update.kbv.de/ita-update/Verordnungen/Arzneimittel/BMP/EXT_ITA_VGEX_BMP_Anlage3.pdf).
@@ -254,6 +254,28 @@ rows, and inserts all validated carrier rows atomically. The immutable audit
 record stores a checksum plus the bounded normalized snapshot, not raw XML.
 Idempotent replay does not repeat clinical, audit, or realtime events.
 
+## Android BMP Data Matrix scanning (Phase 7)
+
+The Android Capacitor app has a bounded native preprocessing step for printed
+BMP carriers. CameraX sends in-memory frames directly to the bundled ML Kit
+barcode model configured for `FORMAT_DATA_MATRIX` only. The app does not create
+an image file, upload a camera frame, retain a thumbnail, or use a dynamically
+downloaded scanner model. The scanner activity also carries `FLAG_SECURE`, like
+the main staff activity.
+
+Raw barcode bytes are preferred and decoded as ISO-8859-1, matching the KBV
+carrier specification. The ML Kit string value is only a compatibility fallback.
+The native bridge returns at most 128 KiB of XML-like BMP carrier text and no
+image data. Browser and iOS clients keep the decoded-XML upload/paste path; the
+camera action is exposed only in the native Android runtime.
+
+A successful scan immediately requests the existing server preview. It never
+confirms or applies medications from the camera result. Exact patient matching,
+unsupported-structure blocks, the stale fingerprint check, staff acknowledgement,
+atomic replacement, immutable import snapshot, idempotency, audit and realtime
+rules remain server-authoritative. A physical-device matrix must still verify
+focus, centre-point detection and low-light behavior before production rollout.
+
 ## Next implementation slices
 
 1. Ship the read-only patient preflight endpoint and profile panel.
@@ -264,7 +286,7 @@ Idempotent replay does not repeat clinical, audit, or realtime events.
    workflow. Keep EMA PMS lookup disabled in production until its terms permit
    the intended business use and the organisation records source-owner approval.
 5. Extend the BMP carrier import only after adding lossless weekly/free-text
-   dosing fields and an approved current code/PZN reference source; add image
-   decoding as a separate bounded preprocessing slice.
+   dosing fields and an approved current code/PZN reference source; complete
+   physical Android scanner QA before production rollout.
 6. Complete intended-purpose/MDR review before patient-specific therapeutic
    decision support.
