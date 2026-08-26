@@ -163,6 +163,62 @@ Real patient identity must not be sent to an external model. The backend builds
 a minimized clinical payload, stores the audit record locally, and keeps provider
 selection behind a server-side adapter.
 
+## Local Medication Evidence Review (Phase 5)
+
+Phase 5 does not call an AI provider. It creates a versioned, immutable bundle
+from the already computed Medication Intelligence response and then produces a
+deterministic local draft. The provider capability is explicitly
+`not_configured`, external calls are disabled, and there is no shell, model key,
+client-selected provider, or fallback path.
+
+The JSON evidence snapshot is privacy-minimized. It contains opaque patient
+medication row IDs, deterministic findings, missing-data reasons, official
+source provenance, and an internal citation registry. It does not contain the
+patient ID, name, contact data, date of birth, medication brand names, or other
+demographic identifiers. Finding detail and missing-data labels are deliberately
+excluded because the existing Medication Intelligence text may contain a
+medication display name.
+
+Every draft item can contain only bilingual evidence text and citation
+references. Draft citations must be members of the immutable bundle registry;
+the transaction rejects any reference outside that set. The only draft sections
+are `evidence_summary`, `verification_questions`, `limitations`, and their
+`citation_refs`. There is no dosage, treatment-change, new-fact, or clinical
+approval field. Category templates may ask staff to verify duplicate active
+entries or review a linked BfArM original, but never instruct treatment.
+
+The client first obtains a preview fingerprint, then submits it with an
+idempotency key. Creation returns `409` when the current deterministic evidence
+has changed. A retry with the same actor/key and same patient/fingerprint returns
+the original immutable review; reuse for another patient or fingerprint returns
+`409` without revealing the original review. Bundle, request, draft, and state
+event persistence is transactional. Realtime/audit events are emitted only for
+a newly created review, not an idempotent replay.
+
+GMED currently has no separately qualified clinical-review role. Accordingly,
+all responses expose `clinical_review.status = not_configured` and
+`clinical_review.can_approve = false`. CEO access to create/read a technical
+evidence draft must never be interpreted as medical approval authority. If a
+qualified clinical-review workflow is introduced later, it requires a separate
+role, policy, audit state machine, and regulatory approval rather than extending
+this technical review implicitly.
+
+### Intended-purpose gate
+
+As an engineering release gate, any future patient-specific diagnostic or
+therapeutic recommendation must first receive a documented intended-purpose,
+qualification, and classification assessment under [Regulation (EU)
+2017/745](https://eur-lex.europa.eu/eli/reg/2017/745/oj/eng) and [MDCG 2019-11
+rev.1 (June
+2025)](https://health.ec.europa.eu/document/download/b45335c5-1679-4c71-a91c-fc7a4d37f12b_en?filename=mdcg_2019_11_en.pdf),
+plus an [AI Act Regulation (EU)
+2024/1689](https://eur-lex.europa.eu/eli/reg/2024/1689/oj?locale=en) and [GDPR
+Regulation (EU)
+2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj/eng) data-protection
+review. This is not a legal classification conclusion; it is a mandatory
+cross-functional review checkpoint. Configuring or replacing an AI provider
+does not satisfy the gate and must not enable those capabilities.
+
 ## Next implementation slices
 
 1. Ship the read-only patient preflight endpoint and profile panel.

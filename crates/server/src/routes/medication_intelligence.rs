@@ -343,7 +343,7 @@ fn analyze(
             source_id: None,
             published_at: None,
             source_url: None,
-            substances: None,
+            substances: Some(vec![display_substance.to_string()]),
         });
     }
 
@@ -635,6 +635,10 @@ mod tests {
         assert!(duplicate.medication_ids.contains(&first_id));
         assert!(duplicate.medication_ids.contains(&second_id));
         assert!(!duplicate.medication_ids.contains(&inactive_id));
+        assert_eq!(
+            duplicate.substances.as_deref(),
+            Some(&["Ibuprofen".to_string()][..])
+        );
     }
 
     #[test]

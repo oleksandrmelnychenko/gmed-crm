@@ -105,6 +105,7 @@ import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
+import { MedicationEvidenceReviewPanel } from "./medication-evidence-review-panel";
 import { MedicationIntelligencePanel } from "./medication-intelligence-panel";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
@@ -3896,6 +3897,10 @@ export function PatientClinicalTab({
         onSubmit={() => void submitMedicationHoldEditor()}
       />
       <MedicationIntelligencePanel
+        patientId={patientId}
+        refreshKey={`${version}:${medicationIntelligenceRefreshKey}`}
+      />
+      <MedicationEvidenceReviewPanel
         patientId={patientId}
         refreshKey={`${version}:${medicationIntelligenceRefreshKey}`}
       />

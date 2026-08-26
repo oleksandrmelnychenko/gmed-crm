@@ -38,6 +38,7 @@ import {
   CLINICAL_PROVIDER_QUERY,
   clinicalMedicalProviderRows,
 } from "@/pages/patients/ui/sections/patient-clinical-tab";
+import { MedicationEvidenceReviewPanel } from "@/pages/patients/ui/sections/medication-evidence-review-panel";
 import { MedicationIntelligencePanel } from "@/pages/patients/ui/sections/medication-intelligence-panel";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
@@ -297,6 +298,14 @@ export function CaseRecordMedicationsSection() {
   if (!patientId) return null;
   if (record.loading) return <RecordLoading />;
   const medications = record.profile?.medications ?? [];
+  const medicationRefreshKey = medications
+    .map((medication) => [
+      medication.id,
+      medication.handelsname,
+      medication.wirkstoff,
+      medication.status,
+    ].join(":"))
+    .join("|");
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -318,14 +327,11 @@ export function CaseRecordMedicationsSection() {
       />
       <MedicationIntelligencePanel
         patientId={patientId}
-        refreshKey={medications
-          .map((medication) => [
-            medication.id,
-            medication.handelsname,
-            medication.wirkstoff,
-            medication.status,
-          ].join(":"))
-          .join("|")}
+        refreshKey={medicationRefreshKey}
+      />
+      <MedicationEvidenceReviewPanel
+        patientId={patientId}
+        refreshKey={medicationRefreshKey}
       />
     </div>
   );

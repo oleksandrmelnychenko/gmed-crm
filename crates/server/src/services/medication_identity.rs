@@ -1268,7 +1268,7 @@ fn source_identifier(value: &Value, keys: &[&str]) -> Option<String> {
         value
             .get(key)
             .and_then(Value::as_str)
-            .and_then(|value| clean_string(value))
+            .and_then(clean_string)
     })
 }
 

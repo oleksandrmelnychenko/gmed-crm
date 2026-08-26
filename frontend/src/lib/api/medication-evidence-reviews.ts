@@ -218,7 +218,7 @@ function provider(value: unknown): MedicationEvidenceProvider {
   };
 }
 
-function clinicalReview(_value: unknown): MedicationEvidenceClinicalReview {
+function clinicalReview(): MedicationEvidenceClinicalReview {
   return { status: "not_configured", can_approve: false };
 }
 
@@ -268,7 +268,7 @@ export function normalizeMedicationEvidenceReviewPreview(
     summary: summary(payload.summary),
     medication_ids: stringArray(payload.medication_ids),
     provider: provider(payload.provider),
-    clinical_review: clinicalReview(payload.clinical_review),
+    clinical_review: clinicalReview(),
     permissions: permissions(payload.permissions),
     latest_review: Object.keys(latestReview).length === 0
       ? null
@@ -370,7 +370,7 @@ export function normalizeMedicationEvidenceReview(value: unknown): MedicationEvi
       citation_refs: stringArray(draft.citation_refs),
     },
     provider: provider(payload.provider),
-    clinical_review: clinicalReview(payload.clinical_review),
+    clinical_review: clinicalReview(),
     permissions: permissions(payload.permissions),
   };
 }
