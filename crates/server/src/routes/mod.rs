@@ -29,6 +29,8 @@ pub mod invoices;
 pub mod key_rotation;
 pub mod leads;
 pub mod me;
+pub mod medication_identity;
+pub mod medication_intelligence;
 pub mod messages;
 pub mod notifications;
 pub mod order_service_groups;
@@ -89,6 +91,8 @@ pub fn protected_router() -> Router<AppState> {
         .merge(interpreter_patient_history::router())
         .merge(order_service_groups::router())
         .merge(drug_products::router())
+        .merge(medication_identity::router())
+        .merge(medication_intelligence::router())
         .merge(appointments::router())
         .merge(tasks::router())
         .merge(stats::router())

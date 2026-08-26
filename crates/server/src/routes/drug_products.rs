@@ -537,14 +537,20 @@ async fn verify_patient_medication_drug_match(
             "Invalid verification status",
         );
     }
+    // Verified medication identity now requires a versioned candidate set,
+    // explicit staff acknowledgement, and an immutable decision audit. Keep
+    // this legacy endpoint for candidate/rejected projection maintenance only.
+    if status == "verified" {
+        return err(
+            StatusCode::CONFLICT,
+            "Use medication identity-confirmations to verify medication identity",
+        );
+    }
 
     match sqlx::query(
         r#"UPDATE medication_drug_matches
            SET verification_status = $3,
-               match_kind = CASE WHEN $3 = 'verified' THEN 'staff_verified' ELSE match_kind END,
                note = COALESCE($4, note),
-               verified_by = CASE WHEN $3 = 'verified' THEN $5 ELSE verified_by END,
-               verified_at = CASE WHEN $3 = 'verified' THEN now() ELSE verified_at END,
                updated_at = now()
            WHERE id = $1
              AND patient_medication_id = $2
@@ -554,7 +560,6 @@ async fn verify_patient_medication_drug_match(
     .bind(medication_id)
     .bind(status)
     .bind(normalize_optional_text(body.note))
-    .bind(auth.user_id)
     .fetch_optional(&state.db)
     .await
     {

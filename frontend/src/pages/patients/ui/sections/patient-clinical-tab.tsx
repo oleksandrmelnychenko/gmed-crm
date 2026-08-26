@@ -46,7 +46,6 @@ import {
 } from "../../data/medication-options";
 
 import {
-  createPatientMedicationDrugMatch,
   createPatientRecommendation,
   deletePatientNarrative,
   deletePatientRecommendation,
@@ -81,12 +80,7 @@ import {
   type RecommendationLifecycleStatus,
 } from "@/pages/patients/data/patient-clinical";
 
-import {
-  searchDrugProducts,
-  verifyDrugEquivalent,
-  type DrugProduct,
-  type GermanEquivalent,
-} from "@/lib/api/clinical";
+import { type GermanEquivalent } from "@/lib/api/clinical";
 import { MedicationEquivalentsPanel } from "@/pages/case-workspace/medication-equivalents-panel";
 import {
   fetchPatientMedicationImportHistory,
@@ -111,6 +105,7 @@ import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
+import { MedicationIntelligencePanel } from "./medication-intelligence-panel";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
   collectAttachedClinicalSpecializations,
@@ -2662,6 +2657,12 @@ export function PatientClinicalTab({
     () => groupMedicationImportHistory(medications, medicationImportHistory),
     [medicationImportHistory, medications],
   );
+  const medicationIntelligenceRefreshKey = useMemo(
+    () => medications
+      .map((item) => [item.id, item.status, item.on_hold, item.wirkstoff, item.handelsname].join(":"))
+      .join("|"),
+    [medications],
+  );
 
   async function loadMoreMedicationHistory() {
     if (medicationHistoryLoadingMore || medicationImportHistory.length >= medicationHistoryTotal) return;
@@ -3894,11 +3895,9 @@ export function PatientClinicalTab({
         }}
         onSubmit={() => void submitMedicationHoldEditor()}
       />
-      <PatientMedicationEquivalentsBlock
+      <MedicationIntelligencePanel
         patientId={patientId}
-        medications={medications}
-        canManage={canManage}
-        tx={tx}
+        refreshKey={`${version}:${medicationIntelligenceRefreshKey}`}
       />
       <MedicationHistoryTree
         series={medicationHistorySeries}
@@ -4484,12 +4483,10 @@ export function PatientClinicalTab({
 export function PatientMedicationEquivalentsBlock({
   patientId,
   medications,
-  canManage,
   tx,
 }: {
   patientId: string;
   medications: ClinicalMedication[];
-  canManage: boolean;
   tx: Bilingual;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -4498,12 +4495,6 @@ export function PatientMedicationEquivalentsBlock({
   const [searchCompleted, setSearchCompleted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [verifyingEquivalentId, setVerifyingEquivalentId] = useState<string | null>(null);
-  const [drugQuery, setDrugQuery] = useState("");
-  const [drugResults, setDrugResults] = useState<DrugProduct[]>([]);
-  const [drugSearching, setDrugSearching] = useState(false);
-  const [drugError, setDrugError] = useState("");
-  const [linkingProductId, setLinkingProductId] = useState<string | null>(null);
 
   const persisted = medications.filter((m): m is ClinicalMedication & { id: string } =>
     Boolean(m.id),
@@ -4515,8 +4506,6 @@ export function PatientMedicationEquivalentsBlock({
     setCandidates([]);
     setSearchCompleted(false);
     setError("");
-    setDrugResults([]);
-    setDrugError("");
   };
 
   const findEquivalents = async (include = includeCandidates) => {
@@ -4540,72 +4529,9 @@ export function PatientMedicationEquivalentsBlock({
     }
   };
 
-  const verifyEquivalent = async (
-    relationshipId: string,
-    verificationStatus: "verified" | "rejected" | "candidate",
-  ) => {
-    setVerifyingEquivalentId(relationshipId);
-    setError("");
-    try {
-      await verifyDrugEquivalent(relationshipId, verificationStatus);
-      await findEquivalents();
-    } catch (verifyError) {
-      setError(
-        verifyError instanceof Error
-          ? verifyError.message
-          : tx("Не удалось обновить статус.", "Status konnte nicht aktualisiert werden."),
-      );
-    } finally {
-      setVerifyingEquivalentId(null);
-    }
-  };
-
-  const searchDrugs = async () => {
-    if (!drugQuery.trim()) return;
-    setDrugSearching(true);
-    setDrugError("");
-    try {
-      const results = await searchDrugProducts({
-        q: drugQuery,
-        include_candidates: includeCandidates,
-      });
-      setDrugResults(results);
-    } catch (searchError) {
-      setDrugResults([]);
-      setDrugError(
-        searchError instanceof Error
-          ? searchError.message
-          : tx("Поиск препаратов не удался.", "Arzneimittelsuche fehlgeschlagen."),
-      );
-    } finally {
-      setDrugSearching(false);
-    }
-  };
-
-  const linkProduct = async (productId: string) => {
-    if (!selected) return;
-    setLinkingProductId(productId);
-    setDrugError("");
-    try {
-      await createPatientMedicationDrugMatch(patientId, selected.id, {
-        drug_product_id: productId,
-        confidence: 0.85,
-      });
-      await findEquivalents();
-    } catch (linkError) {
-      setDrugError(
-        linkError instanceof Error
-          ? linkError.message
-          : tx("Не удалось связать препарат.", "Verknüpfung fehlgeschlagen."),
-      );
-    } finally {
-      setLinkingProductId(null);
-    }
-  };
-
   return (
     <section className="space-y-3">
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2">
         <Field label={tx("Медикамент для проверки эквивалентов", "Medikament für Äquivalent-Prüfung")}>
           <NativeComboboxSelect
             value={selected?.id ?? ""}
@@ -4623,72 +4549,7 @@ export function PatientMedicationEquivalentsBlock({
             ))}
           </NativeComboboxSelect>
         </Field>
-        {canManage ? (
-          <Field label={tx("Поиск в справочнике препаратов", "Arzneimittel-Referenz durchsuchen")}>
-            <div className="flex gap-2">
-              <Input
-                value={drugQuery}
-                onChange={(e) => setDrugQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void searchDrugs();
-                  }
-                }}
-                className={inputClass}
-                placeholder={tx("Название или вещество", "Name oder Wirkstoff")}
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-9 shrink-0 rounded-lg"
-                disabled={drugSearching || !drugQuery.trim()}
-                onClick={() => void searchDrugs()}
-              >
-                {drugSearching ? tx("Поиск…", "Suche…") : tx("Найти", "Suchen")}
-              </Button>
-            </div>
-          </Field>
-        ) : null}
       </div>
-
-      {drugError ? (
-        <p role="alert" className="text-xs text-destructive">
-          {drugError}
-        </p>
-      ) : null}
-      {drugResults.length > 0 && canManage ? (
-        <ul className="space-y-1.5">
-          {drugResults.map((product) => (
-            <li
-              key={product.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-muted/20 px-3 py-1.5"
-            >
-              <span className="min-w-0 text-sm text-foreground">
-                {product.brand_name}
-                <span className="ml-1.5 text-xs text-muted-foreground">
-                  {product.country_code}
-                  {product.strength ? ` · ${product.strength}` : ""}
-                  {product.form ? ` · ${product.form}` : ""}
-                </span>
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 rounded-full px-2.5 text-[11px]"
-                disabled={linkingProductId === product.id}
-                onClick={() => void linkProduct(product.id)}
-              >
-                {linkingProductId === product.id
-                  ? tx("Связывание…", "Verknüpfen…")
-                  : tx("Связать с медикаментом", "Mit Medikament verknüpfen")}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
 
       <MedicationEquivalentsPanel
         medicationName={selected?.handelsname || selected?.wirkstoff || "—"}
@@ -4698,18 +4559,12 @@ export function PatientMedicationEquivalentsBlock({
         searchCompleted={searchCompleted}
         loading={loading}
         error={error}
-        verifyingEquivalentId={verifyingEquivalentId}
+        verifyingEquivalentId={null}
         onFind={() => void findEquivalents()}
         onToggleCandidates={(include) => {
           setIncludeCandidates(include);
           if (searchCompleted) void findEquivalents(include);
         }}
-        onVerifyEquivalent={
-          canManage
-            ? (relationshipId, verificationStatus) =>
-                void verifyEquivalent(relationshipId, verificationStatus)
-            : undefined
-        }
       />
     </section>
   );

@@ -20,7 +20,7 @@ axum-prometheus = "0.10"
 # major would create two independent global recorders and metrics
 # emitted from handlers would not flow to the /metrics endpoint.
 metrics = "0.24"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync", "process", "time"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
 tower_governor = "0.8"
 tracing = "0.1"
@@ -48,6 +48,8 @@ ttf-parser = "0.25.1"
 datamatrix = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unicode-normalization = "0.1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rss = "2"
 
 secrecy = { version = "0.10", features = ["serde"] }
 gmed-domain = { path = "../domain" }

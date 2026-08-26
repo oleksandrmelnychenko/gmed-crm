@@ -42,6 +42,7 @@ import {
   conciergeWorkspaceStats,
   canChangeConciergeTaskStatus,
   canModifyConciergeTask,
+  conciergeOperationalItemsListPath,
   conciergeTaskErrorMessage,
   filterConciergeServices,
   filterConciergeTaskAssignees,
@@ -598,6 +599,11 @@ export function ConciergeWorkspacePage() {
 
   useDebouncedRealtimeSubscription(REALTIME_EVENTS, handleRealtimeRefresh, 250);
 
+  const taskListPath = useMemo(
+    () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
+    [user?.id, user?.role],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -611,7 +617,7 @@ export function ConciergeWorkspacePage() {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
-          apiFetch<ConciergeTask[]>("/concierge-operational-items?archive=all", {
+          apiFetch<ConciergeTask[]>(taskListPath, {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
@@ -661,7 +667,7 @@ export function ConciergeWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [labels.loadFailed, user, version]);
+  }, [labels.loadFailed, taskListPath, user, version]);
 
   const visibleServices = useMemo(
     () => sortConciergeServices(filterConciergeServices(services, query)),

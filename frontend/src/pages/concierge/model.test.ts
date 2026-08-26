@@ -16,6 +16,7 @@ import {
   conciergeTaskDisplayTitle,
   conciergeTaskErrorMessage,
   conciergeTaskCode,
+  conciergeOperationalItemsListPath,
   assignableConciergeTaskUsers,
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
@@ -129,6 +130,20 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canChangeConciergeTaskStatus(assignedTask, "assignee", "concierge")).toBe(true);
     expect(canChangeConciergeTaskStatus(assignedTask, "peer", "concierge")).toBe(false);
     expect(canChangeConciergeTaskStatus(assignedTask, "ceo", "ceo")).toBe(true);
+  });
+});
+
+describe("conciergeOperationalItemsListPath", () => {
+  it("scopes a concierge task queue to the current account", () => {
+    expect(conciergeOperationalItemsListPath("concierge-1", "concierge")).toBe(
+      "/concierge-operational-items?archive=all&assigned_to=concierge-1",
+    );
+  });
+
+  it("keeps the shared task queue for management roles", () => {
+    expect(conciergeOperationalItemsListPath("ceo-1", "ceo")).toBe(
+      "/concierge-operational-items?archive=all",
+    );
   });
 });
 

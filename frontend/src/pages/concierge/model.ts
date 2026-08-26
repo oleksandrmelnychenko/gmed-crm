@@ -223,6 +223,20 @@ export function assignableConciergeTaskUsers(
   );
 }
 
+/**
+ * Concierge accounts use a personal task queue by default. Management roles
+ * keep the shared queue so they can coordinate work across the team.
+ */
+export function conciergeOperationalItemsListPath(
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+  archive: "active" | "archived" | "all" = "all",
+) {
+  const params = new URLSearchParams({ archive });
+  if (actorRole === "concierge" && actorId) params.set("assigned_to", actorId);
+  return `/concierge-operational-items?${params.toString()}`;
+}
+
 export function canModifyConciergeTask(
   task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role">,
   actorId: string | null | undefined,

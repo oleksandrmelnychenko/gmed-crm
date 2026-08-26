@@ -14,6 +14,7 @@ import {
   assignableConciergeTaskUsers,
   canChangeConciergeTaskStatus,
   canModifyConciergeTask,
+  conciergeOperationalItemsListPath,
   conciergeTaskErrorMessage,
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
@@ -58,6 +59,8 @@ const copy = {
     retry: "Erneut laden",
     archiveFailed: "Die Aufgabe konnte nicht archiviert werden.",
     restoreFailed: "Die Aufgabe konnte nicht wiederhergestellt werden.",
+    myTitle: "Meine Aufgaben",
+    mySubtitle: "Persönliche Aufgaben, Termine und Fristen",
   },
   ru: {
     title: "Менеджер задач",
@@ -75,6 +78,8 @@ const copy = {
     retry: "Повторить",
     archiveFailed: "Не удалось переместить задачу в архив.",
     restoreFailed: "Не удалось восстановить задачу из архива.",
+    myTitle: "Мои задачи",
+    mySubtitle: "Личные задачи, события и сроки",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
 
@@ -104,6 +109,11 @@ export function ConciergeTaskManagerPage() {
   const createTaskRequestIdRef = useRef<string | null>(null);
   const taskParam = searchParams.get("task");
   const now = useMemo(() => new Date(), [tasks, version]);
+  const isPersonalConcierge = user?.role === "concierge";
+  const taskListPath = useMemo(
+    () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
+    [user?.id, user?.role],
+  );
 
   const requestRefresh = useCallback(() => {
     clearApiCache("/concierge-operational-items");
@@ -127,7 +137,7 @@ export function ConciergeTaskManagerPage() {
       setError("");
       try {
         const [taskRows, assigneeRows, patientRows, providerRows] = await Promise.all([
-          apiFetch<ConciergeTask[]>("/concierge-operational-items?archive=all", {
+          apiFetch<ConciergeTask[]>(taskListPath, {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
@@ -177,7 +187,7 @@ export function ConciergeTaskManagerPage() {
     return () => {
       cancelled = true;
     };
-  }, [labels.loadFailed, user, version]);
+  }, [labels.loadFailed, taskListPath, user, version]);
 
   async function changeTaskStatus(task: ConciergeTask, status: string) {
     if (updatingTaskId || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return;
@@ -328,8 +338,8 @@ export function ConciergeTaskManagerPage() {
   return (
     <div className="space-y-3" data-testid="concierge-task-manager-page">
       <PageHeader
-        title={labels.title}
-        description={labels.subtitle}
+        title={isPersonalConcierge ? labels.myTitle : labels.title}
+        description={isPersonalConcierge ? labels.mySubtitle : labels.subtitle}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
@@ -356,7 +366,7 @@ export function ConciergeTaskManagerPage() {
         assignees={assignees}
         lang={lang}
         now={now}
-        canManageTeam={assignees.some((assignee) => assignee.id !== user?.id)}
+        canManageTeam={!isPersonalConcierge && assignees.some((assignee) => assignee.id !== user?.id)}
         updatingTaskId={updatingTaskId}
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}

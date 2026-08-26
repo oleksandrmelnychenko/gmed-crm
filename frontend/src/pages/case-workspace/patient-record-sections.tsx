@@ -36,9 +36,9 @@ import {
 } from "@/pages/patients/ui/sections/patient-clinical-entry-sections";
 import {
   CLINICAL_PROVIDER_QUERY,
-  PatientMedicationEquivalentsBlock,
   clinicalMedicalProviderRows,
 } from "@/pages/patients/ui/sections/patient-clinical-tab";
+import { MedicationIntelligencePanel } from "@/pages/patients/ui/sections/medication-intelligence-panel";
 import { fetchProviders } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
@@ -294,7 +294,6 @@ export function CaseRecordMedicationsSection() {
   const { patientId, caseUuid, canEdit, lang } = useRecordContext();
   const record = usePatientRecord(patientId);
   void caseUuid;
-  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   if (!patientId) return null;
   if (record.loading) return <RecordLoading />;
   const medications = record.profile?.medications ?? [];
@@ -317,11 +316,16 @@ export function CaseRecordMedicationsSection() {
           record.runSave(() => savePatientMedications(patientId, next))
         }
       />
-      <PatientMedicationEquivalentsBlock
+      <MedicationIntelligencePanel
         patientId={patientId}
-        medications={medications}
-        canManage={canEdit}
-        tx={tx}
+        refreshKey={medications
+          .map((medication) => [
+            medication.id,
+            medication.handelsname,
+            medication.wirkstoff,
+            medication.status,
+          ].join(":"))
+          .join("|")}
       />
     </div>
   );
