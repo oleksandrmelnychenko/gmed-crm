@@ -147,7 +147,11 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
         openai_model: Some(model.to_string()),
     });
     let configured_app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(
-        ConnectInfo("127.0.0.1:40124".parse().expect("valid peer address")),
+        ConnectInfo(
+            "127.0.0.1:40124"
+                .parse::<std::net::SocketAddr>()
+                .expect("valid peer address"),
+        ),
     ));
 
     let (status, body) = json_request(
