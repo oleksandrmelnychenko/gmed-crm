@@ -142,7 +142,15 @@ tag_running_image() {
   local tag="$2"
   local image_id
   image_id="$(docker inspect --format '{{.Image}}' "$container")"
-  docker image tag "$image_id" "$tag"
+  if docker image inspect "$image_id" >/dev/null 2>&1; then
+    docker image tag "$image_id" "$tag"
+  else
+    # A local rebuild can replace the Compose tag and prune the immutable
+    # image object while its old container is still running. Preserve that
+    # exact running filesystem as the rollback image instead of aborting the
+    # deployment before staging starts.
+    docker commit "$container" "$tag" >/dev/null
+  fi
 }
 
 tag_running_image gmed-crm-backend-1 "gmed-dev-rollback-backend:$STAMP"
