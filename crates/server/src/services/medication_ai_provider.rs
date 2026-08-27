@@ -441,7 +441,6 @@ fn output_schema() -> Value {
                 "citation_refs": {
                     "type": "array",
                     "maxItems": 8,
-                    "uniqueItems": true,
                     "items": {"type": "string", "maxLength": 200}
                 }
             }
@@ -627,7 +626,7 @@ fn valid_language_pair(text_ru: &str, text_de: &str) -> bool {
     valid_text(text_ru)
         && valid_text(text_de)
         && ru_cyrillic >= 3
-        && ru_cyrillic >= ru_latin
+        && ru_cyrillic.saturating_mul(3) >= ru_latin
         && de_latin >= 3
         && de_cyrillic == 0
 }
@@ -652,9 +651,11 @@ fn valid_text(value: &str) -> bool {
         return false;
     }
     let lower = normalized_safety_text(trimmed);
+    let compact = lower.split_whitespace().collect::<String>();
     if contains_dose_amount(&lower)
         || contains_dosing_schedule(&lower)
         || contains_forbidden_clinical_content(&lower)
+        || contains_forbidden_clinical_content(&compact)
     {
         return false;
     }
@@ -741,11 +742,13 @@ fn is_limitation_text(value: &str, language: LimitationLanguage) -> bool {
             "отсутств",
             "огранич",
             "не позволяет",
+            "не хватает",
             "невозможно",
             "нельзя сделать вывод",
             "не подтвержден",
             "не подтверждена",
             "требуется провер",
+            "требуется вериф",
             "нужна провер",
         ],
         LimitationLanguage::German => &[
@@ -753,6 +756,7 @@ fn is_limitation_text(value: &str, language: LimitationLanguage) -> bool {
             "unvollstandig",
             "unbekannt",
             "nicht angegeben",
+            "nicht ausreichend",
             "fehl",
             "begrenz",
             "lasst keine",
@@ -760,7 +764,9 @@ fn is_limitation_text(value: &str, language: LimitationLanguage) -> bool {
             "keine schlussfolger",
             "nicht bestatigt",
             "nicht abschliess",
+            "keine abschliess",
             "pruf",
+            "validierung erforderlich",
             "muss gepruft",
         ],
     };
@@ -988,20 +994,31 @@ fn contains_dose_amount(value: &str) -> bool {
         "одно",
         "два",
         "две",
+        "двух",
         "три",
+        "трех",
         "четыре",
+        "четырех",
         "пять",
+        "пяти",
         "шесть",
+        "шести",
         "семь",
+        "семи",
         "восемь",
+        "восьми",
         "девять",
+        "девяти",
         "десять",
+        "десяти",
         "половина",
+        "полтора",
         "полтаблетки",
         "null",
         "ein",
         "eine",
         "einen",
+        "einer",
         "zwei",
         "drei",
         "vier",
@@ -1013,6 +1030,7 @@ fn contains_dose_amount(value: &str) -> bool {
         "zehn",
         "halb",
         "halbe",
+        "anderthalb",
         "zero",
         "one",
         "two",
@@ -1032,26 +1050,20 @@ fn contains_dose_amount(value: &str) -> bool {
         SHORT_UNITS.contains(&token) || UNIT_STEMS.iter().any(|stem| token.starts_with(stem))
     };
     let has_numeric_token = tokens.iter().any(|token| {
-        token.chars().any(|character| character.is_ascii_digit())
-            || NUMBER_WORDS.contains(token)
+        token.chars().any(|character| character.is_ascii_digit()) || NUMBER_WORDS.contains(token)
     });
     let has_unit = tokens.iter().any(|token| is_unit(token));
     let has_dosage_form = tokens
         .iter()
         .any(|token| DOSAGE_FORM_STEMS.iter().any(|stem| token.starts_with(stem)));
     let has_attached_amount = tokens.iter().any(|token| {
-        SHORT_UNITS
-            .iter()
-            .chain(UNIT_STEMS.iter())
-            .any(|unit| {
-                token.strip_suffix(unit).is_some_and(|number| {
-                    !number.is_empty()
-                        && number.chars().any(|character| character.is_ascii_digit())
-                        && number
-                            .chars()
-                            .all(|character| character.is_ascii_digit())
-                })
+        SHORT_UNITS.iter().chain(UNIT_STEMS.iter()).any(|unit| {
+            token.strip_suffix(unit).is_some_and(|number| {
+                !number.is_empty()
+                    && number.chars().any(|character| character.is_ascii_digit())
+                    && number.chars().all(|character| character.is_ascii_digit())
             })
+        })
     });
 
     has_attached_amount || (has_numeric_token && (has_unit || has_dosage_form))
@@ -1360,6 +1372,7 @@ mod tests {
             "Дозу можно удвоить.",
             "Принимать по две таблетки каждое утро.",
             "Достаточно пяти миллиграмм после еды.",
+            "Нужно прекра-тить лекарство.",
             "Следует прекра\u{200b}тить прием.",
             // German passive voice, modal verbs, diagnosis, substitution and word doses.
             "Der Patient hat Diabetes.",
@@ -1399,7 +1412,10 @@ mod tests {
         ];
 
         for output in safe_outputs {
-            assert!(valid_text(output), "neutral evidence was rejected: {output}");
+            assert!(
+                valid_text(output),
+                "neutral evidence was rejected: {output}"
+            );
         }
     }
 

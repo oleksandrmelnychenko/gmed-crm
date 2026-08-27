@@ -81,10 +81,11 @@ BEGIN
     LIMIT 1;
 
     IF NEW.from_status IS NULL THEN
-        IF has_previous_event THEN
+        IF COALESCE(has_previous_event, FALSE) THEN
             RAISE EXCEPTION 'initial medication AI event already exists';
         END IF;
-    ELSIF NOT has_previous_event OR previous_status IS DISTINCT FROM NEW.from_status THEN
+    ELSIF NOT COALESCE(has_previous_event, FALSE)
+       OR previous_status IS DISTINCT FROM NEW.from_status THEN
         RAISE EXCEPTION
             'medication AI event source status % does not follow previous status %',
             NEW.from_status, previous_status;
