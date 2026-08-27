@@ -979,8 +979,7 @@ export function createSingleFlightRunner() {
       } catch (error) {
         promise = Promise.reject(error);
       }
-      let trackedPromise!: Promise<void>;
-      trackedPromise = promise.finally(() => {
+      const trackedPromise = promise.finally(() => {
         if (inFlight?.promise === trackedPromise) inFlight = null;
       });
       inFlight = { key, promise: trackedPromise, controller };

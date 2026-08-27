@@ -120,10 +120,7 @@ fn require_patient_export_section<T>(
     section: &'static str,
 ) -> Result<T, axum::response::Response> {
     result.map_err(|_| {
-        tracing::error!(
-            export_section = section,
-            "patient export section failed"
-        );
+        tracing::error!(export_section = section, "patient export section failed");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to build complete patient export",
@@ -210,57 +207,70 @@ pub(crate) async fn build_patient_export_payload(
     .fetch_all(&state.db)
     .await, "consents")?;
 
-    let documents = require_patient_export_section(sqlx::query(
-        r#"SELECT id, order_id, appointment_id, auto_name, original_filename, art, category,
+    let documents = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT id, order_id, appointment_id, auto_name, original_filename, art, category,
                   status, visibility, is_medical, mime_type, file_size, klinik, ursprung,
                   notes, version_number, created_at, updated_at
            FROM documents
            WHERE patient_id = $1
            ORDER BY created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "documents")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "documents",
+    )?;
 
-    let invoices = require_patient_export_section(sqlx::query(
-        r#"SELECT id, quote_id, order_id, invoice_number, invoice_type, status, issued_at,
+    let invoices = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT id, quote_id, order_id, invoice_number, invoice_type, status, issued_at,
                   due_date, total_net, total_vat, total_gross, paid_amount, paid_at,
                   line_items, notes, created_at, updated_at
            FROM invoices
            WHERE patient_id = $1
            ORDER BY issued_at DESC, created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "invoices")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "invoices",
+    )?;
 
-    let invoice_dunning_events = require_patient_export_section(sqlx::query(
-        r#"SELECT ide.id, ide.invoice_id, ide.level, ide.note, ide.due_date_snapshot,
+    let invoice_dunning_events = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT ide.id, ide.invoice_id, ide.level, ide.note, ide.due_date_snapshot,
                   ide.balance_due, ide.sent_at, ide.created_at
            FROM invoice_dunning_events ide
            JOIN invoices i ON i.id = ide.invoice_id
            WHERE i.patient_id = $1
            ORDER BY ide.sent_at DESC, ide.created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "invoice_dunning_events")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "invoice_dunning_events",
+    )?;
 
-    let quotes = require_patient_export_section(sqlx::query(
-        r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.valid_until,
+    let quotes = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.valid_until,
                   q.total_net, q.total_vat, q.total_gross, q.paid_amount, q.paid_at,
                   q.line_items, q.notes, q.created_at, q.updated_at
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE o.patient_id = $1
            ORDER BY q.created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "quotes")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "quotes",
+    )?;
 
-    let tasks = require_patient_export_section(sqlx::query(
-        r#"SELECT DISTINCT t.id, t.title, t.description, t.assigned_to, t.assigned_by,
+    let tasks = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT DISTINCT t.id, t.title, t.description, t.assigned_to, t.assigned_by,
                   t.patient_id, t.order_id, t.appointment_id, t.due_date, t.priority,
                   t.status, t.completed_at, t.created_at, t.updated_at,
                   assignee.name AS assigned_to_name,
@@ -272,13 +282,16 @@ pub(crate) async fn build_patient_export_payload(
               OR t.order_id IN (SELECT id FROM orders WHERE patient_id = $1)
               OR t.appointment_id IN (SELECT id FROM appointments WHERE patient_id = $1)
            ORDER BY t.created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "tasks")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "tasks",
+    )?;
 
-    let reminders = require_patient_export_section(sqlx::query(
-        r#"SELECT r.id, r.appointment_id, r.user_id, r.remind_at, r.title, r.description,
+    let reminders = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT r.id, r.appointment_id, r.user_id, r.remind_at, r.title, r.description,
                   r.is_completed, r.completed_at, r.created_at,
                   u.name AS user_name,
                   a.title AS appointment_title,
@@ -288,21 +301,26 @@ pub(crate) async fn build_patient_export_payload(
            LEFT JOIN users u ON u.id = r.user_id
            WHERE a.patient_id = $1
            ORDER BY r.remind_at DESC, r.created_at DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "reminders")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "reminders",
+    )?;
 
-    let patient_user_rows = require_patient_export_section(sqlx::query(
-        r#"SELECT DISTINCT u.id
+    let patient_user_rows = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT DISTINCT u.id
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $1
              AND u.role = 'patient'"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "patient_users")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "patient_users",
+    )?;
     let patient_user_ids = require_patient_export_section(
         patient_user_rows
             .into_iter()
@@ -314,8 +332,9 @@ pub(crate) async fn build_patient_export_payload(
     let messages = if patient_user_ids.is_empty() {
         Vec::<PgRow>::new()
     } else {
-        require_patient_export_section(sqlx::query(
-            r#"SELECT dm.id, dm.from_user, dm.to_user, dm.message, dm.message_ciphertext,
+        require_patient_export_section(
+            sqlx::query(
+                r#"SELECT dm.id, dm.from_user, dm.to_user, dm.message, dm.message_ciphertext,
                       dm.message_nonce, dm.encryption_key_id, dm.is_read, dm.read_at, dm.created_at,
                       dm.attachment_filename, dm.attachment_mime, dm.attachment_size,
                       dm.redacted_at, dm.redaction_reason,
@@ -326,14 +345,17 @@ pub(crate) async fn build_patient_export_payload(
                LEFT JOIN users tu ON tu.id = dm.to_user
                WHERE dm.from_user = ANY($1::uuid[]) OR dm.to_user = ANY($1::uuid[])
                ORDER BY dm.created_at DESC"#,
-        )
-        .bind(&patient_user_ids)
-        .fetch_all(&state.db)
-        .await, "messages")?
+            )
+            .bind(&patient_user_ids)
+            .fetch_all(&state.db)
+            .await,
+            "messages",
+        )?
     };
 
-    let medication_evidence_reviews = require_patient_export_section(sqlx::query(
-        r#"SELECT request.id, request.status, request.requested_by,
+    let medication_evidence_reviews = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT request.id, request.status, request.requested_by,
                   request.requested_at, request.completed_at,
                   bundle.id AS bundle_id, bundle.bundle_version,
                   bundle.intelligence_fingerprint, bundle.evidence_snapshot,
@@ -347,13 +369,16 @@ pub(crate) async fn build_patient_export_payload(
            LEFT JOIN medication_evidence_review_drafts draft ON draft.request_id = request.id
            WHERE request.patient_id = $1
            ORDER BY request.requested_at DESC, request.id DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "medication_evidence_reviews")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "medication_evidence_reviews",
+    )?;
 
-    let medication_ai_analyses = require_patient_export_section(sqlx::query(
-        r#"SELECT id, review_id, bundle_id, status, provider_kind, provider_model,
+    let medication_ai_analyses = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT id, review_id, bundle_id, status, provider_kind, provider_model,
                   input_schema_version, prompt_version, input_fingerprint,
                   requested_by, requested_at, started_at, completed_at,
                   output_json, output_fingerprint, provider_response_id,
@@ -361,22 +386,27 @@ pub(crate) async fn build_patient_export_payload(
            FROM medication_ai_analyses
            WHERE patient_id = $1
            ORDER BY requested_at DESC, id DESC"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "medication_ai_analyses")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "medication_ai_analyses",
+    )?;
 
-    let medication_ai_analysis_events = require_patient_export_section(sqlx::query(
-        r#"SELECT event.id, event.analysis_id, event.from_status, event.to_status,
+    let medication_ai_analysis_events = require_patient_export_section(
+        sqlx::query(
+            r#"SELECT event.id, event.analysis_id, event.from_status, event.to_status,
                   event.reason_code, event.actor_id, event.created_at
            FROM medication_ai_analysis_events event
            JOIN medication_ai_analyses analysis ON analysis.id = event.analysis_id
            WHERE analysis.patient_id = $1
            ORDER BY event.created_at, event.id"#,
-    )
-    .bind(patient_id)
-    .fetch_all(&state.db)
-    .await, "medication_ai_analysis_events")?;
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await,
+        "medication_ai_analysis_events",
+    )?;
 
     let medication_evidence_reviews = require_patient_export_section(
         medication_evidence_reviews

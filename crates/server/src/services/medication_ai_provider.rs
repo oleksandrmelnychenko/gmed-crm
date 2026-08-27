@@ -9,9 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::MedicationAiConfig;
 use crate::services::gba_ais::GBA_AIS_SOURCE_ID;
-use crate::services::medication_evidence_reviews::{
-    DraftItem, EvidenceCitation, EvidenceSnapshot,
-};
+use crate::services::medication_evidence_reviews::{DraftItem, EvidenceCitation, EvidenceSnapshot};
 
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
 pub const MEDICATION_AI_PROMPT_VERSION: &str = "medication-evidence-selection-v1";
@@ -668,14 +666,13 @@ fn claim_catalog(
         return Err(MedicationAiProviderError::InvalidOutput);
     }
     let aliases = citation_aliases(snapshot)?;
-    let cited_candidate = |
-        claim_id: String,
-        section: DraftSection,
-        text_ru: String,
-        text_de: String,
-        local_citation_ref: &str,
-        citation_binding: CitationBinding<'_>,
-    | -> Result<ClaimCandidate, MedicationAiProviderError> {
+    let cited_candidate = |claim_id: String,
+                           section: DraftSection,
+                           text_ru: String,
+                           text_de: String,
+                           local_citation_ref: &str,
+                           citation_binding: CitationBinding<'_>|
+     -> Result<ClaimCandidate, MedicationAiProviderError> {
         let citation = snapshot
             .citations
             .iter()
@@ -758,14 +755,8 @@ fn claim_catalog(
         catalog.push(cited_candidate(
             format!("claim.missing-data.question.{:04}", index + 1),
             DraftSection::VerificationQuestion,
-            format!(
-                "Проверено ли отсутствие данных №{}?",
-                index + 1
-            ),
-            format!(
-                "Wurde die Datenlücke Nr. {} geprüft?",
-                index + 1
-            ),
+            format!("Проверено ли отсутствие данных №{}?", index + 1),
+            format!("Wurde die Datenlücke Nr. {} geprüft?", index + 1),
             &entry.citation_ref,
             CitationBinding::MissingData {
                 code: &entry.code,
@@ -781,8 +772,8 @@ fn claim_catalog(
         {
             return Err(MedicationAiProviderError::InvalidOutput);
         }
-        let (health_ru, health_de) = source_health_labels(&source.health)
-            .ok_or(MedicationAiProviderError::InvalidOutput)?;
+        let (health_ru, health_de) =
+            source_health_labels(&source.health).ok_or(MedicationAiProviderError::InvalidOutput)?;
         catalog.push(cited_candidate(
             format!("claim.source.summary.{:04}", index + 1),
             DraftSection::EvidenceSummary,
@@ -837,10 +828,10 @@ fn claim_catalog(
         ClaimCandidate {
             claim_id: "claim.limitation.frozen-evidence-only.v1".to_string(),
             section: DraftSection::Limitation,
-            text_ru: "Сводка ограничена фактами зафиксированного набора доказательств."
-                .to_string(),
-            text_de: "Die Übersicht ist auf die Fakten des festgeschriebenen Evidenzstands begrenzt."
-                .to_string(),
+            text_ru: "Сводка ограничена фактами зафиксированного набора доказательств.".to_string(),
+            text_de:
+                "Die Übersicht ist auf die Fakten des festgeschriebenen Evidenzstands begrenzt."
+                    .to_string(),
             citation_aliases: Vec::new(),
             local_citation_refs: Vec::new(),
         },
@@ -1791,7 +1782,10 @@ mod tests {
         };
 
         let missing = configured(None);
-        assert_eq!(missing.capability().reason_code, "governance_review_missing");
+        assert_eq!(
+            missing.capability().reason_code,
+            "governance_review_missing"
+        );
         assert!(!missing.capability().external_calls_enabled);
         assert_eq!(missing.governance_review_id(), None);
 
@@ -1835,9 +1829,11 @@ mod tests {
         let capability = blocked.capability();
         assert_eq!(capability.reason_code, "model_invalid");
         assert_eq!(capability.model, None);
-        assert!(!serde_json::to_string(&capability)
-            .unwrap()
-            .contains("forged-provider-metadata"));
+        assert!(
+            !serde_json::to_string(&capability)
+                .unwrap()
+                .contains("forged-provider-metadata")
+        );
     }
 
     #[test]
@@ -1949,23 +1945,23 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]
-                ["properties"]["claim_id"]["enum"],
+            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]["properties"]
+                ["claim_id"]["enum"],
             json!(["claim.source.summary.0001"])
         );
         assert_eq!(
-            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]
-                ["properties"]["citation_refs"]["minItems"],
+            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]["properties"]
+                ["citation_refs"]["minItems"],
             1
         );
         assert_eq!(
-            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]
-                ["properties"]["citation_refs"]["maxItems"],
+            body["text"]["format"]["schema"]["properties"]["evidence_summary"]["items"]["properties"]
+                ["citation_refs"]["maxItems"],
             1
         );
         assert_eq!(
-            body["text"]["format"]["schema"]["properties"]["limitations"]["items"]
-                ["properties"]["citation_refs"]["maxItems"],
+            body["text"]["format"]["schema"]["properties"]["limitations"]["items"]["properties"]["citation_refs"]
+                ["maxItems"],
             0
         );
     }
@@ -2010,10 +2006,8 @@ mod tests {
         assert!(claim_catalog(&too_many_candidates).is_err());
 
         let mut too_many_enum_values = snapshot_with_source();
-        too_many_enum_values.sources = vec![
-            too_many_enum_values.sources[0].clone();
-            MAX_SCHEMA_ENUM_VALUES_PER_PROPERTY + 1
-        ];
+        too_many_enum_values.sources =
+            vec![too_many_enum_values.sources[0].clone(); MAX_SCHEMA_ENUM_VALUES_PER_PROPERTY + 1];
         assert!(claim_catalog(&too_many_enum_values).is_err());
 
         let mut wrong_kind = snapshot_with_source();
@@ -2050,15 +2044,15 @@ mod tests {
             citation_ref: missing_data_citation_id(code, reason_ru, reason_de).unwrap(),
         })
         .collect();
-        snapshot.citations.extend(snapshot.missing_data.iter().map(|entry| {
-            EvidenceCitation {
+        snapshot
+            .citations
+            .extend(snapshot.missing_data.iter().map(|entry| EvidenceCitation {
                 id: entry.citation_ref.clone(),
                 kind: "missing_data".to_string(),
                 source_id: None,
                 source_url: None,
                 evidence_refs: Vec::new(),
-            }
-        }));
+            }));
         assert!(claim_catalog(&snapshot).is_ok());
 
         let first_ref = snapshot.missing_data[0].citation_ref.clone();
@@ -2143,7 +2137,11 @@ mod tests {
         };
         let source_draft = render_selection(&source_snapshot, &source_selection).unwrap();
         assert!(!source_draft.evidence_summary[0].text_de.contains("Alice"));
-        assert!(!source_draft.evidence_summary[0].text_de.contains("medication"));
+        assert!(
+            !source_draft.evidence_summary[0]
+                .text_de
+                .contains("medication")
+        );
 
         let mut benefit_snapshot = snapshot();
         benefit_snapshot.citations.push(EvidenceCitation {
@@ -2153,20 +2151,22 @@ mod tests {
             source_url: Some("https://www.g-ba.de/".to_string()),
             evidence_refs: vec!["official:1".to_string()],
         });
-        benefit_snapshot.benefit_assessments.push(EvidenceBenefitAssessment {
-            evidence_ref: "official:1".to_string(),
-            medication_id: uuid::Uuid::new_v4(),
-            decision_id: "321".to_string(),
-            dossier_reference: "D-1".to_string(),
-            official_url: "https://www.g-ba.de/".to_string(),
-            decision_date: "2026-08-27".to_string(),
-            indication_short: malicious.to_string(),
-            patient_group: malicious.to_string(),
-            benefit_extent: malicious.to_string(),
-            benefit_probability: Some(malicious.to_string()),
-            assessed_substances: vec![malicious.to_string()],
-            citation_ref: "benefit_assessment:official:1".to_string(),
-        });
+        benefit_snapshot
+            .benefit_assessments
+            .push(EvidenceBenefitAssessment {
+                evidence_ref: "official:1".to_string(),
+                medication_id: uuid::Uuid::new_v4(),
+                decision_id: "321".to_string(),
+                dossier_reference: "D-1".to_string(),
+                official_url: "https://www.g-ba.de/".to_string(),
+                decision_date: "2026-08-27".to_string(),
+                indication_short: malicious.to_string(),
+                patient_group: malicious.to_string(),
+                benefit_extent: malicious.to_string(),
+                benefit_probability: Some(malicious.to_string()),
+                assessed_substances: vec![malicious.to_string()],
+                citation_ref: "benefit_assessment:official:1".to_string(),
+            });
         let body = request_body("gpt-test", &benefit_snapshot).unwrap();
         assert!(!body.to_string().contains("alice@example.invalid"));
         let benefit_selection = MedicationAiSelection {
@@ -2182,9 +2182,11 @@ mod tests {
         };
         let benefit_draft = render_selection(&benefit_snapshot, &benefit_selection).unwrap();
         assert!(!benefit_draft.evidence_summary[0].text_de.contains("Alice"));
-        assert!(!benefit_draft.evidence_summary[0]
-            .text_de
-            .contains("medication"));
+        assert!(
+            !benefit_draft.evidence_summary[0]
+                .text_de
+                .contains("medication")
+        );
 
         benefit_snapshot.benefit_assessments[0].decision_date = "2026-02-30".to_string();
         assert!(claim_catalog(&benefit_snapshot).is_err());
@@ -2194,12 +2196,9 @@ mod tests {
 
     #[test]
     fn input_fingerprint_covers_only_the_minimized_outbound_contract() {
-        let first_missing_citation_ref = missing_data_citation_id(
-            "identity_unresolved",
-            "Локальная причина",
-            "Lokaler Grund",
-        )
-        .unwrap();
+        let first_missing_citation_ref =
+            missing_data_citation_id("identity_unresolved", "Локальная причина", "Lokaler Grund")
+                .unwrap();
         let mut first = snapshot();
         first.citations[0].id = "source:private-source-id".to_string();
         first.citations[0].source_id = Some("private-source-id".to_string());
@@ -2687,10 +2686,7 @@ mod tests {
             }]
         });
         assert!(matches!(
-            parse_response(
-                &snapshot(),
-                &serde_json::to_vec(&mixed_refusal).unwrap()
-            ),
+            parse_response(&snapshot(), &serde_json::to_vec(&mixed_refusal).unwrap()),
             Err(MedicationAiProviderError::Incomplete)
         ));
 

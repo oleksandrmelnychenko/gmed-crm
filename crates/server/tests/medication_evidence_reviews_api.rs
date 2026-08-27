@@ -633,13 +633,12 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     .await
     .unwrap();
     assert_eq!(primary_idempotency_analysis, analysis_id);
-    let stored_governance_review_id: String = sqlx::query_scalar(
-        "SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1",
-    )
-    .bind(analysis_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let stored_governance_review_id: String =
+        sqlx::query_scalar("SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1")
+            .bind(analysis_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(stored_governance_review_id, TEST_GOVERNANCE_REVIEW_ID);
 
     let provenance_rewrite = sqlx::query(
@@ -853,10 +852,8 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
 
     let renewed_governance_review_id = "governance-review-test-v2";
     let renewed_idempotency_key = format!("ai-job-renewed-{patient_id}");
-    let renewed_ai_app = ai_enabled_app_with_governance(
-        ctx.pool.clone(),
-        renewed_governance_review_id,
-    );
+    let renewed_ai_app =
+        ai_enabled_app_with_governance(ctx.pool.clone(), renewed_governance_review_id);
     let (renewed_status, renewed) = json_request(
         &renewed_ai_app,
         Method::POST,
@@ -868,13 +865,12 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     assert_eq!(renewed_status, StatusCode::ACCEPTED, "{renewed}");
     assert_ne!(renewed["id"], created["id"]);
     let renewed_analysis_id = Uuid::parse_str(renewed["id"].as_str().unwrap()).unwrap();
-    let renewed_stored_review: String = sqlx::query_scalar(
-        "SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1",
-    )
-    .bind(renewed_analysis_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let renewed_stored_review: String =
+        sqlx::query_scalar("SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1")
+            .bind(renewed_analysis_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert_eq!(renewed_stored_review, renewed_governance_review_id);
 
     let reverted_idempotency_key = format!("ai-job-reverted-{patient_id}");
@@ -983,7 +979,11 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
         Some(json!({"idempotency_key": cross_actor_idempotency_key.clone()})),
     )
     .await;
-    assert_eq!(cross_actor_replay_status, StatusCode::OK, "{cross_actor_replay}");
+    assert_eq!(
+        cross_actor_replay_status,
+        StatusCode::OK,
+        "{cross_actor_replay}"
+    );
     assert_eq!(cross_actor_replay["id"], created["id"]);
 
     let cross_review_path = format!(
@@ -1016,7 +1016,11 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
         Some(json!({"idempotency_key": reverted_idempotency_key.clone()})),
     )
     .await;
-    assert_eq!(cross_patient_status, StatusCode::CONFLICT, "{cross_patient}");
+    assert_eq!(
+        cross_patient_status,
+        StatusCode::CONFLICT,
+        "{cross_patient}"
+    );
     assert!(
         !cross_patient.to_string().contains(&analysis_id.to_string()),
         "cross-patient conflicts must not disclose the bound analysis ID"

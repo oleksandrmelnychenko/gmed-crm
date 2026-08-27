@@ -212,14 +212,8 @@ pub async fn create_analysis(
         .await?;
     }
     tx.commit().await?;
-    let view = load_analysis_by_id(
-        &state.db,
-        patient_id,
-        review_id,
-        analysis_id,
-        capability,
-    )
-    .await?;
+    let view =
+        load_analysis_by_id(&state.db, patient_id, review_id, analysis_id, capability).await?;
     Ok(CreateMedicationAiAnalysisResult { view, created })
 }
 
@@ -330,14 +324,7 @@ pub async fn retry_analysis(
     )
     .await?;
     tx.commit().await?;
-    load_analysis_by_id(
-        &state.db,
-        patient_id,
-        review_id,
-        analysis_id,
-        capability,
-    )
-    .await
+    load_analysis_by_id(&state.db, patient_id, review_id, analysis_id, capability).await
 }
 
 fn view_from_row(

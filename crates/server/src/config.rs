@@ -112,11 +112,10 @@ impl Config {
             env_flag("GMED_MEDICATION_AI_ENABLED");
         let (patient_data_transfer_approved, _) =
             env_flag("GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED");
-        let governance_review_id =
-            std::env::var("GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID")
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty());
+        let governance_review_id = std::env::var("GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let openai_api_key = std::env::var("GMED_OPENAI_API_KEY")
             .ok()
             .map(|value| value.trim().to_string())
