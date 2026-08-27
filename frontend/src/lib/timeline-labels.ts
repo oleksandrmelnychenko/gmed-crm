@@ -162,6 +162,11 @@ export function localizeTimelineTitle(
 ): string {
   if (!value) return "";
 
+  if (/^workflow_item_[a-z0-9_]+$/.test(value)) {
+    const localized = l(value);
+    return localized === value ? humanizeFallback(value.replace(/^workflow_item_/, "")) : localized;
+  }
+
   const workflowTitle = value
     .replace(/^(?:Order|Patient) checklist:\s*/i, "")
     .trim();

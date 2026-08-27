@@ -31,7 +31,7 @@ export function StaffDashboardPageNew() {
 function ExecutiveStaffDashboard() {
   const { user } = useAuth();
   const { t } = useLang();
-  const tr = t as unknown as Record<string, string>;
+  const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
 
   const {

@@ -265,6 +265,7 @@ const TASK_PERMISSION_ERROR_PREFIX =
   "Only the task creator or a higher role can";
 const TASK_STATUS_PERMISSION_ERROR =
   "Only the task assignee, creator, or a higher role can change task status";
+const TASK_NOT_FOUND_ERROR = "Operational item not found";
 
 export function conciergeTaskErrorMessage(
   error: unknown,
@@ -282,6 +283,12 @@ export function conciergeTaskErrorMessage(
     return lang === "ru"
       ? "Статус задачи может менять исполнитель, автор или сотрудник с более высокой ролью."
       : "Den Aufgabenstatus dürfen der Zuständige, der Ersteller oder eine Person mit einer höheren Rolle ändern.";
+  }
+
+  if (message === TASK_NOT_FOUND_ERROR) {
+    return lang === "ru"
+      ? "Задача не найдена. Возможно, она была удалена или относится к старому рабочему процессу."
+      : "Die Aufgabe wurde nicht gefunden. Sie wurde möglicherweise gelöscht oder gehört zu einem früheren Arbeitsablauf.";
   }
 
   if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {

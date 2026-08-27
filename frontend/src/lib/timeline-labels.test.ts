@@ -66,4 +66,10 @@ describe("timeline labels", () => {
       "Call the custom provider",
     );
   });
+
+  it("localizes workflow keys returned as task titles", () => {
+    expect(localizeTimelineTitle("workflow_item_scope_review", l)).toBe(
+      "Проверить объём заказа",
+    );
+  });
 });

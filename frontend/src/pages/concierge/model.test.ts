@@ -89,6 +89,9 @@ describe("filterConciergeTaskAssignees", () => {
     expect(
       conciergeTaskErrorMessage(new Error("Specific error"), "ru", "fallback"),
     ).toBe("Specific error");
+    expect(
+      conciergeTaskErrorMessage(new Error("Operational item not found"), "ru", "fallback"),
+    ).toBe("Задача не найдена. Возможно, она была удалена или относится к старому рабочему процессу.");
     expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
   });
 

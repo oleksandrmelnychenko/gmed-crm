@@ -229,7 +229,7 @@ function priorityRank(priority: string) {
 }
 
 function isTaskOpen(task: TaskItem) {
-  return task.status !== "done" && task.status !== "cancelled";
+  return task.status !== "done" && task.status !== "completed" && task.status !== "cancelled";
 }
 
 function weeklyCashData(finance: ExecutiveFinanceSnapshot | null, locale: string): CashDatum[] {
@@ -364,7 +364,7 @@ export function ExecutiveBusinessMap({
   const { lang, t } = useLang();
   const copy = lang === "de" ? COPY.de : COPY.ru;
   const l = (key: string) =>
-    (t as unknown as Record<string, string>)[key] ?? key;
+    t.uiText[key] ?? (t as unknown as Record<string, string>)[key] ?? key;
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const money = useMemo(
     () => new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),

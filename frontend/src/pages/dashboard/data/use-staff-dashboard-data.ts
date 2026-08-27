@@ -6,6 +6,7 @@ import {
   fetchCompanyFinancialAccounts,
   fetchCompanyFinancialPosition,
 } from "@/pages/company-finance/data";
+import type { ConciergeTask } from "@/pages/concierge/model";
 
 import type {
   ClinicalPayload,
@@ -106,6 +107,11 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
   "reminder.completed",
   "task.created",
   "task.status_changed",
+  "concierge_operational_item.created",
+  "concierge_operational_item.updated",
+  "concierge_operational_item.deleted",
+  "concierge_operational_item.archived",
+  "concierge_operational_item.restored",
   "consent.granted",
   "consent.revoked",
   "user.created",
@@ -118,9 +124,21 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
 function clearStaffDashboardCache() {
   clearApiCache("/stats");
   clearApiCache("/patients");
-  clearApiCache("/tasks");
+  clearApiCache("/concierge-operational-items");
   clearApiCache("/company-financial-position");
   clearApiCache("/company-financial-accounts");
+}
+
+export function dashboardTaskFromOperationalItem(task: ConciergeTask): TaskItem {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.note,
+    patient_id: task.patient_id,
+    due_date: task.kind === "event" ? task.starts_at : task.due_at,
+    priority: task.priority,
+    status: task.status,
+  };
 }
 
 function localIsoDate(date: Date): string {
@@ -294,9 +312,11 @@ export function useStaffDashboardData(period: Period) {
       }).catch(
         () => [] as UpcomingAppointment[],
       ),
-      apiFetch<TaskItem[]>("/tasks?mine_only=true", {
+      apiFetch<ConciergeTask[]>("/concierge-operational-items?archive=active", {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
-      }).catch(() => [] as TaskItem[]),
+      })
+        .then((rows) => rows.map(dashboardTaskFromOperationalItem))
+        .catch(() => [] as TaskItem[]),
       apiFetch<PatientSummary[]>("/patients", {
         cacheTtlMs: DASHBOARD_CACHE_TTL_MS,
       }).catch(() => [] as PatientSummary[]),
@@ -372,7 +392,7 @@ export function useStaffDashboardData(period: Period) {
   }, [patients]);
 
   const openTasksCount = useMemo(
-    () => tasks.filter((task) => task.status !== "done" && task.status !== "cancelled").length,
+    () => tasks.filter((task) => task.status !== "done" && task.status !== "completed" && task.status !== "cancelled").length,
     [tasks],
   );
   const setSectionsLoading = (value: SetStateAction<boolean>) => {

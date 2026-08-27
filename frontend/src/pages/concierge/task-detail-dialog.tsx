@@ -252,11 +252,11 @@ export function ConciergeTaskDetailDialog({
       const payload = await apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${taskId}`, { forceFresh: true });
       setDetail(payload);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : labels.loading);
+      setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
     } finally {
       setLoading(false);
     }
-  }, [labels.loading, taskId]);
+  }, [labels.loading, lang, taskId]);
 
   const refreshFromRealtime = useCallback((event: { entity_id: string }) => {
     if (open && taskId && event.entity_id === taskId) void load();
