@@ -1,11 +1,14 @@
 FROM python:3.12-slim
 
+ARG DEBIAN_SECURITY_REFRESH=local
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata \
     FLAGS_use_mkldnn=0
 
-RUN apt-get update \
+RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
+    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
        tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
@@ -13,6 +16,7 @@ RUN apt-get update \
        fonts-dejavu-core \
        libgl1 libglib2.0-0 libgomp1 \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' util-linux)" ge '2.41.5-0+deb13u1' \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' openssl)" ge '3.5.7-1~deb13u2' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

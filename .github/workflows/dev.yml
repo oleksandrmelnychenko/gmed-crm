@@ -105,6 +105,8 @@ jobs:
             VITE_RELEASE_CHANNEL=development
             VITE_BUILD_NUMBER=dev-sha-${{ steps.source.outputs.short_sha }}
             VITE_BUILD_TIMESTAMP=${{ steps.source.outputs.build_timestamp }}
+            ALPINE_SECURITY_REFRESH=${{ steps.source.outputs.build_timestamp }}
+            DEBIAN_SECURITY_REFRESH=${{ steps.source.outputs.build_timestamp }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=dev-${{ matrix.name }}
