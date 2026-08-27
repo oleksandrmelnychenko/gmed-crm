@@ -13,7 +13,6 @@ import {
   MapPin,
   Navigation,
   Phone,
-  Route,
   Star,
 } from "lucide-react";
 
@@ -273,7 +272,7 @@ export function ConciergeTaskQueue({
     <aside className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.tasks}>
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <ListTodo className="size-4 text-primary" />
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h2 className="text-sm font-semibold">{labels.tasks}</h2>
         </div>
         <div className="flex items-center gap-1.5">
@@ -572,11 +571,11 @@ export function ConciergeMapView({
 
   return (
     <div className="space-y-4">
-      <section className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.routePlanner}>
-        <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-end sm:justify-between">
+      <section className="overflow-hidden rounded-lg border border-border/70 bg-card" aria-label={labels.routePlanner}>
+        <div className="flex flex-col gap-3 border-b border-border/70 bg-muted/20 px-4 py-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Route className="size-4 text-primary" />
+              <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
               <h2 className="text-sm font-semibold">{labels.routePlanner}</h2>
             </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">{labels.routePlannerSubtitle}</p>
@@ -696,9 +695,9 @@ export function ConciergeMapView({
         )}
       </section>
 
-      <section className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.destinations}>
-        <div className="flex items-center gap-2 border-b border-border/70 px-4 py-3">
-          <MapPin className="size-4 text-primary" />
+      <section className="overflow-hidden rounded-lg border border-border/70 bg-card" aria-label={labels.destinations}>
+        <div className="flex items-center gap-2 border-b border-border/70 bg-muted/20 px-4 py-3">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h2 className="text-sm font-semibold">{labels.destinations}</h2>
         </div>
         {previewAddress ? (
@@ -740,10 +739,13 @@ export function ConciergeMapView({
         )}
       </section>
 
-      <section className="rounded-lg border border-border/70 bg-card shadow-sm" aria-label={labels.partners}>
-        <div className="border-b border-border/70 px-4 py-3">
-          <h2 className="text-sm font-semibold">{labels.partners}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{labels.partnerSubtitle}</p>
+      <section className="overflow-hidden rounded-lg border border-border/70 bg-card" aria-label={labels.partners}>
+        <div className="border-b border-border/70 bg-muted/20 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+            <h2 className="text-sm font-semibold">{labels.partners}</h2>
+          </div>
+          <p className="mt-1 pl-4 text-xs leading-5 text-muted-foreground">{labels.partnerSubtitle}</p>
         </div>
         <div className="space-y-2 border-b border-border/60 p-3">
           <Input className="h-8 rounded-md bg-field text-xs" value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} placeholder={labels.providerSearch} aria-label={labels.providerSearch} />
