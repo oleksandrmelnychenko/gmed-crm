@@ -182,6 +182,29 @@ mv "$STAGING_DIR" "$REPO_DIR"
 STAGING_DIR=""
 SWAPPED=1
 
+# Start the data and API tier first. The frontend declares a healthy-backend
+# dependency, and asking Compose to start everything at once can fail before
+# the backend's migrations and first health probe have had time to complete.
+compose "$REPO_DIR" up -d --no-build postgres clinical-document-parser backend
+
+backend_healthy=0
+for _attempt in $(seq 1 30); do
+  backend_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gmed-crm-backend-1)"
+  if [[ "$backend_status" == "healthy" ]]; then
+    backend_healthy=1
+    break
+  fi
+  if [[ "$backend_status" == "exited" || "$backend_status" == "dead" ]]; then
+    docker logs --tail 120 gmed-crm-backend-1 >&2 || true
+    break
+  fi
+  sleep 2
+done
+if [[ "$backend_healthy" -ne 1 ]]; then
+  echo "ERROR: DEV backend did not become healthy." >&2
+  exit 1
+fi
+
 compose "$REPO_DIR" up -d --no-build --remove-orphans
 
 healthy=0
