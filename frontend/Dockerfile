@@ -30,7 +30,10 @@ RUN npm run build
 
 FROM nginx:1.30-alpine AS runtime
 
-RUN apk upgrade --no-cache
+ARG ALPINE_SECURITY_REFRESH=local
+
+RUN echo "security-refresh=${ALPINE_SECURITY_REFRESH}" >/dev/null \
+  && apk upgrade --no-cache
 
 ENV GMED_BACKEND_UPSTREAM=http://backend:3000
 
