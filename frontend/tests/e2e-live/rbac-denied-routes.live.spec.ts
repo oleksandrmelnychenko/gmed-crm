@@ -165,7 +165,9 @@ test.describe("live RBAC denied route normalization", () => {
     await setGermanLanguage(page);
     await bootstrapAndLogin(page, request, "interpreter");
     await page.goto("/task-manager");
-    await expect(page.getByRole("heading", { name: /Aufgabenmanager|Task manager/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /Meine Aufgaben|Мои задачи|My tasks/i }),
+    ).toBeVisible();
     await expectForbiddenRouteRedirect(page, "/reports");
   });
 
