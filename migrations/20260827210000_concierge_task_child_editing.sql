@@ -21,6 +21,12 @@ ALTER TABLE concierge_operational_task_comments
     ADD COLUMN deleted_at TIMESTAMPTZ,
     ADD COLUMN deleted_by UUID REFERENCES users(id);
 
+-- The legacy trigger rejects every UPDATE. Remove it before backfilling the
+-- new timestamp column; the migration is transactional, so the old trigger is
+-- restored automatically if a later statement fails.
+DROP TRIGGER prevent_concierge_task_comment_mutation
+    ON concierge_operational_task_comments;
+
 UPDATE concierge_operational_task_comments
 SET updated_at = created_at;
 
@@ -36,9 +42,6 @@ CREATE INDEX idx_concierge_task_comments_active
 
 -- Comments remain protected from hard deletion. Edits and soft deletion are
 -- authorized by the API and mirrored into the append-only task event stream.
-DROP TRIGGER prevent_concierge_task_comment_mutation
-    ON concierge_operational_task_comments;
-
 CREATE OR REPLACE FUNCTION prevent_concierge_task_comment_hard_delete()
 RETURNS TRIGGER
 LANGUAGE plpgsql
