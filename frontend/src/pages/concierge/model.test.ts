@@ -17,9 +17,14 @@ import {
   conciergeTaskErrorMessage,
   conciergeTaskCode,
   conciergeOperationalItemsListPath,
+  conciergeTasksAssignedToActor,
+  conciergeTasksVisibleToActor,
   assignableConciergeTaskUsers,
+  availableConciergeTaskStatuses,
+  availableConciergeServiceStatuses,
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
+  canDeleteConciergeTask,
   canModifyConciergeTask,
   filterConciergeServices,
   filterConciergeTasks,
@@ -30,6 +35,7 @@ import {
   googleMapsSearchUrl,
   nextConciergeTaskStatus,
   nextConciergeKeyActions,
+  isConciergeKeyService,
   nextConciergeServiceStatus,
   sortConciergeProviders,
   sortConciergeServices,
@@ -92,10 +98,20 @@ describe("filterConciergeTaskAssignees", () => {
     expect(
       conciergeTaskErrorMessage(new Error("Operational item not found"), "ru", "fallback"),
     ).toBe("Задача не найдена. Возможно, она была удалена или относится к старому рабочему процессу.");
+    expect(
+      conciergeTaskErrorMessage(new Error("Invalid task status transition"), "ru", "fallback"),
+    ).toBe("Этот переход между статусами недоступен. Используйте следующий этап рабочего процесса.");
+    expect(
+      conciergeTaskErrorMessage(
+        new Error("Only an untouched open task can be deleted; cancel or archive it instead"),
+        "ru",
+        "fallback",
+      ),
+    ).toBe("Удалить можно только ошибочно созданную открытую задачу без комментариев, чек-листа и файлов.");
     expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
   });
 
-  it("limits assignment to the actor's level and lower levels", () => {
+  it("keeps concierge and interpreter assignment branches separate", () => {
     const users: ConciergeAssignee[] = [
       { id: "ceo", name: "CEO", email: "ceo@test", role: "ceo", is_active: true },
       { id: "billing", name: "Billing", email: "billing@test", role: "billing", is_active: true },
@@ -107,10 +123,12 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canAssignConciergeTaskToRole("teamlead_interpreter", "interpreter")).toBe(true);
     expect(canAssignConciergeTaskToRole("teamlead_interpreter", "billing")).toBe(false);
     expect(assignableConciergeTaskUsers(users, "lead", "teamlead_interpreter").map((user) => user.id).sort()).toEqual([
-      "concierge",
       "interpreter",
       "lead",
     ]);
+    expect(canAssignConciergeTaskToRole("concierge", "interpreter")).toBe(false);
+    expect(canAssignConciergeTaskToRole("billing", "concierge")).toBe(true);
+    expect(canAssignConciergeTaskToRole("billing", "teamlead_interpreter")).toBe(false);
   });
 
   it("allows only the creator or a strictly higher role to modify a task", () => {
@@ -133,13 +151,29 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canChangeConciergeTaskStatus(assignedTask, "assignee", "concierge")).toBe(true);
     expect(canChangeConciergeTaskStatus(assignedTask, "peer", "concierge")).toBe(false);
     expect(canChangeConciergeTaskStatus(assignedTask, "ceo", "ceo")).toBe(true);
+    expect(availableConciergeTaskStatuses(assignedTask, "assignee", "concierge")).toEqual([
+      "open",
+      "in_progress",
+    ]);
+    expect(availableConciergeTaskStatuses(
+      task({ status: "review", assigned_by: "creator", assigned_by_role: "concierge" }),
+      "manager",
+      "patient_manager",
+    )).toEqual(["review", "in_progress", "completed", "cancelled"]);
+  });
+
+  it("deletes only untouched open tasks", () => {
+    const untouched = task({ assigned_by: "creator", assigned_by_role: "concierge" });
+    expect(canDeleteConciergeTask(untouched, "creator", "concierge")).toBe(true);
+    expect(canDeleteConciergeTask({ ...untouched, status: "completed" }, "creator", "concierge")).toBe(false);
+    expect(canDeleteConciergeTask({ ...untouched, comment_count: 1 }, "creator", "concierge")).toBe(false);
   });
 });
 
 describe("conciergeOperationalItemsListPath", () => {
-  it("scopes a concierge task queue to the current account", () => {
+  it("delegates task visibility to the server-side permission scope", () => {
     expect(conciergeOperationalItemsListPath("concierge-1", "concierge")).toBe(
-      "/concierge-operational-items?archive=all&assigned_to=concierge-1",
+      "/concierge-operational-items?archive=all",
     );
   });
 
@@ -147,6 +181,35 @@ describe("conciergeOperationalItemsListPath", () => {
     expect(conciergeOperationalItemsListPath("ceo-1", "ceo")).toBe(
       "/concierge-operational-items?archive=all",
     );
+  });
+});
+
+describe("personal task scopes", () => {
+  const rows = [
+    task({ id: "assigned", assigned_to: "actor", assigned_by: "manager" }),
+    task({ id: "created", assigned_to: "other", assigned_by: "actor" }),
+    task({ id: "foreign", assigned_to: "other", assigned_by: "manager" }),
+  ];
+
+  it("keeps an executor task manager limited to assigned or created tasks", () => {
+    expect(conciergeTasksVisibleToActor(rows, "actor", "concierge").map((item) => item.id)).toEqual([
+      "assigned",
+      "created",
+    ]);
+    expect(conciergeTasksVisibleToActor(rows, "actor", "interpreter").map((item) => item.id)).toEqual([
+      "assigned",
+      "created",
+    ]);
+  });
+
+  it("keeps the workspace preview strictly limited to assigned tasks", () => {
+    expect(conciergeTasksAssignedToActor(rows, "actor").map((item) => item.id)).toEqual([
+      "assigned",
+    ]);
+  });
+
+  it("leaves management queues to the server-side hierarchy", () => {
+    expect(conciergeTasksVisibleToActor(rows, "manager", "patient_manager")).toEqual(rows);
   });
 });
 
@@ -332,7 +395,7 @@ describe("concierge workspace model", () => {
   });
 
   it("groups operational statuses into the board columns", () => {
-    expect(conciergeServiceColumn(service({ status: "planned" }))).toBe("requests");
+    expect(conciergeServiceColumn(service({ status: "planned" }))).toBe("planned");
     expect(conciergeServiceColumn(service({ status: "confirmed" }))).toBe("confirmed");
     expect(conciergeServiceColumn(service({ status: "in_service" }))).toBe("in_service");
     expect(conciergeServiceColumn(service({ status: "completed" }))).toBe("completed");
@@ -345,6 +408,24 @@ describe("concierge workspace model", () => {
     expect(nextConciergeServiceStatus("in_service")).toBe("completed");
     expect(nextConciergeServiceStatus("completed")).toBeNull();
     expect(nextConciergeServiceStatus("cancelled")).toBeNull();
+  });
+
+  it("exposes only valid service lifecycle transitions and privileged reopen actions", () => {
+    expect(availableConciergeServiceStatuses(service({ status: "planned" }))).toEqual([
+      "planned",
+      "in_service",
+      "cancelled",
+    ]);
+    expect(availableConciergeServiceStatuses(service({ status: "completed" }))).toEqual(["completed"]);
+    expect(availableConciergeServiceStatuses(service({ status: "completed" }), true)).toEqual([
+      "completed",
+      "in_service",
+    ]);
+  });
+
+  it("shows key custody only for explicitly key-related services", () => {
+    expect(isConciergeKeyService(service({ title: "Schlüssel vom Hotel abholen" }))).toBe(true);
+    expect(isConciergeKeyService(service({ title: "Restaurant reservieren" }))).toBe(false);
   });
 
   it("offers only valid key custody transitions, including a new cycle after return", () => {
@@ -437,7 +518,7 @@ describe("concierge workspace model", () => {
 
   it("advances and sorts the concierge task queue", () => {
     expect(nextConciergeTaskStatus("open")).toBe("in_progress");
-    expect(nextConciergeTaskStatus("in_progress")).toBe("completed");
+    expect(nextConciergeTaskStatus("in_progress")).toBe("review");
     expect(nextConciergeTaskStatus("completed")).toBeNull();
 
     const rows = sortConciergeTasks([

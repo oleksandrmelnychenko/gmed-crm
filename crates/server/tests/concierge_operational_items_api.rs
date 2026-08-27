@@ -187,13 +187,14 @@ async fn seed_service(
 }
 
 #[tokio::test]
-async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers_task() {
+async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothers_task() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
     let tag = Uuid::new_v4().simple().to_string();
     let concierge_id = seed_user(&ctx.pool, "concierge", &format!("owner-{tag}")).await;
     let other_id = seed_user(&ctx.pool, "concierge", &format!("other-{tag}")).await;
+    let billing_id = seed_user(&ctx.pool, "billing", &format!("manager-{tag}")).await;
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &tag).await;
     let provider_id = seed_provider(&ctx.pool, "non_medical", &tag).await;
     let service_id = seed_service(
@@ -207,6 +208,7 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
     .await;
     let bearer = auth_header_for(concierge_id, "concierge");
     let other_bearer = auth_header_for(other_id, "concierge");
+    let billing_bearer = auth_header_for(billing_id, "billing");
     let path = "/api/v1/concierge-operational-items";
 
     let (status, task) = json_request(
@@ -261,7 +263,11 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
 
     let (status, other_list) = json_request(&ctx.app, "GET", path, &other_bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{other_list}");
-    assert_eq!(other_list.as_array().expect("other list").len(), 2);
+    assert!(other_list.as_array().expect("other list").is_empty());
+
+    let (status, manager_list) = json_request(&ctx.app, "GET", path, &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{manager_list}");
+    assert_eq!(manager_list.as_array().map(Vec::len), Some(2));
 
     let update_path = format!("{path}/{task_id}/update");
     let update_body = json!({
@@ -272,7 +278,7 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
         "concierge_service_id": service_id,
         "due_at": "2026-08-20T09:15:00Z",
         "priority": "normal",
-        "status": "completed"
+        "status": "in_progress"
     });
     let (status, forbidden) = json_request(
         &ctx.app,
@@ -293,8 +299,8 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
-    assert_eq!(updated["status"], "completed");
-    assert!(updated["completed_at"].is_string());
+    assert_eq!(updated["status"], "in_progress");
+    assert!(updated["completed_at"].is_null());
 
     let (status, stale_update) =
         json_request(&ctx.app, "POST", &update_path, &bearer, Some(update_body)).await;
@@ -308,7 +314,21 @@ async fn operational_staff_can_list_all_items_but_same_rank_cannot_edit_anothers
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{current}");
-    assert_eq!(current["item"]["status"], "completed");
+    assert_eq!(current["item"]["status"], "in_progress");
+
+    let (status, manager_completed) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{path}/{task_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "expected_updated_at": current["item"]["updated_at"],
+            "status": "completed"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manager_completed}");
+    assert_eq!(manager_completed["status"], "completed");
 
     let (status, generic) = json_request(
         &ctx.app,
@@ -369,21 +389,26 @@ async fn terminal_tasks_can_be_archived_filtered_restored_and_keep_history() {
         "{active_rejected}"
     );
 
-    let (status, completed) = json_request(
+    let (status, in_progress) = json_request(
         &ctx.app,
         "POST",
-        &format!("{path}/{task_id}/update"),
+        &format!("{path}/{task_id}/status"),
         &creator_bearer,
         Some(json!({
             "expected_updated_at": created["updated_at"],
-            "kind": "task",
-            "title": created["title"],
-            "note": created["note"],
-            "due_at": created["due_at"],
-            "priority": created["priority"],
-            "status": "completed",
-            "assigned_to": created["assigned_to"],
-            "task_audience": created["task_audience"]
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{in_progress}");
+    let (status, completed) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{path}/{task_id}/status"),
+        &creator_bearer,
+        Some(json!({
+            "expected_updated_at": in_progress["updated_at"],
+            "status": "completed"
         })),
     )
     .await;
@@ -518,7 +543,7 @@ async fn ceo_can_assign_operational_items_to_ceo_and_billing() {
     let (status, billing_items) = json_request(&ctx.app, "GET", path, &billing_bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{billing_items}");
     let billing_items = billing_items.as_array().expect("billing operational list");
-    assert_eq!(billing_items.len(), 2);
+    assert_eq!(billing_items.len(), 1);
     assert!(
         billing_items
             .iter()
@@ -906,17 +931,12 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
         return;
     };
     let tag = Uuid::new_v4().simple().to_string();
-    let creator_id = seed_user(&ctx.pool, "concierge", &format!("creator-{tag}")).await;
-    let same_rank_id = seed_user(
-        &ctx.pool,
-        "teamlead_interpreter",
-        &format!("same-rank-{tag}"),
-    )
-    .await;
+    let creator_id = seed_user(&ctx.pool, "teamlead_interpreter", &format!("creator-{tag}")).await;
+    let same_rank_id = seed_user(&ctx.pool, "concierge", &format!("same-rank-{tag}")).await;
     let assignee_id = seed_user(&ctx.pool, "interpreter", &format!("assignee-{tag}")).await;
     let billing_id = seed_user(&ctx.pool, "billing", &format!("billing-higher-{tag}")).await;
-    let creator_bearer = auth_header_for(creator_id, "concierge");
-    let same_rank_bearer = auth_header_for(same_rank_id, "teamlead_interpreter");
+    let creator_bearer = auth_header_for(creator_id, "teamlead_interpreter");
+    let same_rank_bearer = auth_header_for(same_rank_id, "concierge");
     let assignee_bearer = auth_header_for(assignee_id, "interpreter");
     let billing_bearer = auth_header_for(billing_id, "billing");
     let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
@@ -953,7 +973,7 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{task}");
-    assert_eq!(task["assigned_by_role"], "concierge");
+    assert_eq!(task["assigned_by_role"], "teamlead_interpreter");
     let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
     let update_path = format!("{path}/{task_id}/update");
     let update_body = json!({
@@ -977,7 +997,7 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
     .unwrap();
     assert_eq!(assignee_notifications, 1);
 
-    for bearer in [&same_rank_bearer, &assignee_bearer] {
+    for bearer in [&same_rank_bearer, &assignee_bearer, &billing_bearer] {
         let (status, denied) = json_request(
             &ctx.app,
             "POST",
@@ -1036,11 +1056,28 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
     assert_eq!(assignee_updated["status"], "in_progress");
     assert_eq!(assignee_updated["title"], "Arrange transfer");
 
+    let (status, premature_completion) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &assignee_bearer,
+        Some(json!({
+            "expected_updated_at": assignee_updated["updated_at"],
+            "status": "completed"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{premature_completion}"
+    );
+
     let (status, updated) = json_request(
         &ctx.app,
         "POST",
         &update_path,
-        &billing_bearer,
+        &ceo_bearer,
         Some(json!({
             "expected_updated_at": assignee_updated["updated_at"],
             "kind": "task",
@@ -1071,6 +1108,34 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
         json_request(&ctx.app, "DELETE", &delete_path, &same_rank_bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
 
+    let (status, protected) =
+        json_request(&ctx.app, "DELETE", &delete_path, &ceo_bearer, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{protected}");
+
+    let (status, reopened) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo_bearer,
+        Some(json!({
+            "expected_updated_at": updated["updated_at"],
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
+    let (status, reopened) = json_request(
+        &ctx.app,
+        "POST",
+        &status_path,
+        &ceo_bearer,
+        Some(json!({
+            "expected_updated_at": reopened["updated_at"],
+            "status": "open"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
     let (status, deleted) = json_request(&ctx.app, "DELETE", &delete_path, &ceo_bearer, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{deleted}");
     let (status, missing) =
@@ -1126,7 +1191,7 @@ async fn hierarchy_controls_mutations_and_task_notifications_are_delivered() {
             "kind": "task",
             "title": "Creator-owned follow-up updated",
             "priority": "normal",
-            "status": "completed"
+            "status": "open"
         })),
     )
     .await;
@@ -1193,21 +1258,20 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
         return;
     };
     let tag = Uuid::new_v4().simple().to_string();
-    let creator_id = seed_user(&ctx.pool, "concierge", &format!("file-creator-{tag}")).await;
-    let same_rank_id = seed_user(
+    let creator_id = seed_user(
         &ctx.pool,
         "teamlead_interpreter",
-        &format!("file-same-{tag}"),
+        &format!("file-creator-{tag}"),
     )
     .await;
+    let same_rank_id = seed_user(&ctx.pool, "concierge", &format!("file-same-{tag}")).await;
     let assignee_id = seed_user(&ctx.pool, "interpreter", &format!("file-viewer-{tag}")).await;
-    let billing_id = seed_user(&ctx.pool, "billing", &format!("file-billing-{tag}")).await;
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("file-{tag}")).await;
     let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("file-{tag}")).await;
-    let creator_bearer = auth_header_for(creator_id, "concierge");
-    let same_rank_bearer = auth_header_for(same_rank_id, "teamlead_interpreter");
+    let creator_bearer = auth_header_for(creator_id, "teamlead_interpreter");
+    let same_rank_bearer = auth_header_for(same_rank_id, "concierge");
     let assignee_bearer = auth_header_for(assignee_id, "interpreter");
-    let billing_bearer = auth_header_for(billing_id, "billing");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
     let base_path = "/api/v1/concierge-operational-items";
     let (status, task) = json_request(
         &ctx.app,
@@ -1329,9 +1393,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{detail}");
-    assert_eq!(detail["attachments"].as_array().map(Vec::len), Some(1));
-    assert_eq!(detail["item"]["attachment_count"], 1);
+    assert_eq!(status, StatusCode::FORBIDDEN, "{detail}");
 
     let download_path = format!("{attachment_path}/{attachment_id}/download");
     let (status, downloaded) = raw_request(&ctx.app, "GET", &download_path, &assignee_bearer).await;
@@ -1362,7 +1424,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
         "{}",
         String::from_utf8_lossy(&denied)
     );
-    let (status, deleted) = raw_request(&ctx.app, "DELETE", &delete_path, &billing_bearer).await;
+    let (status, deleted) = raw_request(&ctx.app, "DELETE", &delete_path, &ceo_bearer).await;
     assert_eq!(
         status,
         StatusCode::NO_CONTENT,
@@ -1406,13 +1468,28 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
             .expect("second attachment id"),
     )
     .unwrap();
-    let (status, deleted_task) = raw_request(
+    let task_path = format!("{base_path}/{task_id}");
+    let (status, protected_task) = raw_request(&ctx.app, "DELETE", &task_path, &ceo_bearer).await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{}",
+        String::from_utf8_lossy(&protected_task)
+    );
+    let (status, deleted_second) = raw_request(
         &ctx.app,
         "DELETE",
-        &format!("{base_path}/{task_id}"),
-        &billing_bearer,
+        &format!("{attachment_path}/{second_attachment_id}"),
+        &ceo_bearer,
     )
     .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&deleted_second)
+    );
+    let (status, deleted_task) = raw_request(&ctx.app, "DELETE", &task_path, &ceo_bearer).await;
     assert_eq!(
         status,
         StatusCode::NO_CONTENT,
@@ -1454,7 +1531,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(attachment_events, 5);
+    assert_eq!(attachment_events, 6);
 }
 
 #[tokio::test]
@@ -1496,7 +1573,7 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
 
     let detail_path = format!("{path}/{task_id}");
     let (status, visible) = json_request(&ctx.app, "GET", &detail_path, &other_bearer, None).await;
-    assert_eq!(status, StatusCode::OK, "{visible}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{visible}");
 
     let comment_request_id = Uuid::new_v4();
     let comment_body = json!({
@@ -1631,7 +1708,7 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
 }
 
 #[tokio::test]
-async fn reassignment_serializes_detail_and_child_mutations_without_hiding_shared_task() {
+async fn reassignment_serializes_and_revokes_former_assignee_child_access() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
@@ -1729,9 +1806,9 @@ async fn reassignment_serializes_detail_and_child_mutations_without_hiding_share
 
     reassign_tx.commit().await.unwrap();
     let (detail_status, detail_body) = pending_detail.await.unwrap();
-    assert_eq!(detail_status, StatusCode::OK, "{detail_body}");
+    assert_eq!(detail_status, StatusCode::FORBIDDEN, "{detail_body}");
     let (comment_status, comment_body) = pending_comment.await.unwrap();
-    assert_eq!(comment_status, StatusCode::OK, "{comment_body}");
+    assert_eq!(comment_status, StatusCode::FORBIDDEN, "{comment_body}");
 
     let (status, shared_checklist) = json_request(
         &ctx.app,
@@ -1740,11 +1817,11 @@ async fn reassignment_serializes_detail_and_child_mutations_without_hiding_share
         &old_bearer,
         Some(json!({
             "request_id": Uuid::new_v4(),
-            "label": "Former assignee can collaborate"
+            "label": "Former assignee must not collaborate"
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{shared_checklist}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{shared_checklist}");
     let (status, shared_toggle) = json_request(
         &ctx.app,
         "POST",
@@ -1756,7 +1833,7 @@ async fn reassignment_serializes_detail_and_child_mutations_without_hiding_share
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{shared_toggle}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{shared_toggle}");
 
     let (status, new_owner_comment) = json_request(
         &ctx.app,
@@ -1793,7 +1870,7 @@ async fn reassignment_serializes_detail_and_child_mutations_without_hiding_share
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(comment_count, 2);
+    assert_eq!(comment_count, 1);
     let checklist_state: (i64, i64) = sqlx::query_as(
         r#"SELECT count(*), count(*) FILTER (WHERE is_completed)
            FROM concierge_operational_task_checklist_items
@@ -1803,7 +1880,7 @@ async fn reassignment_serializes_detail_and_child_mutations_without_hiding_share
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(checklist_state, (2, 1));
+    assert_eq!(checklist_state, (1, 0));
 }
 
 #[tokio::test]

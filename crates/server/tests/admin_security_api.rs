@@ -1,13 +1,19 @@
 mod support;
 
+use axum::Extension;
 use axum::body::Body;
+use axum::extract::ConnectInfo;
 use axum::http::{Request, StatusCode};
+use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
 use gmed_server::auth::jwt;
+use gmed_server::config::MedicationAiConfig;
+use gmed_server::settings::{SettingsCache, TokenSettings};
+use gmed_server::state::AppState;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
@@ -100,6 +106,92 @@ async fn audit_analytics_requires_it_admin() {
     .await;
 
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn system_health_requires_it_admin() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pm_id = seed_user(&app.suite.pool, "system-health", "patient_manager").await;
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/health",
+        &auth_header_for("patient_manager", pm_id),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn system_health_exposes_only_aggregate_medication_ai_state() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let secret = "sk-test-health-secret-must-never-leak";
+    let model = "gpt-test-health";
+    let state = AppState::new(
+        app.suite.pool.clone(),
+        TEST_SECRET,
+        SettingsCache::new(TokenSettings::default()),
+    )
+    .with_medication_ai(MedicationAiConfig {
+        enabled: true,
+        explicitly_configured: true,
+        patient_data_transfer_approved: true,
+        openai_api_key: Some(SecretString::from(secret.to_string())),
+        openai_model: Some(model.to_string()),
+    });
+    let configured_app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(
+        ConnectInfo("127.0.0.1:40124".parse().expect("valid peer address")),
+    ));
+
+    let (status, body) = json_request(
+        &configured_app,
+        "GET",
+        "/api/v1/admin/health",
+        &auth_header_for("it_admin", app.it_admin_id),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["medication_ai"]["provider"]["kind"], "openai");
+    assert_eq!(body["medication_ai"]["provider"]["status"], "ready");
+    assert_eq!(
+        body["medication_ai"]["provider"]["external_calls_enabled"],
+        true
+    );
+    assert_eq!(body["medication_ai"]["provider"]["model"], model);
+    assert!(body["medication_ai"]["queue"]["available"].is_boolean());
+    assert!(body["medication_ai"]["queue"]["total"].is_number());
+
+    let serialized = serde_json::to_string(&body).expect("serialize health response");
+    for forbidden in [
+        secret,
+        "api_key",
+        "authorization",
+        "instructions",
+        "prompt_version",
+        "provider_response_id",
+        "provider_response_model",
+        "output_json",
+        "input_fingerprint",
+        "patient_id",
+        "review_id",
+        "bundle_id",
+        "requested_by",
+        "medication-evidence-draft-v1",
+    ] {
+        assert!(
+            !serialized.to_ascii_lowercase().contains(forbidden),
+            "health response leaked forbidden AI field or value: {forbidden}"
+        );
+    }
 }
 
 #[tokio::test]

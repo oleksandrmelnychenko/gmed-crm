@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get, post } from "./client";
 import {
   confirmMedicationIdentity,
+  fetchMedicationBenefitEvidence,
   fetchMedicationIntelligence,
   fetchMedicationIdentityCandidates,
   generateMedicationIdentityCandidates,
@@ -247,6 +248,38 @@ describe("medication intelligence API", () => {
         confirmed_by: "user-1",
         confirmed_at: "2026-08-26T12:00:00Z",
       },
+    });
+  });
+
+  it("loads and normalizes exact official G-BA evidence without broadening", async () => {
+    vi.mocked(get).mockResolvedValue({
+      lookup_status: "exact_match",
+      generated_at: "2026-08-27T10:00:00Z",
+      matching: { identifier_type: "pzn", identifier: "01234567" },
+      pagination: { limit: 50, offset: 0, total_count: 1, returned_count: 1 },
+      limitations: { ru: "Только точное совпадение", de: "Nur exakte Zuordnung" },
+      source: { id: "gba-ais", ingestion_status: "available", health: "fresh" },
+      evidence: [{
+        evidence_ref: "official:1",
+        patient_group_id: "group-1",
+        patient_group: "Patientengruppe A",
+        official_url: "https://www.g-ba.de/beschluesse/1",
+        pzns: ["01234567"],
+        benefit_extent: "gering",
+      }],
+    });
+
+    const result = await fetchMedicationBenefitEvidence({ pzn: "01234567" });
+
+    expect(get).toHaveBeenCalledWith(
+      "/medication-intelligence/evidence/benefit-assessments?pzn=01234567",
+    );
+    expect(result.lookup_status).toBe("exact_match");
+    expect(result.matching.broader_fallback_on_no_match).toBe(false);
+    expect(result.evidence[0]).toMatchObject({
+      evidence_ref: "official:1",
+      patient_group: "Patientengruppe A",
+      pzns: ["01234567"],
     });
   });
 });

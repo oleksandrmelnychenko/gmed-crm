@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { notificationHrefForRole, type Notification } from "./topbar-data";
+import {
+  localizedNotificationCopy,
+  notificationHrefForRole,
+  type Notification,
+} from "./topbar-data";
 
 function notification(entityType: string, entityId = "entity-1"): Notification {
   return {
@@ -21,6 +25,16 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("recommendation"), "patient")).toBe("/recommendations");
     expect(notificationHrefForRole(notification("invoice"), "patient")).toBe("/invoices");
     expect(notificationHrefForRole(notification("privacy_request"), "patient")).toBe("/privacy");
+  });
+
+  it("opens Medication AI notifications on the patient's clinical workspace", () => {
+    const item = notification("patient", "patient-1");
+    item.kind = "medication_ai_ready";
+
+    expect(notificationHrefForRole(item, "ceo")).toBe(
+      "/patients/patient-1?tab=clinical",
+    );
+    expect(notificationHrefForRole(item, "patient")).toBeNull();
   });
 
   it("does not expose staff-only entities to patients", () => {
@@ -45,5 +59,35 @@ describe("notificationHrefForRole", () => {
     );
     expect(notificationHrefForRole(notification("concierge_expense"), "concierge")).toBe("/concierge");
     expect(notificationHrefForRole(notification("concierge_expense"), "patient_manager")).toBeNull();
+  });
+});
+
+describe("localizedNotificationCopy", () => {
+  it("localizes successful Medication AI notifications without bilingual text", () => {
+    const item = notification("patient");
+    item.kind = "medication_ai_ready";
+    item.title = "server fallback";
+    item.body = "server fallback body";
+
+    expect(localizedNotificationCopy(item, "ru")).toEqual({
+      title: "AI-черновик готов",
+      body: "Обезличенный черновик доступен для проверки по источникам.",
+    });
+    expect(localizedNotificationCopy(item, "de")).toEqual({
+      title: "KI-Entwurf bereit",
+      body: "Der de-identifizierte Entwurf kann anhand der Quellen geprüft werden.",
+    });
+  });
+
+  it("localizes failed Medication AI notifications and preserves unrelated notifications", () => {
+    const failed = notification("patient");
+    failed.kind = "medication_ai_failed";
+    expect(localizedNotificationCopy(failed, "de").title).toBe("KI-Entwurf fehlgeschlagen");
+
+    const regular = notification("document");
+    expect(localizedNotificationCopy(regular, "ru")).toEqual({
+      title: regular.title,
+      body: regular.body,
+    });
   });
 });

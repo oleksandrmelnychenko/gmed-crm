@@ -33,7 +33,7 @@ export type ConciergeService = {
   taxonomy_node_name_de: string | null;
   taxonomy_node_name_ru: string | null;
   title: string;
-  status: string;
+  status: ConciergeServiceStatus;
   booking_reference: string | null;
   vendor_name: string | null;
   vendor_contact: string | null;
@@ -126,6 +126,8 @@ export type ApplyPartnerQuoteResponse = {
   applied_by_name: string;
 };
 
+export type ConciergeTaskStatus = "open" | "in_progress" | "review" | "completed" | "cancelled";
+
 export type ConciergeTask = {
   id: string;
   kind: "task" | "event";
@@ -142,12 +144,13 @@ export type ConciergeTask = {
   ends_at: string | null;
   location: string | null;
   priority: string;
-  status: string;
+  status: ConciergeTaskStatus;
   reminder_at: string | null;
   reminder_sent_at: string | null;
   checklist_total: number;
   checklist_completed: number;
   comment_count: number;
+  attachment_count?: number;
   completed_at: string | null;
   archived_at: string | null;
   archived_by: string | null;
@@ -189,16 +192,18 @@ export const TASK_MANAGER_ROLES = [
 
 const TASK_MANAGER_ROLE_SET = new Set<string>(TASK_MANAGER_ROLES);
 
-const TASK_ROLE_LEVEL: Record<string, number> = {
-  interpreter: 1,
-  concierge: 2,
-  teamlead_interpreter: 2,
-  ceo_assistant: 3,
-  billing: 3,
-  patient_manager: 3,
-  sales: 3,
-  ceo: 4,
-};
+const MANAGEMENT_ROLES = new Set(["ceo_assistant", "billing", "patient_manager", "sales"]);
+
+function canManageConciergeTaskCreatorRole(
+  actorRole: string | null | undefined,
+  creatorRole: string | null | undefined,
+) {
+  if (!actorRole || !creatorRole) return false;
+  if (actorRole === "ceo") return creatorRole !== "ceo";
+  if (MANAGEMENT_ROLES.has(actorRole)) return creatorRole === "concierge";
+  if (actorRole === "teamlead_interpreter") return creatorRole === "interpreter";
+  return false;
+}
 
 /** Task manager assignees include every active role participating in the task hierarchy. */
 export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
@@ -208,9 +213,14 @@ export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
 }
 
 export function canAssignConciergeTaskToRole(actorRole: string | null | undefined, targetRole: string) {
-  const actorLevel = actorRole ? TASK_ROLE_LEVEL[actorRole] : undefined;
-  const targetLevel = TASK_ROLE_LEVEL[targetRole];
-  return actorLevel !== undefined && targetLevel !== undefined && actorLevel >= targetLevel;
+  if (!actorRole || !TASK_MANAGER_ROLE_SET.has(actorRole) || !TASK_MANAGER_ROLE_SET.has(targetRole)) {
+    return false;
+  }
+  if (actorRole === targetRole) return true;
+  if (actorRole === "ceo") return true;
+  if (MANAGEMENT_ROLES.has(actorRole)) return targetRole === "concierge";
+  if (actorRole === "teamlead_interpreter") return targetRole === "interpreter";
+  return false;
 }
 
 export function assignableConciergeTaskUsers(
@@ -224,8 +234,8 @@ export function assignableConciergeTaskUsers(
 }
 
 /**
- * Concierge accounts use a personal task queue by default. Management roles
- * keep the shared queue so they can coordinate work across the team.
+ * Server-side visibility is authoritative: executors see assigned/created
+ * tasks, managers also see the tasks of roles they supervise, and CEO sees all.
  */
 export function conciergeOperationalItemsListPath(
   actorId: string | null | undefined,
@@ -233,8 +243,35 @@ export function conciergeOperationalItemsListPath(
   archive: "active" | "archived" | "all" = "all",
 ) {
   const params = new URLSearchParams({ archive });
-  if (actorRole === "concierge" && actorId) params.set("assigned_to", actorId);
+  void actorId;
+  void actorRole;
   return `/concierge-operational-items?${params.toString()}`;
+}
+
+/**
+ * Keep personal task workspaces defensive even when an older backend returns
+ * a broader management queue. Managers still rely on the server-side scope,
+ * while executors only see tasks they own or created.
+ */
+export function conciergeTasksVisibleToActor(
+  tasks: ConciergeTask[],
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+): ConciergeTask[] {
+  if (!actorId) return [];
+  if (actorRole !== "concierge" && actorRole !== "interpreter") return tasks;
+  return tasks.filter(
+    (task) => task.assigned_to === actorId || task.assigned_by === actorId,
+  );
+}
+
+/** Tasks shown in the compact personal queue are strictly assigned to the actor. */
+export function conciergeTasksAssignedToActor(
+  tasks: ConciergeTask[],
+  actorId: string | null | undefined,
+): ConciergeTask[] {
+  if (!actorId) return [];
+  return tasks.filter((task) => task.assigned_to === actorId);
 }
 
 export function canModifyConciergeTask(
@@ -245,9 +282,7 @@ export function canModifyConciergeTask(
   if (!actorId || !actorRole) return false;
   if (task.assigned_by === actorId) return true;
   if (actorRole === "ceo") return true;
-  const actorLevel = TASK_ROLE_LEVEL[actorRole];
-  const authorLevel = task.assigned_by_role ? TASK_ROLE_LEVEL[task.assigned_by_role] : undefined;
-  return actorLevel !== undefined && authorLevel !== undefined && actorLevel > authorLevel;
+  return canManageConciergeTaskCreatorRole(actorRole, task.assigned_by_role);
 }
 
 export function canChangeConciergeTaskStatus(
@@ -261,11 +296,52 @@ export function canChangeConciergeTaskStatus(
   );
 }
 
+export function availableConciergeTaskStatuses(
+  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+): ConciergeTaskStatus[] {
+  if (!canChangeConciergeTaskStatus(task, actorId, actorRole)) return [task.status];
+  const canReview = canModifyConciergeTask(task, actorId, actorRole);
+  const transitions: Record<ConciergeTaskStatus, ConciergeTaskStatus[]> = canReview
+    ? {
+        open: ["in_progress", "cancelled"],
+        in_progress: ["open", "review", "completed", "cancelled"],
+        review: ["in_progress", "completed", "cancelled"],
+        completed: ["in_progress"],
+        cancelled: ["open"],
+      }
+    : {
+        open: ["in_progress"],
+        in_progress: ["review"],
+        review: ["in_progress"],
+        completed: [],
+        cancelled: [],
+      };
+  return [task.status, ...transitions[task.status]];
+}
+
+export function canDeleteConciergeTask(
+  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number },
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return canModifyConciergeTask(task, actorId, actorRole)
+    && task.status === "open"
+    && !task.archived_at
+    && task.comment_count === 0
+    && task.checklist_total === 0
+    && (task.attachment_count ?? 0) === 0;
+}
+
 const TASK_PERMISSION_ERROR_PREFIX =
   "Only the task creator or a higher role can";
 const TASK_STATUS_PERMISSION_ERROR =
   "Only the task assignee, creator, or a higher role can change task status";
 const TASK_NOT_FOUND_ERROR = "Operational item not found";
+const TASK_TRANSITION_ERROR = "Invalid task status transition";
+const TASK_DELETE_ERROR = "Only an untouched open task can be deleted; cancel or archive it instead";
+const TASK_ACCESS_ERROR = "Only the task assignee, creator, or a higher role can access this task";
 
 export function conciergeTaskErrorMessage(
   error: unknown,
@@ -289,6 +365,24 @@ export function conciergeTaskErrorMessage(
     return lang === "ru"
       ? "Задача не найдена. Возможно, она была удалена или относится к старому рабочему процессу."
       : "Die Aufgabe wurde nicht gefunden. Sie wurde möglicherweise gelöscht oder gehört zu einem früheren Arbeitsablauf.";
+  }
+
+  if (message === TASK_TRANSITION_ERROR) {
+    return lang === "ru"
+      ? "Этот переход между статусами недоступен. Используйте следующий этап рабочего процесса."
+      : "Dieser Statuswechsel ist nicht zulässig. Verwenden Sie den nächsten Schritt im Arbeitsablauf.";
+  }
+
+  if (message === TASK_DELETE_ERROR) {
+    return lang === "ru"
+      ? "Удалить можно только ошибочно созданную открытую задачу без комментариев, чек-листа и файлов."
+      : "Nur eine irrtümlich erstellte offene Aufgabe ohne Kommentare, Checkliste und Dateien kann gelöscht werden.";
+  }
+
+  if (message === TASK_ACCESS_ERROR || message === "Forbidden") {
+    return lang === "ru"
+      ? "У вас нет доступа к этой задаче."
+      : "Sie haben keinen Zugriff auf diese Aufgabe.";
   }
 
   if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {
@@ -411,10 +505,12 @@ export type ConciergeRoutePlan = {
 export type ConciergeProviderCategory = "all" | "restaurants" | "drivers" | "hotels" | "other";
 
 export const CONCIERGE_BOARD_COLUMNS = [
-  { id: "requests", statuses: ["planned", "booked"] },
+  { id: "planned", statuses: ["planned"] },
+  { id: "booked", statuses: ["booked"] },
   { id: "confirmed", statuses: ["confirmed"] },
   { id: "in_service", statuses: ["in_service"] },
-  { id: "completed", statuses: ["completed", "cancelled"] },
+  { id: "completed", statuses: ["completed"] },
+  { id: "cancelled", statuses: ["cancelled"] },
 ] as const;
 
 export type ConciergeBoardColumnId = (typeof CONCIERGE_BOARD_COLUMNS)[number]["id"];
@@ -427,6 +523,39 @@ export type ConciergeWorkspaceStats = {
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "cancelled"]);
+
+export function availableConciergeServiceStatuses(
+  service: Pick<ConciergeService, "status">,
+  canReopen = false,
+): ConciergeServiceStatus[] {
+  const transitions: Record<ConciergeServiceStatus, ConciergeServiceStatus[]> = {
+    planned: ["planned", "in_service", "cancelled"],
+    booked: ["booked", "cancelled"],
+    confirmed: ["confirmed", "in_service", "cancelled"],
+    in_service: ["in_service", "completed", "cancelled"],
+    completed: canReopen ? ["completed", "in_service"] : ["completed"],
+    cancelled: canReopen ? ["cancelled", "planned"] : ["cancelled"],
+  };
+  return transitions[service.status];
+}
+
+export function isConciergeKeyService(
+  service: Pick<
+    ConciergeService,
+    "title" | "taxonomy_node_code" | "taxonomy_node_name_de" | "taxonomy_node_name_ru"
+  >,
+): boolean {
+  const searchable = [
+    service.title,
+    service.taxonomy_node_code,
+    service.taxonomy_node_name_de,
+    service.taxonomy_node_name_ru,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  return ["key", "schlüssel", "schluessel", "ключ"].some((marker) => searchable.includes(marker));
+}
 const PROVIDER_CATEGORY_CODES: Record<Exclude<ConciergeProviderCategory, "all" | "other">, readonly string[]> = {
   restaurants: ["nonmedical_restaurants", "nonmedical_cafe", "nonmedical_bars", "nonmedical_catering", "nonmedical_private_cook"],
   drivers: ["nonmedical_chauffeur", "nonmedical_car_rental", "nonmedical_ground_transport"],
@@ -472,9 +601,9 @@ export function isConciergeTaskActive(task: ConciergeTask): boolean {
   return !TERMINAL_STATUSES.has(task.status);
 }
 
-export function nextConciergeTaskStatus(status: string): "in_progress" | "completed" | null {
+export function nextConciergeTaskStatus(status: string): "in_progress" | "review" | null {
   if (status === "open") return "in_progress";
-  if (status === "in_progress") return "completed";
+  if (status === "in_progress") return "review";
   return null;
 }
 
@@ -508,7 +637,7 @@ export function conciergeServiceColumn(service: ConciergeService): ConciergeBoar
   const match = CONCIERGE_BOARD_COLUMNS.find((column) =>
     (column.statuses as readonly string[]).includes(service.status),
   );
-  return match?.id ?? "requests";
+  return match?.id ?? "planned";
 }
 
 export function nextConciergeServiceStatus(status: string): ConciergeServiceStatus | null {
@@ -941,7 +1070,7 @@ export function buildConciergeAgenda(
 ): ConciergeAgendaItem[] {
   const items: ConciergeAgendaItem[] = [];
   for (const service of services) {
-    if (!service.starts_at) continue;
+    if (!service.starts_at || TERMINAL_STATUSES.has(service.status)) continue;
     items.push({
       id: service.id,
       kind: "service",

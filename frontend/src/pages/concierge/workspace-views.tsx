@@ -1,20 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowRight,
   ArrowDown,
   ArrowUp,
   CalendarDays,
   CalendarClock,
   CalendarCheck2,
-  CheckCircle2,
   Clock3,
   ExternalLink,
   History,
   ListTodo,
-  LoaderCircle,
   MapPin,
   Navigation,
   Phone,
-  Pencil,
   Route,
   Star,
 } from "lucide-react";
@@ -41,7 +39,6 @@ import {
   googleMapsSearchUrl,
   isConciergeTaskActive,
   isConciergeTaskOverdue,
-  nextConciergeTaskStatus,
   sortConciergeProviders,
   sortConciergeTasks,
   type ConciergeAgendaItem,
@@ -61,6 +58,7 @@ const copy = {
     taskHistory: "Verlauf",
     activeTasks: "Aktiv",
     openTasks: "offen",
+    allTasks: "Alle Aufgaben",
     noTasks: "Keine offenen Concierge-Aufgaben.",
     noTaskHistory: "Noch keine abgeschlossenen oder stornierten Einträge.",
     overdue: "Überfällig",
@@ -68,6 +66,7 @@ const copy = {
     assignedBy: "Von",
     taskOpen: "Offen",
     taskProgress: "In Arbeit",
+    taskReview: "Zur Prüfung",
     taskCompleted: "Erledigt",
     taskCancelled: "Storniert",
     priorityUrgent: "Dringend",
@@ -98,6 +97,8 @@ const copy = {
     phone: "Anrufen",
     openMap: "Karte",
     directions: "Route öffnen",
+    showOnMap: "Auf Karte zeigen",
+    mapPreview: "Kartenvorschau",
     book: "Partner buchen",
     routePlanner: "Tagesroute",
     routePlannerSubtitle: "Services, Aufgaben und Termine mit operativer Adresse in einer Route öffnen.",
@@ -123,6 +124,7 @@ const copy = {
     taskHistory: "История",
     activeTasks: "Активные",
     openTasks: "открыто",
+    allTasks: "Все задачи",
     noTasks: "Открытых задач консьержа нет.",
     noTaskHistory: "Завершённых или отменённых записей пока нет.",
     overdue: "Просрочено",
@@ -130,6 +132,7 @@ const copy = {
     assignedBy: "Поставил",
     taskOpen: "Открыта",
     taskProgress: "В работе",
+    taskReview: "На проверке",
     taskCompleted: "Выполнена",
     taskCancelled: "Отменена",
     priorityUrgent: "Срочно",
@@ -160,6 +163,8 @@ const copy = {
     phone: "Позвонить",
     openMap: "Карта",
     directions: "Открыть маршрут",
+    showOnMap: "Показать на карте",
+    mapPreview: "Предпросмотр карты",
     book: "Забронировать",
     routePlanner: "Маршрут на день",
     routePlannerSubtitle: "Откройте услуги, задачи и события с рабочими адресами одним маршрутом.",
@@ -211,6 +216,7 @@ function taskStatusLabel(status: string, lang: Lang) {
   const labels = copy[lang];
   if (status === "open") return labels.taskOpen;
   if (status === "in_progress") return labels.taskProgress;
+  if (status === "review") return labels.taskReview;
   if (status === "completed") return labels.taskCompleted;
   if (status === "cancelled") return labels.taskCancelled;
   return status.replaceAll("_", " ");
@@ -242,24 +248,24 @@ export function ConciergeTaskQueue({
   tasks,
   lang,
   now,
-  updatingTaskId,
-  onAdvance,
-  onEdit,
   onOpen,
+  onOpenAll,
+  maxItems = 5,
 }: {
   tasks: ConciergeTask[];
   lang: Lang;
   now: Date;
-  updatingTaskId: string | null;
-  onAdvance: (task: ConciergeTask) => void;
-  onEdit: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
+  onOpenAll: () => void;
+  maxItems?: number;
 }) {
   const labels = copy[lang];
   const [showCompleted, setShowCompleted] = useState(false);
   const rows = useMemo(
-    () => sortConciergeTasks(tasks).filter((task) => isConciergeTaskActive(task) !== showCompleted),
-    [showCompleted, tasks],
+    () => sortConciergeTasks(tasks)
+      .filter((task) => isConciergeTaskActive(task) !== showCompleted)
+      .slice(0, maxItems),
+    [maxItems, showCompleted, tasks],
   );
   const openCount = tasks.filter(isConciergeTaskActive).length;
 
@@ -282,6 +288,16 @@ export function ConciergeTaskQueue({
           >
             {showCompleted ? <ListTodo className="size-3.5" /> : <History className="size-3.5" />}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 gap-1 px-2 text-[11px]"
+            onClick={onOpenAll}
+          >
+            {labels.allTasks}
+            <ArrowRight className="size-3.5" />
+          </Button>
         </div>
       </div>
       <div className="space-y-2 p-2">
@@ -289,7 +305,6 @@ export function ConciergeTaskQueue({
           <p className="px-3 py-8 text-center text-xs text-muted-foreground">{showCompleted ? labels.noTaskHistory : labels.noTasks}</p>
         ) : (
           rows.map((task) => {
-            const nextStatus = nextConciergeTaskStatus(task.status);
             const overdue = isConciergeTaskOverdue(task, now);
             const scheduledAt = task.kind === "event" ? task.starts_at : task.due_at;
             return (
@@ -336,25 +351,6 @@ export function ConciergeTaskQueue({
                   <p className="truncate border-t border-border/60 pt-1.5">{labels.assignedBy}: <span className="font-medium text-foreground">{task.assigned_by_name}</span></p>
                 </div>
                 </button>
-                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3">
-                  <Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs" aria-label={labels.editTask} onClick={() => onEdit(task)}>
-                    <Pencil />{labels.editTask}
-                  </Button>
-                  {nextStatus ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
-                      disabled={updatingTaskId === task.id}
-                      aria-label={labels.advanceTask.replace("{status}", taskStatusLabel(nextStatus, lang))}
-                      onClick={() => onAdvance(task)}
-                    >
-                      {updatingTaskId === task.id ? <LoaderCircle className="animate-spin" /> : <CheckCircle2 />}
-                      {taskStatusLabel(nextStatus, lang)}
-                    </Button>
-                  ) : <span />}
-                </div>
               </article>
             );
           })
@@ -370,12 +366,16 @@ export function ConciergeAgendaView({
   providersById,
   patientNames,
   lang,
+  onOpenService,
+  onOpenTask,
 }: {
   services: ConciergeService[];
   tasks: ConciergeTask[];
   providersById: Map<string, ConciergeProvider>;
   patientNames: Map<string, string>;
   lang: Lang;
+  onOpenService: (service: ConciergeService) => void;
+  onOpenTask: (task: ConciergeTask) => void;
 }) {
   const labels = copy[lang];
   const agenda = useMemo(
@@ -409,8 +409,29 @@ export function ConciergeAgendaView({
               const provider = item.providerId ? providersById.get(item.providerId) : null;
               const address = item.address || conciergeProviderAddress(provider);
               const directions = googleMapsDirectionsUrl(address);
+              const openItem = () => {
+                if (item.kind === "service") {
+                  const service = services.find((candidate) => candidate.id === item.id);
+                  if (service) onOpenService(service);
+                  return;
+                }
+                const task = tasks.find((candidate) => candidate.id === item.id);
+                if (task) onOpenTask(task);
+              };
               return (
-                <article key={`${item.kind}:${item.id}`} className="grid gap-2 px-4 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center">
+                <article
+                  key={`${item.kind}:${item.id}`}
+                  className="grid cursor-pointer gap-2 px-4 py-3 transition-colors hover:bg-muted/35 focus-within:bg-muted/35 sm:grid-cols-[7rem_minmax(0,1fr)_auto] sm:items-center"
+                  role="button"
+                  tabIndex={0}
+                  onClick={openItem}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openItem();
+                    }
+                  }}
+                >
                   <div className="font-mono text-xs text-muted-foreground">
                     {dateTime(item.date, lang).split(", ").at(-1)}
                   </div>
@@ -425,7 +446,7 @@ export function ConciergeAgendaView({
                     {item.patientName ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.patientName}</p> : null}
                   </div>
                   {directions ? (
-                    <Button nativeButton={false} render={<a href={directions} target="_blank" rel="noreferrer" />} variant="outline" size="sm">
+                    <Button nativeButton={false} render={<a href={directions} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} />} variant="outline" size="sm">
                       <Navigation />{labels.route}
                     </Button>
                   ) : null}
@@ -458,6 +479,7 @@ export function ConciergeMapView({
   const [routeDate, setRouteDate] = useState(() => localDateInputValue(new Date()));
   const [routeOrder, setRouteOrder] = useState<string[]>([]);
   const [selectedRouteStopIds, setSelectedRouteStopIds] = useState<Set<string>>(() => new Set());
+  const [previewAddress, setPreviewAddress] = useState<string | null>(null);
   const knownRouteStopIdsRef = useRef<Set<string>>(new Set());
   const providersById = useMemo(() => new Map(providers.map((provider) => [provider.id, provider])), [providers]);
   const routeStops = useMemo(
@@ -502,11 +524,15 @@ export function ConciergeMapView({
   const routableStops = routeStops.filter((stop) => Boolean(stop.address));
   const missingAddressCount = routeStops.length - routableStops.length;
   const destinations = useMemo(() => {
+    const seen = new Set<string>();
     return services.flatMap((service) => {
-      if (!service.provider_id) return [];
+      if (!service.provider_id || ["completed", "cancelled"].includes(service.status)) return [];
       const provider = providersById.get(service.provider_id);
       const address = conciergeServiceRouteAddress(service, provider);
       if (!provider || !address) return [];
+      const dedupeKey = `${provider.id}:${address.trim().toLocaleLowerCase()}`;
+      if (seen.has(dedupeKey)) return [];
+      seen.add(dedupeKey);
       return [{ service, provider, address }];
     });
   }, [providersById, services]);
@@ -675,6 +701,21 @@ export function ConciergeMapView({
           <MapPin className="size-4 text-primary" />
           <h2 className="text-sm font-semibold">{labels.destinations}</h2>
         </div>
+        {previewAddress ? (
+          <div className="border-b border-border/70 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="truncate text-xs font-medium">{labels.mapPreview}: {previewAddress}</p>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setPreviewAddress(null)}>×</Button>
+            </div>
+            <iframe
+              title={labels.mapPreview}
+              src={`https://www.google.com/maps?q=${encodeURIComponent(previewAddress)}&output=embed`}
+              className="h-72 w-full rounded-lg border border-border/70"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        ) : null}
         {destinations.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted-foreground">{labels.noDestinations}</p>
         ) : (
@@ -687,6 +728,9 @@ export function ConciergeMapView({
                 </p>
                 <p className="mt-2 flex items-start gap-1.5 text-xs leading-5"><MapPin className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />{address}</p>
                 <div className="mt-3 grid grid-cols-2 gap-1.5">
+                  <Button type="button" variant="outline" size="sm" className="col-span-2" onClick={() => setPreviewAddress(address)}>
+                    <MapPin />{labels.showOnMap}
+                  </Button>
                   <MapAction href={googleMapsSearchUrl(address)} label={labels.openMap} icon={MapPin} />
                   <MapAction href={googleMapsDirectionsUrl(address)} label={labels.directions} icon={Navigation} />
                 </div>

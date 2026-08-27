@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { AiMark } from "@/components/ui/ai-mark";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,8 +12,13 @@ import {
 import { ApiRequestError } from "@/lib/api";
 import {
   createMedicationEvidenceReview,
+  createMedicationAiAnalysis,
+  fetchMedicationAiAnalysis,
   fetchMedicationEvidenceReview,
   fetchMedicationEvidenceReviewPreview,
+  retryMedicationAiAnalysis,
+  type MedicationAiAnalysis,
+  type MedicationAiProvider,
   type MedicationEvidenceCitation,
   type MedicationEvidenceDraftItem,
   type MedicationEvidenceReview,
@@ -72,7 +77,7 @@ function safeExternalUrl(value: string | null) {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+    return url.protocol === "https:" ? url.toString() : null;
   } catch {
     return null;
   }
@@ -100,9 +105,10 @@ function SummaryStrip({ summary, tx }: { summary: MedicationEvidenceSummary; tx:
     [tx("Сигналы", "Hinweise"), summary.findings_total],
     [tx("Высокий приоритет", "Hohe Priorität"), summary.high_priority_findings],
     [tx("Не хватает данных", "Fehlende Daten"), summary.missing_data_total],
+    [tx("Оценки G-BA", "G-BA-Bewertungen"), summary.benefit_assessments_total],
   ] as const;
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border/60 bg-white grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="grid overflow-hidden rounded-lg border border-border/60 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
       {items.map(([label, value], index) => (
         <div
           key={label}
@@ -117,22 +123,6 @@ function SummaryStrip({ summary, tx }: { summary: MedicationEvidenceSummary; tx:
           <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</p>
         </div>
       ))}
-    </div>
-  );
-}
-
-function LocalEvidenceNotice({ tx }: { tx: Bilingual }) {
-  return (
-    <div className="rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
-      <p className="font-medium text-foreground">
-        {tx("Локальный пакет доказательств", "Lokales Evidenzpaket")}
-      </p>
-      <p className="mt-0.5">
-        {tx(
-          "Внешний AI-провайдер не настроен и внешние вызовы не выполняются. Пакет формируется детерминированно из зафиксированных данных Medication Intelligence.",
-          "Es ist kein externer AI-Anbieter konfiguriert und es erfolgen keine externen Aufrufe. Das Paket wird deterministisch aus den gespeicherten Medication-Intelligence-Daten erstellt.",
-        )}
-      </p>
     </div>
   );
 }
@@ -158,22 +148,18 @@ export function MedicationEvidenceReviewPanelContent({
     : null;
 
   return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-white" aria-label="Evidence Copilot">
+    <section
+      className="overflow-hidden rounded-lg border border-border/70 bg-white"
+      aria-label={tx("AI-анализ доказательств", "KI-Evidenzprüfung")}
+    >
       <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="size-2 rounded-full bg-foreground/70" />
-            <h2 className="text-[13px] font-semibold text-foreground">Evidence Copilot</h2>
-            <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
-              {tx("Только локальные доказательства", "Nur lokale Evidenz")}
-            </Badge>
+            <AiMark className="size-4 text-foreground" />
+            <h2 className="text-[13px] font-semibold text-foreground">
+              {tx("AI-анализ доказательств", "KI-Evidenzprüfung")}
+            </h2>
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {tx(
-              "Неизменяемый пакет проверяемых фактов, вопросов и ограничений — без рекомендаций по лечению.",
-              "Unveränderliches Paket prüfbarer Fakten, Fragen und Einschränkungen – ohne Therapieempfehlungen.",
-            )}
-          </p>
         </div>
         {preview ? (
           <span className="shrink-0 text-[10px] text-muted-foreground">
@@ -202,15 +188,14 @@ export function MedicationEvidenceReviewPanelContent({
           </div>
         ) : (
           <>
-            <LocalEvidenceNotice tx={tx} />
             <SummaryStrip summary={preview.summary} tx={tx} />
 
             {operation === "stale" ? (
               <div role="alert" className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
                 <span>
                   {tx(
-                    "Medication Intelligence изменился. Обновите предпросмотр и сформируйте пакет из актуальных данных.",
-                    "Medication Intelligence hat sich geändert. Aktualisieren Sie die Vorschau und erstellen Sie das Paket aus den aktuellen Daten.",
+                    "Данные о медикаментах изменились. Обновите предпросмотр и сформируйте пакет из актуальных данных.",
+                    "Die Medikationsdaten haben sich geändert. Aktualisieren Sie die Vorschau und erstellen Sie das Paket aus den aktuellen Daten.",
                   )}
                 </span>
                 {onRefreshStale ? (
@@ -247,12 +232,6 @@ export function MedicationEvidenceReviewPanelContent({
                     {tx("Пакеты доказательств ещё не создавались.", "Es wurden noch keine Evidenzpakete erstellt.")}
                   </p>
                 )}
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  {tx(
-                    "Клиническое согласование не настроено; кнопки подтверждения здесь нет.",
-                    "Eine klinische Freigabe ist nicht konfiguriert; es gibt hier keine Freigabeaktion.",
-                  )}
-                </p>
               </div>
               <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                 {preview.latest_review && preview.permissions.can_read_review && onViewLatest ? (
@@ -263,6 +242,7 @@ export function MedicationEvidenceReviewPanelContent({
                     className="min-h-11 rounded-lg sm:min-h-8"
                     onClick={() => onViewLatest(preview.latest_review!.id)}
                   >
+                    <AiMark className="size-3.5" />
                     {tx("Открыть пакет", "Paket öffnen")}
                   </Button>
                 ) : null}
@@ -274,6 +254,7 @@ export function MedicationEvidenceReviewPanelContent({
                     disabled={operation === "creating" || !preview.intelligence_fingerprint}
                     onClick={onCreate}
                   >
+                    <AiMark className="size-3.5" />
                     {operation === "creating"
                       ? tx("Формируем…", "Wird erstellt…")
                       : tx("Создать пакет доказательств", "Evidenzpaket erstellen")}
@@ -329,18 +310,20 @@ function DraftGroup({
   citations,
   lang,
   emptyText,
+  ai = false,
 }: {
   title: string;
   items: MedicationEvidenceDraftItem[];
   citations: Map<string, MedicationEvidenceCitation>;
   lang: Lang;
   emptyText: string;
+  ai?: boolean;
 }) {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
       <header className="flex items-center gap-2 border-b border-border/60 bg-muted/15 px-3 py-2.5">
-        <span className="size-1.5 rounded-full bg-foreground/70" />
+        {ai ? <AiMark className="size-3.5 text-foreground" /> : <span className="size-1.5 rounded-full bg-foreground/70" />}
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{items.length}</span>
       </header>
@@ -378,7 +361,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
         <span className="size-1.5 rounded-full bg-foreground/70" />
         <span className="text-xs font-semibold text-foreground">{tx("Снимок доказательств", "Evidenz-Snapshot")}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-          {review.bundle.findings.length + review.bundle.missing_data.length}
+          {review.bundle.findings.length + review.bundle.missing_data.length + review.bundle.benefit_assessments.length}
         </span>
       </summary>
       <div className="border-t border-border/60">
@@ -392,14 +375,45 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
           </div>
         ))}
         {review.bundle.missing_data.map((missing) => (
-          <div key={missing.code} className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
+          <div key={missing.citation_ref} className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
             <p className="text-xs text-muted-foreground">
               {lang === "de" ? missing.reason_de : missing.reason_ru}
             </p>
             <CitationRefs refs={[missing.citation_ref].filter(Boolean)} citations={citations} tx={tx} />
           </div>
         ))}
-        {review.bundle.findings.length === 0 && review.bundle.missing_data.length === 0 ? (
+        {review.bundle.benefit_assessments.map((assessment) => (
+          <div key={assessment.evidence_ref} className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-foreground">
+                  G-BA · {assessment.indication_short || assessment.dossier_reference}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                  {assessment.patient_group || "—"} · {tx("Дополнительная польза", "Zusatznutzen")}: {assessment.benefit_extent || "—"}
+                  {assessment.benefit_probability
+                    ? ` · ${tx("Вероятность", "Wahrscheinlichkeit")}: ${assessment.benefit_probability}`
+                    : ""}
+                </p>
+              </div>
+              <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
+                {assessment.decision_date || "—"}
+              </span>
+            </div>
+            <CitationRefs refs={[assessment.citation_ref].filter(Boolean)} citations={citations} tx={tx} />
+          </div>
+        ))}
+        {review.bundle.benefit_assessments.length > 0 ? (
+          <p className="border-t border-border/50 bg-muted/10 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+            {tx(
+              "Точное совпадение PZN/ATC не подтверждает показание и не определяет принадлежность конкретного пациента к группе G-BA.",
+              "Eine exakte PZN-/ATC-Zuordnung bestätigt weder die Indikation noch die Zugehörigkeit der konkreten Person zur G-BA-Gruppe.",
+            )}
+          </p>
+        ) : null}
+        {review.bundle.findings.length === 0
+        && review.bundle.missing_data.length === 0
+        && review.bundle.benefit_assessments.length === 0 ? (
           <p className="px-3 py-5 text-center text-xs text-muted-foreground">
             {tx("В снимке нет сигналов или запросов данных.", "Der Snapshot enthält keine Hinweise oder Datenanforderungen.")}
           </p>
@@ -510,13 +524,6 @@ export function MedicationEvidenceReviewContent({
           {review.bundle.version} · {formatTimestamp(review.review.created_at, lang) || review.review.id}
         </span>
       </div>
-      <LocalEvidenceNotice tx={tx} />
-      <div className="rounded-lg border border-border/60 bg-muted/10 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-        {tx(
-          "Клиническое согласование не настроено. Этот пакет предназначен только для чтения и медицинской проверки уполномоченным специалистом.",
-          "Eine klinische Freigabe ist nicht konfiguriert. Dieses Paket dient ausschließlich der Lektüre und medizinischen Prüfung durch autorisierte Fachpersonen.",
-        )}
-      </div>
       <SummaryStrip summary={review.bundle.summary} tx={tx} />
 
       <DraftGroup
@@ -543,6 +550,131 @@ export function MedicationEvidenceReviewContent({
       <EvidenceSnapshot review={review} lang={lang} tx={tx} />
       <ProvenanceDetails review={review} lang={lang} tx={tx} />
     </div>
+  );
+}
+
+function aiProviderMessage(provider: MedicationAiProvider, tx: Bilingual) {
+  if (provider.reason_code === "data_transfer_not_approved") {
+    return tx(
+      "AI выключен до документированного разрешения на передачу обезличенных медицинских данных.",
+      "KI bleibt deaktiviert, bis die Übertragung de-identifizierter Gesundheitsdaten dokumentiert freigegeben ist.",
+    );
+  }
+  if (provider.reason_code === "api_key_missing" || provider.reason_code === "model_missing") {
+    return tx(
+      "AI-провайдер включён, но серверная конфигурация ещё не завершена.",
+      "Der KI-Anbieter ist aktiviert, die Serverkonfiguration ist jedoch noch unvollständig.",
+    );
+  }
+  if (provider.status === "blocked") {
+    return tx(
+      "AI-провайдер заблокирован безопасной серверной конфигурацией.",
+      "Der KI-Anbieter ist durch die sichere Serverkonfiguration blockiert.",
+    );
+  }
+  if (provider.status === "disabled") {
+    return tx("AI-провайдер отключён администратором.", "Der KI-Anbieter wurde administrativ deaktiviert.");
+  }
+  return tx("AI-провайдер пока не настроен.", "Der KI-Anbieter ist noch nicht konfiguriert.");
+}
+
+function MedicationAiAnalysisSection({
+  review,
+  provider,
+  analysis,
+  loading,
+  error,
+  lang,
+  onCreate,
+  onRetry,
+}: {
+  review: MedicationEvidenceReview;
+  provider: MedicationAiProvider;
+  analysis: MedicationAiAnalysis | null;
+  loading: boolean;
+  error: string | null;
+  lang: Lang;
+  onCreate: () => void;
+  onRetry: () => void;
+}) {
+  const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
+  const citations = useMemo(
+    () => new Map(review.bundle.citations.map((citation) => [citation.id, citation])),
+    [review.bundle.citations],
+  );
+  const displayProvider = analysis?.provider ?? provider;
+  const ready = displayProvider.status === "ready" && displayProvider.external_calls_enabled;
+  return (
+    <section
+      className="overflow-hidden rounded-lg border border-border/70 bg-white"
+      aria-label={tx("AI-черновик доказательств", "KI-Evidenzentwurf")}
+    >
+      <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <AiMark className="size-4 text-foreground" />
+          <h3 className="text-xs font-semibold text-foreground">{tx("AI-черновик", "KI-Entwurf")}</h3>
+        </div>
+      </header>
+      <div className="space-y-3 p-3">
+        {!ready && analysis?.status !== "ready" ? (
+          <p className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/10 px-3 py-3 text-xs text-muted-foreground">
+            <AiMark className="mt-0.5 size-3.5 text-foreground" />
+            <span>{aiProviderMessage(displayProvider, tx)}</span>
+          </p>
+        ) : error ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
+            <span>{error}</span>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={analysis?.status === "failed" ? onRetry : onCreate}>
+              <AiMark className="size-3.5" />
+              {tx("Повторить", "Erneut versuchen")}
+            </Button>
+          </div>
+        ) : !analysis ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-border/60 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {tx(
+                "AI получит только обезличенный снимок доказательств и разрешённые ссылки на цитаты.",
+                "Die KI erhält ausschließlich einen de-identifizierten Evidenz-Snapshot und erlaubte Zitatreferenzen.",
+              )}
+            </p>
+            <Button type="button" size="sm" className="min-h-11 shrink-0 rounded-lg sm:min-h-8" disabled={loading} onClick={onCreate}>
+              <AiMark className="size-3.5" />
+              {loading ? tx("Ставим в очередь…", "Wird eingereiht…") : tx("Создать AI-черновик", "KI-Entwurf erstellen")}
+            </Button>
+          </div>
+        ) : analysis.status === "requested" || analysis.status === "processing" ? (
+          <div role="status" className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-3 text-xs text-muted-foreground">
+            <AiMark className="size-4 animate-pulse text-foreground" />
+            {analysis.status === "processing"
+              ? tx("AI обрабатывает обезличенный пакет…", "Die KI verarbeitet das de-identifizierte Paket…")
+              : tx("AI-черновик ожидает обработки…", "Der KI-Entwurf wartet auf Verarbeitung…")}
+          </div>
+        ) : analysis.status === "failed" ? (
+          <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-start gap-2"><AiMark className="mt-0.5 size-3.5" />{tx("AI-черновик не прошёл безопасную обработку. Локальный пакет не изменён.", "Der KI-Entwurf konnte nicht sicher verarbeitet werden. Das lokale Paket blieb unverändert.")}</span>
+            <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" disabled={loading} onClick={onRetry}>
+              <AiMark className="size-3.5" />
+              {tx("Повторить", "Erneut versuchen")}
+            </Button>
+          </div>
+        ) : analysis.draft ? (
+          <>
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-amber-950">
+              <AiMark className="mt-0.5 size-3.5" />
+              <span>
+                {tx(
+                  "AI-текст не является медицинским решением. Проверяйте каждое утверждение по прикреплённым источникам.",
+                  "KI-Text ist keine medizinische Entscheidung. Prüfen Sie jede Aussage anhand der verknüpften Quellen.",
+                )}
+              </span>
+            </div>
+            <DraftGroup ai title={tx("AI-сводка доказательств", "KI-Evidenzzusammenfassung")} items={analysis.draft.evidence_summary} citations={citations} lang={lang} emptyText={tx("AI-сводка пуста.", "Die KI-Zusammenfassung ist leer.")} />
+            <DraftGroup ai title={tx("AI-вопросы для проверки", "KI-Prüffragen")} items={analysis.draft.verification_questions} citations={citations} lang={lang} emptyText={tx("AI-вопросов нет.", "Keine KI-Prüffragen vorhanden.")} />
+            <DraftGroup ai title={tx("AI-ограничения", "KI-Einschränkungen")} items={analysis.draft.limitations} citations={citations} lang={lang} emptyText={tx("AI-ограничения не перечислены.", "Keine KI-Einschränkungen aufgeführt.")} />
+          </>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -580,8 +712,13 @@ export function MedicationEvidenceReviewPanel({
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<MedicationAiAnalysis | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const requestEpochRef = useRef(0);
+  const aiRequestEpochRef = useRef(0);
   const idempotencyKeyRef = useRef<string | null>(null);
+  const aiIdempotencyKeyRef = useRef<string | null>(null);
   const pendingFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -605,15 +742,57 @@ export function MedicationEvidenceReviewPanel({
     setReview(null);
     setReviewId(null);
     setReviewError(null);
+    setAiAnalysis(null);
+    setAiLoading(false);
+    setAiError(null);
     setOperation("idle");
     setOperationError(null);
     idempotencyKeyRef.current = null;
+    aiIdempotencyKeyRef.current = null;
     pendingFingerprintRef.current = null;
+    aiRequestEpochRef.current += 1;
   }, [patientId]);
 
   const currentPreview = previewState.patientId === patientId
     ? previewState
     : { patientId, data: null, loading: true, error: false };
+
+  const loadExistingAiAnalysis = useCallback(async (nextReviewId: string, showLoading = true) => {
+    const epoch = ++aiRequestEpochRef.current;
+    if (showLoading) setAiLoading(true);
+    setAiError(null);
+    try {
+      const loaded = await fetchMedicationAiAnalysis(patientId, nextReviewId);
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiAnalysis(loaded);
+    } catch (loadError) {
+      if (epoch !== aiRequestEpochRef.current) return;
+      if (loadError instanceof ApiRequestError && loadError.status === 404) {
+        setAiAnalysis(null);
+      } else {
+        setAiError(lang === "de" ? "Der KI-Status konnte nicht geladen werden." : "Не удалось загрузить статус AI-черновика.");
+      }
+    } finally {
+      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
+    }
+  }, [lang, patientId]);
+
+  useEffect(() => {
+    if (
+      !dialogOpen
+      || !reviewId
+      || aiAnalysis?.provider.status !== "ready"
+      || (aiAnalysis?.status !== "requested" && aiAnalysis?.status !== "processing")
+    ) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      if (active) void loadExistingAiAnalysis(reviewId, false);
+    }, 2_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [aiAnalysis?.provider.status, aiAnalysis?.status, dialogOpen, loadExistingAiAnalysis, reviewId]);
 
   const createReview = async (fingerprint: string) => {
     const epoch = ++requestEpochRef.current;
@@ -636,6 +815,8 @@ export function MedicationEvidenceReviewPanel({
         setReviewId(created.review.id);
         setReviewError(null);
         setDialogOpen(true);
+        setAiAnalysis(null);
+        setAiError(null);
       }
       setReloadToken((token) => token + 1);
     } catch (createError) {
@@ -661,12 +842,15 @@ export function MedicationEvidenceReviewPanel({
     setReview(null);
     setReviewError(null);
     setReviewLoading(true);
+    setAiAnalysis(null);
+    setAiError(null);
     setDialogOpen(true);
     try {
       const loaded = await fetchMedicationEvidenceReview(patientId, nextReviewId);
       if (epoch !== requestEpochRef.current) return;
       setReview(loaded);
       setReviewLoading(false);
+      void loadExistingAiAnalysis(nextReviewId);
     } catch {
       if (epoch !== requestEpochRef.current) return;
       setReviewLoading(false);
@@ -675,6 +859,54 @@ export function MedicationEvidenceReviewPanel({
           ? "Das Evidenzpaket konnte nicht geladen werden."
           : "Не удалось загрузить пакет доказательств.",
       );
+    }
+  };
+
+  const createAiDraft = async () => {
+    if (!reviewId) return;
+    const epoch = ++aiRequestEpochRef.current;
+    const idempotencyKey = aiIdempotencyKeyRef.current
+      || (typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `medication-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    aiIdempotencyKeyRef.current = idempotencyKey;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const created = await createMedicationAiAnalysis(patientId, reviewId, idempotencyKey);
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiAnalysis(created);
+      aiIdempotencyKeyRef.current = null;
+    } catch {
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiError(lang === "de" ? "Der KI-Entwurf konnte nicht angefordert werden." : "Не удалось запросить AI-черновик.");
+    } finally {
+      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
+    }
+  };
+
+  const retryAiDraft = async () => {
+    if (!reviewId) return;
+    const epoch = ++aiRequestEpochRef.current;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const retried = await retryMedicationAiAnalysis(patientId, reviewId);
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiAnalysis(retried);
+    } catch (retryError) {
+      if (epoch !== aiRequestEpochRef.current) return;
+      if (retryError instanceof ApiRequestError && retryError.status === 409) {
+        setAiAnalysis(null);
+        aiIdempotencyKeyRef.current = null;
+        setAiError(lang === "de"
+          ? "Die KI-Konfiguration wurde geändert. Erstellen Sie einen neuen KI-Entwurf."
+          : "Конфигурация AI изменилась. Создайте новый AI-черновик.");
+      } else {
+        setAiError(lang === "de" ? "Der KI-Entwurf konnte nicht erneut gestartet werden." : "Не удалось повторно запустить AI-черновик.");
+      }
+    } finally {
+      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
     }
   };
 
@@ -716,6 +948,7 @@ export function MedicationEvidenceReviewPanel({
         onOpenChange={(open) => {
           if (open) return;
           requestEpochRef.current += 1;
+          aiRequestEpochRef.current += 1;
           setDialogOpen(false);
           setReviewLoading(false);
           setReviewError(null);
@@ -723,11 +956,14 @@ export function MedicationEvidenceReviewPanel({
       >
         <DialogContent className="sm:max-w-5xl">
           <DialogHeader className="border-b border-border/60 pb-3">
-            <DialogTitle>Evidence Copilot</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <AiMark className="size-4" />
+              {lang === "de" ? "KI-Evidenzprüfung" : "AI-анализ доказательств"}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
               {lang === "de"
-                ? "Unveränderliches lokales Evidenzpaket – ohne externe Provider, Therapieempfehlung oder klinische Freigabe."
-                : "Неизменяемый локальный пакет доказательств — без внешнего провайдера, рекомендаций по лечению или клинического согласования."}
+                ? "Evidenzpaket und optionaler KI-Entwurf."
+                : "Пакет доказательств и дополнительный AI-черновик."}
             </DialogDescription>
           </DialogHeader>
           <MedicationEvidenceReviewContent
@@ -737,6 +973,24 @@ export function MedicationEvidenceReviewPanel({
             language={lang}
             onRetry={reviewId ? () => void openReview(reviewId) : undefined}
           />
+          {review ? (
+            <MedicationAiAnalysisSection
+              review={review}
+              provider={currentPreview.data?.ai_provider ?? {
+                kind: "none",
+                status: "not_configured",
+                external_calls_enabled: false,
+                reason_code: "external_provider_not_configured",
+                model: null,
+              }}
+              analysis={aiAnalysis}
+              loading={aiLoading}
+              error={aiError}
+              lang={lang}
+              onCreate={() => void createAiDraft()}
+              onRetry={() => void retryAiDraft()}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

@@ -818,6 +818,15 @@ fn finalize_patient_group(state: &mut ParseState) -> Result<(), GbaAisConnectorE
     normalize_set(&mut group.atc_codes, 64, "ATC codes")?;
     normalize_set(&mut group.ask_numbers, 64, "ASK numbers")?;
     normalize_set(&mut group.pzns, 4096, "PZNs")?;
+    if !group.atc_codes.iter().all(|value| valid_atc(value)) {
+        return Err(invalid("ATC_CODE does not match the official AIS format"));
+    }
+    if !group.ask_numbers.iter().all(|value| valid_ask(value)) {
+        return Err(invalid("ASK_NR does not match the official AIS format"));
+    }
+    if !group.pzns.iter().all(|value| valid_pzn(value)) {
+        return Err(invalid("PZN does not match the official AIS format"));
+    }
     let mut trade_names = decision.trade_names.clone();
     normalize_set(&mut trade_names, 256, "trade names")?;
 
@@ -954,6 +963,23 @@ fn validate_official_url(value: &str) -> Result<(), GbaAisConnectorError> {
 
 fn numeric_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 9 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn valid_pzn(value: &str) -> bool {
+    value.len() == 8 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn valid_ask(value: &str) -> bool {
+    value.len() == 5 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn valid_atc(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7
+        && bytes[0].is_ascii_uppercase()
+        && bytes[1..3].iter().all(u8::is_ascii_digit)
+        && bytes[3..5].iter().all(u8::is_ascii_uppercase)
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
 }
 
 fn xml_attributes(
@@ -1207,6 +1233,20 @@ mod tests {
             parse_gba_ais_xml(custom_entity.as_bytes()),
             Err(GbaAisConnectorError::InvalidDelivery(_))
         ));
+    }
+
+    #[test]
+    fn rejects_identifiers_outside_the_official_ais_xsd_formats() {
+        for invalid_delivery in [
+            VALID_XML.replace("12345678", "1234567"),
+            VALID_XML.replace("A01AA01", "a01aa01"),
+            VALID_XML.replace("ASK_NR value=\"12345\"", "ASK_NR value=\"1234\""),
+        ] {
+            assert!(matches!(
+                parse_gba_ais_xml(invalid_delivery.as_bytes()),
+                Err(GbaAisConnectorError::InvalidDelivery(_))
+            ));
+        }
     }
 
     #[test]

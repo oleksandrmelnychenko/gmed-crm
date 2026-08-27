@@ -9,21 +9,18 @@ import {
   Clock3,
   Columns3,
   List,
-  ListChecks,
   ListPlus,
+  KeyRound,
   LoaderCircle,
   MapPinned,
   MessageSquareText,
-  Plus,
   ReceiptText,
-  RefreshCw,
   Search,
   UserRound,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { PageHeader } from "@/components/ui-shell";
@@ -31,6 +28,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
 import {
@@ -40,14 +38,15 @@ import {
   conciergeServiceDisplayTitle,
   conciergeServiceTaxonomyLabel,
   conciergeWorkspaceStats,
-  canChangeConciergeTaskStatus,
   canModifyConciergeTask,
   conciergeOperationalItemsListPath,
   conciergeTaskErrorMessage,
+  conciergeTasksAssignedToActor,
+  conciergeTasksVisibleToActor,
   filterConciergeServices,
   filterConciergeTaskAssignees,
+  isConciergeKeyService,
   isConciergeServiceOverdue,
-  nextConciergeTaskStatus,
   sortConciergeServices,
   type ApplyPartnerQuoteResponse,
   type ConciergeAssignee,
@@ -55,9 +54,11 @@ import {
   type ConciergePartnerInteraction,
   type ConciergeProvider,
   type ConciergeService,
+  type ConciergeKeyAction,
+  type ConciergeKeyEvent,
+  type RecordConciergeKeyEventResponse,
   type ConciergeTask,
 } from "./model";
-import { ConciergeTaskManager } from "./task-manager";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
   ConciergePartnerInteractionDialog,
@@ -79,6 +80,7 @@ import {
   ConciergeTaskQueue,
 } from "./workspace-views";
 import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
+import { ConciergeKeyHandoverDialog } from "./key-handover-dialog";
 import {
   ConciergeServiceRequestDialog,
   requestStatusOptions,
@@ -125,8 +127,8 @@ const REALTIME_EVENTS = [
 
 const text = {
   de: {
-    title: "Concierge-Arbeitsbereich",
-    subtitle: "Services, Aufgaben und Partneraktivitäten zentral steuern",
+    title: "Operationszentrale",
+    subtitle: "CRM-Anfragen, Kundenservices und die tägliche operative Arbeit steuern",
     searchLabel: "Suche",
     search: "Service, Patient, Anbieter oder Referenz suchen",
     refresh: "Aktualisieren",
@@ -147,7 +149,7 @@ const text = {
     in_service: "In Durchführung",
     completed: "Abgeschlossen",
     emptyColumn: "Keine Services in diesem Abschnitt",
-    empty: "Keine zugewiesenen Services gefunden.",
+    empty: "Ihnen sind derzeit keine Services zugewiesen.",
     patient: "Patient",
     schedule: "Termin",
     provider: "Anbieter",
@@ -178,13 +180,14 @@ const text = {
     cancelled: "Storniert",
     partner: "Partner",
     expenseReceipt: "Ausgabe / Beleg",
+    keyHandover: "Schlüssel",
     editRequest: "Bearbeiten",
     createTaskFromRequest: "Aufgabe anlegen",
     status: "Status",
   },
   ru: {
-    title: "Рабочее пространство консьержа",
-    subtitle: "Единое управление услугами, задачами и взаимодействием с партнёрами",
+    title: "Операционный центр",
+    subtitle: "Заявки из CRM, клиентские сервисы и ежедневная операционная работа",
     searchLabel: "Поиск",
     search: "Поиск по услуге, пациенту, поставщику или номеру",
     refresh: "Обновить",
@@ -205,7 +208,7 @@ const text = {
     in_service: "Выполняется",
     completed: "Завершено",
     emptyColumn: "В этом разделе пока нет услуг",
-    empty: "Назначенные вам услуги не найдены.",
+    empty: "Назначенных вам услуг пока нет.",
     patient: "Пациент",
     schedule: "Время",
     provider: "Поставщик",
@@ -236,6 +239,7 @@ const text = {
     cancelled: "Отменено",
     partner: "Партнёр",
     expenseReceipt: "Расход / документ",
+    keyHandover: "Ключ",
     editRequest: "Изменить",
     createTaskFromRequest: "Создать задачу",
     status: "Статус",
@@ -243,7 +247,7 @@ const text = {
 } as const;
 
 type ConciergeText = (typeof text)[Lang];
-type ViewMode = "board" | "list" | "calendar" | "map" | "tasks";
+type ViewMode = "board" | "list" | "calendar" | "map";
 
 function serviceStatusLabel(status: string, labels: ConciergeText) {
   if (status === "confirmed") return labels.status_confirmed;
@@ -290,7 +294,7 @@ function formatMoney(value: string | null, currency: string, lang: Lang, fallbac
 function serviceAccent(status: ConciergeService["status"], overdue: boolean) {
   if (overdue) return "border-l-rose-400";
   if (status === "completed") return "border-l-emerald-400";
-  if (status === "in_progress") return "border-l-sky-400";
+  if (status === "in_service") return "border-l-sky-400";
   if (status === "booked") return "border-l-indigo-400";
   if (status === "cancelled") return "border-l-slate-300";
   return "border-l-amber-400";
@@ -307,6 +311,8 @@ function ServiceCard({
   onCreateTask,
   onOpenPartner,
   onOpenExpense,
+  onOpenKey,
+  canReopen,
   compact = false,
 }: {
   service: ConciergeService;
@@ -319,6 +325,8 @@ function ServiceCard({
   onCreateTask: (service: ConciergeService) => void;
   onOpenPartner?: (service: ConciergeService) => void;
   onOpenExpense: (service: ConciergeService) => void;
+  onOpenKey?: (service: ConciergeService) => void;
+  canReopen: boolean;
   compact?: boolean;
 }) {
   const taxonomy = conciergeServiceTaxonomyLabel(service, lang);
@@ -467,9 +475,21 @@ function ServiceCard({
           <ReceiptText />
           {labels.expenseReceipt}
         </Button>
+        {onOpenKey ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+            onClick={() => onOpenKey(service)}
+          >
+            <KeyRound />
+            {labels.keyHandover}
+          </Button>
+        ) : null}
         <SelectField
           value={service.status}
-          options={requestStatusOptions(lang)}
+          options={requestStatusOptions(lang, service, canReopen)}
           disabled={updating}
           aria-label={labels.status}
           className="col-span-2 h-8 min-w-40 text-xs sm:col-span-1 sm:w-auto"
@@ -527,6 +547,7 @@ function MetricCard({
 export function ConciergeWorkspacePage() {
   const { lang } = useLang();
   const { user } = useAuth();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const labels = text[lang];
   const [services, setServices] = useState<ConciergeService[]>([]);
@@ -536,16 +557,11 @@ export function ConciergeWorkspacePage() {
   const [taskProviders, setTaskProviders] = useState<ConciergeProvider[]>([]);
   const [taskPatients, setTaskPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>(() => searchParams.get("view") === "tasks" ? "tasks" : "board");
+  const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [version, setVersion] = useState(0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
-  const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [taskSourceService, setTaskSourceService] = useState<ConciergeService | null>(null);
@@ -572,6 +588,11 @@ export function ConciergeWorkspacePage() {
   const [expenseError, setExpenseError] = useState("");
   const [submittingExpense, setSubmittingExpense] = useState(false);
   const [expenseProgress, setExpenseProgress] = useState(0);
+  const [keyServiceId, setKeyServiceId] = useState<string | null>(null);
+  const [keyEvents, setKeyEvents] = useState<ConciergeKeyEvent[]>([]);
+  const [keyError, setKeyError] = useState("");
+  const [loadingKeyEvents, setLoadingKeyEvents] = useState(false);
+  const [submittingKeyAction, setSubmittingKeyAction] = useState<ConciergeKeyAction | null>(null);
   const expenseLoadSequenceRef = useRef(0);
   const now = useMemo(() => new Date(), [version, services, tasks]);
 
@@ -605,11 +626,18 @@ export function ConciergeWorkspacePage() {
   );
 
   useEffect(() => {
+    if (searchParams.get("view") !== "tasks") return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    const queryString = next.toString();
+    staffGo(`/task-manager${queryString ? `?${queryString}` : ""}`);
+  }, [searchParams, staffGo]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      if (services.length > 0) setRefreshing(true);
-      else setLoading(true);
+      if (services.length === 0) setLoading(true);
       setError("");
       try {
         const [serviceRows, taskRows, providerRows, assigneeRows, taskProviderRows, patientRows] = await Promise.all([
@@ -642,7 +670,7 @@ export function ConciergeWorkspacePage() {
         ]);
         if (!cancelled) {
           setServices(serviceRows);
-          setTasks(taskRows);
+          setTasks(conciergeTasksVisibleToActor(taskRows, user?.id, user?.role));
           setProviders(providerRows);
           setAssignees(assigneeRows);
           setTaskProviders(taskProviderRows.sort((left, right) => left.name.localeCompare(right.name)));
@@ -658,7 +686,6 @@ export function ConciergeWorkspacePage() {
       } finally {
         if (!cancelled) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
     }
@@ -672,6 +699,10 @@ export function ConciergeWorkspacePage() {
   const visibleServices = useMemo(
     () => sortConciergeServices(filterConciergeServices(services, query)),
     [query, services],
+  );
+  const workspaceTasks = useMemo(
+    () => conciergeTasksAssignedToActor(tasks, user?.id),
+    [tasks, user?.id],
   );
   const stats = useMemo(() => conciergeWorkspaceStats(services, now), [now, services]);
   const servicesByColumn = useMemo(() => {
@@ -705,6 +736,10 @@ export function ConciergeWorkspacePage() {
     () => services.find((service) => service.id === expenseServiceId) ?? null,
     [expenseServiceId, services],
   );
+  const keyService = useMemo(
+    () => services.find((service) => service.id === keyServiceId) ?? null,
+    [keyServiceId, services],
+  );
   const editingRequest = useMemo(
     () => services.find((service) => service.id === editingRequestId) ?? null,
     [editingRequestId, services],
@@ -732,6 +767,57 @@ export function ConciergeWorkspacePage() {
       setExpenseError(loadError instanceof Error ? loadError.message : labels.loadFailed);
     } finally {
       if (expenseLoadSequenceRef.current === loadSequence) setExpenseLoading(false);
+    }
+  }
+
+  async function openKeyHandover(service: ConciergeService) {
+    if (!isConciergeKeyService(service)) return;
+    setKeyServiceId(service.id);
+    setKeyEvents([]);
+    setKeyError("");
+    setLoadingKeyEvents(true);
+    try {
+      const rows = await apiFetch<ConciergeKeyEvent[]>(
+        `/concierge-services/${service.id}/key-events`,
+        { forceFresh: true },
+      );
+      setKeyEvents(rows);
+    } catch (loadError) {
+      setKeyError(loadError instanceof Error ? loadError.message : labels.loadFailed);
+    } finally {
+      setLoadingKeyEvents(false);
+    }
+  }
+
+  async function recordKeyHandover(action: ConciergeKeyAction, occurredAt: string, note: string) {
+    if (!keyService || submittingKeyAction) return;
+    setSubmittingKeyAction(action);
+    setKeyError("");
+    try {
+      const response = await apiFetch<RecordConciergeKeyEventResponse>(
+        `/concierge-services/${keyService.id}/key-events`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action,
+            occurred_at: new Date(occurredAt).toISOString(),
+            note: note.trim() || null,
+          }),
+        },
+      );
+      setKeyEvents((current) => [...current, response.event]);
+      setServices((current) => current.map((service) => service.id === keyService.id ? {
+        ...service,
+        key_status: response.key_status,
+        key_responsible_user_id: response.key_responsible_user_id,
+        key_responsible_user_name: response.key_responsible_user_name,
+        key_status_at: response.key_status_at,
+      } : service));
+    } catch (recordError) {
+      setKeyError(recordError instanceof Error ? recordError.message : labels.updateFailed);
+      throw recordError;
+    } finally {
+      setSubmittingKeyAction(null);
     }
   }
 
@@ -888,7 +974,7 @@ export function ConciergeWorkspacePage() {
     try {
       const updated = await apiFetch<ConciergeService>(
         `/concierge-services/${service.id}/update`,
-        { method: "POST", body: JSON.stringify({ status }) },
+        { method: "POST", body: JSON.stringify({ status, expected_updated_at: service.updated_at }) },
       );
       clearApiCache("/concierge-services");
       setServices((current) => current.map((item) => (item.id === updated.id ? updated : item)));
@@ -897,43 +983,6 @@ export function ConciergeWorkspacePage() {
     } finally {
       setUpdatingId(null);
     }
-  }
-
-  async function changeTaskStatus(task: ConciergeTask, requestedStatus?: string) {
-    const status = requestedStatus ?? nextConciergeTaskStatus(task.status);
-    if (!status || updatingTaskId || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return;
-
-    setUpdatingTaskId(task.id);
-    setError("");
-    try {
-      const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${task.id}/status`, {
-        method: "POST",
-        body: JSON.stringify({
-          expected_updated_at: task.updated_at,
-          status,
-        }),
-      });
-      clearApiCache("/concierge-operational-items");
-      setTasks((current) =>
-        current.map((item) => item.id === updated.id ? updated : item),
-      );
-    } catch (updateError) {
-      setError(conciergeTaskErrorMessage(updateError, lang, labels.taskUpdateFailed));
-    } finally {
-      setUpdatingTaskId(null);
-    }
-  }
-
-  function advanceTask(task: ConciergeTask) {
-    void changeTaskStatus(task);
-  }
-
-  function openCreateTask() {
-    setTaskError("");
-    setEditingTask(null);
-    setTaskSourceService(null);
-    createTaskRequestIdRef.current = crypto.randomUUID();
-    setTaskDialogOpen(true);
   }
 
   function openCreateTaskFromRequest(service: ConciergeService) {
@@ -970,29 +1019,11 @@ export function ConciergeWorkspacePage() {
     }
   }
 
-  function openEditTask(task: ConciergeTask) {
-    if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
-    setTaskError("");
-    setEditingTask(task);
-    setTaskSourceService(null);
-    setTaskDialogOpen(true);
-  }
-
   function selectViewMode(mode: ViewMode) {
     setViewMode(mode);
     const next = new URLSearchParams(searchParams);
-    if (mode === "tasks") next.set("view", "tasks");
-    else next.delete("view");
-    if (mode !== "tasks") next.delete("task");
-    setSearchParams(next, { replace: true });
-  }
-
-  function openTaskDetail(task: ConciergeTask) {
-    setViewMode("tasks");
-    setDetailTaskId(task.id);
-    const next = new URLSearchParams(searchParams);
-    next.set("view", "tasks");
-    next.set("task", task.id);
+    next.delete("view");
+    next.delete("task");
     setSearchParams(next, { replace: true });
   }
 
@@ -1046,46 +1077,6 @@ export function ConciergeWorkspacePage() {
     }
   }
 
-  async function deleteTask(task: ConciergeTask) {
-    if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
-    setDeletingTaskId(task.id);
-    setError("");
-    try {
-      await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
-      clearApiCache("/concierge-operational-items");
-      setTasks((current) => current.filter((item) => item.id !== task.id));
-      setPendingDeleteTask(null);
-    } catch (deleteError) {
-      setError(conciergeTaskErrorMessage(deleteError, lang, labels.taskDeleteFailed));
-    } finally {
-      setDeletingTaskId(null);
-    }
-  }
-
-  async function changeArchiveState(task: ConciergeTask, archive: boolean) {
-    if (archivingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
-    setArchivingTaskId(task.id);
-    setError("");
-    try {
-      const updated = await apiFetch<ConciergeTask>(
-        `/concierge-operational-items/${task.id}/${archive ? "archive" : "restore"}`,
-        { method: "POST" },
-      );
-      clearApiCache("/concierge-operational-items");
-      setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
-    } catch (archiveError) {
-      setError(
-        conciergeTaskErrorMessage(
-          archiveError,
-          lang,
-          archive ? labels.taskArchiveFailed : labels.taskRestoreFailed,
-        ),
-      );
-    } finally {
-      setArchivingTaskId(null);
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground">
@@ -1098,31 +1089,16 @@ export function ConciergeWorkspacePage() {
   return (
     <div className="space-y-3" data-testid="concierge-workspace">
       <PageHeader
-        title={viewMode === "tasks" ? labels.taskManagerTitle : labels.title}
-        description={viewMode === "tasks" ? labels.taskManagerSubtitle : labels.subtitle}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {viewMode === "tasks" || user?.role === "concierge" ? (
-              <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
-                <Plus />{labels.newTask}
-              </Button>
-            ) : null}
-            <Button type="button" className="h-9 rounded-lg px-3.5" variant="outline" disabled={refreshing} onClick={requestRefresh}>
-              <RefreshCw className={cn(refreshing && "animate-spin")} />
-              {labels.refresh}
-            </Button>
-          </div>
-        }
+        title={labels.title}
+        description={labels.subtitle}
       />
 
-      {viewMode !== "tasks" ? (
-        <section aria-label={labels.title} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-          <MetricCard label={labels.active} value={stats.active} icon={Columns3} />
-          <MetricCard label={labels.today} value={stats.today} icon={CalendarDays} />
-          <MetricCard label={labels.overdue} value={stats.overdue} tone="danger" icon={Clock3} />
-          <MetricCard label={labels.ready} value={stats.readyForBilling} tone="success" icon={CheckCircle2} />
-        </section>
-      ) : null}
+      <section aria-label={labels.title} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <MetricCard label={labels.active} value={stats.active} icon={Columns3} />
+        <MetricCard label={labels.today} value={stats.today} icon={CalendarDays} />
+        <MetricCard label={labels.overdue} value={stats.overdue} tone="danger" icon={Clock3} />
+        <MetricCard label={labels.ready} value={stats.readyForBilling} tone="success" icon={CheckCircle2} />
+      </section>
 
       {error ? (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -1130,9 +1106,8 @@ export function ConciergeWorkspacePage() {
         </div>
       ) : null}
 
-      {viewMode !== "tasks" ? (
-        <div className="relative z-30 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:px-3 sm:py-2">
-          <div className="relative min-w-0">
+      <div className="relative z-30 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:px-3 sm:py-2">
+        <div className="relative min-w-0">
           <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
@@ -1142,9 +1117,8 @@ export function ConciergeWorkspacePage() {
             aria-label={labels.search}
             className="h-10 rounded-md bg-field pl-8 text-xs shadow-none sm:h-8"
           />
-          </div>
         </div>
-      ) : null}
+      </div>
 
       <div className="-mx-2.5 overflow-x-auto px-2.5 pb-1 sm:mx-0 sm:px-0">
         <div className="mx-auto flex w-max min-w-full flex-nowrap justify-center gap-1 sm:min-w-0">
@@ -1153,7 +1127,6 @@ export function ConciergeWorkspacePage() {
             ["list", List, labels.list],
             ["calendar", CalendarDays, labels.calendar],
             ["map", MapPinned, labels.map],
-            ["tasks", ListChecks, labels.taskManager],
           ] as const).map(([mode, Icon, label]) => (
             <Button key={mode} type="button" size="sm" variant={viewMode === mode ? "default" : "ghost"} className="h-9 shrink-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" aria-pressed={viewMode === mode} onClick={() => selectViewMode(mode)}>
               <Icon className="size-3.5" />
@@ -1163,37 +1136,20 @@ export function ConciergeWorkspacePage() {
         </div>
       </div>
 
-      {viewMode === "tasks" ? (
-        <ConciergeTaskManager
-          tasks={tasks}
-          assignees={assignees}
-          lang={lang}
-          now={now}
-          canManageTeam={user?.role === "ceo"}
-          updatingTaskId={updatingTaskId}
-          deletingTaskId={deletingTaskId}
-          archivingTaskId={archivingTaskId}
-          canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
-          canChangeTaskStatus={(task) => canChangeConciergeTaskStatus(task, user?.id, user?.role)}
-          onEdit={openEditTask}
-          onDelete={setPendingDeleteTask}
-          onArchive={(task) => void changeArchiveState(task, true)}
-          onRestore={(task) => void changeArchiveState(task, false)}
-          onOpen={openTaskDetail}
-          onStatusChange={(task, status) => void changeTaskStatus(task, status)}
-        />
-      ) : viewMode === "calendar" ? (
+      {viewMode === "calendar" ? (
         <ConciergeAgendaView
           services={visibleServices}
-          tasks={tasks}
+          tasks={workspaceTasks}
           providersById={providersById}
           patientNames={patientNames}
           lang={lang}
+          onOpenService={openEditRequest}
+          onOpenTask={openWorkspaceTaskDetail}
         />
       ) : viewMode === "map" ? (
         <ConciergeMapView
-          services={services}
-          tasks={tasks}
+          services={visibleServices}
+          tasks={workspaceTasks}
           providers={providers}
           lang={lang}
           onBookProvider={openProviderBooking}
@@ -1235,6 +1191,8 @@ export function ConciergeWorkspacePage() {
                               onEdit={openEditRequest}
                               onCreateTask={openCreateTaskFromRequest}
                               onOpenExpense={(item) => void openExpenseReceipt(item)}
+                              onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
+                              canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
                               onOpenPartner={
                                 service.provider_id && providersById.has(service.provider_id)
                                   ? openPartnerInteraction
@@ -1262,6 +1220,8 @@ export function ConciergeWorkspacePage() {
                     onEdit={openEditRequest}
                     onCreateTask={openCreateTaskFromRequest}
                     onOpenExpense={(item) => void openExpenseReceipt(item)}
+                    onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
+                    canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
                     onOpenPartner={
                       service.provider_id && providersById.has(service.provider_id)
                         ? openPartnerInteraction
@@ -1274,13 +1234,11 @@ export function ConciergeWorkspacePage() {
             )}
           </div>
           <ConciergeTaskQueue
-            tasks={tasks}
+            tasks={workspaceTasks}
             lang={lang}
             now={now}
-            updatingTaskId={updatingTaskId}
-            onAdvance={advanceTask}
-            onEdit={openEditTask}
             onOpen={openWorkspaceTaskDetail}
+            onOpenAll={() => staffGo("/task-manager")}
           />
         </div>
       )}
@@ -1348,6 +1306,22 @@ export function ConciergeWorkspacePage() {
         onSubmit={submitExpense}
         onDownload={downloadExpenseReceipt}
       />
+      <ConciergeKeyHandoverDialog
+        service={keyService}
+        lang={lang}
+        open={Boolean(keyService)}
+        events={keyEvents}
+        error={keyError}
+        loading={loadingKeyEvents}
+        submittingAction={submittingKeyAction}
+        onOpenChange={(open) => {
+          if (open) return;
+          setKeyServiceId(null);
+          setKeyEvents([]);
+          setKeyError("");
+        }}
+        onRecord={recordKeyHandover}
+      />
       <ConciergeServiceRequestDialog
         service={editingRequest}
         lang={lang}
@@ -1355,6 +1329,7 @@ export function ConciergeWorkspacePage() {
         submitting={submittingRequest}
         error={requestError}
         canEditTitle={user?.role === "ceo" || user?.role === "patient_manager"}
+        canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
         onOpenChange={(open) => {
           if (open) return;
           setEditingRequestId(null);
@@ -1402,21 +1377,6 @@ export function ConciergeWorkspacePage() {
           setSearchParams(next, { replace: true });
         }}
         onChanged={requestRefresh}
-      />
-      <DirtyDismissConfirmDialog
-        open={Boolean(pendingDeleteTask)}
-        title={labels.taskDeleteTitle}
-        message={labels.taskDeleteMessage}
-        cancelLabel={labels.taskDeleteCancel}
-        confirmLabel={labels.taskDelete}
-        destructive
-        confirmDisabled={Boolean(deletingTaskId)}
-        onCancel={() => {
-          if (!deletingTaskId) setPendingDeleteTask(null);
-        }}
-        onConfirm={() => {
-          if (pendingDeleteTask) void deleteTask(pendingDeleteTask);
-        }}
       />
     </div>
   );

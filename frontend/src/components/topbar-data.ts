@@ -11,6 +11,35 @@ export interface Notification {
   created_at: string;
 }
 
+export function localizedNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> {
+  if (item.kind === "medication_ai_ready") {
+    return lang === "de"
+      ? {
+          title: "KI-Entwurf bereit",
+          body: "Der de-identifizierte Entwurf kann anhand der Quellen geprüft werden.",
+        }
+      : {
+          title: "AI-черновик готов",
+          body: "Обезличенный черновик доступен для проверки по источникам.",
+        };
+  }
+  if (item.kind === "medication_ai_failed") {
+    return lang === "de"
+      ? {
+          title: "KI-Entwurf fehlgeschlagen",
+          body: "Die sichere Verarbeitung ist fehlgeschlagen; das lokale Paket blieb unverändert.",
+        }
+      : {
+          title: "AI-черновик не сформирован",
+          body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
+        };
+  }
+  return { title: item.title, body: item.body };
+}
+
 export interface ActiveSession {
   user_id: string;
   user_name: string;
@@ -65,6 +94,9 @@ export function notificationHrefForRole(item: Notification, role: string) {
   if (!item.entity_id) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;
+  if (item.entity_type === "patient" && item.kind.startsWith("medication_ai_")) {
+    return `/patients/${item.entity_id}?tab=clinical`;
+  }
   if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
   if (item.entity_type === "provider") return `/providers/${item.entity_id}`;
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;

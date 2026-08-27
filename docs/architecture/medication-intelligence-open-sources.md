@@ -304,18 +304,122 @@ path reads only local snapshots and performs no G-BA request. Phase 8 does not
 turn a benefit assessment into a treatment recommendation: patient-specific
 retrieval and medical review remain separate, explicitly gated steps.
 
+## Exact G-BA evidence retrieval (Phase 9)
+
+`GET /medication-intelligence/evidence/benefit-assessments`
+
+The CEO-only endpoint reads one already persisted G-BA snapshot and accepts
+`pzn`, `atc` and `ask` query parameters. It selects exactly one identifier with
+the precedence PZN, then ATC, then ASK. Fallback happens only when the stronger
+identifier is absent. A present but malformed PZN/ATC/ASK is rejected, and a
+valid PZN with no result is never broadened to a supplied ATC or ASK value.
+
+Matching is exact array membership only. PZN must be eight ASCII digits, ATC
+must match `A00AA00`, and ASK must be five ASCII digits, following the official
+AIS XSD. The ingestion parser and database constraints enforce the same
+formats. Substrings, trade-name matching, fuzzy matching and model inference
+are not part of this layer.
+
+The response distinguishes `source_unavailable`, `no_exact_match` and
+`exact_match`, returns bounded pagination and complete source/snapshot
+provenance, and exposes only normalized immutable evidence rows. It deliberately
+does not determine whether a patient belongs to a G-BA patient group, whether
+the source indication applies, or which treatment should be selected. Audit
+context records the identifier type and pagination only, not the queried value.
+
+## Privacy-minimised Medication Evidence AI draft (Phase 10)
+
+The optional AI workflow is a separate, asynchronous draft attached to one
+immutable Medication Evidence Review. It never replaces or mutates the local
+evidence bundle, a patient medication, a diagnosis, a task, or a clinical
+decision. The server exposes the provider state as `not_configured`, `disabled`,
+`blocked`, or `ready`; the UI offers the AI action only in `ready` state.
+
+External calls are fail-closed behind all of these server-side requirements:
+
+- `GMED_MEDICATION_AI_ENABLED=true`;
+- `GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED=true` after an environment-specific
+  data-protection/vendor review;
+- a server-only `GMED_OPENAI_API_KEY`;
+- an explicitly approved `GMED_OPENAI_MODEL` identifier.
+
+The adapter uses the fixed OpenAI Responses API HTTPS endpoint, rejects
+redirects, applies connection/request/input/output limits, sends `store=false`,
+enables no tools, and requests a strict JSON-schema response. Neither the client
+nor stored patient data can select a provider endpoint, model, system prompt, or
+tool. The API key never reaches the browser, database, audit payload, or log.
+
+The outbound payload is constructed from the frozen bundle and excludes patient
+ID, medication row ID, name, date of birth, contacts, source URLs, raw documents,
+free-form patient notes, diagnoses and demographic fields. It contains only
+bounded finding category/severity codes, missing-data codes, normalized
+official-source authority/health metadata, exact G-BA assessment fields and a
+closed list of request-local citation aliases such as `evidence:0001`. Finding
+titles, missing-data explanations and local source IDs are intentionally
+removed before transfer because future source content could contain a product
+or locally meaningful label. Local citation IDs and `evidence_refs` are never
+sent because they can embed medication-row or snapshot UUIDs. The server maps
+an accepted alias back to its immutable local citation after the response and
+rejects every unknown alias.
+The vendor's contractual retention, regional processing and zero-data-retention
+options still require separate approval; `store=false` is an API control, not a
+substitute for that review.
+
+The model may return only bilingual evidence-summary items, verification
+questions and limitations. Factual items must cite references from the frozen
+bundle. The backend rejects unknown citations, URLs, control characters,
+oversized output, refusals/incomplete or ambiguous multi-text responses,
+non-bilingual items, provider identifiers that are unsafe for storage, explicit
+treatment/stopping/dose-change directions and any newly generated numeric dose
+amount. Accepted output is stored separately with its model,
+provider response ID, SHA-256 fingerprint, immutable prompt-contract version,
+state-transition history and audit event. It remains visibly marked as
+AI-generated and read-only.
+
+Jobs use bounded leases, `FOR UPDATE SKIP LOCKED`, three attempts for transient
+transport/rate/server errors, crash recovery and a manual retry from `failed`.
+Permanent provider/schema/safety failures are not retried automatically. The
+local evidence package remains available when AI is disabled or fails.
+
+Operators can inspect a PHI-free AI section in **System Health**. It exposes the
+provider/call gate state, configured model identifier, aggregate queue counts,
+expired leases, the oldest runnable request and the last success/failure times.
+It never exposes API keys, patient or review identifiers, prompts, response IDs
+or generated content. During a rolling deployment, a backend without the new
+health field is normalized to `not_configured` instead of breaking the page.
+
+Prometheus receives only bounded lifecycle labels through
+`gmed_medication_ai_jobs_total{outcome,reason}` and provider-attempt latency
+through `gmed_medication_ai_provider_duration_seconds{outcome}`. PROD rules
+alert on a terminal AI job failure and on a retry burst. Alerts deliberately
+contain no patient identifiers or content; the deterministic package stays
+available during every AI incident.
+
+When a job becomes `ready` or reaches terminal `failed`, its requesting
+operator receives a generic in-app notification and realtime bell update linked
+to the patient's clinical workspace. The stored notification keeps a bilingual
+fallback for non-browser clients, while the web UI renders a single RU or DE
+copy according to the active interface language. Notification text contains no
+patient name, medication, diagnosis, generated text or provider response ID.
+
+No current role can medically approve an AI draft. Production enablement
+requires, at minimum, documented vendor/GDPR approval, an approved model ID,
+DEV validation with synthetic data, output-safety regression tests, monitoring,
+an operator rollback procedure, tested alert delivery, and the intended-purpose/MDR gate described
+above. Enablement is a configuration/restart operation; rollback is setting
+`GMED_MEDICATION_AI_ENABLED=false` and restarting the backend. Existing local
+evidence bundles remain usable.
+
 ## Next implementation slices
 
 1. Obtain the organisation-specific permanent G-BA AIS download URL, configure
    it in DEV through the secret store, and verify the first complete snapshot.
-2. Add a read-only exact-evidence retrieval layer for verified PZN/ATC/ASK
-   matches. Do not infer indication or patient-group membership from free text.
-3. Review and activate an official BfArM shortage export only after its current
+2. Review and activate an official BfArM shortage export only after its current
    machine-readable contract and reuse terms are documented.
-4. Keep EMA PMS lookup disabled in production until its terms permit the
+3. Keep EMA PMS lookup disabled in production until its terms permit the
    intended business use and the organisation records source-owner approval.
-5. Extend the BMP carrier import only after adding lossless weekly/free-text
+4. Extend the BMP carrier import only after adding lossless weekly/free-text
    dosing fields and an approved current code/PZN reference source; complete
    physical Android scanner QA before production rollout.
-6. Complete intended-purpose/MDR review before patient-specific therapeutic
+5. Complete intended-purpose/MDR review before patient-specific therapeutic
    decision support.

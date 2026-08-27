@@ -126,6 +126,7 @@ impl<'de> Deserialize<'de> for NullablePatchValue {
 #[derive(Default, Deserialize)]
 #[serde(default)]
 struct UpdateConciergeServiceRequest {
+    expected_updated_at: Option<String>,
     provider_id: Option<Uuid>,
     provider_service_id: Option<Uuid>,
     assigned_concierge_id: Option<Uuid>,
@@ -159,6 +160,7 @@ struct RecordConciergeServiceKeyEventRequest {
 
 #[derive(Deserialize)]
 struct RecordConciergeServicePartnerInteractionRequest {
+    request_id: Option<Uuid>,
     channel: String,
     direction: String,
     outcome: String,
@@ -1351,6 +1353,12 @@ async fn list_concierge_service_key_events(
     if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
         return resp;
     }
+    if !is_key_service_row(&service) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Key custody is available only for key-related services",
+        );
+    }
 
     match sqlx::query(
         r#"SELECT e.id, e.concierge_service_id, e.action, e.responsible_user_id,
@@ -1402,6 +1410,12 @@ async fn record_concierge_service_key_event(
     };
     if let Err(resp) = ensure_operational_service_access(&state, &auth, &service).await {
         return resp;
+    }
+    if !is_key_service_row(&service) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Key custody is available only for key-related services",
+        );
     }
 
     let responsible_user_id = body.responsible_user_id.unwrap_or(auth.user_id);
@@ -1807,16 +1821,20 @@ async fn record_concierge_service_partner_interaction(
         Err(resp) => return resp,
     };
 
+    let request_id = body.request_id.unwrap_or_else(Uuid::new_v4);
     let interaction = match sqlx::query(
         r#"INSERT INTO concierge_service_partner_interactions (
-               concierge_service_id, provider_id, channel, direction, outcome,
+               concierge_service_id, provider_id, request_id, channel, direction, outcome,
                occurred_at, contact_person, note, quoted_cost, quoted_currency, recorded_by
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (concierge_service_id, request_id)
+           DO UPDATE SET request_id = EXCLUDED.request_id
            RETURNING id, created_at"#,
     )
     .bind(service_id)
     .bind(provider_id)
+    .bind(request_id)
     .bind(&body.channel)
     .bind(&body.direction)
     .bind(&body.outcome)
@@ -2440,6 +2458,33 @@ async fn update_concierge_service(
             "Use the provider booking endpoint for booked or confirmed status",
         );
     }
+    let current_status = existing
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "planned".to_string());
+    if let Some(next_status) = body.status.as_deref()
+        && !is_allowed_service_status_transition(
+            &current_status,
+            next_status,
+            matches!(auth.role, Role::Ceo | Role::PatientManager),
+        )
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service status transition is not allowed",
+        );
+    }
+    let expected_updated_at = match body.expected_updated_at.as_deref() {
+        Some(value) => match chrono::DateTime::parse_from_rfc3339(value) {
+            Ok(value) => Some(value.with_timezone(&chrono::Utc)),
+            Err(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "expected_updated_at must be an RFC3339 timestamp",
+                );
+            }
+        },
+        None => None,
+    };
     if let Some(ref value) = body.billing_status
         && !is_valid_billing_status(value)
     {
@@ -2694,8 +2739,17 @@ async fn update_concierge_service(
         Some("billed") | Some("settled") => Some(chrono::Utc::now()),
         _ => None,
     };
+    let automatically_ready_for_billing = body.status.as_deref() == Some("completed")
+        && body.billing_status.is_none()
+        && existing
+            .try_get::<String, _>("billing_status")
+            .is_ok_and(|value| value == "draft");
     let audit_status = body.status.clone();
-    let audit_billing_status = body.billing_status.clone();
+    let audit_billing_status = if automatically_ready_for_billing {
+        Some("ready".to_string())
+    } else {
+        body.billing_status.clone()
+    };
     let audit_assigned_concierge_id = body.assigned_concierge_id;
 
     match sqlx::query(
@@ -2705,7 +2759,11 @@ async fn update_concierge_service(
                service_kind = COALESCE($4, service_kind),
                title = COALESCE($5, title),
                status = COALESCE($6, status),
-               billing_status = COALESCE($7, billing_status),
+               billing_status = CASE
+                   WHEN $7 IS NOT NULL THEN $7
+                   WHEN $6 = 'completed' AND billing_status = 'draft' THEN 'ready'
+                   ELSE billing_status
+               END,
                booking_reference = $8,
                vendor_name = $9,
                vendor_contact = $10,
@@ -2717,13 +2775,22 @@ async fn update_concierge_service(
                currency = COALESCE($16, currency),
                service_notes = $17,
                billing_notes = $18,
-               completed_at = COALESCE($19, completed_at),
-               billed_at = COALESCE($20, billed_at),
+               completed_at = CASE
+                   WHEN $6 IS NULL THEN completed_at
+                   WHEN $19 IS NOT NULL THEN COALESCE(completed_at, $19)
+                   ELSE NULL
+               END,
+               billed_at = CASE
+                   WHEN $7 IS NULL THEN billed_at
+                   WHEN $20 IS NOT NULL THEN COALESCE(billed_at, $20)
+                   ELSE NULL
+               END,
                taxonomy_node_id = COALESCE($21, taxonomy_node_id),
                provider_service_id = COALESCE($22, provider_service_id),
                quantity = COALESCE($23, quantity),
                unit_price = COALESCE($24, unit_price)
-           WHERE id = $1"#,
+           WHERE id = $1
+             AND ($25::timestamptz IS NULL OR updated_at = $25)"#,
     )
     .bind(service_id)
     .bind(provider_id_update)
@@ -2749,6 +2816,7 @@ async fn update_concierge_service(
     .bind(body.provider_service_id)
     .bind(quantity)
     .bind(unit_price)
+    .bind(expected_updated_at)
     .execute(&state.db)
     .await
     {
@@ -2782,6 +2850,19 @@ async fn update_concierge_service(
                 }),
             )
             .await;
+            if automatically_ready_for_billing {
+                crate::realtime::publish_concierge_service_event(
+                    &state,
+                    Some(auth.user_id),
+                    "concierge_service.billing_ready",
+                    service_id,
+                    serde_json::json!({
+                        "status": "completed",
+                        "billing_status": "ready",
+                    }),
+                )
+                .await;
+            }
 
             match load_service_row(&state, service_id).await {
                 Ok(Some(service)) => {
@@ -2791,6 +2872,10 @@ async fn update_concierge_service(
                 Err(resp) => resp,
             }
         }
+        Ok(_) if body.expected_updated_at.is_some() => err(
+            StatusCode::CONFLICT,
+            "Concierge service changed; refresh before saving",
+        ),
         Ok(_) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(e) => {
             tracing::error!(error = %e, service_id = %service_id, "update concierge service");
@@ -3267,6 +3352,27 @@ fn is_valid_key_transition(current: Option<&str>, next: &str) -> bool {
     )
 }
 
+fn is_key_service_row(row: &sqlx::postgres::PgRow) -> bool {
+    let searchable = [
+        row.try_get::<String, _>("title").unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_code")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_name_de")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_name_ru")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .join(" ")
+    .to_lowercase();
+
+    ["key", "schlüssel", "schluessel", "ключ"]
+        .iter()
+        .any(|marker| searchable.contains(marker))
+}
+
 fn is_valid_partner_channel(value: &str) -> bool {
     matches!(
         value,
@@ -3450,6 +3556,24 @@ fn is_valid_service_status(value: &str) -> bool {
         value,
         "planned" | "booked" | "confirmed" | "in_service" | "completed" | "cancelled"
     )
+}
+
+fn is_allowed_service_status_transition(current: &str, next: &str, can_reopen: bool) -> bool {
+    if current == next {
+        return true;
+    }
+
+    matches!(
+        (current, next),
+        ("planned", "in_service" | "cancelled")
+            | ("booked", "cancelled")
+            | ("confirmed", "in_service" | "cancelled")
+            | ("in_service", "completed" | "cancelled")
+    ) || (can_reopen
+        && matches!(
+            (current, next),
+            ("completed", "in_service") | ("cancelled", "planned")
+        ))
 }
 
 fn is_valid_billing_status(value: &str) -> bool {

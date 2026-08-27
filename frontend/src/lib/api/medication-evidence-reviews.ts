@@ -13,6 +13,7 @@ export type MedicationEvidenceSummary = {
   findings_total: number;
   high_priority_findings: number;
   missing_data_total: number;
+  benefit_assessments_total: number;
 };
 
 export type MedicationEvidenceProvider = {
@@ -20,6 +21,14 @@ export type MedicationEvidenceProvider = {
   status: "not_configured" | "disabled";
   external_calls_enabled: false;
   reason_code: "external_provider_not_configured";
+};
+
+export type MedicationAiProvider = {
+  kind: "none" | "openai";
+  status: "not_configured" | "disabled" | "blocked" | "ready";
+  external_calls_enabled: boolean;
+  reason_code: string;
+  model: string | null;
 };
 
 export type MedicationEvidenceClinicalReview = {
@@ -45,6 +54,7 @@ export type MedicationEvidenceReviewPreview = {
   summary: MedicationEvidenceSummary;
   medication_ids: string[];
   provider: MedicationEvidenceProvider;
+  ai_provider: MedicationAiProvider;
   clinical_review: MedicationEvidenceClinicalReview;
   permissions: MedicationEvidenceReviewPermissions;
   latest_review: MedicationEvidenceReviewSummary | null;
@@ -97,10 +107,25 @@ export type MedicationEvidenceSource = {
 
 export type MedicationEvidenceCitation = {
   id: string;
-  kind: "finding" | "missing_data" | "source";
+  kind: "finding" | "missing_data" | "source" | "benefit_assessment";
   source_id: string | null;
   source_url: string | null;
   evidence_refs: string[];
+};
+
+export type MedicationEvidenceBenefitAssessment = {
+  evidence_ref: string;
+  medication_id: string;
+  decision_id: string;
+  dossier_reference: string;
+  official_url: string;
+  decision_date: string;
+  indication_short: string;
+  patient_group: string;
+  benefit_extent: string;
+  benefit_probability: string | null;
+  assessed_substances: string[];
+  citation_ref: string;
 };
 
 export type MedicationEvidenceDraftItem = {
@@ -129,6 +154,7 @@ export type MedicationEvidenceReview = {
     missing_data: MedicationEvidenceMissingData[];
     sources: MedicationEvidenceSource[];
     citations: MedicationEvidenceCitation[];
+    benefit_assessments: MedicationEvidenceBenefitAssessment[];
   };
   draft: {
     id: string;
@@ -149,6 +175,26 @@ export type CreateMedicationEvidenceReviewInput = {
   idempotency_key: string;
 };
 
+export type MedicationAiAnalysisStatus = "requested" | "processing" | "ready" | "failed";
+
+export type MedicationAiAnalysis = {
+  id: string;
+  review_id: string;
+  status: MedicationAiAnalysisStatus;
+  requested_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  provider: MedicationAiProvider;
+  prompt_version: string;
+  draft: {
+    evidence_summary: MedicationEvidenceDraftItem[];
+    verification_questions: MedicationEvidenceDraftItem[];
+    limitations: MedicationEvidenceDraftItem[];
+    citation_refs: string[];
+  } | null;
+  error_code: string | null;
+};
+
 const EMPTY_SUMMARY: MedicationEvidenceSummary = {
   active_medications: 0,
   identified_medications: 0,
@@ -156,6 +202,7 @@ const EMPTY_SUMMARY: MedicationEvidenceSummary = {
   findings_total: 0,
   high_priority_findings: 0,
   missing_data_total: 0,
+  benefit_assessments_total: 0,
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -205,6 +252,7 @@ function summary(value: unknown): MedicationEvidenceSummary {
     findings_total: count(payload.findings_total),
     high_priority_findings: count(payload.high_priority_findings),
     missing_data_total: count(payload.missing_data_total),
+    benefit_assessments_total: count(payload.benefit_assessments_total),
   };
 }
 
@@ -215,6 +263,23 @@ function provider(value: unknown): MedicationEvidenceProvider {
     status: payload.status === "disabled" ? "disabled" : "not_configured",
     external_calls_enabled: false,
     reason_code: "external_provider_not_configured",
+  };
+}
+
+function aiProvider(value: unknown): MedicationAiProvider {
+  const payload = record(value);
+  const status = payload.status === "ready"
+    || payload.status === "blocked"
+    || payload.status === "disabled"
+    || payload.status === "not_configured"
+    ? payload.status
+    : "not_configured";
+  return {
+    kind: payload.kind === "openai" ? "openai" : "none",
+    status,
+    external_calls_enabled: payload.external_calls_enabled === true,
+    reason_code: string(payload.reason_code),
+    model: nullableString(payload.model),
   };
 }
 
@@ -268,6 +333,7 @@ export function normalizeMedicationEvidenceReviewPreview(
     summary: summary(payload.summary),
     medication_ids: stringArray(payload.medication_ids),
     provider: provider(payload.provider),
+    ai_provider: aiProvider(payload.ai_provider),
     clinical_review: clinicalReview(),
     permissions: permissions(payload.permissions),
     latest_review: Object.keys(latestReview).length === 0
@@ -289,6 +355,9 @@ export function normalizeMedicationEvidenceReview(value: unknown): MedicationEvi
   const missingData = Array.isArray(bundle.missing_data) ? bundle.missing_data : [];
   const sources = Array.isArray(bundle.sources) ? bundle.sources : [];
   const citations = Array.isArray(bundle.citations) ? bundle.citations : [];
+  const benefitAssessments = Array.isArray(bundle.benefit_assessments)
+    ? bundle.benefit_assessments
+    : [];
 
   return {
     mode: "local_evidence_only",
@@ -351,12 +420,31 @@ export function normalizeMedicationEvidenceReview(value: unknown): MedicationEvi
         const citation = record(item);
         return {
           id: string(citation.id),
-          kind: citation.kind === "missing_data" || citation.kind === "source"
+          kind: citation.kind === "missing_data"
+            || citation.kind === "source"
+            || citation.kind === "benefit_assessment"
             ? citation.kind
             : "finding",
           source_id: nullableString(citation.source_id),
           source_url: nullableString(citation.source_url),
           evidence_refs: stringArray(citation.evidence_refs),
+        };
+      }),
+      benefit_assessments: benefitAssessments.map((item) => {
+        const assessment = record(item);
+        return {
+          evidence_ref: string(assessment.evidence_ref),
+          medication_id: string(assessment.medication_id),
+          decision_id: string(assessment.decision_id),
+          dossier_reference: string(assessment.dossier_reference),
+          official_url: string(assessment.official_url),
+          decision_date: string(assessment.decision_date),
+          indication_short: string(assessment.indication_short),
+          patient_group: string(assessment.patient_group),
+          benefit_extent: string(assessment.benefit_extent),
+          benefit_probability: nullableString(assessment.benefit_probability),
+          assessed_substances: stringArray(assessment.assessed_substances),
+          citation_ref: string(assessment.citation_ref),
         };
       }),
     },
@@ -402,4 +490,65 @@ export async function fetchMedicationEvidenceReview(
     `${collectionPath(patientId)}/${encodeURIComponent(reviewId)}`,
   );
   return normalizeMedicationEvidenceReview(payload);
+}
+
+export function normalizeMedicationAiAnalysis(value: unknown): MedicationAiAnalysis {
+  const payload = record(value);
+  const draft = record(payload.draft);
+  const status = payload.status === "processing"
+    || payload.status === "ready"
+    || payload.status === "failed"
+    || payload.status === "requested"
+    ? payload.status
+    : "requested";
+  return {
+    id: string(payload.id),
+    review_id: string(payload.review_id),
+    status,
+    requested_at: string(payload.requested_at),
+    started_at: nullableString(payload.started_at),
+    completed_at: nullableString(payload.completed_at),
+    provider: aiProvider(payload.provider),
+    prompt_version: string(payload.prompt_version),
+    draft: Object.keys(draft).length === 0
+      ? null
+      : {
+          evidence_summary: draftItems(draft.evidence_summary),
+          verification_questions: draftItems(draft.verification_questions),
+          limitations: draftItems(draft.limitations),
+          citation_refs: stringArray(draft.citation_refs),
+        },
+    error_code: nullableString(payload.error_code),
+  };
+}
+
+function aiAnalysisPath(patientId: string, reviewId: string) {
+  return `${collectionPath(patientId)}/${encodeURIComponent(reviewId)}/ai-analysis`;
+}
+
+export async function createMedicationAiAnalysis(
+  patientId: string,
+  reviewId: string,
+  idempotencyKey: string,
+): Promise<MedicationAiAnalysis> {
+  const payload = await post<unknown>(aiAnalysisPath(patientId, reviewId), {
+    idempotency_key: idempotencyKey,
+  });
+  return normalizeMedicationAiAnalysis(payload);
+}
+
+export async function fetchMedicationAiAnalysis(
+  patientId: string,
+  reviewId: string,
+): Promise<MedicationAiAnalysis> {
+  const payload = await get<unknown>(aiAnalysisPath(patientId, reviewId));
+  return normalizeMedicationAiAnalysis(payload);
+}
+
+export async function retryMedicationAiAnalysis(
+  patientId: string,
+  reviewId: string,
+): Promise<MedicationAiAnalysis> {
+  const payload = await post<unknown>(`${aiAnalysisPath(patientId, reviewId)}/retry`, {});
+  return normalizeMedicationAiAnalysis(payload);
 }

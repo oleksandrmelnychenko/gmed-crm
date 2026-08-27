@@ -13,6 +13,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
 
 import {
+  availableConciergeTaskStatuses,
   conciergeServiceDisplayTitle,
   type ConciergeAssignee,
   type ConciergeService,
@@ -67,6 +68,7 @@ const copy = {
     status: "Status",
     open: "Offen",
     in_progress: "In Arbeit",
+    review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
     cancel: "Abbrechen",
@@ -135,6 +137,7 @@ const copy = {
     status: "Статус",
     open: "Открыта",
     in_progress: "В работе",
+    review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
     cancel: "Отмена",
@@ -333,6 +336,10 @@ export function ConciergeTaskEventDialog({
   const [pendingAttachmentError, setPendingAttachmentError] = useState("");
   const [uploadingPending, setUploadingPending] = useState(false);
   const [comments, setComments] = useState<ConciergeTaskComment[]>([]);
+  const currentUserRole = assignees.find((assignee) => assignee.id === currentUserId)?.role ?? null;
+  const editableStatuses = item
+    ? availableConciergeTaskStatuses(item, currentUserId, currentUserRole)
+    : (["open"] as const);
   const [comment, setComment] = useState("");
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentBusy, setCommentBusy] = useState(false);
@@ -600,7 +607,7 @@ export function ConciergeTaskEventDialog({
                       <select className={selectClass} value={priority} onChange={(event) => setPriority(event.target.value)}>{(["low", "normal", "high", "urgent"] as const).map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select>
                     </ConciergeField>
                     {item ? (
-                      <ConciergeField label={labels.status}><select className={selectClass} value={status} onChange={(event) => setStatus(event.target.value)}>{(["open", "in_progress", "completed", "cancelled"] as const).map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></ConciergeField>
+                      <ConciergeField label={labels.status}><select className={selectClass} value={status} onChange={(event) => setStatus(event.target.value)}>{editableStatuses.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></ConciergeField>
                     ) : (
                       <div className="grid content-end gap-1.5 text-xs font-medium text-muted-foreground">{labels.status}<Badge variant="outline" className="h-9 justify-center rounded-md bg-field text-foreground">{labels.open}</Badge></div>
                     )}

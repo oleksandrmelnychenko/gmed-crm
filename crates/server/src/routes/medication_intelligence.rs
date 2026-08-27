@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
 };
 use chrono::Utc;
 use gmed_domain::role::Role;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -19,6 +19,11 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::services::bfarm_rote_hand::{BFARM_ROTE_HAND_SOURCE_ID, normalize_substance_key};
+use crate::services::gba_ais::GBA_AIS_SOURCE_ID;
+use crate::services::medication_benefit_evidence::{
+    BenefitAssessmentEvidenceItem, EvidenceIdentifierKind, ExactEvidencePage,
+    load_exact_benefit_evidence, select_exact_identifier,
+};
 use crate::services::medication_identity::MedicationIdentityPermissions;
 use crate::services::medication_intelligence_sources::{
     OfficialSourceStatus, load_source_statuses,
@@ -28,6 +33,9 @@ use crate::state::AppState;
 // Keep this read gate aligned with the patient clinical master record. Future
 // medical roles must be enabled deliberately in both workspaces.
 const MEDICATION_INTELLIGENCE_ROLES: &[Role] = &[Role::Ceo];
+const DEFAULT_EVIDENCE_PAGE_SIZE: i64 = 50;
+const MAX_EVIDENCE_PAGE_SIZE: i64 = 100;
+const MAX_EVIDENCE_OFFSET: i64 = 10_000;
 
 const DISCLAIMER_RU: &str = "Текущая версия выполняет только ограниченный набор детерминированных проверок. Подключённые официальные сообщения BfArM сопоставляются только при точном совпадении явно указанного действующего вещества; источники со статусом planned или manual_reference не проверяются. Отсутствие предупреждения не подтверждает безопасность препарата, комбинации или дозировки. Решение принимает медицинский специалист.";
 const DISCLAIMER_DE: &str = "Die aktuelle Version führt nur einen begrenzten Satz deterministischer Prüfungen aus. Angebundene amtliche BfArM-Mitteilungen werden nur bei exakter Übereinstimmung eines ausdrücklich genannten Wirkstoffs zugeordnet; Quellen mit dem Status planned oder manual_reference werden nicht geprüft. Das Fehlen eines Hinweises belegt nicht die Sicherheit eines Arzneimittels, einer Kombination oder Dosierung. Die Entscheidung trifft medizinisches Fachpersonal.";
@@ -41,6 +49,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/medication-intelligence/sources",
             get(get_medication_intelligence_sources),
+        )
+        .route(
+            "/medication-intelligence/evidence/benefit-assessments",
+            get(get_exact_benefit_assessment_evidence),
         )
 }
 
@@ -79,8 +91,8 @@ pub(crate) struct MedicationView {
     name: String,
     substance: Option<String>,
     status: String,
-    atc_code: Option<String>,
-    pzn: Option<String>,
+    pub(crate) atc_code: Option<String>,
+    pub(crate) pzn: Option<String>,
     country_code: Option<String>,
     identity_status: &'static str,
     #[serde(skip)]
@@ -135,6 +147,177 @@ struct SourceStatusResponse {
     mode: &'static str,
     generated_at: String,
     sources: Vec<OfficialSourceStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExactBenefitEvidenceQuery {
+    pzn: Option<String>,
+    atc: Option<String>,
+    ask: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExactEvidenceMatch {
+    identifier_type: EvidenceIdentifierKind,
+    identifier: String,
+    strategy: &'static str,
+    precedence: [&'static str; 3],
+    selection_reason: &'static str,
+    broader_fallback_on_no_match: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidencePagination {
+    limit: i64,
+    offset: i64,
+    total_count: i64,
+    returned_count: usize,
+    truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceLimitations {
+    ru: &'static str,
+    de: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ExactBenefitEvidenceResponse {
+    mode: &'static str,
+    generated_at: String,
+    lookup_status: &'static str,
+    matching: ExactEvidenceMatch,
+    pagination: EvidencePagination,
+    limitations: EvidenceLimitations,
+    source: OfficialSourceStatus,
+    evidence: Vec<BenefitAssessmentEvidenceItem>,
+}
+
+async fn get_exact_benefit_assessment_evidence(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Query(query): Query<ExactBenefitEvidenceQuery>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(MEDICATION_INTELLIGENCE_ROLES) {
+        return response;
+    }
+    let selector = match select_exact_identifier(
+        query.pzn.as_deref(),
+        query.atc.as_deref(),
+        query.ask.as_deref(),
+    ) {
+        Ok(selector) => selector,
+        Err(error_value) => return error(StatusCode::BAD_REQUEST, &error_value.to_string()),
+    };
+    let limit = query.limit.unwrap_or(DEFAULT_EVIDENCE_PAGE_SIZE);
+    if !(1..=MAX_EVIDENCE_PAGE_SIZE).contains(&limit) {
+        return error(StatusCode::BAD_REQUEST, "limit must be between 1 and 100");
+    }
+    let offset = query.offset.unwrap_or(0);
+    if !(0..=MAX_EVIDENCE_OFFSET).contains(&offset) {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "offset must be between 0 and 10000",
+        );
+    }
+
+    audit_context.set_action("read_medication_benefit_assessment_evidence");
+    audit_context.set_context(json!({
+        "mode": "exact_official_evidence",
+        "identifier_type": selector.kind.as_str(),
+        "limit": limit,
+        "offset": offset,
+    }));
+
+    let source = match load_source_statuses(&state.db).await {
+        Ok(statuses) => match statuses
+            .into_iter()
+            .find(|source| source.id == GBA_AIS_SOURCE_ID)
+        {
+            Some(source) => source,
+            None => {
+                tracing::error!("G-BA AIS source registration is missing");
+                return error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "G-BA AIS source registration is missing",
+                );
+            }
+        },
+        Err(error_value) => {
+            tracing::error!(error = %error_value, "load G-BA AIS source status for evidence lookup");
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load benefit assessment source status",
+            );
+        }
+    };
+    let page = match source.last_successful_snapshot.as_ref() {
+        Some(snapshot) => {
+            match load_exact_benefit_evidence(&state.db, snapshot.id, &selector, limit, offset)
+                .await
+            {
+                Ok(page) => page,
+                Err(error_value) => {
+                    tracing::error!(
+                        error = %error_value,
+                        identifier_type = selector.kind.as_str(),
+                        "load exact G-BA benefit assessment evidence"
+                    );
+                    return error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load exact benefit assessment evidence",
+                    );
+                }
+            }
+        }
+        None => ExactEvidencePage::empty(),
+    };
+    let lookup_status = if source.last_successful_snapshot.is_none() {
+        "source_unavailable"
+    } else if page.total_count == 0 {
+        "no_exact_match"
+    } else {
+        "exact_match"
+    };
+    let returned_count = page.items.len();
+    let truncated = offset.saturating_add(returned_count as i64) < page.total_count;
+    let selection_reason = match selector.kind {
+        EvidenceIdentifierKind::Pzn => "pzn_provided",
+        EvidenceIdentifierKind::Atc => "pzn_absent_atc_provided",
+        EvidenceIdentifierKind::Ask => "pzn_and_atc_absent_ask_provided",
+    };
+
+    Json(ExactBenefitEvidenceResponse {
+        mode: "exact_official_evidence",
+        generated_at: Utc::now().to_rfc3339(),
+        lookup_status,
+        matching: ExactEvidenceMatch {
+            identifier_type: selector.kind,
+            identifier: selector.value,
+            strategy: "exact_array_membership",
+            precedence: ["pzn", "atc", "ask"],
+            selection_reason,
+            broader_fallback_on_no_match: false,
+        },
+        pagination: EvidencePagination {
+            limit,
+            offset,
+            total_count: page.total_count,
+            returned_count,
+            truncated,
+        },
+        limitations: EvidenceLimitations {
+            ru: "Результаты показывают только точное совпадение с группами пациентов из официальной оценки G-BA. Принадлежность конкретного пациента к группе, показание и лечение не определяются автоматически.",
+            de: "Die Ergebnisse zeigen nur eine exakte Zuordnung zu Patientengruppen der amtlichen G-BA-Nutzenbewertung. Gruppenzugehörigkeit, Indikation und Behandlung eines konkreten Patienten werden nicht automatisch bestimmt.",
+        },
+        source,
+        evidence: page.items,
+    })
+    .into_response()
 }
 
 async fn get_medication_intelligence_sources(

@@ -134,6 +134,7 @@ const OUTCOMES: ConciergePartnerOutcome[] = [
 ];
 
 export type RecordPartnerInteractionInput = {
+  request_id: string;
   channel: ConciergePartnerChannel;
   direction: ConciergePartnerDirection;
   outcome: ConciergePartnerOutcome;
@@ -222,6 +223,7 @@ export function ConciergePartnerInteractionDialog({
   const [note, setNote] = useState("");
   const [quotedCost, setQuotedCost] = useState("");
   const [currency, setCurrency] = useState("EUR");
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   const callUrl = conciergePartnerPhoneUrl(provider?.phone);
   const emailUrl = conciergePartnerEmailUrl(provider?.email);
@@ -241,6 +243,7 @@ export function ConciergePartnerInteractionDialog({
     setNote("");
     setQuotedCost("");
     setCurrency(service?.currency || "EUR");
+    setRequestId(crypto.randomUUID());
   }, [initialChannel, open, service?.currency, service?.id]);
 
   if (!service || !provider) return null;
@@ -248,6 +251,7 @@ export function ConciergePartnerInteractionDialog({
   async function record() {
     try {
       await onRecord({
+        request_id: requestId,
         channel,
         direction,
         outcome,
@@ -261,6 +265,7 @@ export function ConciergePartnerInteractionDialog({
       setContactPerson("");
       setNote("");
       setQuotedCost("");
+      setRequestId(crypto.randomUUID());
     } catch {
       // Keep the entered values so a failed request can be retried.
     }

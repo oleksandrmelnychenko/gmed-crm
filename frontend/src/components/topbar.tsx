@@ -15,6 +15,7 @@ import { useNavState } from "@/lib/nav-state";
 import { staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import {
   useDebouncedRealtimeSubscription,
   useRealtimeConnectionStatus,
@@ -29,6 +30,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   markTopbarChatRead,
+  localizedNotificationCopy,
   notificationHrefForRole,
   sendTopbarChatMessage,
   type ActiveAnnouncement,
@@ -39,6 +41,7 @@ import {
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
+import { AiMark } from "@/components/ui/ai-mark";
 import {
   Dialog,
   DialogContent,
@@ -64,8 +67,13 @@ function initials(name: string) {
     .join("");
 }
 
-function compactDt(dt: string) {
-  return dt.replace("T", " ").slice(0, 16);
+function compactDt(dt: string, lang: "ru" | "de") {
+  const value = new Date(dt);
+  if (Number.isNaN(value.getTime())) return "—";
+  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(value);
 }
 
 function compactTime(dt: string) {
@@ -466,7 +474,7 @@ function NotificationPanel({
   staffRole: string;
 }) {
   const navigate = useNavigate();
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [notifs, setNotifs] = useState<Notification[]>([]);
   const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
   const [selectedAnnouncement, setSelectedAnnouncement] =
@@ -622,8 +630,10 @@ function NotificationPanel({
               {t.topbar_no_notifications}
             </div>
           ) : (
-            notifs.map((n) => (
-              <button
+            notifs.map((n) => {
+              const copy = localizedNotificationCopy(n, lang);
+              return (
+                <button
                 key={n.id}
                 type="button"
                 onClick={() => handleOpen(n)}
@@ -633,20 +643,25 @@ function NotificationPanel({
                     : "bg-primary/5 hover:bg-primary/10"
                 }`}
               >
-                <Bell aria-hidden="true" className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+                {n.kind.startsWith("medication_ai_") ? (
+                  <AiMark className="mt-0.5 size-4 text-foreground" />
+                ) : (
+                  <Bell aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                )}
                 <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{n.title}</p>
-                  {n.body && (
+                  <p className="text-sm font-medium truncate">{copy.title}</p>
+                  {copy.body && (
                     <p className="text-xs text-muted-foreground truncate">
-                      {n.body}
+                      {copy.body}
                     </p>
                   )}
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    {compactDt(n.created_at)}
+                    {compactDt(n.created_at, lang)}
                   </p>
                 </div>
-              </button>
-            ))
+                </button>
+              );
+            })
           )}
         </div>
         {staffRole === "patient" ? (

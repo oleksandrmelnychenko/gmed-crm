@@ -176,6 +176,7 @@ export interface Translations
   common_monitoring: string;
   common_last_updated: string;
   common_discard_unsaved_confirm: string;
+  common_discard_unsaved_action: string;
   common_overlay_dismiss_blocked: string;
   table_filter: string;
   table_filter_search_fields: string;
@@ -594,6 +595,16 @@ export interface Translations
   activity_action_login_blocked: string;
   activity_action_login_mfa_requested: string;
   activity_action_refresh_family_revoked: string;
+  activity_action_preview_medication_evidence_review: string;
+  activity_action_create_medication_evidence_review: string;
+  activity_action_read_medication_evidence_review: string;
+  activity_action_medication_evidence_review_created: string;
+  activity_action_create_medication_ai_analysis: string;
+  activity_action_read_medication_ai_analysis: string;
+  activity_action_retry_medication_ai_analysis: string;
+  activity_action_medication_ai_analysis_requested: string;
+  activity_action_medication_ai_analysis_ready: string;
+  activity_action_medication_ai_analysis_failed: string;
   activity_anonymous_actor: string;
   activity_view_activity: string;
   activity_view_security: string;

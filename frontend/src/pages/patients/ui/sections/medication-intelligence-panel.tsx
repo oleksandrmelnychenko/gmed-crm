@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink, FileSearch } from "lucide-react";
 
+import { AiMark } from "@/components/ui/ai-mark";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -11,10 +14,12 @@ import {
 import { ApiRequestError } from "@/lib/api";
 import {
   confirmMedicationIdentity,
+  fetchMedicationBenefitEvidence,
   fetchMedicationIntelligence,
   generateMedicationIdentityCandidates,
   type MedicationIdentityCandidateSet,
   type MedicationIdentityConfirmationInput,
+  type MedicationBenefitEvidenceResponse,
   type MedicationIntelligenceFinding,
   type MedicationIntelligenceResponse,
   type MedicationIntelligenceSeverity,
@@ -44,6 +49,7 @@ type MedicationIntelligencePanelContentProps = {
   error?: string | null;
   onRetry?: () => void;
   onIdentifyMedication?: (medicationId: string) => void;
+  onOpenBenefitEvidence?: (medicationId: string) => void;
   language?: Lang;
 };
 
@@ -163,7 +169,7 @@ function sourceErrorLabel(code: string, tx: Bilingual) {
 function safeExternalUrl(value: string): string | null {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+    return url.protocol === "https:" ? url.toString() : null;
   } catch {
     return null;
   }
@@ -396,11 +402,13 @@ function MedicationsTable({
   tx,
   lang,
   onIdentifyMedication,
+  onOpenBenefitEvidence,
 }: {
   data: MedicationIntelligenceResponse;
   tx: Bilingual;
   lang: Lang;
   onIdentifyMedication?: (medicationId: string) => void;
+  onOpenBenefitEvidence?: (medicationId: string) => void;
 }) {
   if (data.medications.length === 0) {
     return <EmptyRow>{tx("Активная медикация не указана.", "Keine aktive Medikation angegeben.")}</EmptyRow>;
@@ -417,6 +425,7 @@ function MedicationsTable({
             <th className="px-3.5 py-2 font-semibold">PZN</th>
             <th className="px-3.5 py-2 font-semibold">{tx("Страна", "Land")}</th>
             <th className="px-3.5 py-2 font-semibold">{tx("Идентификация", "Identität")}</th>
+            <th className="px-3.5 py-2 font-semibold">G-BA</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/60">
@@ -427,6 +436,22 @@ function MedicationsTable({
                 {medication.status ? (
                   <p className="mt-0.5 text-[10px] text-muted-foreground">{medication.status}</p>
                 ) : null}
+              </td>
+              <td className="px-3.5 py-2.5">
+                {onOpenBenefitEvidence && (medication.pzn || medication.atc_code) ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-md text-[11px]"
+                    onClick={() => onOpenBenefitEvidence(medication.id)}
+                  >
+                    <FileSearch aria-hidden="true" className="size-3.5" strokeWidth={1.7} />
+                    {tx("Точная оценка", "Exakte Bewertung")}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
               </td>
               <td className="px-3.5 py-2.5 text-xs text-foreground">{medication.substance ?? "—"}</td>
               <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{medication.atc_code ?? "—"}</td>
@@ -465,8 +490,8 @@ function MissingDataSection({
   }
   return (
     <div className="divide-y divide-border/60">
-      {data.missing_data.map((item) => (
-        <div key={item.code} className="grid gap-1 px-3.5 py-2.5 sm:grid-cols-[minmax(10rem,0.35fr)_minmax(0,1fr)] sm:gap-4">
+      {data.missing_data.map((item, index) => (
+        <div key={`${item.code}:${item.label_ru}:${item.reason_ru}:${index}`} className="grid gap-1 px-3.5 py-2.5 sm:grid-cols-[minmax(10rem,0.35fr)_minmax(0,1fr)] sm:gap-4">
           <p className="text-xs font-semibold text-foreground">
             {lang === "de" ? item.label_de : item.label_ru}
           </p>
@@ -728,6 +753,7 @@ export function MedicationIntelligencePanelContent({
   error = null,
   onRetry,
   onIdentifyMedication,
+  onOpenBenefitEvidence,
   language,
 }: MedicationIntelligencePanelContentProps) {
   const { lang: activeLanguage } = useLang();
@@ -746,6 +772,7 @@ export function MedicationIntelligencePanelContent({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
+            <AiMark className="size-4 text-foreground" />
             <h2 className="text-sm font-semibold tracking-tight text-foreground">
               {tx("Интеллектуальная проверка медикации", "Intelligente Medikationsprüfung")}
             </h2>
@@ -811,6 +838,7 @@ export function MedicationIntelligencePanelContent({
                   tx={tx}
                   lang={lang}
                   onIdentifyMedication={onIdentifyMedication}
+                  onOpenBenefitEvidence={onOpenBenefitEvidence}
                 />
               </SectionCard>
               <SectionCard title={tx("Недостающие данные", "Fehlende Daten")} count={data.missing_data.length}>
@@ -850,6 +878,11 @@ export function MedicationIntelligencePanel({
 }: MedicationIntelligencePanelProps) {
   const { lang } = useLang();
   const [reloadToken, setReloadToken] = useState(0);
+  const [benefitDialogOpen, setBenefitDialogOpen] = useState(false);
+  const [benefitMedicationId, setBenefitMedicationId] = useState<string | null>(null);
+  const [benefitEvidence, setBenefitEvidence] = useState<MedicationBenefitEvidenceResponse | null>(null);
+  const [benefitLoading, setBenefitLoading] = useState(false);
+  const [benefitError, setBenefitError] = useState(false);
   const [identityDialogOpen, setIdentityDialogOpen] = useState(false);
   const [identityMedicationId, setIdentityMedicationId] = useState<string | null>(null);
   const [identityCandidateSet, setIdentityCandidateSet] = useState<MedicationIdentityCandidateSet | null>(null);
@@ -898,7 +931,33 @@ export function MedicationIntelligencePanel({
     setIdentityError(null);
     identityIdempotencyKeyRef.current = null;
     pendingIdentityConfirmationRef.current = null;
+    setBenefitDialogOpen(false);
+    setBenefitMedicationId(null);
+    setBenefitEvidence(null);
+    setBenefitError(false);
   }, [patientId]);
+
+  const openBenefitEvidence = async (medicationId: string) => {
+    const medication = currentState.data?.medications.find((item) => item.id === medicationId);
+    if (!medication) return;
+    setBenefitMedicationId(medicationId);
+    setBenefitDialogOpen(true);
+    setBenefitLoading(true);
+    setBenefitError(false);
+    setBenefitEvidence(null);
+    try {
+      const result = medication.pzn
+        ? await fetchMedicationBenefitEvidence({ pzn: medication.pzn })
+        : medication.atc_code
+          ? await fetchMedicationBenefitEvidence({ atc: medication.atc_code })
+          : null;
+      setBenefitEvidence(result);
+    } catch {
+      setBenefitError(true);
+    } finally {
+      setBenefitLoading(false);
+    }
+  };
 
   const currentState = state.patientId === patientId
     ? state
@@ -1015,6 +1074,7 @@ export function MedicationIntelligencePanel({
           : null}
         onRetry={() => setReloadToken((token) => token + 1)}
         onIdentifyMedication={openIdentityWorkflow}
+        onOpenBenefitEvidence={(medicationId) => void openBenefitEvidence(medicationId)}
         language={lang}
       />
 
@@ -1059,6 +1119,85 @@ export function MedicationIntelligencePanel({
             }}
             onRetry={retryIdentityAction}
           />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={benefitDialogOpen} onOpenChange={setBenefitDialogOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader className="border-b border-border/60 pb-3">
+            <DialogTitle className="flex items-center gap-2">
+              <FileSearch aria-hidden="true" className="size-4" strokeWidth={1.7} />
+              {lang === "de" ? "Amtliche G-BA-Nutzenbewertung" : "Официальная оценка пользы G-BA"}
+            </DialogTitle>
+            <DialogDescription>
+              {currentState.data?.medications.find((item) => item.id === benefitMedicationId)?.name || "—"}
+            </DialogDescription>
+          </DialogHeader>
+          {benefitLoading ? (
+            <div role="status" className="py-10 text-center text-xs text-muted-foreground">
+              {lang === "de" ? "Exakte Evidenz wird geladen…" : "Загружаем точные данные…"}
+            </div>
+          ) : benefitError ? (
+            <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-xs text-rose-800">
+              {lang === "de" ? "Die G-BA-Evidenz konnte nicht geladen werden." : "Не удалось загрузить данные G-BA."}
+            </div>
+          ) : benefitEvidence ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <Badge variant="outline" className="rounded-full font-mono text-[10px]">
+                  {benefitEvidence.matching.identifier_type.toUpperCase()} · {benefitEvidence.matching.identifier}
+                </Badge>
+                <span>
+                  {lang === "de" ? "Nur exakte Übereinstimmung" : "Только точное совпадение"}
+                </span>
+                <span className="font-mono">{benefitEvidence.pagination.total_count}</span>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-amber-950">
+                {lang === "de" ? benefitEvidence.limitations.de : benefitEvidence.limitations.ru}
+              </div>
+              {benefitEvidence.lookup_status === "source_unavailable" ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-xs text-muted-foreground">
+                  {lang === "de" ? "Der amtliche Snapshot ist noch nicht verfügbar." : "Официальный снимок данных пока недоступен."}
+                </div>
+              ) : benefitEvidence.evidence.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-xs text-muted-foreground">
+                  {lang === "de" ? "Keine exakte Zuordnung gefunden; die Suche wurde nicht erweitert." : "Точного совпадения нет; поиск автоматически не расширялся."}
+                </div>
+              ) : (
+                <div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-white">
+                  {benefitEvidence.evidence.map((item) => {
+                    const officialHref = safeExternalUrl(item.official_url);
+                    return (
+                    <article key={item.evidence_ref} className="space-y-2 px-3.5 py-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-foreground">{item.patient_group}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{item.indication_short}</p>
+                        </div>
+                        {officialHref ? (
+                          <a
+                            href={officialHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-[11px] font-medium"
+                          >
+                            {lang === "de" ? "Original" : "Оригинал"}
+                            <ExternalLink aria-hidden="true" className="size-3.5" strokeWidth={1.7} />
+                          </a>
+                        ) : null}
+                      </div>
+                      <dl className="grid gap-2 text-[11px] sm:grid-cols-3">
+                        <div><dt className="text-muted-foreground">{lang === "de" ? "Zusatznutzen" : "Дополнительная польза"}</dt><dd className="font-medium text-foreground">{item.benefit_extent || "—"}</dd></div>
+                        <div><dt className="text-muted-foreground">{lang === "de" ? "Wahrscheinlichkeit" : "Вероятность"}</dt><dd className="font-medium text-foreground">{item.benefit_probability || "—"}</dd></div>
+                        <div><dt className="text-muted-foreground">{lang === "de" ? "Beschluss" : "Решение"}</dt><dd className="font-mono text-foreground">{item.decision_date || "—"}</dd></div>
+                      </dl>
+                    </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

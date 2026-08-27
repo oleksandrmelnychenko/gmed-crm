@@ -210,6 +210,30 @@ groups:
           summary: "Zero successful logins in last 30m"
           description: "No successful logins recorded in the last 30 minutes. Possible causes: app down, DB down, MFA admin offline. Silence the alert if this is outside business hours."
 
+      - alert: ProdMedicationAiJobFailure
+        expr: |
+          sum by (reason) (
+            increase(gmed_medication_ai_jobs_total{outcome="failed"}[15m])
+          ) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Medication AI job failed ({{ $labels.reason }})"
+          description: "At least one privacy-minimised Medication Evidence AI job reached a terminal failure in the last 15 minutes. The deterministic local evidence package remains available. Check the AI queue in System Health and backend logs; never copy patient content into incident notes."
+
+      - alert: ProdMedicationAiRetryBurst
+        expr: |
+          sum by (reason) (
+            increase(gmed_medication_ai_jobs_total{outcome="retry_scheduled"}[15m])
+          ) >= 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Medication AI retry burst ({{ $labels.reason }})"
+          description: "Three or more Medication Evidence AI retries were scheduled within 15 minutes. Check provider availability/rate limits and the queue before allowing more operator requests. Metric labels contain no patient identifiers."
+
   - name: prod-containers
     interval: 30s
     rules:

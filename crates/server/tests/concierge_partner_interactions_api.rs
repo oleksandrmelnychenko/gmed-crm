@@ -131,6 +131,7 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
     let concierge_bearer = auth_header_for(concierge_id, "concierge");
     let other_bearer = auth_header_for(other_id, "concierge");
     let path = format!("/api/v1/concierge-services/{service_id}/partner-interactions");
+    let first_request_id = Uuid::new_v4();
 
     let (status, first) = json_request(
         &ctx.app,
@@ -138,6 +139,7 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
         &path,
         &concierge_bearer,
         Some(json!({
+            "request_id": first_request_id,
             "channel": "phone",
             "direction": "outbound",
             "outcome": "quote_received",
@@ -154,6 +156,26 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
     assert_eq!(first["quoted_cost"], "85.50");
     assert_eq!(first["quoted_currency"], "EUR");
     assert_eq!(first["recorded_by"], concierge_id.to_string());
+
+    let (status, replayed) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &concierge_bearer,
+        Some(json!({
+            "request_id": first_request_id,
+            "channel": "phone",
+            "direction": "outbound",
+            "outcome": "quote_received",
+            "contact_person": "Anna Booking",
+            "note": "Table and transfer option held until 18:00",
+            "quoted_cost": 85.5,
+            "quoted_currency": "eur"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed["id"], first["id"]);
 
     let first_id = Uuid::parse_str(first["id"].as_str().expect("interaction id")).unwrap();
     let apply_path = format!(

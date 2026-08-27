@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
+import { AiMark } from "@/components/ui/ai-mark";
 import {
   AdminInlineMetric,
   AdminSheetScaffold,
@@ -138,6 +139,10 @@ const ADMIN_ACTIVITY_REALTIME_EVENTS = [
   "patient.assignment_revoked",
   "patient.activated",
   "patient.deactivated",
+  "patient.medication_evidence_review_created",
+  "patient.medication_ai_analysis_requested",
+  "patient.medication_ai_analysis_ready",
+  "patient.medication_ai_analysis_failed",
   "pending_login.approved",
   "pending_login.rejected",
   "privacy_request.created",
@@ -178,13 +183,20 @@ const ADMIN_ACTIVITY_REALTIME_EVENTS = [
   "workflow_checklist_item.completed",
 ] as const;
 
-function actionTone(action: string) {
+export function actionTone(action: string) {
+  if (action.endsWith(".medication_ai_analysis_ready")) return "success" as const;
+  if (action.endsWith(".medication_ai_analysis_failed")) return "error" as const;
+  if (action.endsWith(".medication_ai_analysis_requested")) return "brand" as const;
+  if (action.endsWith(".medication_evidence_review_created")) return "success" as const;
   switch (action) {
     case "login":
     case "login_success":
     case "create_lead":
     case "create_patient":
     case "convert_lead":
+    case "create_medication_evidence_review":
+    case "medication_evidence_review_created":
+    case "medication_ai_analysis_ready":
       return "success" as const;
     case "revoke_all_sessions":
     case "admin_force_logout_user":
@@ -195,10 +207,14 @@ function actionTone(action: string) {
     case "login_blocked":
     case "refresh_token_theft":
     case "refresh_family_revoked":
+    case "medication_ai_analysis_failed":
       return "error" as const;
     case "qualify_lead":
       return "warning" as const;
     case "update_setting":
+    case "create_medication_ai_analysis":
+    case "retry_medication_ai_analysis":
+    case "medication_ai_analysis_requested":
       return "brand" as const;
     default:
       return "neutral" as const;
@@ -223,6 +239,16 @@ const EXACT_ACTION_LABEL_KEYS = {
   token_theft_detected: "activity_action_token_theft_detected",
   refresh_token_theft: "activity_action_token_theft_detected",
   refresh_family_revoked: "activity_action_refresh_family_revoked",
+  preview_medication_evidence_review: "activity_action_preview_medication_evidence_review",
+  create_medication_evidence_review: "activity_action_create_medication_evidence_review",
+  read_medication_evidence_review: "activity_action_read_medication_evidence_review",
+  medication_evidence_review_created: "activity_action_medication_evidence_review_created",
+  create_medication_ai_analysis: "activity_action_create_medication_ai_analysis",
+  read_medication_ai_analysis: "activity_action_read_medication_ai_analysis",
+  retry_medication_ai_analysis: "activity_action_retry_medication_ai_analysis",
+  medication_ai_analysis_requested: "activity_action_medication_ai_analysis_requested",
+  medication_ai_analysis_ready: "activity_action_medication_ai_analysis_ready",
+  medication_ai_analysis_failed: "activity_action_medication_ai_analysis_failed",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
 type ActivityView = "activity" | "security" | "technical";
@@ -331,6 +357,10 @@ const ACTIVITY_EVENT_LABEL_KEYS = {
   maintenance_toggled: "activity_event_maintenance_toggled",
   medication_expiry_confirmed: "activity_event_medication_expiry_confirmed",
   medication_expiry_flagged: "activity_event_medication_expiry_flagged",
+  medication_evidence_review_created: "activity_action_medication_evidence_review_created",
+  medication_ai_analysis_requested: "activity_action_medication_ai_analysis_requested",
+  medication_ai_analysis_ready: "activity_action_medication_ai_analysis_ready",
+  medication_ai_analysis_failed: "activity_action_medication_ai_analysis_failed",
   mfa_toggled: "activity_event_mfa_toggled",
   overdue_marked: "activity_event_overdue_marked",
   password_reset: "activity_event_password_reset",
@@ -357,7 +387,11 @@ const ACTIVITY_EVENT_LABEL_KEYS = {
   uploaded: "activity_event_uploaded",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-function actionLabel(action: string, translations: Translations): string {
+export function isAiActivityAction(action: string): boolean {
+  return action.includes("medication_ai_analysis");
+}
+
+export function actionLabel(action: string, translations: Translations): string {
   if (action === "http_request") return translations.activity_http_request;
 
   const exact = formatEnumLabelFromKeys(action, EXACT_ACTION_LABEL_KEYS, translations);
@@ -382,6 +416,21 @@ function actionLabel(action: string, translations: Translations): string {
   }
 
   return formatUnknownValue(action, translations);
+}
+
+function ActivityActionBadge({
+  action,
+  translations,
+}: {
+  action: string;
+  translations: Translations;
+}) {
+  return (
+    <StatusBadge tone={actionTone(action)}>
+      {isAiActivityAction(action) ? <AiMark className="size-3" aria-hidden="true" /> : null}
+      {actionLabel(action, translations)}
+    </StatusBadge>
+  );
 }
 
 const TECHNICAL_CONTEXT_KEYS = new Set(["latency_ms", "method", "route", "status"]);
@@ -579,9 +628,10 @@ function AdminActivityDetailSheet({
                   <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                     <p className="text-[11.5px] text-muted-foreground">{t.activity_action}</p>
                     <div className="mt-1">
-                      <StatusBadge tone={actionTone(selectedActivity.action)}>
-                        {actionLabel(selectedActivity.action, t)}
-                      </StatusBadge>
+                      <ActivityActionBadge
+                        action={selectedActivity.action}
+                        translations={t}
+                      />
                     </div>
                   </div>
                   <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
@@ -1091,9 +1141,7 @@ export function AdminActivityPage() {
       accessor: (activity) => activity.action,
       width: 180,
       render: (activity) => (
-        <StatusBadge tone={actionTone(activity.action)}>
-          {actionLabel(activity.action, t)}
-        </StatusBadge>
+        <ActivityActionBadge action={activity.action} translations={t} />
       ),
     },
     {

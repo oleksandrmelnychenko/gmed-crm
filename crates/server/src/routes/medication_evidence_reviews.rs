@@ -14,6 +14,9 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::medication_intelligence::build_patient_medication_intelligence;
+use crate::services::medication_ai_jobs::{
+    MedicationAiJobError, create_analysis, load_analysis, retry_analysis,
+};
 use crate::services::medication_evidence_reviews::{
     MedicationEvidenceReviewError, build_preview, create_review, load_review,
 };
@@ -35,12 +38,26 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/medication-evidence-reviews/{review_id}",
             get(get_by_id),
         )
+        .route(
+            "/patients/{patient_id}/medication-evidence-reviews/{review_id}/ai-analysis",
+            get(get_ai_analysis).post(create_ai_analysis),
+        )
+        .route(
+            "/patients/{patient_id}/medication-evidence-reviews/{review_id}/ai-analysis/retry",
+            axum::routing::post(retry_ai_analysis),
+        )
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CreateReviewRequest {
     intelligence_fingerprint: String,
+    idempotency_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateAiAnalysisRequest {
     idempotency_key: String,
 }
 
@@ -65,9 +82,153 @@ async fn get_preview(
         Ok(value) => value,
         Err(error_value) => return intelligence_error(error_value, patient_id),
     };
-    match build_preview(&state.db, patient_id, &intelligence).await {
+    match build_preview(
+        &state.db,
+        patient_id,
+        &intelligence,
+        state.medication_ai.capability(),
+    )
+    .await
+    {
         Ok(response) => Json(response).into_response(),
         Err(error_value) => service_error(error_value, patient_id, None),
+    }
+}
+
+async fn create_ai_analysis(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Path((patient_id, review_id)): Path<(Uuid, Uuid)>,
+    Json(request): Json<CreateAiAnalysisRequest>,
+) -> axum::response::Response {
+    if let Some(response) = authorize(&state, &auth, patient_id).await {
+        return response;
+    }
+    let capability = state.medication_ai.capability();
+    audit_context.set_entity("patient", patient_id);
+    audit_context.set_action("create_medication_ai_analysis");
+    audit_context.set_context(json!({
+        "review_id": review_id,
+        "provider_kind": capability.kind,
+        "provider_status": capability.status,
+        "external_calls_enabled": capability.external_calls_enabled,
+    }));
+    match create_analysis(
+        &state,
+        patient_id,
+        review_id,
+        auth.user_id,
+        &request.idempotency_key,
+    )
+    .await
+    {
+        Ok(result) if result.created => {
+            metrics::counter!(
+                crate::business_metrics::MEDICATION_AI_JOBS_TOTAL,
+                "outcome" => "requested",
+                "reason" => "operator_requested"
+            )
+            .increment(1);
+            state.audit_sender.try_send(audit::domain_event(
+                "medication_ai_analysis_requested",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                json!({"analysis_id": result.view.id, "review_id": review_id, "provider_kind": "openai"}),
+            ));
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "patient.medication_ai_analysis_requested",
+                patient_id,
+                json!({
+                    "analysis_id": result.view.id,
+                    "review_id": review_id,
+                    "status": result.view.status,
+                }),
+            )
+            .await;
+            (StatusCode::ACCEPTED, Json(result.view)).into_response()
+        }
+        Ok(result) => Json(result.view).into_response(),
+        Err(error_value) => ai_job_error(error_value, patient_id, review_id),
+    }
+}
+
+async fn get_ai_analysis(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Path((patient_id, review_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Some(response) = authorize(&state, &auth, patient_id).await {
+        return response;
+    }
+    audit_context.set_entity("patient", patient_id);
+    audit_context.set_action("read_medication_ai_analysis");
+    audit_context.set_context(json!({"review_id": review_id}));
+    match load_analysis(
+        &state.db,
+        patient_id,
+        review_id,
+        state.medication_ai.capability(),
+    )
+    .await
+    {
+        Ok(view) => Json(view).into_response(),
+        Err(error_value) => ai_job_error(error_value, patient_id, review_id),
+    }
+}
+
+async fn retry_ai_analysis(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Extension(audit_context): Extension<audit::AuditContext>,
+    Path((patient_id, review_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Some(response) = authorize(&state, &auth, patient_id).await {
+        return response;
+    }
+    audit_context.set_entity("patient", patient_id);
+    audit_context.set_action("retry_medication_ai_analysis");
+    audit_context.set_context(json!({"review_id": review_id}));
+    match retry_analysis(&state, patient_id, review_id, auth.user_id).await {
+        Ok(view) => {
+            metrics::counter!(
+                crate::business_metrics::MEDICATION_AI_JOBS_TOTAL,
+                "outcome" => "manual_retry",
+                "reason" => "operator_requested"
+            )
+            .increment(1);
+            state.audit_sender.try_send(audit::domain_event(
+                "medication_ai_analysis_requested",
+                Some(auth.user_id),
+                "patient",
+                Some(patient_id),
+                json!({
+                    "analysis_id": view.id,
+                    "review_id": review_id,
+                    "provider_kind": "openai",
+                    "reason": "manual_retry",
+                }),
+            ));
+            crate::realtime::publish_patient_event(
+                &state,
+                Some(auth.user_id),
+                "patient.medication_ai_analysis_requested",
+                patient_id,
+                json!({
+                    "analysis_id": view.id,
+                    "review_id": review_id,
+                    "status": view.status,
+                    "reason": "manual_retry",
+                }),
+            )
+            .await;
+            (StatusCode::ACCEPTED, Json(view)).into_response()
+        }
+        Err(error_value) => ai_job_error(error_value, patient_id, review_id),
     }
 }
 
@@ -239,6 +400,50 @@ fn service_error(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Medication evidence review workflow failed",
+            )
+        }
+    };
+    error(status, message)
+}
+
+fn ai_job_error(
+    error_value: MedicationAiJobError,
+    patient_id: Uuid,
+    review_id: Uuid,
+) -> axum::response::Response {
+    let (status, message) = match error_value {
+        MedicationAiJobError::ProviderUnavailable => (
+            StatusCode::CONFLICT,
+            "Medication AI provider is not available",
+        ),
+        MedicationAiJobError::ReviewNotFound => (
+            StatusCode::NOT_FOUND,
+            "Medication evidence review or AI analysis not found",
+        ),
+        MedicationAiJobError::ReviewNotReady => (
+            StatusCode::CONFLICT,
+            "Medication evidence review is not ready",
+        ),
+        MedicationAiJobError::InvalidInput => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Medication AI analysis input is invalid",
+        ),
+        MedicationAiJobError::IdempotencyConflict => (
+            StatusCode::CONFLICT,
+            "Idempotency key belongs to another medication AI analysis",
+        ),
+        MedicationAiJobError::InvalidStoredData
+        | MedicationAiJobError::Database(_)
+        | MedicationAiJobError::Json(_) => {
+            tracing::error!(
+                error = %error_value,
+                patient_id = %patient_id,
+                review_id = %review_id,
+                "medication AI analysis workflow"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Medication AI analysis workflow failed",
             )
         }
     };

@@ -12,9 +12,10 @@ describe("linked profile tasks", () => {
     expect(linkedTaskOpenCount([
       task("open"),
       task("in_progress"),
+      task("review"),
       task("completed"),
       task("cancelled"),
-    ])).toBe(2);
+    ])).toBe(3);
   });
 
   it("builds a patient or provider filtered request", () => {

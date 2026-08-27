@@ -6,8 +6,10 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::audit::AuditSender;
+use crate::config::MedicationAiConfig;
 use crate::crypto::KeyRegistry;
 use crate::realtime::RealtimeEvent;
+use crate::services::medication_ai_provider::MedicationAiProvider;
 use crate::settings::SettingsCache;
 
 #[derive(Clone)]
@@ -19,6 +21,7 @@ pub struct AppState {
     pub realtime_events: broadcast::Sender<RealtimeEvent>,
     pub message_keys: Arc<KeyRegistry>,
     pub audit_sender: AuditSender,
+    pub medication_ai: Arc<MedicationAiProvider>,
 }
 
 impl AppState {
@@ -48,6 +51,7 @@ impl AppState {
             realtime_events,
             message_keys: Arc::new(message_keys),
             audit_sender: AuditSender::noop(),
+            medication_ai: Arc::new(MedicationAiProvider::new(MedicationAiConfig::default())),
         }
     }
 
@@ -55,6 +59,11 @@ impl AppState {
     /// `main` calls this once after [`crate::audit::spawn_writer`].
     pub fn with_audit_sender(mut self, sender: AuditSender) -> Self {
         self.audit_sender = sender;
+        self
+    }
+
+    pub fn with_medication_ai(mut self, config: MedicationAiConfig) -> Self {
+        self.medication_ai = Arc::new(MedicationAiProvider::new(config));
         self
     }
 

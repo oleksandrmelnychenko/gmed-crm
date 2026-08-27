@@ -56,6 +56,7 @@ const copy = {
     openTask: "Aufgabe öffnen",
     open_status: "Offen",
     in_progress: "In Arbeit",
+    review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
     task_kind: "Aufgabe",
@@ -76,6 +77,7 @@ const copy = {
     openTask: "Открыть задачу",
     open_status: "Открыта",
     in_progress: "В работе",
+    review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
     task_kind: "Задача",
@@ -118,6 +120,7 @@ function statusTone(status: string) {
   if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "cancelled") return "border-slate-200 bg-slate-50 text-slate-600";
   if (status === "in_progress") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "review") return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
@@ -125,6 +128,7 @@ function taskStatusLabel(status: string, lang: Lang) {
   const labels = copy[lang];
   if (status === "open") return labels.open_status;
   if (status === "in_progress") return labels.in_progress;
+  if (status === "review") return labels.review;
   if (status === "completed") return labels.completed;
   if (status === "cancelled") return labels.cancelled;
   return status;

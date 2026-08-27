@@ -53,9 +53,10 @@ const ROLES_FINANCE_CATALOG = [
 
 const ROLES_DOCUMENTS = [
   "ceo",
-  "concierge",
   "billing",
 ] as const satisfies readonly StaffRole[];
+
+const ROLES_SOPS = ["ceo", "billing"] as const satisfies readonly StaffRole[];
 
 const ROLES_APPOINTMENTS = [
   "ceo",
@@ -116,7 +117,6 @@ const ROLES_PATIENTS = [
   "billing",
   "teamlead_interpreter",
   "interpreter",
-  "concierge",
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 
@@ -409,7 +409,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "sops",
     match: "exact",
     path: "/sops",
-    roles: RELEASE_STAFF_ROLES,
+    roles: ROLES_SOPS,
     nav: { section: "main", labelKey: "nav_learning" },
   },
   {

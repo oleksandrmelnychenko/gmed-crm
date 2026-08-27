@@ -444,6 +444,7 @@ export type StaffFormState = {
 
 export type ProviderPermissions = {
   canViewPage: boolean;
+  canCreateProvider: boolean;
   canManageRegistry: boolean;
   forceNonMedical: boolean;
 };

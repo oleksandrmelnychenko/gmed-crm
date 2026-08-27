@@ -129,6 +129,56 @@ async fn create_provider_with_payload(app: &axum::Router, bearer: &str, payload:
     body["id"].as_str().unwrap().parse().unwrap()
 }
 
+#[tokio::test]
+async fn concierge_can_create_only_non_medical_providers() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-non-medical-provider");
+    let concierge_bearer = auth_header_for(admin_id, "concierge");
+    let chauffeur_leaf_id = taxonomy_leaf_id(&app, &bearer, CHAUFFEUR_LEAF_CODE).await;
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &concierge_bearer,
+        Some(json!({
+            "name": format!("Concierge transfer partner {tag}"),
+            "provider_type": "non_medical",
+            "address_city": "Berlin",
+            "address_country": "Germany",
+            "taxonomy_node_id": chauffeur_leaf_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+
+    let provider_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let stored_provider_type: String =
+        sqlx::query_scalar("SELECT provider_type FROM providers WHERE id = $1")
+            .bind(provider_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_provider_type, "non_medical");
+
+    let (status, rejected) = json_request(
+        &app,
+        "POST",
+        "/api/v1/providers",
+        &concierge_bearer,
+        Some(json!({
+            "name": format!("Forbidden concierge clinic {tag}"),
+            "provider_type": "medical",
+            "address_city": "Berlin",
+            "address_country": "Germany",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{rejected}");
+}
+
 async fn taxonomy_leaf_id(app: &axum::Router, bearer: &str, code: &str) -> String {
     let (status, body) = json_request(app, "GET", "/api/v1/providers/taxonomy", bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");

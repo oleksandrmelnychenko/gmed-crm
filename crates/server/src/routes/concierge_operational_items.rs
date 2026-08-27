@@ -302,6 +302,9 @@ async fn list_items(
     }
 
     let assignee_filter = query.assigned_to;
+    let Some(actor_role) = operational_role_name(auth.role) else {
+        return err(StatusCode::FORBIDDEN, "Forbidden");
+    };
 
     let rows = match sqlx::query(
         r#"SELECT t.id, t.title, t.description AS operational_note, t.assigned_to, t.assigned_by,
@@ -350,8 +353,21 @@ async fn list_items(
                  OR ($7::text = 'active' AND t.archived_at IS NULL)
                  OR ($7::text = 'archived' AND t.archived_at IS NOT NULL)
              )
+             AND (
+                 $9::text = 'ceo'
+                 OR t.assigned_to = $8
+                 OR t.assigned_by = $8
+                 OR ($9::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND assigner.role = 'concierge')
+                 OR ($9::text = 'teamlead_interpreter' AND assigner.role = 'interpreter')
+             )
            ORDER BY
-               CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+               CASE t.status
+                   WHEN 'open' THEN 0
+                   WHEN 'in_progress' THEN 1
+                   WHEN 'review' THEN 2
+                   WHEN 'completed' THEN 3
+                   ELSE 4
+               END,
                CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
                COALESCE(t.starts_at, t.due_date) NULLS LAST,
                t.created_at DESC"#,
@@ -363,6 +379,8 @@ async fn list_items(
     .bind(query.patient_id)
     .bind(query.provider_id)
     .bind(archive)
+    .bind(auth.user_id)
+    .bind(actor_role)
     .fetch_all(&state.db)
     .await
     {
@@ -423,7 +441,7 @@ async fn list_attachments(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
-    if let Err(response) = ensure_active_operational_item(&state, item_id).await {
+    if let Err(response) = ensure_operational_view_access(&state, &auth, item_id).await {
         return response;
     }
     match load_attachments(&state, item_id).await {
@@ -445,6 +463,9 @@ async fn list_all_attachments(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid kind");
     }
+    let Some(actor_role) = operational_role_name(auth.role) else {
+        return err(StatusCode::FORBIDDEN, "Forbidden");
+    };
     let search = query
         .q
         .as_deref()
@@ -461,6 +482,7 @@ async fn list_all_attachments(
                   provider.name AS provider_name
            FROM concierge_operational_task_attachments attachment
            JOIN tasks task ON task.id = attachment.task_id
+           JOIN users task_creator ON task_creator.id = task.assigned_by
            JOIN users uploader ON uploader.id = attachment.uploaded_by
            LEFT JOIN patients patient ON patient.id = task.patient_id
            LEFT JOIN providers provider ON provider.id = task.provider_id
@@ -474,11 +496,20 @@ async fn list_all_attachments(
                   OR COALESCE(patient.first_name, '') ILIKE $2
                   OR COALESCE(patient.last_name, '') ILIKE $2
                   OR COALESCE(provider.name, '') ILIKE $2)
+             AND (
+                 $4::text = 'ceo'
+                 OR task.assigned_to = $3
+                 OR task.assigned_by = $3
+                 OR ($4::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND task_creator.role = 'concierge')
+                 OR ($4::text = 'teamlead_interpreter' AND task_creator.role = 'interpreter')
+             )
            ORDER BY attachment.created_at DESC, attachment.id DESC
            LIMIT 1000"#,
     )
     .bind(query.kind)
     .bind(search)
+    .bind(auth.user_id)
+    .bind(actor_role)
     .fetch_all(&state.db)
     .await
     {
@@ -726,6 +757,9 @@ async fn download_attachment(
     Path((item_id, attachment_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
     if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    if let Err(response) = ensure_operational_view_access(&state, &auth, item_id).await {
         return response;
     }
     let row = match sqlx::query(
@@ -1238,6 +1272,14 @@ async fn update_item(
             "Operational item was changed by another user",
         );
     }
+    if existing_status != body.status
+        && !is_allowed_status_transition(&existing_status, &body.status, true)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid task status transition",
+        );
+    }
     let requested_assignee = body.assigned_to.or(Some(existing_assignee));
     let assigned_to = match resolve_assignee(&state, &auth, requested_assignee).await {
         Ok(value) => value,
@@ -1517,9 +1559,8 @@ async fn update_item_status(
     let assigned_by_role = existing
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if auth.user_id != assigned_to
-        && !can_mutate_operational_item(&auth, assigned_by, &assigned_by_role)
-    {
+    let can_review = can_mutate_operational_item(&auth, assigned_by, &assigned_by_role);
+    if auth.user_id != assigned_to && !can_review {
         return err(
             StatusCode::FORBIDDEN,
             "Only the task assignee, creator, or a higher role can change task status",
@@ -1543,6 +1584,23 @@ async fn update_item_status(
     }
     let previous_status = existing.try_get::<String, _>("status").unwrap_or_default();
     let title = existing.try_get::<String, _>("title").unwrap_or_default();
+    if !is_allowed_status_transition(&previous_status, &body.status, can_review) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid task status transition",
+        );
+    }
+    if previous_status == body.status {
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit idempotent concierge task status update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return match load_item(&state, item_id).await {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
+            Err(response) => response,
+        };
+    }
 
     if let Err(error) = sqlx::query(
         r#"UPDATE tasks
@@ -1857,6 +1915,9 @@ async fn delete_item(
     let task = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.title, task.status,
                   task.archived_at,
+                  EXISTS(SELECT 1 FROM concierge_operational_task_comments comment WHERE comment.task_id = task.id) AS has_comments,
+                  EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id) AS has_checklist,
+                  EXISTS(SELECT 1 FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = task.id AND attachment.deleted_at IS NULL) AS has_attachments,
                   creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -1901,6 +1962,15 @@ async fn delete_item(
         return err(
             StatusCode::CONFLICT,
             "Restore the archived task before deleting it",
+        );
+    }
+    let has_work = task.try_get::<bool, _>("has_comments").unwrap_or(true)
+        || task.try_get::<bool, _>("has_checklist").unwrap_or(true)
+        || task.try_get::<bool, _>("has_attachments").unwrap_or(true);
+    if status != "open" || has_work {
+        return err(
+            StatusCode::CONFLICT,
+            "Only an untouched open task can be deleted; cancel or archive it instead",
         );
     }
     if let Err(error) = sqlx::query(
@@ -2537,23 +2607,25 @@ async fn toggle_checklist_item(
 
 async fn lock_item_access(
     tx: &mut Transaction<'_, Postgres>,
-    _auth: &AuthUser,
+    auth: &AuthUser,
     item_id: Uuid,
     for_update: bool,
 ) -> Result<Uuid, axum::response::Response> {
     let query = if for_update {
-        r#"SELECT assigned_to
-           FROM tasks
-           WHERE id = $1 AND task_scope = 'concierge_operational'
-             AND deleted_at IS NULL AND archived_at IS NULL
-           FOR UPDATE"#
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1 AND task.task_scope = 'concierge_operational'
+             AND task.deleted_at IS NULL AND task.archived_at IS NULL
+           FOR UPDATE OF task"#
     } else {
-        r#"SELECT assigned_to
-           FROM tasks
-           WHERE id = $1 AND task_scope = 'concierge_operational' AND deleted_at IS NULL
-           FOR SHARE"#
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
+           FOR SHARE OF task"#
     };
-    let assigned_to = sqlx::query_scalar::<_, Uuid>(query)
+    let row = sqlx::query(query)
         .bind(item_id)
         .fetch_optional(&mut **tx)
         .await
@@ -2562,28 +2634,54 @@ async fn lock_item_access(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by = row
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by_role = row
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Only the task assignee, creator, or a higher role can access this task",
+        ));
+    }
     Ok(assigned_to)
 }
 
-async fn ensure_active_operational_item(
+async fn ensure_operational_view_access(
     state: &AppState,
+    auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let exists = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-               SELECT 1 FROM tasks
-               WHERE id = $1 AND task_scope = 'concierge_operational' AND deleted_at IS NULL
-           )"#,
+    let row = sqlx::query(
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL"#,
     )
     .bind(item_id)
-    .fetch_one(&state.db)
+    .fetch_optional(&state.db)
     .await
     .map_err(|error| {
         tracing::error!(error = %error, item_id = %item_id, "validate operational task for attachment access");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-    })?;
-    if !exists {
-        return Err(err(StatusCode::NOT_FOUND, "Operational item not found"));
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by = row
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assigned_by_role = row
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role) {
+        return Err(err(StatusCode::FORBIDDEN, "Forbidden"));
     }
     Ok(())
 }
@@ -3483,43 +3581,104 @@ fn can_mutate_operational_item(auth: &AuthUser, assigned_by: Uuid, assigned_by_r
     if auth.user_id == assigned_by {
         return true;
     }
-    let Some(actor_rank) = operational_role_rank(auth.role) else {
-        return false;
-    };
-    let Some(creator_rank) = operational_role_name_rank(assigned_by_role) else {
-        return false;
-    };
-    actor_rank > creator_rank
+    can_manage_operational_role(auth.role, assigned_by_role)
 }
 
-fn operational_role_rank(role: Role) -> Option<u8> {
+fn operational_role_name(role: Role) -> Option<&'static str> {
     match role {
-        Role::Ceo => Some(3),
-        Role::CeoAssistant | Role::Billing | Role::PatientManager | Role::Sales => Some(2),
-        Role::Concierge | Role::TeamleadInterpreter => Some(1),
-        Role::Interpreter => Some(0),
+        Role::Ceo => Some("ceo"),
+        Role::CeoAssistant => Some("ceo_assistant"),
+        Role::Billing => Some("billing"),
+        Role::PatientManager => Some("patient_manager"),
+        Role::Sales => Some("sales"),
+        Role::Concierge => Some("concierge"),
+        Role::TeamleadInterpreter => Some("teamlead_interpreter"),
+        Role::Interpreter => Some("interpreter"),
         _ => None,
     }
 }
 
-fn operational_role_name_rank(role: &str) -> Option<u8> {
-    match role {
-        "ceo" => Some(3),
-        "ceo_assistant" | "billing" | "patient_manager" | "sales" => Some(2),
-        "concierge" | "teamlead_interpreter" => Some(1),
-        "interpreter" => Some(0),
-        _ => None,
+fn can_manage_operational_role(actor_role: Role, creator_role: &str) -> bool {
+    match actor_role {
+        Role::Ceo => true,
+        Role::CeoAssistant | Role::Billing | Role::PatientManager | Role::Sales => {
+            creator_role == "concierge"
+        }
+        Role::TeamleadInterpreter => creator_role == "interpreter",
+        _ => false,
     }
 }
 
 fn can_assign_operational_role(actor_role: Role, target_role: &str) -> bool {
-    match (
-        operational_role_rank(actor_role),
-        operational_role_name_rank(target_role),
-    ) {
-        (Some(actor_rank), Some(target_rank)) => actor_rank >= target_rank,
+    let Some(actor_role_name) = operational_role_name(actor_role) else {
+        return false;
+    };
+    if actor_role_name == target_role {
+        return true;
+    }
+    match actor_role {
+        Role::Ceo => matches!(
+            target_role,
+            "ceo_assistant"
+                | "billing"
+                | "patient_manager"
+                | "sales"
+                | "concierge"
+                | "teamlead_interpreter"
+                | "interpreter"
+        ),
+        Role::CeoAssistant | Role::Billing | Role::PatientManager | Role::Sales => {
+            target_role == "concierge"
+        }
+        Role::TeamleadInterpreter => target_role == "interpreter",
         _ => false,
     }
+}
+
+fn can_collaborate_on_operational_item(
+    auth: &AuthUser,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+) -> bool {
+    auth.user_id == assigned_to
+        || auth.user_id == assigned_by
+        || can_manage_operational_role(auth.role, assigned_by_role)
+}
+
+fn can_view_operational_item(
+    auth: &AuthUser,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+) -> bool {
+    can_collaborate_on_operational_item(auth, assigned_to, assigned_by, assigned_by_role)
+}
+
+fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool {
+    if from == to {
+        return true;
+    }
+    if can_review {
+        return matches!(
+            (from, to),
+            ("open", "in_progress")
+                | ("open", "cancelled")
+                | ("in_progress", "open")
+                | ("in_progress", "review")
+                | ("in_progress", "completed")
+                | ("in_progress", "cancelled")
+                | ("review", "in_progress")
+                | ("review", "completed")
+                | ("review", "cancelled")
+                | ("completed", "in_progress")
+                | ("cancelled", "open")
+        );
+    }
+    matches!(
+        (from, to),
+        ("open", "in_progress") | ("in_progress", "review") | ("review", "in_progress")
+    )
 }
 
 fn is_allowed_operational_attachment(file_name: &str, mime_type: &str, data: &[u8]) -> bool {
@@ -3582,7 +3741,10 @@ fn is_valid_priority(value: &str) -> bool {
 }
 
 fn is_valid_status(value: &str) -> bool {
-    matches!(value, "open" | "in_progress" | "completed" | "cancelled")
+    matches!(
+        value,
+        "open" | "in_progress" | "review" | "completed" | "cancelled"
+    )
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

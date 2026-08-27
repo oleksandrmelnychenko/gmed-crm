@@ -51,7 +51,8 @@ async fn main() {
         settings_cache,
         cfg.message_key_registry,
     )
-    .with_audit_sender(audit_sender);
+    .with_audit_sender(audit_sender)
+    .with_medication_ai(cfg.medication_ai);
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
     gmed_server::routes::cases::spawn_medication_expiry_scheduler(app_state.clone());
     gmed_server::routes::orders::spawn_external_invoice_deadline_scheduler(app_state.clone());
@@ -70,6 +71,7 @@ async fn main() {
         cfg.gba_ais_download_url,
     )
     .await;
+    gmed_server::services::medication_ai_jobs::spawn_medication_ai_worker(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());

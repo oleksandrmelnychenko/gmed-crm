@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::services::medication_ai_provider::MedicationAiCapability;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -341,6 +342,10 @@ async fn system_health(
         .map(|r| serde_json::json!({"table": r.table, "size": r.size}))
         .collect();
 
+    let ai_provider = state.medication_ai.capability();
+    let ai_queue = load_medication_ai_queue_health(&state).await;
+    let ai_operational_status = medication_ai_operational_status(&ai_provider, &ai_queue);
+
     Json(serde_json::json!({
         "database": {
             "size": db_size,
@@ -361,9 +366,201 @@ async fn system_health(
             "leads": total_leads,
             "orders": total_orders,
             "audit_entries": total_audit,
+        },
+        "medication_ai": {
+            "provider": ai_provider,
+            "operational_status": ai_operational_status,
+            "queue": ai_queue.as_json(),
         }
     }))
     .into_response()
+}
+
+#[derive(Default)]
+struct MedicationAiQueueHealth {
+    available: bool,
+    total: i64,
+    requested: i64,
+    processing: i64,
+    ready: i64,
+    failed: i64,
+    stale_processing: i64,
+    ready_last_24h: i64,
+    failed_last_24h: i64,
+    oldest_requested_seconds: Option<i64>,
+    last_ready_at: Option<String>,
+    last_failed_at: Option<String>,
+}
+
+impl MedicationAiQueueHealth {
+    fn as_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "available": self.available,
+            "total": self.total,
+            "requested": self.requested,
+            "processing": self.processing,
+            "ready": self.ready,
+            "failed": self.failed,
+            "stale_processing": self.stale_processing,
+            "ready_last_24h": self.ready_last_24h,
+            "failed_last_24h": self.failed_last_24h,
+            "oldest_requested_seconds": self.oldest_requested_seconds,
+            "last_ready_at": self.last_ready_at,
+            "last_failed_at": self.last_failed_at,
+        })
+    }
+}
+
+async fn load_medication_ai_queue_health(state: &AppState) -> MedicationAiQueueHealth {
+    let result = sqlx::query(
+        r#"SELECT count(*)::bigint AS total,
+                  count(*) FILTER (WHERE status = 'requested')::bigint AS requested,
+                  count(*) FILTER (WHERE status = 'processing')::bigint AS processing,
+                  count(*) FILTER (WHERE status = 'ready')::bigint AS ready,
+                  count(*) FILTER (WHERE status = 'failed')::bigint AS failed,
+                  count(*) FILTER (
+                      WHERE status = 'processing' AND lease_until < now()
+                  )::bigint AS stale_processing,
+                  count(*) FILTER (
+                      WHERE status = 'ready' AND completed_at >= now() - interval '24 hours'
+                  )::bigint AS ready_last_24h,
+                  count(*) FILTER (
+                      WHERE status = 'failed' AND completed_at >= now() - interval '24 hours'
+                  )::bigint AS failed_last_24h,
+                  extract(epoch FROM (
+                      now() - min(requested_at) FILTER (
+                          WHERE status = 'requested' AND available_at <= now()
+                      )
+                  ))::bigint AS oldest_requested_seconds,
+                  max(completed_at) FILTER (WHERE status = 'ready') AS last_ready_at,
+                  max(completed_at) FILTER (WHERE status = 'failed') AS last_failed_at
+           FROM medication_ai_analyses"#,
+    )
+    .fetch_one(&state.db)
+    .await;
+
+    match result {
+        Ok(row) => MedicationAiQueueHealth {
+            available: true,
+            total: row.get("total"),
+            requested: row.get("requested"),
+            processing: row.get("processing"),
+            ready: row.get("ready"),
+            failed: row.get("failed"),
+            stale_processing: row.get("stale_processing"),
+            ready_last_24h: row.get("ready_last_24h"),
+            failed_last_24h: row.get("failed_last_24h"),
+            oldest_requested_seconds: row.get("oldest_requested_seconds"),
+            last_ready_at: row
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_ready_at")
+                .map(|value| value.to_rfc3339()),
+            last_failed_at: row
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_failed_at")
+                .map(|value| value.to_rfc3339()),
+        },
+        Err(error) => {
+            tracing::error!(error = %error, "load medication AI queue health");
+            MedicationAiQueueHealth::default()
+        }
+    }
+}
+
+fn medication_ai_operational_status(
+    provider: &MedicationAiCapability,
+    queue: &MedicationAiQueueHealth,
+) -> &'static str {
+    if !queue.available {
+        return "unavailable";
+    }
+    if !provider.external_calls_enabled {
+        return provider.status;
+    }
+    if queue.stale_processing > 0
+        || queue.failed_last_24h > 0
+        || queue
+            .oldest_requested_seconds
+            .is_some_and(|seconds| seconds > 120)
+    {
+        return "attention";
+    }
+    "healthy"
+}
+
+#[cfg(test)]
+mod medication_ai_health_tests {
+    use super::*;
+
+    fn provider(status: &'static str, enabled: bool) -> MedicationAiCapability {
+        MedicationAiCapability {
+            kind: if enabled { "openai" } else { "none" },
+            status,
+            external_calls_enabled: enabled,
+            reason_code: status,
+            model: enabled.then(|| "gpt-test".to_string()),
+        }
+    }
+
+    #[test]
+    fn disabled_provider_is_not_reported_as_an_incident() {
+        let queue = MedicationAiQueueHealth {
+            available: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("disabled", false), &queue),
+            "disabled"
+        );
+    }
+
+    #[test]
+    fn ready_provider_reports_queue_failures_and_expired_leases() {
+        let failed = MedicationAiQueueHealth {
+            available: true,
+            failed_last_24h: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &failed),
+            "attention"
+        );
+        let stale = MedicationAiQueueHealth {
+            available: true,
+            stale_processing: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &stale),
+            "attention"
+        );
+        let delayed = MedicationAiQueueHealth {
+            available: true,
+            oldest_requested_seconds: Some(121),
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &delayed),
+            "attention"
+        );
+    }
+
+    #[test]
+    fn clean_ready_provider_is_healthy_and_database_failure_is_visible() {
+        let clean = MedicationAiQueueHealth {
+            available: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &clean),
+            "healthy"
+        );
+        assert_eq!(
+            medication_ai_operational_status(
+                &provider("ready", true),
+                &MedicationAiQueueHealth::default(),
+            ),
+            "unavailable"
+        );
+    }
 }
 
 async fn login_geo_history(

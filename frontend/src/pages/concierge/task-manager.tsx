@@ -36,6 +36,7 @@ import {
   type ConciergeAssignee,
   type ConciergeTask,
   type ConciergeTaskFilters,
+  type ConciergeTaskStatus,
 } from "./model";
 import {
   isoWeekNumber,
@@ -72,6 +73,7 @@ const copy = {
     month: "Monat",
     open: "Offen",
     in_progress: "In Arbeit",
+    review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
     low: "Niedrig",
@@ -81,6 +83,7 @@ const copy = {
     task: "Aufgabe",
     event: "Termin",
     noTasks: "Keine Aufgaben für die gewählten Filter",
+    noActiveTasks: "Derzeit sind keine aktiven Aufgaben vorhanden",
     active: "Aktiv",
     dueToday: "Heute fällig",
     teamWorkload: "Team-Auslastung",
@@ -130,6 +133,7 @@ const copy = {
     month: "Месяц",
     open: "Открыто",
     in_progress: "В работе",
+    review: "На проверке",
     completed: "Выполнено",
     cancelled: "Отменено",
     low: "Низкий",
@@ -139,6 +143,7 @@ const copy = {
     task: "Задача",
     event: "Событие",
     noTasks: "Для выбранных фильтров задач нет",
+    noActiveTasks: "Активных задач пока нет",
     active: "Активные",
     dueToday: "На сегодня",
     teamWorkload: "Загрузка команды",
@@ -166,7 +171,7 @@ const copy = {
   },
 } as const;
 
-const statuses = ["open", "in_progress", "completed", "cancelled"] as const;
+const statuses = ["open", "in_progress", "review", "completed", "cancelled"] as const;
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -208,7 +213,9 @@ function TaskCard({
   deleting,
   archiving,
   canModify,
+  canDelete,
   canChangeStatus,
+  availableStatuses,
   onOpen,
   onEdit,
   onDelete,
@@ -224,7 +231,9 @@ function TaskCard({
   deleting: boolean;
   archiving: boolean;
   canModify: boolean;
+  canDelete: boolean;
   canChangeStatus: boolean;
+  availableStatuses: ConciergeTaskStatus[];
   onOpen: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
@@ -287,7 +296,7 @@ function TaskCard({
           <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive />{labels.archive}</Button>
         ) : null}
         {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
-        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.delete : labels.noPermission} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
+        {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
       <SelectField
         className="h-8 min-w-[130px] rounded-md bg-background text-xs"
@@ -295,7 +304,7 @@ function TaskCard({
         disabled={archived || !canChangeStatus || updating || deleting || archiving}
         title={canChangeStatus ? labels.moveTo : labels.noStatusPermission}
         aria-label={labels.moveTo}
-        options={statuses.map((status) => ({ value: status, label: labels[status] }))}
+        options={availableStatuses.map((status) => ({ value: status, label: labels[status] }))}
         onValueChange={(status) => onStatusChange(task, status)}
       />
     </article>
@@ -312,7 +321,9 @@ export function ConciergeTaskManager({
   deletingTaskId,
   archivingTaskId,
   canModifyTask,
+  canDeleteTask,
   canChangeTaskStatus,
+  availableStatusesForTask,
   onEdit,
   onDelete,
   onArchive,
@@ -330,7 +341,9 @@ export function ConciergeTaskManager({
   deletingTaskId: string | null;
   archivingTaskId: string | null;
   canModifyTask: (task: ConciergeTask) => boolean;
+  canDeleteTask: (task: ConciergeTask) => boolean;
   canChangeTaskStatus: (task: ConciergeTask) => boolean;
+  availableStatusesForTask: (task: ConciergeTask) => ConciergeTaskStatus[];
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
   onArchive: (task: ConciergeTask) => void;
@@ -360,6 +373,16 @@ export function ConciergeTaskManager({
   const visibleStatuses = filters.archive === "archived"
     ? statuses.filter((status) => status === "completed" || status === "cancelled")
     : statuses;
+  const hasCustomFilters = Boolean(
+    filters.query.trim()
+      || filters.archive !== "active"
+      || filters.assignee !== "all"
+      || filters.status !== "all"
+      || filters.priority !== "all"
+      || filters.kind !== "all"
+      || filters.audience !== "all"
+      || filters.timing !== "all",
+  );
   const tasksByDay = useMemo(() => {
     const result = new Map<string, ConciergeTask[]>();
     filtered.forEach((task) => {
@@ -408,33 +431,33 @@ export function ConciergeTaskManager({
         </div>
       ) : null}
 
-      <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 sm:flex sm:flex-nowrap sm:items-center sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
-        <div className="relative col-span-2 min-w-0 sm:col-auto sm:min-w-[240px] sm:flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-10 rounded-md bg-field pl-8 text-xs sm:h-8" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[120px] sm:shrink-0" value={filters.archive} options={[{ value: "active", label: labels.activeTasks }, { value: "archived", label: labels.archivedTasks }, { value: "all", label: labels.allTasks }]} onValueChange={(archive) => setFilters((current) => ({ ...current, archive: archive as ConciergeTaskFilters["archive"] }))} />
-        {canManageTeam ? <NativeComboboxSelect className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</NativeComboboxSelect> : null}
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[130px] sm:shrink-0" value={filters.status} options={[{ value: "all", label: labels.allStatuses }, ...statuses.map((status) => ({ value: status, label: labels[status] }))]} onValueChange={(status) => setFilters((current) => ({ ...current, status }))} />
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[140px] sm:shrink-0" value={filters.priority} options={[{ value: "all", label: labels.allPriorities }, ...["low", "normal", "high", "urgent"].map((priority) => ({ value: priority, label: labels[priority as keyof typeof labels] }))]} onValueChange={(priority) => setFilters((current) => ({ ...current, priority }))} />
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.kind} options={[{ value: "all", label: labels.allKinds }, { value: "task", label: labels.task }, { value: "event", label: labels.event }]} onValueChange={(kind) => setFilters((current) => ({ ...current, kind }))} />
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[145px] sm:shrink-0" value={filters.audience} options={[{ value: "all", label: labels.allAudiences }, { value: "internal", label: labels.internal }, { value: "external", label: labels.external }]} onValueChange={(audience) => setFilters((current) => ({ ...current, audience }))} />
-        <SelectField className="h-10 min-w-0 text-xs sm:h-8 sm:w-[125px] sm:shrink-0" value={filters.timing} options={[{ value: "all", label: labels.allTiming }, { value: "today", label: labels.today }, { value: "overdue", label: labels.overdue }, { value: "upcoming", label: labels.upcoming }]} onValueChange={(timing) => setFilters((current) => ({ ...current, timing: timing as ConciergeTaskFilters["timing"] }))} />
+      <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8 2xl:px-3 2xl:py-2">
+        <div className="relative col-span-2 min-w-0"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input aria-label={labels.search} className="h-10 rounded-md bg-field pl-8 text-xs 2xl:h-8" value={filters.query} placeholder={labels.search} onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))} /></div>
+        <SelectField aria-label={labels.activeTasks} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.archive} options={[{ value: "active", label: labels.activeTasks }, { value: "archived", label: labels.archivedTasks }, { value: "all", label: labels.allTasks }]} onValueChange={(archive) => setFilters((current) => ({ ...current, archive: archive as ConciergeTaskFilters["archive"] }))} />
+        {canManageTeam ? <NativeComboboxSelect aria-label={labels.allAssignees} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.assignee} onChange={(event) => setFilters((current) => ({ ...current, assignee: event.target.value }))}><option value="all">{labels.allAssignees}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</NativeComboboxSelect> : null}
+        <SelectField aria-label={labels.allStatuses} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.status} options={[{ value: "all", label: labels.allStatuses }, ...statuses.map((status) => ({ value: status, label: labels[status] }))]} onValueChange={(status) => setFilters((current) => ({ ...current, status }))} />
+        <SelectField aria-label={labels.allPriorities} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.priority} options={[{ value: "all", label: labels.allPriorities }, ...["low", "normal", "high", "urgent"].map((priority) => ({ value: priority, label: labels[priority as keyof typeof labels] }))]} onValueChange={(priority) => setFilters((current) => ({ ...current, priority }))} />
+        <SelectField aria-label={labels.allKinds} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.kind} options={[{ value: "all", label: labels.allKinds }, { value: "task", label: labels.task }, { value: "event", label: labels.event }]} onValueChange={(kind) => setFilters((current) => ({ ...current, kind }))} />
+        <SelectField aria-label={labels.allAudiences} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.audience} options={[{ value: "all", label: labels.allAudiences }, { value: "internal", label: labels.internal }, { value: "external", label: labels.external }]} onValueChange={(audience) => setFilters((current) => ({ ...current, audience }))} />
+        <SelectField aria-label={labels.allTiming} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.timing} options={[{ value: "all", label: labels.allTiming }, { value: "today", label: labels.today }, { value: "overdue", label: labels.overdue }, { value: "upcoming", label: labels.upcoming }]} onValueChange={(timing) => setFilters((current) => ({ ...current, timing: timing as ConciergeTaskFilters["timing"] }))} />
       </div>
 
       <div className="mx-auto grid w-full grid-cols-3 gap-1 sm:flex sm:w-fit">
         {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
-      {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{labels.noTasks}</div> : null}
+      {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{hasCustomFilters ? labels.noTasks : labels.noActiveTasks}</div> : null}
 
       {filtered.length > 0 && view === "board" ? (
-        <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-4")}>
+        <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-5")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canChangeStatus={canChangeTaskStatus(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canChangeStatus={canChangeTaskStatus(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">

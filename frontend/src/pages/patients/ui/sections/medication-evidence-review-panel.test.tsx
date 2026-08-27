@@ -22,6 +22,7 @@ function summary() {
     findings_total: 1,
     high_priority_findings: 0,
     missing_data_total: 1,
+    benefit_assessments_total: 1,
   };
 }
 
@@ -39,6 +40,13 @@ function preview(
       status: "not_configured",
       external_calls_enabled: false,
       reason_code: "external_provider_not_configured",
+    },
+    ai_provider: {
+      kind: "none",
+      status: "not_configured",
+      external_calls_enabled: false,
+      reason_code: "external_provider_not_configured",
+      model: null,
     },
     clinical_review: { status: "not_configured", can_approve: false },
     permissions: { can_create_review: true, can_read_review: true },
@@ -115,7 +123,28 @@ function review(overrides: Partial<MedicationEvidenceReview> = {}): MedicationEv
           source_url: null,
           evidence_refs: ["patient_medication:med-1"],
         },
+        {
+          id: "benefit_assessment:gba:decision-1:group-a",
+          kind: "benefit_assessment",
+          source_id: "gba_ais",
+          source_url: "https://www.g-ba.de/bewertungsverfahren/nutzenbewertung/1/",
+          evidence_refs: ["gba:decision-1:group-a"],
+        },
       ],
+      benefit_assessments: [{
+        evidence_ref: "gba:decision-1:group-a",
+        medication_id: "med-1",
+        decision_id: "decision-1",
+        dossier_reference: "A23-01",
+        official_url: "https://www.g-ba.de/bewertungsverfahren/nutzenbewertung/1/",
+        decision_date: "2026-08-01",
+        indication_short: "Indikation",
+        patient_group: "Gruppe A",
+        benefit_extent: "gering",
+        benefit_probability: "Hinweis",
+        assessed_substances: ["Apixaban"],
+        citation_ref: "benefit_assessment:gba:decision-1:group-a",
+      }],
     },
     draft: {
       id: "draft-1",
@@ -151,15 +180,17 @@ function review(overrides: Partial<MedicationEvidenceReview> = {}): MedicationEv
 }
 
 describe("MedicationEvidenceReviewPanelContent", () => {
-  it("presents provider-not-configured as a neutral local mode, not a failure", () => {
+  it("renders a compact overview without technical or clinical boilerplate", () => {
     const html = renderToStaticMarkup(
       <MedicationEvidenceReviewPanelContent preview={preview()} language="ru" />,
     );
 
-    expect(html).toContain("Evidence Copilot");
-    expect(html).toContain("Только локальные доказательства");
-    expect(html).toContain("Внешний AI-провайдер не настроен");
-    expect(html).toContain("внешние вызовы не выполняются");
+    expect(html).toContain("AI-анализ доказательств");
+    expect(html).not.toContain("Evidence Copilot");
+    expect(html).toContain('data-ai-mark="true"');
+    expect(html).not.toContain("Только локальные доказательства");
+    expect(html).not.toContain("Внешний AI-провайдер не активен");
+    expect(html).not.toContain("Клиническое согласование не настроено");
     expect(html).not.toContain('role="alert"');
     expect(html).not.toContain("Одобрить");
   });
@@ -200,7 +231,8 @@ describe("MedicationEvidenceReviewPanelContent", () => {
       />,
     );
 
-    expect(html).toContain("Medication Intelligence изменился");
+    expect(html).toContain("Данные о медикаментах изменились");
+    expect(html).not.toContain("Medication Intelligence изменился");
     expect(html).toContain("Обновить данные");
     expect(html).toContain('role="alert"');
   });
@@ -221,7 +253,10 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(russian).toContain("Зафиксирован проверяемый сигнал");
     expect(russian).toContain('href="https://www.bfarm.de/alert"');
     expect(russian).toContain("citation:finding-1");
-    expect(russian).toContain("Клиническое согласование не настроено");
+    expect(russian).toContain("Дополнительная польза");
+    expect(russian).toContain("Gruppe A");
+    expect(russian).toContain("Точное совпадение PZN/ATC");
+    expect(russian).not.toContain("Клиническое согласование не настроено");
     expect(german).toContain("Evidenzzusammenfassung");
     expect(german).toContain("Prüffragen");
     expect(german).toContain("Ein prüfbarer Hinweis wurde erfasst");

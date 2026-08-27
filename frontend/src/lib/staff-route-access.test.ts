@@ -53,11 +53,8 @@ describe("first-release staff RBAC", () => {
     for (const path of [
       "/",
       "/chat",
-      "/sops",
       "/leads",
-      "/patients/patient-1",
       "/providers/provider-1",
-      "/documents",
       "/files",
       "/concierge",
       "/task-manager",
@@ -70,6 +67,11 @@ describe("first-release staff RBAC", () => {
     for (const path of [
       "/feedback",
       "/reports",
+      "/sops",
+      "/patients",
+      "/patients/patient-1",
+      "/documents",
+      "/documents/document-1",
       "/orders",
       "/contracts",
       "/invoices",
@@ -173,6 +175,10 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/employees");
     expect(concierge).toContain("/concierge");
     expect(concierge).toContain("/task-manager");
+    expect(concierge).toContain("/files");
+    expect(concierge).not.toContain("/documents");
+    expect(concierge).not.toContain("/sops");
+    expect(concierge).not.toContain("/patients");
     expect(concierge).not.toContain("/feedback");
     expect(concierge).not.toContain("/reports");
 

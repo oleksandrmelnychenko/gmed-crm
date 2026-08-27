@@ -181,7 +181,7 @@ function Dialog({
         title={t.common_discard_unsaved_confirm}
         message={t.common_overlay_dismiss_blocked}
         cancelLabel={t.common_cancel}
-        confirmLabel={t.common_ok}
+        confirmLabel={t.common_discard_unsaved_action}
         onCancel={handleCancelDismiss}
         onConfirm={handleConfirmDismiss}
       />

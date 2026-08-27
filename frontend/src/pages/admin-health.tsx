@@ -26,6 +26,7 @@ import {
 } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
+import { AiMark } from "@/components/ui/ai-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -62,9 +63,186 @@ interface HealthData {
     orders: number;
     audit_entries: number;
   };
+  medication_ai: {
+    provider: {
+      kind: "none" | "openai";
+      status: "not_configured" | "disabled" | "blocked" | "ready";
+      external_calls_enabled: boolean;
+      reason_code: string;
+      model: string | null;
+    };
+    operational_status: "not_configured" | "disabled" | "blocked" | "healthy" | "attention" | "unavailable";
+    queue: {
+      available: boolean;
+      total: number;
+      requested: number;
+      processing: number;
+      ready: number;
+      failed: number;
+      stale_processing: number;
+      ready_last_24h: number;
+      failed_last_24h: number;
+      oldest_requested_seconds: number | null;
+      last_ready_at: string | null;
+      last_failed_at: string | null;
+    };
+  };
 }
 
-type HealthDetailPanel = "database" | "access" | "data";
+const DEFAULT_MEDICATION_AI_HEALTH: HealthData["medication_ai"] = {
+  provider: {
+    kind: "none",
+    status: "not_configured",
+    external_calls_enabled: false,
+    reason_code: "not_configured",
+    model: null,
+  },
+  operational_status: "not_configured",
+  queue: {
+    available: false,
+    total: 0,
+    requested: 0,
+    processing: 0,
+    ready: 0,
+    failed: 0,
+    stale_processing: 0,
+    ready_last_24h: 0,
+    failed_last_24h: 0,
+    oldest_requested_seconds: null,
+    last_ready_at: null,
+    last_failed_at: null,
+  },
+};
+
+function normalizeHealthData(payload: HealthData): HealthData {
+  return {
+    ...payload,
+    medication_ai: payload.medication_ai ?? DEFAULT_MEDICATION_AI_HEALTH,
+  };
+}
+
+type HealthDetailPanel = "database" | "access" | "data" | "ai";
+
+type AiHealthCopy = ReturnType<typeof aiHealthCopy>;
+
+function aiHealthCopy(lang: "ru" | "de") {
+  return lang === "de"
+    ? {
+        section: "KI-Betrieb",
+        provider: "Anbieterstatus",
+        reason: "Konfigurationshinweis",
+        operational: "Betriebsstatus",
+        queue: "Aktive Warteschlange",
+        requested: "Wartend",
+        processing: "In Verarbeitung",
+        ready: "Gespeichert",
+        failed: "Fehlgeschlagen",
+        stale: "Abgelaufene Leases",
+        ready24h: "Bereit in 24 Std.",
+        failed24h: "Fehler in 24 Std.",
+        oldest: "Ältester wartender Auftrag",
+        lastReady: "Letztes Ergebnis",
+        lastFailed: "Letzter Fehler",
+        model: "Freigegebenes Modell",
+        externalCalls: "Externe Aufrufe",
+        enabled: "Aktiv",
+        disabled: "Aus",
+        noModel: "Nicht festgelegt",
+        noTimestamp: "Keine Ereignisse",
+        privacy: "Es werden weder API-Schlüssel noch Patienten- oder Antwortinhalte angezeigt.",
+        attentionFailed: "KI-Aufträge mit Fehlern in den letzten 24 Stunden",
+        attentionStale: "KI-Aufträge mit abgelaufener Verarbeitungssperre",
+        attentionDelayed: "KI-Aufträge warten länger als zwei Minuten",
+        attentionBlocked: "Der konfigurierte KI-Anbieter ist blockiert",
+        attentionUnavailable: "Der KI-Warteschlangenstatus konnte nicht gelesen werden",
+        statuses: {
+          not_configured: "Nicht konfiguriert",
+          disabled: "Deaktiviert",
+          blocked: "Blockiert",
+          ready: "Bereit",
+          healthy: "Stabil",
+          attention: "Prüfung erforderlich",
+          unavailable: "Nicht verfügbar",
+        },
+        reasons: {
+          external_provider_not_configured: "Externer Anbieter nicht konfiguriert",
+          external_provider_disabled: "Administrativ deaktiviert",
+          data_transfer_not_approved: "Datenübertragung nicht freigegeben",
+          api_key_missing: "Server-Schlüssel fehlt",
+          model_missing: "Freigegebenes Modell fehlt",
+          client_initialization_failed: "Sicherer HTTP-Client konnte nicht gestartet werden",
+          ready: "Konfiguration vollständig",
+        },
+      }
+    : {
+        section: "AI-контур",
+        provider: "Состояние провайдера",
+        reason: "Состояние конфигурации",
+        operational: "Операционное состояние",
+        queue: "Активная очередь",
+        requested: "Ожидают",
+        processing: "Обрабатываются",
+        ready: "Сохранены",
+        failed: "Завершились ошибкой",
+        stale: "Просроченные блокировки обработки",
+        ready24h: "Готовы за 24 часа",
+        failed24h: "Ошибки за 24 часа",
+        oldest: "Самая старая ожидающая задача",
+        lastReady: "Последний результат",
+        lastFailed: "Последняя ошибка",
+        model: "Разрешённая модель",
+        externalCalls: "Внешние вызовы",
+        enabled: "Включены",
+        disabled: "Выключены",
+        noModel: "Не задана",
+        noTimestamp: "Событий ещё нет",
+        privacy: "API-ключи, данные пациентов и содержимое ответов здесь не отображаются.",
+        attentionFailed: "AI-задачи с ошибками за последние 24 часа",
+        attentionStale: "AI-задачи с просроченной блокировкой обработки",
+        attentionDelayed: "AI-задачи ожидают обработки больше двух минут",
+        attentionBlocked: "Настроенный AI-провайдер заблокирован",
+        attentionUnavailable: "Не удалось прочитать состояние AI-очереди",
+        statuses: {
+          not_configured: "Не настроен",
+          disabled: "Отключён",
+          blocked: "Заблокирован",
+          ready: "Готов",
+          healthy: "Стабильно",
+          attention: "Требует проверки",
+          unavailable: "Недоступно",
+        },
+        reasons: {
+          external_provider_not_configured: "Внешний провайдер не настроен",
+          external_provider_disabled: "Отключён администратором",
+          data_transfer_not_approved: "Передача данных не согласована",
+          api_key_missing: "Нет серверного ключа",
+          model_missing: "Не задана разрешённая модель",
+          client_initialization_failed: "Не удалось запустить безопасный HTTP-клиент",
+          ready: "Конфигурация завершена",
+        },
+      };
+}
+
+function aiStatusLabel(status: string, copy: AiHealthCopy) {
+  return copy.statuses[status as keyof typeof copy.statuses] ?? status;
+}
+
+function aiReasonLabel(reason: string, copy: AiHealthCopy) {
+  return copy.reasons[reason as keyof typeof copy.reasons] ?? copy.statuses.unavailable;
+}
+
+function aiQueueAge(seconds: number | null, lang: "ru" | "de") {
+  if (seconds == null) return "—";
+  if (seconds < 60) return lang === "de" ? "< 1 Min." : "< 1 мин.";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} ${lang === "de" ? "Min." : "мин."}`;
+  return `${Math.floor(seconds / 3_600)} ${lang === "de" ? "Std." : "ч."}`;
+}
+
+function aiEventTimestamp(value: string | null, lang: "ru" | "de", copy: AiHealthCopy) {
+  if (!value) return copy.noTimestamp;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? copy.noTimestamp : formatAdminDateTime(parsed, lang);
+}
 
 type AdminHealthState = {
   data: HealthData | null;
@@ -116,6 +294,8 @@ type AdminHealthDetailSheetProps = {
   detailMeta: AdminHealthDetailMeta | null;
   detailPanel: HealthDetailPanel | null;
   t: Record<string, string>;
+  aiCopy: AiHealthCopy;
+  lang: "ru" | "de";
   onDetailPanelChange: (value: HealthDetailPanel | null) => void;
 };
 
@@ -124,6 +304,8 @@ function AdminHealthDetailSheet({
   detailMeta,
   detailPanel,
   t,
+  aiCopy,
+  lang,
   onDetailPanelChange,
 }: AdminHealthDetailSheetProps) {
   return (
@@ -210,6 +392,73 @@ function AdminHealthDetailSheet({
                 </div>
               </section>
             ) : null}
+
+            {detailPanel === "ai" ? (
+              <section className="space-y-4 rounded-xl border border-border/60 bg-card p-3.5">
+                <div className="flex items-center gap-2">
+                  <AiMark className="size-4 text-foreground" />
+                  <AdminSectionTitle>{aiCopy.section}</AdminSectionTitle>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.provider}</div>
+                    <div className="mt-1 text-base font-semibold">
+                      {aiStatusLabel(data.medication_ai.provider.status, aiCopy)}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {aiCopy.reason}: {aiReasonLabel(data.medication_ai.provider.reason_code, aiCopy)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.operational}</div>
+                    <div className="mt-1 text-base font-semibold">
+                      {aiStatusLabel(data.medication_ai.operational_status, aiCopy)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.model}</div>
+                    <div className="mt-1 truncate font-mono text-sm font-semibold">
+                      {data.medication_ai.provider.model ?? aiCopy.noModel}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.externalCalls}</div>
+                    <div className="mt-1 text-base font-semibold">
+                      {data.medication_ai.provider.external_calls_enabled ? aiCopy.enabled : aiCopy.disabled}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.requested}</div>
+                    <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.requested}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.processing}</div>
+                    <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.processing}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.stale}</div>
+                    <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.stale_processing}</div>
+                  </div>
+                </div>
+                <div className="space-y-2 rounded-lg border border-border/60 bg-background p-3 text-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">{aiCopy.oldest}</span>
+                    <span className="font-mono text-xs">{aiQueueAge(data.medication_ai.queue.oldest_requested_seconds, lang)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">{aiCopy.lastReady}</span>
+                    <span className="text-right text-xs">{aiEventTimestamp(data.medication_ai.queue.last_ready_at, lang, aiCopy)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">{aiCopy.lastFailed}</span>
+                    <span className="text-right text-xs">{aiEventTimestamp(data.medication_ai.queue.last_failed_at, lang, aiCopy)}</span>
+                  </div>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">{aiCopy.privacy}</p>
+              </section>
+            ) : null}
           </AdminSheetScaffold>
         ) : null}
       </SheetContent>
@@ -221,15 +470,17 @@ type AdminHealthMetricsProps = {
   data: HealthData;
   datasetVolume: number;
   t: Record<string, string>;
+  aiCopy: AiHealthCopy;
 };
 
 function AdminHealthMetrics({
   data,
   datasetVolume,
   t,
+  aiCopy,
 }: AdminHealthMetricsProps) {
   return (
-    <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+    <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 sm:grid-cols-2 xl:grid-cols-5 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
       <AdminInlineMetric
         icon={Database}
         tone="sky"
@@ -257,6 +508,13 @@ function AdminHealthMetrics({
         label={t.health_data}
         value={datasetVolume}
         description={`${data.data.audit_entries} ${t.health_audit_suffix}`}
+      />
+      <AdminInlineMetric
+        icon={AiMark}
+        tone="slate"
+        label={aiCopy.queue}
+        value={data.medication_ai.queue.requested + data.medication_ai.queue.processing}
+        description={aiStatusLabel(data.medication_ai.operational_status, aiCopy)}
       />
     </div>
   );
@@ -292,6 +550,7 @@ function AdminHealthHeaderActions({
 
 export function AdminHealthPage() {
   const { t, lang } = useLang();
+  const aiCopy = useMemo(() => aiHealthCopy(lang), [lang]);
   const [adminHealthState, dispatchAdminHealthState] = useReducer(
     adminHealthReducer,
     undefined,
@@ -354,10 +613,10 @@ export function AdminHealthPage() {
     setError("");
     try {
       const payload = await fetchAdminHealth<HealthData>();
-      setData(payload);
+      setData(normalizeHealthData(payload));
       setRefreshedAt(new Date());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t.common_error);
+    } catch {
+      setError(t.common_error);
       setData(null);
     } finally {
       setLoading(false);
@@ -377,8 +636,25 @@ export function AdminHealthPage() {
     if (data.sessions.pending_mfa > 0) {
       attention.push(`${t.health_mfa_pending}: ${data.sessions.pending_mfa}`);
     }
+    if (data.medication_ai.operational_status === "blocked") {
+      attention.push(aiCopy.attentionBlocked);
+    }
+    if (data.medication_ai.operational_status === "unavailable") {
+      attention.push(aiCopy.attentionUnavailable);
+    }
+    if (data.medication_ai.queue.stale_processing > 0) {
+      attention.push(`${aiCopy.attentionStale}: ${data.medication_ai.queue.stale_processing}`);
+    }
+    if (data.medication_ai.queue.failed_last_24h > 0) {
+      attention.push(`${aiCopy.attentionFailed}: ${data.medication_ai.queue.failed_last_24h}`);
+    }
+    if ((data.medication_ai.queue.oldest_requested_seconds ?? 0) > 120) {
+      attention.push(
+        `${aiCopy.attentionDelayed}: ${aiQueueAge(data.medication_ai.queue.oldest_requested_seconds, lang)}`,
+      );
+    }
     return attention;
-  }, [data, t.health_mfa_pending, t.health_users_locked]);
+  }, [aiCopy, data, lang, t.health_mfa_pending, t.health_users_locked]);
 
   const datasetVolume = data
     ? data.data.patients + data.data.leads + data.data.orders
@@ -403,12 +679,20 @@ export function AdminHealthPage() {
       };
     }
 
+    if (detailPanel === "ai") {
+      return {
+        title: aiCopy.section,
+        description: `${aiCopy.operational}: ${aiStatusLabel(data.medication_ai.operational_status, aiCopy)}`,
+      };
+    }
+
     return {
       title: t.health_section_data,
       description: `${t.health_data}: ${datasetVolume}`,
     };
   }, [
     data,
+    aiCopy,
     datasetVolume,
     detailPanel,
     t.health_data,
@@ -446,6 +730,7 @@ export function AdminHealthPage() {
             data={data}
             datasetVolume={datasetVolume}
             t={t as unknown as Record<string, string>}
+            aiCopy={aiCopy}
           />
 
           <div className="flex flex-wrap gap-2">
@@ -472,6 +757,15 @@ export function AdminHealthPage() {
               onClick={() => setDetailPanel("data")}
             >
               {t.health_section_data}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-lg bg-field px-3 text-[12px]"
+              onClick={() => setDetailPanel("ai")}
+            >
+              <AiMark className="size-3.5 text-foreground" />
+              {aiCopy.section}
             </Button>
           </div>
 
@@ -587,6 +881,40 @@ export function AdminHealthPage() {
               />
             </div>
           </Section>
+
+          <Section title={aiCopy.section}>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+              <AiMark className="size-4 text-foreground" />
+              <span className="font-medium text-foreground">
+                {aiStatusLabel(data.medication_ai.operational_status, aiCopy)}
+              </span>
+              <span className="text-xs text-muted-foreground">{aiCopy.privacy}</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                label={aiCopy.provider}
+                value={aiStatusLabel(data.medication_ai.provider.status, aiCopy)}
+                description={data.medication_ai.provider.status === "ready"
+                  ? data.medication_ai.provider.model ?? aiCopy.noModel
+                  : aiReasonLabel(data.medication_ai.provider.reason_code, aiCopy)}
+              />
+              <StatCard
+                label={aiCopy.queue}
+                value={data.medication_ai.queue.requested + data.medication_ai.queue.processing}
+                description={`${aiCopy.requested}: ${data.medication_ai.queue.requested} · ${aiCopy.processing}: ${data.medication_ai.queue.processing}`}
+              />
+              <StatCard
+                label={aiCopy.ready24h}
+                value={data.medication_ai.queue.ready_last_24h}
+                description={`${aiCopy.ready}: ${data.medication_ai.queue.ready}`}
+              />
+              <StatCard
+                label={aiCopy.failed24h}
+                value={data.medication_ai.queue.failed_last_24h}
+                description={`${aiCopy.stale}: ${data.medication_ai.queue.stale_processing}`}
+              />
+            </div>
+          </Section>
         </>
       ) : null}
 
@@ -601,6 +929,8 @@ export function AdminHealthPage() {
         detailMeta={detailMeta}
         detailPanel={detailPanel}
         t={t as unknown as Record<string, string>}
+        aiCopy={aiCopy}
+        lang={lang}
         onDetailPanelChange={setDetailPanel}
       />
     </div>

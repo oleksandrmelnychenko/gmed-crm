@@ -25,6 +25,7 @@ import {
   providerPeopleCount,
   providerPeopleCountLabel,
   providerLoadErrorMessage,
+  providerPermissions,
   splitDoctorTitleValue,
   taxonomyAttributeValueOptions,
   taxonomyAttributeValue,
@@ -41,6 +42,22 @@ import type { ProviderFilters, ProviderSummary } from "./types";
 function paramsFromPath(path: string) {
   return new URL(path, "https://crm.test").searchParams;
 }
+
+describe("provider permissions", () => {
+  it("lets Concierge create only the non-medical provider form without full registry access", () => {
+    expect(providerPermissions("concierge")).toEqual({
+      canViewPage: true,
+      canCreateProvider: true,
+      canManageRegistry: false,
+      forceNonMedical: true,
+    });
+  });
+
+  it("keeps read-only provider roles from creating providers", () => {
+    expect(providerPermissions("billing").canCreateProvider).toBe(false);
+    expect(providerPermissions("sales").canCreateProvider).toBe(false);
+  });
+});
 
 describe("provider people metrics", () => {
   it("uses doctors for medical providers and staff for non-medical providers", () => {

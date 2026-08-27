@@ -166,6 +166,17 @@ async fn ceo_receives_deterministic_open_source_review_and_non_clinical_role_is_
     assert_eq!(source_payload["mode"], "open_sources_only");
     assert_eq!(source_payload["sources"], payload["sources"]);
 
+    let (evidence_status, evidence_payload) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?pzn=01234567",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(evidence_status, StatusCode::OK, "{evidence_payload}");
+    assert_eq!(evidence_payload["lookup_status"], "source_unavailable");
+    assert_eq!(evidence_payload["pagination"]["total_count"], 0);
+    assert_eq!(evidence_payload["evidence"], json!([]));
+
     let manager_bearer = auth_header_for(manager_id, "patient_manager");
     let (status, _) = json_request(&ctx.app, &path, &manager_bearer).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -696,6 +707,102 @@ async fn gba_ais_complete_delivery_is_stored_atomically_without_exposing_secret_
         gba.last_successful_snapshot.as_ref().unwrap().item_count,
         Some(1)
     );
+
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let evidence_path = "/api/v1/medication-intelligence/evidence/benefit-assessments?pzn=12345678";
+    let (status, evidence) = json_request(&ctx.app, evidence_path, &ceo_bearer).await;
+    assert_eq!(status, StatusCode::OK, "{evidence}");
+    assert_eq!(evidence["mode"], "exact_official_evidence");
+    assert_eq!(evidence["lookup_status"], "exact_match");
+    assert_eq!(evidence["matching"]["identifier_type"], "pzn");
+    assert_eq!(evidence["matching"]["identifier"], "12345678");
+    assert_eq!(evidence["matching"]["broader_fallback_on_no_match"], false);
+    assert_eq!(evidence["pagination"]["total_count"], 1);
+    assert_eq!(evidence["pagination"]["returned_count"], 1);
+    assert_eq!(evidence["source"]["id"], "gba_ais_xml");
+    assert_eq!(
+        evidence["source"]["last_successful_snapshot"]["id"],
+        completed.snapshot_id.to_string()
+    );
+    assert_eq!(evidence["evidence"][0]["patient_group_id"], "456");
+    assert_eq!(evidence["evidence"][0]["decision_id"], "321");
+    assert_eq!(evidence["evidence"][0]["decision_date"], "2026-08-01");
+    assert_eq!(evidence["evidence"][0]["pzns"], json!(["12345678"]));
+    assert!(
+        evidence["evidence"][0]["evidence_ref"]
+            .as_str()
+            .is_some_and(|value| value.contains(&completed.snapshot_id.to_string()))
+    );
+    assert!(evidence.get("safe").is_none());
+
+    let (status, empty_page) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?pzn=12345678&limit=1&offset=1",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_page}");
+    assert_eq!(empty_page["lookup_status"], "exact_match");
+    assert_eq!(empty_page["pagination"]["total_count"], 1);
+    assert_eq!(empty_page["pagination"]["returned_count"], 0);
+    assert_eq!(empty_page["evidence"], json!([]));
+
+    // A supplied PZN remains authoritative even when a broader ATC would
+    // match. A zero-result PZN lookup must never broaden silently.
+    let (status, no_broader_match) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?pzn=87654321&atc=A01AA01",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{no_broader_match}");
+    assert_eq!(no_broader_match["lookup_status"], "no_exact_match");
+    assert_eq!(no_broader_match["matching"]["identifier_type"], "pzn");
+    assert_eq!(no_broader_match["pagination"]["total_count"], 0);
+    assert_eq!(no_broader_match["evidence"], json!([]));
+
+    let (status, atc_evidence) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?atc=a01aa01&ask=12345",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{atc_evidence}");
+    assert_eq!(atc_evidence["lookup_status"], "exact_match");
+    assert_eq!(atc_evidence["matching"]["identifier_type"], "atc");
+    assert_eq!(atc_evidence["matching"]["identifier"], "A01AA01");
+
+    let (status, ask_evidence) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?ask=12345",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ask_evidence}");
+    assert_eq!(ask_evidence["lookup_status"], "exact_match");
+    assert_eq!(ask_evidence["matching"]["identifier_type"], "ask");
+
+    let (status, invalid) = json_request(
+        &ctx.app,
+        "/api/v1/medication-intelligence/evidence/benefit-assessments?pzn=123&atc=A01AA01",
+        &ceo_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{invalid}");
+    assert!(
+        invalid["message"]
+            .as_str()
+            .is_some_and(|value| value.contains("8 ASCII digits"))
+    );
+
+    let manager_id = seed_user(&ctx.pool, "patient_manager").await;
+    let (status, _) = json_request(
+        &ctx.app,
+        evidence_path,
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

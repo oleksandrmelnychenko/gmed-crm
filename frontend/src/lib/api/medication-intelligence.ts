@@ -195,6 +195,63 @@ export type MedicationIntelligenceResponse = {
   identity_permissions: MedicationIdentityPermissions;
 };
 
+export type MedicationBenefitEvidenceLookupStatus =
+  | "source_unavailable"
+  | "no_exact_match"
+  | "exact_match";
+
+export type MedicationBenefitEvidenceItem = {
+  evidence_ref: string;
+  snapshot_id: string;
+  source_id: string;
+  patient_group_id: string;
+  decision_id: string;
+  dossier_reference: string;
+  official_url: string;
+  assessment_type: string;
+  assessed_substances: string[];
+  atc_codes: string[];
+  ask_numbers: string[];
+  pzns: string[];
+  trade_names: string[];
+  decision_date: string;
+  valid_until: string | null;
+  indication_short: string;
+  patient_group: string;
+  benefit_extent: string;
+  benefit_probability: string | null;
+  item_checksum_sha256: string;
+};
+
+export type MedicationBenefitEvidenceResponse = {
+  mode: "exact_official_evidence";
+  generated_at: string;
+  lookup_status: MedicationBenefitEvidenceLookupStatus;
+  matching: {
+    identifier_type: "pzn" | "atc" | "ask";
+    identifier: string;
+    strategy: "exact_array_membership";
+    precedence: ["pzn", "atc", "ask"];
+    selection_reason: string;
+    broader_fallback_on_no_match: false;
+  };
+  pagination: {
+    limit: number;
+    offset: number;
+    total_count: number;
+    returned_count: number;
+    truncated: boolean;
+  };
+  limitations: { ru: string; de: string };
+  source: MedicationIntelligenceSource;
+  evidence: MedicationBenefitEvidenceItem[];
+};
+
+export type MedicationBenefitEvidenceSelector =
+  | { pzn: string; atc?: never; ask?: never }
+  | { pzn?: never; atc: string; ask?: never }
+  | { pzn?: never; atc?: never; ask: string };
+
 const EMPTY_SUMMARY: MedicationIntelligenceSummary = {
   active_medications: 0,
   identified_medications: 0,
@@ -459,6 +516,94 @@ export async function fetchMedicationIntelligence(
     `/patients/${encodeURIComponent(patientId)}/medication-intelligence`,
   );
   return normalizeMedicationIntelligence(payload);
+}
+
+export async function fetchMedicationBenefitEvidence(
+  selector: MedicationBenefitEvidenceSelector,
+): Promise<MedicationBenefitEvidenceResponse> {
+  const params = new URLSearchParams();
+  if (selector.pzn) params.set("pzn", selector.pzn);
+  else if (selector.atc) params.set("atc", selector.atc);
+  else if (selector.ask) params.set("ask", selector.ask);
+  const payload = record(await get<unknown>(
+    `/medication-intelligence/evidence/benefit-assessments?${params.toString()}`,
+  ));
+  const matching = record(payload.matching);
+  const pagination = record(payload.pagination);
+  const limitations = record(payload.limitations);
+  const source = record(payload.source);
+  const evidence = Array.isArray(payload.evidence) ? payload.evidence : [];
+  const identifierType = matching.identifier_type === "atc" || matching.identifier_type === "ask"
+    ? matching.identifier_type
+    : "pzn";
+  const lookupStatus = payload.lookup_status === "exact_match"
+    || payload.lookup_status === "no_exact_match"
+    || payload.lookup_status === "source_unavailable"
+    ? payload.lookup_status
+    : "source_unavailable";
+  return {
+    mode: "exact_official_evidence",
+    generated_at: string(payload.generated_at),
+    lookup_status: lookupStatus,
+    matching: {
+      identifier_type: identifierType,
+      identifier: string(matching.identifier),
+      strategy: "exact_array_membership",
+      precedence: ["pzn", "atc", "ask"],
+      selection_reason: string(matching.selection_reason),
+      broader_fallback_on_no_match: false,
+    },
+    pagination: {
+      limit: count(pagination.limit),
+      offset: count(pagination.offset),
+      total_count: count(pagination.total_count),
+      returned_count: count(pagination.returned_count),
+      truncated: pagination.truncated === true,
+    },
+    limitations: {
+      ru: string(limitations.ru),
+      de: string(limitations.de),
+    },
+    source: {
+      id: string(source.id),
+      label: string(source.label),
+      authority: string(source.authority),
+      kind: string(source.kind),
+      url: string(source.url),
+      machine_readable: source.machine_readable === true,
+      ingestion_status: ingestionStatus(source.ingestion_status),
+      health: sourceHealth(source.health),
+      freshness_ttl_hours: nullableCount(source.freshness_ttl_hours),
+      last_attempt_at: nullableString(source.last_attempt_at),
+      last_error: nullableString(source.last_error),
+      last_successful_snapshot: successfulSnapshot(source.last_successful_snapshot),
+    },
+    evidence: evidence.map((item) => {
+      const row = record(item);
+      return {
+        evidence_ref: string(row.evidence_ref),
+        snapshot_id: string(row.snapshot_id),
+        source_id: string(row.source_id),
+        patient_group_id: string(row.patient_group_id),
+        decision_id: string(row.decision_id),
+        dossier_reference: string(row.dossier_reference),
+        official_url: string(row.official_url),
+        assessment_type: string(row.assessment_type),
+        assessed_substances: stringArray(row.assessed_substances),
+        atc_codes: stringArray(row.atc_codes),
+        ask_numbers: stringArray(row.ask_numbers),
+        pzns: stringArray(row.pzns),
+        trade_names: stringArray(row.trade_names),
+        decision_date: string(row.decision_date),
+        valid_until: nullableString(row.valid_until),
+        indication_short: string(row.indication_short),
+        patient_group: string(row.patient_group),
+        benefit_extent: string(row.benefit_extent),
+        benefit_probability: nullableString(row.benefit_probability),
+        item_checksum_sha256: string(row.item_checksum_sha256),
+      };
+    }),
+  };
 }
 
 export async function fetchMedicationIdentityCandidates(

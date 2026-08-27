@@ -12,14 +12,18 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 import {
   assignableConciergeTaskUsers,
+  availableConciergeTaskStatuses,
   canChangeConciergeTaskStatus,
+  canDeleteConciergeTask,
   canModifyConciergeTask,
   conciergeOperationalItemsListPath,
   conciergeTaskErrorMessage,
+  conciergeTasksVisibleToActor,
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
   type ConciergeProvider,
   type ConciergeTask,
+  type ConciergeTaskStatus,
 } from "./model";
 import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
@@ -109,7 +113,7 @@ export function ConciergeTaskManagerPage() {
   const createTaskRequestIdRef = useRef<string | null>(null);
   const taskParam = searchParams.get("task");
   const now = useMemo(() => new Date(), [tasks, version]);
-  const isPersonalConcierge = user?.role === "concierge";
+  const isPersonalConcierge = user?.role === "concierge" || user?.role === "interpreter";
   const taskListPath = useMemo(
     () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
     [user?.id, user?.role],
@@ -163,7 +167,7 @@ export function ConciergeTaskManagerPage() {
           }).catch(() => []),
         ]);
         if (!cancelled) {
-          setTasks(taskRows);
+          setTasks(conciergeTasksVisibleToActor(taskRows, user?.id, user?.role));
           setAssignees(assignableConciergeTaskUsers(assigneeRows, user?.id, user?.role));
           setPatients(patientRows.map((patient) => ({
             id: patient.id,
@@ -189,8 +193,17 @@ export function ConciergeTaskManagerPage() {
     };
   }, [labels.loadFailed, taskListPath, user, version]);
 
+  useEffect(() => {
+    if (loading || !detailTaskId || tasks.some((task) => task.id === detailTaskId)) return;
+    setDetailTaskId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("task");
+    setSearchParams(next, { replace: true });
+  }, [detailTaskId, loading, searchParams, setSearchParams, tasks]);
+
   async function changeTaskStatus(task: ConciergeTask, status: string) {
     if (updatingTaskId || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return;
+    if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return;
     setUpdatingTaskId(task.id);
     setError("");
     try {
@@ -281,7 +294,7 @@ export function ConciergeTaskManagerPage() {
   }
 
   async function deleteTask(task: ConciergeTask) {
-    if (deletingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    if (deletingTaskId || !canDeleteConciergeTask(task, user?.id, user?.role)) return;
     setDeletingTaskId(task.id);
     setError("");
     try {
@@ -345,9 +358,6 @@ export function ConciergeTaskManagerPage() {
             <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
               <Plus />{labels.newTask}
             </Button>
-            <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={requestRefresh}>
-              <RefreshCw />{labels.refresh}
-            </Button>
           </div>
         )}
       />
@@ -371,7 +381,9 @@ export function ConciergeTaskManagerPage() {
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
         canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
+        canDeleteTask={(task) => canDeleteConciergeTask(task, user?.id, user?.role)}
         canChangeTaskStatus={(task) => canChangeConciergeTaskStatus(task, user?.id, user?.role)}
+        availableStatusesForTask={(task) => availableConciergeTaskStatuses(task, user?.id, user?.role)}
         onEdit={openEditTask}
         onDelete={setPendingDeleteTask}
         onArchive={(task) => void changeArchiveState(task, true)}

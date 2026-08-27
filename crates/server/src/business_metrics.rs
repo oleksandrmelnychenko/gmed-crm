@@ -30,7 +30,7 @@
 //! enums (outcome / reason / role) are fine; anything user-controlled
 //! (email, IP, free text) belongs in the audit log, not in a metric.
 
-use metrics::{Unit, describe_counter};
+use metrics::{Unit, describe_counter, describe_histogram};
 
 // --- Names ----------------------------------------------------------------
 //
@@ -51,6 +51,20 @@ use metrics::{Unit, describe_counter};
 /// end. Comfortably under Prometheus's "high cardinality" threshold.
 pub const LOGIN_ATTEMPTS_TOTAL: &str = "gmed_login_attempts_total";
 
+/// Counter: lifecycle outcomes for privacy-minimised medication AI jobs.
+///
+/// Labels are closed server enums only:
+///   - `outcome` = `requested | manual_retry | ready | retry_scheduled | failed`
+///   - `reason` = a bounded provider/job reason code.
+pub const MEDICATION_AI_JOBS_TOTAL: &str = "gmed_medication_ai_jobs_total";
+
+/// Histogram: duration of one OpenAI Responses API attempt.
+///
+/// Label `outcome` is `success | error`; patient, actor, model and response
+/// identifiers are deliberately excluded from metric labels.
+pub const MEDICATION_AI_PROVIDER_DURATION_SECONDS: &str =
+    "gmed_medication_ai_provider_duration_seconds";
+
 // --- Descriptions ---------------------------------------------------------
 
 /// Register `# HELP` text for every metric defined in this module.
@@ -66,5 +80,15 @@ pub fn describe_all() {
         "Login attempts, labelled by outcome and the specific failure reason. \
          outcome=success counts only fully-authenticated logins; outcome=mfa_pending \
          counts logins that passed password but await MFA approval."
+    );
+    describe_counter!(
+        MEDICATION_AI_JOBS_TOTAL,
+        Unit::Count,
+        "Medication Evidence AI job lifecycle outcomes. Labels contain only bounded outcome and reason codes; no patient or provider response identifiers."
+    );
+    describe_histogram!(
+        MEDICATION_AI_PROVIDER_DURATION_SECONDS,
+        Unit::Seconds,
+        "Duration of one external Medication Evidence AI provider attempt, labelled only by success or error."
     );
 }

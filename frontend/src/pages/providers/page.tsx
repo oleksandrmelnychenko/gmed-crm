@@ -1721,7 +1721,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       return {
         createDescription:
           "Servicepartner mit Kontakten, Vertragsnotizen und operativer Kategorie anlegen.",
-        newLabel: "Neuer Servicepartner",
+        newLabel: "Nicht-medizinischen Anbieter hinzufügen",
         peopleLabel: "Kontakte und Personal",
         subtitle: "Servicepartner, Kontakte und Leistungskatalog verwalten",
         title: "Servicepartner",
@@ -1730,7 +1730,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return {
       createDescription:
         "Добавьте сервисного партнёра с контактами, договорными заметками и операционной категорией.",
-      newLabel: "Новый сервисный партнёр",
+      newLabel: "Добавить немедицинского провайдера",
       peopleLabel: "Контакты и персонал",
       subtitle: "Управление сервисными партнёрами, контактами и каталогом услуг",
       title: "Сервисные партнёры",
@@ -3713,7 +3713,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
           description={providerPageCopy.subtitle}
           actions={
             <>
-              {permissions.canManageRegistry ? (
+              {permissions.canCreateProvider ? (
                 <>
                   <Button
                     type="button"

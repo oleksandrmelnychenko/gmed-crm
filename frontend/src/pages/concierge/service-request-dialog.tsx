@@ -8,7 +8,11 @@ import { Input } from "@/components/ui/input";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
 import type { Lang } from "@/lib/i18n";
 
-import type { ConciergeService } from "./model";
+import {
+  availableConciergeServiceStatuses,
+  type ConciergeService,
+  type ConciergeServiceStatus,
+} from "./model";
 import {
   ConciergeDialogBody,
   ConciergeDialogFooter,
@@ -76,6 +80,7 @@ const copy = {
 type EditableStatus = "planned" | "booked" | "confirmed" | "in_service" | "completed" | "cancelled";
 
 export type UpdateConciergeServiceInput = {
+  expected_updated_at: string;
   title?: string;
   status?: EditableStatus;
   vendor_name: string | null;
@@ -99,12 +104,21 @@ function optional(value: string) {
   return value.trim() || null;
 }
 
-export function requestStatusOptions(lang: Lang): SelectFieldOption[] {
+export function requestStatusOptions(
+  lang: Lang,
+  service?: Pick<ConciergeService, "status">,
+  canReopen = false,
+): SelectFieldOption[] {
   const labels = copy[lang];
+  const allowed = new Set<ConciergeServiceStatus>(
+    service
+      ? availableConciergeServiceStatuses(service, canReopen)
+      : ["planned", "in_service", "completed", "cancelled"],
+  );
   return (["planned", "booked", "confirmed", "in_service", "completed", "cancelled"] as const).map((value) => ({
     value,
     label: labels[value],
-    disabled: value === "booked" || value === "confirmed",
+    disabled: !allowed.has(value),
   }));
 }
 
@@ -115,6 +129,7 @@ export function ConciergeServiceRequestDialog({
   submitting,
   error,
   canEditTitle,
+  canReopen,
   onOpenChange,
   onSave,
 }: {
@@ -124,6 +139,7 @@ export function ConciergeServiceRequestDialog({
   submitting: boolean;
   error: string;
   canEditTitle: boolean;
+  canReopen: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (input: UpdateConciergeServiceInput) => Promise<void>;
 }) {
@@ -156,6 +172,7 @@ export function ConciergeServiceRequestDialog({
     if (!service || !title.trim() || submitting) return;
     const nextStatus = status === service.status ? undefined : status;
     await onSave({
+      expected_updated_at: service.updated_at,
       ...(canEditTitle ? { title: title.trim() } : {}),
       ...(nextStatus ? { status: nextStatus } : {}),
       vendor_name: optional(vendorName),
@@ -193,7 +210,7 @@ export function ConciergeServiceRequestDialog({
                     <Input value={title} disabled={!canEditTitle} maxLength={255} required onChange={(event) => setTitle(event.target.value)} />
                   </ConciergeField>
                   <ConciergeField label={labels.status}>
-                    <SelectField value={status} options={requestStatusOptions(lang)} onValueChange={(value) => setStatus(value as EditableStatus)} />
+                    <SelectField value={status} options={requestStatusOptions(lang, service ?? undefined, canReopen)} onValueChange={(value) => setStatus(value as EditableStatus)} />
                   </ConciergeField>
                   <p className="text-xs leading-5 text-muted-foreground">{labels.bookingHint}</p>
                 </div>

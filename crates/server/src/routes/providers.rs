@@ -2341,7 +2341,7 @@ async fn create_provider(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpsertProviderRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
     }
 
@@ -2349,6 +2349,12 @@ async fn create_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if auth.role == Role::Concierge && provider.provider_type != "non_medical" {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge can only create non-medical providers",
+        );
+    }
     if let Err(resp) = validate_provider_parent(&state, None, provider.parent_provider_id).await {
         return resp;
     }

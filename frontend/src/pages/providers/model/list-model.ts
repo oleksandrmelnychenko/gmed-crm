@@ -831,14 +831,34 @@ export function providerPermissions(role?: string): ProviderPermissions {
   switch (role) {
     case "ceo":
     case "patient_manager":
-      return { canViewPage: true, canManageRegistry: true, forceNonMedical: false };
+      return {
+        canViewPage: true,
+        canCreateProvider: true,
+        canManageRegistry: true,
+        forceNonMedical: false,
+      };
     case "concierge":
-      return { canViewPage: true, canManageRegistry: false, forceNonMedical: true };
+      return {
+        canViewPage: true,
+        canCreateProvider: true,
+        canManageRegistry: false,
+        forceNonMedical: true,
+      };
     case "billing":
     case "sales":
-      return { canViewPage: true, canManageRegistry: false, forceNonMedical: false };
+      return {
+        canViewPage: true,
+        canCreateProvider: false,
+        canManageRegistry: false,
+        forceNonMedical: false,
+      };
     default:
-      return { canViewPage: false, canManageRegistry: false, forceNonMedical: false };
+      return {
+        canViewPage: false,
+        canCreateProvider: false,
+        canManageRegistry: false,
+        forceNonMedical: false,
+      };
   }
 }
 

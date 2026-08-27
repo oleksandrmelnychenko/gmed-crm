@@ -78,6 +78,7 @@ const copy = {
     cancel: "Abbrechen",
     noServices: "Keine geplante Serviceanfrage kann mit diesem Partner verbunden werden.",
     confirmedHint: "Für eine bestätigte Buchung ist eine Buchungsnummer, Kontaktperson oder Notiz erforderlich.",
+    overdue: "überfällig",
   },
   ru: {
     title: "Забронировать партнёра",
@@ -109,6 +110,7 @@ const copy = {
     cancel: "Отмена",
     noServices: "Нет запланированного запроса, который можно связать с этим партнёром.",
     confirmedHint: "Для подтверждённой брони укажите номер, контактное лицо или примечание.",
+    overdue: "просрочено",
   },
 } as const;
 
@@ -126,6 +128,19 @@ function localDateTimeValue(value: string | Date | null, fallbackToNextHour = fa
 function optional(value: string) {
   const normalized = value.trim();
   return normalized || null;
+}
+
+export function bookingServiceOptionLabel(service: ConciergeService, lang: Lang, now = new Date()) {
+  const startsAt = service.starts_at ? new Date(service.starts_at) : null;
+  const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null;
+  const date = validStartsAt
+    ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(validStartsAt)
+    : "—";
+  const overdue = validStartsAt && validStartsAt < now ? ` · ${copy[lang].overdue}` : "";
+  return `${date}${overdue} · #${service.id.slice(0, 8)} · ${conciergeServiceDisplayTitle(service, lang)} · ${service.patient_name}`;
 }
 
 export function ConciergeProviderBookingDialog({
@@ -260,7 +275,7 @@ export function ConciergeProviderBookingDialog({
                     <ConciergeField label={labels.service}>
               <select className={selectClass} value={serviceId} onChange={(event) => selectService(event.target.value)} required>
                 <option value="" disabled>{labels.chooseService}</option>
-                {eligibleServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)} · {service.patient_name}</option>)}
+                {eligibleServices.map((service) => <option key={service.id} value={service.id}>{bookingServiceOptionLabel(service, lang)}</option>)}
               </select>
                     </ConciergeField>
                     <div className="grid grid-cols-2 gap-2" role="group" aria-label={labels.title}>

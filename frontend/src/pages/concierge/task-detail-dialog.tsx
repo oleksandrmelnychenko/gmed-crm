@@ -32,7 +32,9 @@ import type {
   ConciergeTaskDetail,
 } from "./model";
 import {
+  availableConciergeTaskStatuses,
   canChangeConciergeTaskStatus,
+  canDeleteConciergeTask,
   canModifyConciergeTask,
   conciergeTaskCode,
   conciergeTaskErrorMessage,
@@ -73,6 +75,7 @@ const copy = {
     externalAssignee: "Externer Ausführender",
     open: "Offen",
     in_progress: "In Arbeit",
+    review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
     low: "Niedrig",
@@ -127,6 +130,7 @@ const copy = {
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
     in_progress: "В работе",
+    review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
     low: "Низкий",
@@ -237,6 +241,7 @@ export function ConciergeTaskDetailDialog({
   const [busy, setBusy] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
+  const canDelete = detail ? canDeleteConciergeTask(detail.item, user?.id, user?.role) : false;
   const canChangeStatus = detail
     ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
     : false;
@@ -424,7 +429,7 @@ export function ConciergeTaskDetailDialog({
           icon={ListChecks}
           tone="dot"
           title={detail?.item.title ?? labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canModify ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canDelete ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
@@ -446,7 +451,7 @@ export function ConciergeTaskDetailDialog({
                         value={detail.item.status}
                         disabled={busy || Boolean(detail.item.archived_at)}
                         aria-label={labels.status}
-                        options={(["open", "in_progress", "completed", "cancelled"] as const).map((status) => ({
+                        options={availableConciergeTaskStatuses(detail.item, user?.id, user?.role).map((status) => ({
                           value: status,
                           label: labels[status],
                         }))}
@@ -483,25 +488,25 @@ export function ConciergeTaskDetailDialog({
                 </TaskDetailSection>
               ) : null}
 
-              <ConciergeTaskAttachments taskId={detail.item.id} lang={lang} canModify={canModify} />
+              <ConciergeTaskAttachments taskId={detail.item.id} lang={lang} canModify={canModify && !detail.item.archived_at} />
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
               <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
                 <div className="divide-y divide-border/60">
                   {detail.checklist.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
-                    <button key={item.id} type="button" className="flex w-full items-start gap-2 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/20" disabled={busy} onClick={() => void toggleChecklist(item)}>
+                    <button key={item.id} type="button" className="flex w-full items-start gap-2 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/20" disabled={busy || Boolean(detail.item.archived_at)} onClick={() => void toggleChecklist(item)}>
                       {item.is_completed ? <Check className="mt-0.5 size-4 text-emerald-600" /> : <Circle className="mt-0.5 size-4 text-muted-foreground" />}
                       <span className={cn("min-w-0 flex-1", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
                     </button>
                   ))}
-                  <div className="flex gap-2 p-3"><Input className="h-9" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div>
+                  {!detail.item.archived_at ? <div className="flex gap-2 p-3"><Input className="h-9" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div> : null}
                 </div>
               </TaskDetailSection>
 
               <TaskDetailSection title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
                 <div className="divide-y divide-border/60">
                   {detail.comments.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => <article key={item.id} className="px-3.5 py-2.5"><div className="flex justify-between gap-2 text-[10px] text-muted-foreground"><strong className="text-foreground">{item.created_by_name}</strong><time>{dateTime(item.created_at, lang)}</time></div><p className="mt-1.5 whitespace-pre-wrap text-sm">{item.body}</p></article>)}
-                  <div className="space-y-2 p-3"><textarea className="min-h-20 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><Button type="button" size="sm" className="w-full" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div>
+                  {!detail.item.archived_at ? <div className="space-y-2 p-3"><textarea className="min-h-20 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><Button type="button" size="sm" className="w-full" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div> : null}
                 </div>
               </TaskDetailSection>
             </div>

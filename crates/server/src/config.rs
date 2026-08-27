@@ -25,6 +25,33 @@ pub struct Config {
     /// official terms. It may contain an access token, so it is never used as
     /// public provenance or returned by an API.
     pub gba_ais_download_url: Option<SecretString>,
+    /// Optional external AI used only to draft a privacy-minimised medication
+    /// evidence summary. External calls are possible only when both explicit
+    /// feature and data-transfer gates are enabled.
+    pub medication_ai: MedicationAiConfig,
+}
+
+#[derive(Clone, Default)]
+pub struct MedicationAiConfig {
+    pub enabled: bool,
+    pub explicitly_configured: bool,
+    pub patient_data_transfer_approved: bool,
+    pub openai_api_key: Option<SecretString>,
+    pub openai_model: Option<String>,
+}
+
+fn env_flag(name: &str) -> (bool, bool) {
+    match std::env::var(name) {
+        Ok(value) => {
+            let enabled = match value.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" | "" => false,
+                _ => panic!("{name} must be a boolean (true/false)"),
+            };
+            (enabled, true)
+        }
+        Err(_) => (false, false),
+    }
 }
 
 impl Config {
@@ -78,6 +105,28 @@ impl Config {
             .filter(|value| !value.is_empty())
             .map(SecretString::from);
 
+        let (medication_ai_enabled, medication_ai_explicitly_configured) =
+            env_flag("GMED_MEDICATION_AI_ENABLED");
+        let (patient_data_transfer_approved, _) =
+            env_flag("GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED");
+        let openai_api_key = std::env::var("GMED_OPENAI_API_KEY")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(SecretString::from);
+        let openai_model = std::env::var("GMED_OPENAI_MODEL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Some(model) = &openai_model
+            && (model.len() > 96
+                || !model
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')))
+        {
+            panic!("GMED_OPENAI_MODEL contains unsupported characters");
+        }
+
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             listen_addr: SocketAddr::from(([0, 0, 0, 0], port)),
@@ -88,6 +137,13 @@ impl Config {
             audit_ip_salt,
             metrics_listen,
             gba_ais_download_url,
+            medication_ai: MedicationAiConfig {
+                enabled: medication_ai_enabled,
+                explicitly_configured: medication_ai_explicitly_configured,
+                patient_data_transfer_approved,
+                openai_api_key,
+                openai_model,
+            },
         }
     }
 }

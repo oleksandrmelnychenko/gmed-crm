@@ -8,12 +8,19 @@ use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::routes::medication_intelligence::MedicationIntelligenceResponse;
+use crate::services::gba_ais::GBA_AIS_SOURCE_ID;
+use crate::services::medication_ai_provider::MedicationAiCapability;
+use crate::services::medication_benefit_evidence::{
+    load_exact_benefit_evidence, select_exact_identifier,
+};
 use crate::services::medication_intelligence_sources::{
     OfficialSourceStatus, SuccessfulSnapshotStatus,
 };
 
 pub const EVIDENCE_MODE: &str = "local_evidence_only";
 pub const EVIDENCE_BUNDLE_VERSION: &str = "medication-evidence-v1";
+const BENEFIT_ASSESSMENT_PAGE_SIZE: i64 = 100;
+const MAX_BENEFIT_ASSESSMENTS_PER_MEDICATION: i64 = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvidenceSummary {
@@ -23,6 +30,8 @@ pub struct EvidenceSummary {
     pub findings_total: usize,
     pub high_priority_findings: usize,
     pub missing_data_total: usize,
+    #[serde(default)]
+    pub benefit_assessments_total: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +100,24 @@ pub struct EvidenceSnapshot {
     pub missing_data: Vec<EvidenceMissingData>,
     pub sources: Vec<EvidenceSource>,
     pub citations: Vec<EvidenceCitation>,
+    #[serde(default)]
+    pub benefit_assessments: Vec<EvidenceBenefitAssessment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvidenceBenefitAssessment {
+    pub evidence_ref: String,
+    pub medication_id: Uuid,
+    pub decision_id: String,
+    pub dossier_reference: String,
+    pub official_url: String,
+    pub decision_date: String,
+    pub indication_short: String,
+    pub patient_group: String,
+    pub benefit_extent: String,
+    pub benefit_probability: Option<String>,
+    pub assessed_substances: Vec<String>,
+    pub citation_ref: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -135,6 +162,7 @@ pub struct EvidencePreviewResponse {
     pub summary: EvidenceSummary,
     pub medication_ids: Vec<Uuid>,
     pub provider: EvidenceProvider,
+    pub ai_provider: MedicationAiCapability,
     pub clinical_review: ClinicalReviewCapability,
     pub permissions: EvidenceReviewPermissions,
     pub latest_review: Option<LatestReviewSummary>,
@@ -161,6 +189,7 @@ pub struct EvidenceBundleView {
     pub missing_data: Vec<EvidenceMissingData>,
     pub sources: Vec<EvidenceSource>,
     pub citations: Vec<EvidenceCitation>,
+    pub benefit_assessments: Vec<EvidenceBenefitAssessment>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -238,8 +267,9 @@ pub(crate) async fn build_preview(
     pool: &PgPool,
     patient_id: Uuid,
     intelligence: &MedicationIntelligenceResponse,
+    ai_provider: MedicationAiCapability,
 ) -> Result<EvidencePreviewResponse, MedicationEvidenceReviewError> {
-    let prepared = prepare_snapshot(intelligence)?;
+    let prepared = prepare_snapshot(pool, intelligence).await?;
     let latest = sqlx::query(
         r#"SELECT id, status, requested_at
            FROM medication_evidence_review_requests
@@ -263,6 +293,7 @@ pub(crate) async fn build_preview(
         summary: prepared.snapshot.summary.clone(),
         medication_ids: prepared.snapshot.medication_ids.clone(),
         provider: provider(),
+        ai_provider,
         clinical_review: clinical_review(),
         permissions: permissions(),
         latest_review: latest,
@@ -278,7 +309,7 @@ pub(crate) async fn create_review(
     intelligence: &MedicationIntelligenceResponse,
 ) -> Result<CreateReviewResult, MedicationEvidenceReviewError> {
     validate_create_input(expected_fingerprint, idempotency_key)?;
-    let prepared = prepare_snapshot(intelligence)?;
+    let prepared = prepare_snapshot(pool, intelligence).await?;
 
     if let Some(existing) = load_idempotent_request(pool, actor_id, idempotency_key).await? {
         return replay_or_conflict(pool, existing, patient_id, expected_fingerprint).await;
@@ -486,6 +517,7 @@ pub async fn load_review(
             missing_data: snapshot.missing_data,
             sources: snapshot.sources,
             citations: snapshot.citations,
+            benefit_assessments: snapshot.benefit_assessments,
         },
         draft,
         provider: provider(),
@@ -499,16 +531,18 @@ struct PreparedSnapshot {
     fingerprint: String,
 }
 
-fn prepare_snapshot(
+async fn prepare_snapshot(
+    pool: &PgPool,
     intelligence: &MedicationIntelligenceResponse,
 ) -> Result<PreparedSnapshot, MedicationEvidenceReviewError> {
-    let summary = EvidenceSummary {
+    let mut summary = EvidenceSummary {
         active_medications: intelligence.summary.active_medications,
         identified_medications: intelligence.summary.identified_medications,
         unresolved_medications: intelligence.summary.unresolved_medications,
         findings_total: intelligence.summary.findings_total,
         high_priority_findings: intelligence.summary.high_priority_findings,
         missing_data_total: intelligence.summary.missing_data_total,
+        benefit_assessments_total: 0,
     };
     let mut medication_ids = intelligence
         .medications
@@ -615,6 +649,77 @@ fn prepare_snapshot(
     }));
     citations.sort_by(|left, right| left.id.cmp(&right.id));
 
+    let mut benefit_assessments = Vec::new();
+    if let Some(snapshot_id) = intelligence
+        .sources
+        .iter()
+        .find(|source| source.id == GBA_AIS_SOURCE_ID)
+        .and_then(|source| source.last_successful_snapshot.as_ref())
+        .map(|snapshot| snapshot.id)
+    {
+        for medication in &intelligence.medications {
+            let selector = match select_exact_identifier(
+                medication.pzn.as_deref(),
+                medication.atc_code.as_deref(),
+                None,
+            ) {
+                Ok(selector) => selector,
+                Err(_) => continue,
+            };
+            let mut offset = 0;
+            loop {
+                let page = load_exact_benefit_evidence(
+                    pool,
+                    snapshot_id,
+                    &selector,
+                    BENEFIT_ASSESSMENT_PAGE_SIZE,
+                    offset,
+                )
+                .await?;
+                if page.total_count > MAX_BENEFIT_ASSESSMENTS_PER_MEDICATION {
+                    return Err(MedicationEvidenceReviewError::InvalidStoredData);
+                }
+                let returned = i64::try_from(page.items.len())
+                    .map_err(|_| MedicationEvidenceReviewError::InvalidStoredData)?;
+                benefit_assessments.extend(page.items.into_iter().map(|item| {
+                    EvidenceBenefitAssessment {
+                        citation_ref: format!("benefit_assessment:{}", item.evidence_ref),
+                        evidence_ref: item.evidence_ref,
+                        medication_id: medication.id,
+                        decision_id: item.decision_id,
+                        dossier_reference: item.dossier_reference,
+                        official_url: item.official_url,
+                        decision_date: item.decision_date,
+                        indication_short: item.indication_short,
+                        patient_group: item.patient_group,
+                        benefit_extent: item.benefit_extent,
+                        benefit_probability: item.benefit_probability,
+                        assessed_substances: item.assessed_substances,
+                    }
+                }));
+                offset += returned;
+                if offset >= page.total_count {
+                    break;
+                }
+                if returned == 0 {
+                    return Err(MedicationEvidenceReviewError::InvalidStoredData);
+                }
+            }
+        }
+    }
+    benefit_assessments.sort_by(|left, right| left.evidence_ref.cmp(&right.evidence_ref));
+    benefit_assessments.dedup_by(|left, right| left.evidence_ref == right.evidence_ref);
+    summary.benefit_assessments_total = benefit_assessments.len();
+    citations.extend(benefit_assessments.iter().map(|item| EvidenceCitation {
+        id: item.citation_ref.clone(),
+        kind: "benefit_assessment".to_string(),
+        source_id: Some(GBA_AIS_SOURCE_ID.to_string()),
+        source_url: Some(item.official_url.clone()),
+        evidence_refs: vec![item.evidence_ref.clone()],
+    }));
+    citations.sort_by(|left, right| left.id.cmp(&right.id));
+    citations.dedup_by(|left, right| left.id == right.id);
+
     let snapshot = EvidenceSnapshot {
         summary,
         medication_ids,
@@ -622,6 +727,7 @@ fn prepare_snapshot(
         missing_data,
         sources,
         citations,
+        benefit_assessments,
     };
     validate_snapshot(&snapshot)?;
     let fingerprint = sha256_json(&serde_json::to_value(&snapshot)?)?;
@@ -676,7 +782,7 @@ struct LocalDraft {
 }
 
 fn build_draft(snapshot: &EvidenceSnapshot) -> Result<LocalDraft, MedicationEvidenceReviewError> {
-    let evidence_summary = snapshot
+    let mut evidence_summary = snapshot
         .findings
         .iter()
         .map(|finding| DraftItem {
@@ -685,6 +791,17 @@ fn build_draft(snapshot: &EvidenceSnapshot) -> Result<LocalDraft, MedicationEvid
             citation_refs: vec![finding.citation_ref.clone()],
         })
         .collect::<Vec<_>>();
+    evidence_summary.extend(snapshot.benefit_assessments.iter().map(|item| DraftItem {
+        text_ru: format!(
+            "Зафиксировано точное совпадение с оценкой G-BA для группы «{}»: дополнительная польза — {}.",
+            item.patient_group, item.benefit_extent
+        ),
+        text_de: format!(
+            "Exakte Zuordnung zu einer G-BA-Bewertung für die Gruppe „{}“ erfasst: Zusatznutzen – {}.",
+            item.patient_group, item.benefit_extent
+        ),
+        citation_refs: vec![item.citation_ref.clone()],
+    }));
     let mut verification_questions = snapshot
         .missing_data
         .iter()
@@ -726,6 +843,11 @@ fn build_draft(snapshot: &EvidenceSnapshot) -> Result<LocalDraft, MedicationEvid
         DraftItem {
             text_ru: "Это техническая сводка доказательств, а не рекомендация по лечению или дозировке.".to_string(),
             text_de: "Dies ist eine technische Evidenzübersicht, keine Therapie- oder Dosierungsempfehlung.".to_string(),
+            citation_refs: Vec::new(),
+        },
+        DraftItem {
+            text_ru: "Точное совпадение PZN/ATC с оценкой G-BA не определяет автоматически показание или принадлежность конкретного пациента к указанной группе.".to_string(),
+            text_de: "Eine exakte PZN-/ATC-Zuordnung zu einer G-BA-Bewertung bestimmt weder die Indikation noch die Zugehörigkeit der konkreten Person zur genannten Gruppe automatisch.".to_string(),
             citation_refs: Vec::new(),
         },
         DraftItem {
@@ -776,6 +898,21 @@ fn validate_snapshot(snapshot: &EvidenceSnapshot) -> Result<(), MedicationEviden
             .sources
             .iter()
             .any(|source| !citation_ids.contains(source.citation_ref.as_str()))
+        || snapshot
+            .benefit_assessments
+            .iter()
+            .any(|item| !citation_ids.contains(item.citation_ref.as_str()))
+        || snapshot.summary.benefit_assessments_total != snapshot.benefit_assessments.len()
+        || snapshot.benefit_assessments.iter().any(|item| {
+            !snapshot.citations.iter().any(|citation| {
+                citation.id == item.citation_ref
+                    && citation.kind == "benefit_assessment"
+                    && citation.source_id.as_deref() == Some(GBA_AIS_SOURCE_ID)
+                    && citation.source_url.as_deref() == Some(item.official_url.as_str())
+                    && citation.evidence_refs.len() == 1
+                    && citation.evidence_refs[0] == item.evidence_ref
+            })
+        })
     {
         return Err(MedicationEvidenceReviewError::InvalidCitation);
     }
@@ -960,12 +1097,14 @@ mod tests {
                 findings_total: 0,
                 high_priority_findings: 0,
                 missing_data_total: 0,
+                benefit_assessments_total: 0,
             },
             medication_ids: Vec::new(),
             findings: Vec::new(),
             missing_data: Vec::new(),
             sources: Vec::new(),
             citations: Vec::new(),
+            benefit_assessments: Vec::new(),
         };
         let draft = LocalDraft {
             evidence_summary: vec![DraftItem {
