@@ -104,6 +104,8 @@ const copy = {
     patient: "Patient",
     provider: "Anbieter",
     expenses: "Ausgaben",
+    addExpense: "Ausgabe / Beleg",
+    linkServiceForExpense: "Service verknüpfen und Ausgabe erfassen",
     activeTasks: "Aktiv",
     archivedTasks: "Archiv",
     allTasks: "Alle",
@@ -165,6 +167,8 @@ const copy = {
     patient: "Пациент",
     provider: "Провайдер",
     expenses: "Расходы",
+    addExpense: "Расход / документ",
+    linkServiceForExpense: "Привязать сервис и добавить расход",
     activeTasks: "Активные",
     archivedTasks: "Архив",
     allTasks: "Все",
@@ -232,12 +236,14 @@ function TaskCard({
   canModify,
   canDelete,
   canChangeStatus,
+  canAddExpense,
   availableStatuses,
   onOpen,
   onEdit,
   onDelete,
   onArchive,
   onRestore,
+  onExpense,
   onStatusChange,
 }: {
   task: ConciergeTask;
@@ -251,12 +257,14 @@ function TaskCard({
   canModify: boolean;
   canDelete: boolean;
   canChangeStatus: boolean;
+  canAddExpense: boolean;
   availableStatuses: ConciergeTaskStatus[];
   onOpen: (task: ConciergeTask) => void;
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
   onArchive: (task: ConciergeTask) => void;
   onRestore: (task: ConciergeTask) => void;
+  onExpense: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
 }) {
   const labels = copy[lang];
@@ -267,7 +275,7 @@ function TaskCard({
   return (
     <article className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
       <button type="button" className={cn("min-w-0 w-full max-w-full overflow-hidden text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
-        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-52")}>
+        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-36")}>
           <Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
@@ -328,22 +336,38 @@ function TaskCard({
       </button>
       <div className={cn("flex items-center gap-1", !compact && "absolute right-2 top-2 z-10")}>
         {archived ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore />{labels.restore}</Button>
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
         ) : terminal ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive />{labels.archive}</Button>
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
         ) : null}
         {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
         {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
-      <SelectField
-        className="h-8 min-w-[130px] rounded-md bg-background text-xs"
-        value={task.status}
-        disabled={archived || !canChangeStatus || updating || deleting || archiving}
-        title={canChangeStatus ? labels.moveTo : labels.noStatusPermission}
-        aria-label={labels.moveTo}
-        options={availableStatuses.map((status) => ({ value: status, label: labels[status] }))}
-        onValueChange={(status) => onStatusChange(task, status)}
-      />
+      <div className={cn("space-y-1.5", compact && "col-span-2 sm:col-span-1")}>
+        <SelectField
+          className="h-8 min-w-[130px] rounded-md bg-background text-xs"
+          value={task.status}
+          disabled={archived || !canChangeStatus || updating || deleting || archiving}
+          title={canChangeStatus ? labels.moveTo : labels.noStatusPermission}
+          aria-label={labels.moveTo}
+          options={availableStatuses.map((status) => ({ value: status, label: labels[status] }))}
+          onValueChange={(status) => onStatusChange(task, status)}
+        />
+        {!archived && canAddExpense ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-full justify-center rounded-md px-2 text-xs text-cyan-800 hover:bg-cyan-50 hover:text-cyan-900"
+            disabled={updating || deleting || archiving}
+            title={labels.addExpense}
+            onClick={() => onExpense(task)}
+          >
+            <ReceiptText />
+            {labels.addExpense}
+          </Button>
+        ) : null}
+      </div>
     </article>
   );
 }
@@ -360,12 +384,14 @@ export function ConciergeTaskManager({
   canModifyTask,
   canDeleteTask,
   canChangeTaskStatus,
+  canAddExpenseToTask,
   availableStatusesForTask,
   onEdit,
   onDelete,
   onArchive,
   onRestore,
   onOpen,
+  onExpense,
   onStatusChange,
   onCreateAt,
 }: {
@@ -380,12 +406,14 @@ export function ConciergeTaskManager({
   canModifyTask: (task: ConciergeTask) => boolean;
   canDeleteTask: (task: ConciergeTask) => boolean;
   canChangeTaskStatus: (task: ConciergeTask) => boolean;
+  canAddExpenseToTask: (task: ConciergeTask) => boolean;
   availableStatusesForTask: (task: ConciergeTask) => ConciergeTaskStatus[];
   onEdit: (task: ConciergeTask) => void;
   onDelete: (task: ConciergeTask) => void;
   onArchive: (task: ConciergeTask) => void;
   onRestore: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
+  onExpense: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
   onCreateAt?: (date: Date) => void;
 }) {
@@ -544,12 +572,12 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-5")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">

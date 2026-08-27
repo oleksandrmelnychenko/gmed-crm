@@ -210,7 +210,10 @@ def extract_document(
     is_pdf = "pdf" in mime or data.startswith(b"%PDF")
 
     if existing_text:
-        candidate = existing_text.strip()
+        # Form-feed characters carry PDF page boundaries. ``str.strip()``
+        # treats them as whitespace and used to collapse empty leading/trailing
+        # pages (for example pages 1-2 before the first OCR text on page 3).
+        candidate = existing_text.strip(" \t\r\n")
         quality = _assess_text_quality(candidate)
         if quality.reliable:
             page_count = _validate_pdf_page_count(data) if is_pdf else 1
@@ -1841,7 +1844,11 @@ def _has_useful_text(text: str) -> bool:
 
 
 def _join_pdf_pages(pages: list[str]) -> str:
-    return _checked_extracted_text("\n\f\n".join(page.strip() for page in pages).strip())
+    # Trim content inside each page, but never trim the joined envelope:
+    # form-feed is structural provenance, including for empty first/last pages.
+    return _checked_extracted_text(
+        "\n\f\n".join(page.strip(" \t\r\n") for page in pages)
+    )
 
 
 def _checked_extracted_text(text: str) -> str:

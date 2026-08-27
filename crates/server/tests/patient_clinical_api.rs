@@ -426,6 +426,57 @@ async fn ceo_can_rescan_review_ready_import_and_clear_previous_draft() {
 }
 
 #[tokio::test]
+async fn clinical_import_api_preserves_empty_leading_page_boundaries() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-import-page-boundaries");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "page-boundary", &tag).await;
+    let draft = json!({
+        "document_type": "laboratory_report",
+        "source_language": "de",
+        "parser_version": "rules-test",
+        "raw_text": "\u{000c}\u{000c}Page three",
+        "warnings": [],
+        "candidates": [],
+        "extraction": {
+            "page_count": 3,
+            "text_chars": 10,
+            "used_ocr": true,
+            "pages": [
+                { "page_number": 1, "source": "ocr" },
+                { "page_number": 2, "source": "ocr" },
+                { "page_number": 3, "source": "ocr" }
+            ]
+        }
+    });
+    sqlx::query("UPDATE clinical_document_imports SET draft = $2 WHERE id = $1")
+        .bind(import_id)
+        .bind(&draft)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{import_id}"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["draft"]["raw_text"], "\u{000c}\u{000c}Page three");
+    assert_eq!(body["draft"]["extraction"]["page_count"], 3);
+    assert_eq!(body["draft"]["extraction"]["pages"][0]["page_number"], 1);
+    assert_eq!(body["draft"]["extraction"]["pages"][1]["page_number"], 2);
+    assert_eq!(body["draft"]["extraction"]["pages"][2]["page_number"], 3);
+}
+
+#[tokio::test]
 async fn applied_import_rescan_creates_auditable_attempt_and_atomically_replaces_lab_results() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

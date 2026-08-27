@@ -57,6 +57,64 @@ export type ClinicalDocumentImportDraft = {
   extraction?: ClinicalDocumentExtraction | null;
 };
 
+export type ClinicalDocumentTextPage = {
+  pageNumber: number;
+  text: string;
+  textScope: "page" | "document";
+  extraction: ClinicalDocumentExtractionPage | null;
+};
+
+export function clinicalDocumentPreviewPage(
+  candidatePage: number | null | undefined,
+  selectedSourcePage: number | null | undefined,
+) {
+  if (candidatePage && candidatePage > 0) return candidatePage;
+  if (selectedSourcePage && selectedSourcePage > 0) return selectedSourcePage;
+  return 1;
+}
+
+/**
+ * Builds a stable one-based page model from the OCR text envelope.
+ * Form-feed is the parser's page delimiter and empty segments are meaningful:
+ * they represent real PDF pages where OCR found no usable text.
+ */
+export function clinicalDocumentTextPages(
+  draft: ClinicalDocumentImportDraft | null | undefined,
+): ClinicalDocumentTextPage[] {
+  if (!draft) return [];
+
+  const rawText = draft.raw_text ?? "";
+  const hasPageBoundaries = rawText.includes("\f");
+  const rawPages = hasPageBoundaries ? rawText.split("\f") : rawText ? [rawText] : [];
+  const extractionPages = draft.extraction?.pages ?? [];
+  const numberedPageCount = extractionPages.reduce(
+    (maximum, page) => Math.max(maximum, page.page_number ?? 0),
+    0,
+  );
+  const knownPageCount = Math.max(
+    draft.extraction?.page_count ?? 0,
+    numberedPageCount,
+    rawPages.length,
+  );
+  if (knownPageCount === 0) return [];
+
+  const extractionByPage = new Map<number, ClinicalDocumentExtractionPage>();
+  for (const page of extractionPages) {
+    if (page.page_number && page.page_number > 0) extractionByPage.set(page.page_number, page);
+  }
+  const singleUnnumberedExtraction = knownPageCount === 1
+    ? extractionPages.find((page) => page.page_number === null) ?? null
+    : null;
+  const documentLevelText = knownPageCount > 1 && rawText.length > 0 && !hasPageBoundaries;
+
+  return Array.from({ length: knownPageCount }, (_, index) => ({
+    pageNumber: index + 1,
+    text: documentLevelText ? rawText : (rawPages[index] ?? ""),
+    textScope: documentLevelText ? "document" : "page",
+    extraction: extractionByPage.get(index + 1) ?? singleUnnumberedExtraction,
+  }));
+}
+
 export type ClinicalDocumentImportStatus =
   | "queued"
   | "processing"

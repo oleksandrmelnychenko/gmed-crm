@@ -6,6 +6,8 @@ import { apiFetch } from "@/lib/api";
 import {
   completeClinicalDocumentImport,
   clinicalDocumentImportAfterPrepare,
+  clinicalDocumentPreviewPage,
+  clinicalDocumentTextPages,
   clinicalImportNeedsSourceCountry,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
@@ -22,6 +24,65 @@ import {
 
 describe("clinical document import API", () => {
   beforeEach(() => vi.mocked(apiFetch).mockReset());
+
+  it("keeps empty first and second OCR pages addressable", () => {
+    const pages = clinicalDocumentTextPages({
+      document_type: "laboratory_report",
+      source_language: "de",
+      parser_version: "rules-test",
+      raw_text: "\f\fPage three",
+      warnings: [],
+      candidates: [],
+      extraction: {
+        page_count: 3,
+        text_chars: 10,
+        used_ocr: true,
+        pages: [1, 2, 3].map((pageNumber) => ({
+          page_number: pageNumber,
+          source: "ocr" as const,
+          route_reason: "ocr_required",
+          native_quality: null,
+          native_char_count: 0,
+          ocr_confidence: 0.9,
+          low_confidence_word_ratio: 0.1,
+          ocr_languages: "latin",
+          ocr_engine: "paddle",
+          orientation_rotation: 0,
+          deskew_angle: 0,
+          word_count: pageNumber === 3 ? 2 : 0,
+        })),
+      },
+    });
+
+    expect(pages.map((page) => page.pageNumber)).toEqual([1, 2, 3]);
+    expect(pages.map((page) => page.text)).toEqual(["", "", "Page three"]);
+    expect(pages.every((page) => page.textScope === "page")).toBe(true);
+  });
+
+  it("marks legacy multi-page text without delimiters as document-level", () => {
+    const pages = clinicalDocumentTextPages({
+      document_type: "laboratory_report",
+      source_language: "de",
+      parser_version: "legacy",
+      raw_text: "Legacy full text",
+      warnings: [],
+      candidates: [],
+      extraction: { page_count: 3, text_chars: 16, used_ocr: false, pages: [] },
+    });
+
+    expect(pages).toHaveLength(3);
+    expect(pages[1]).toMatchObject({
+      pageNumber: 2,
+      text: "Legacy full text",
+      textScope: "document",
+    });
+  });
+
+  it("keeps the candidate, source selector, and PDF preview on one page", () => {
+    expect(clinicalDocumentPreviewPage(3, 1)).toBe(3);
+    expect(clinicalDocumentPreviewPage(null, 2)).toBe(2);
+    expect(clinicalDocumentPreviewPage(null, null)).toBe(1);
+  });
 
   it("creates and polls a patient-scoped import", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ id: "import-1" });

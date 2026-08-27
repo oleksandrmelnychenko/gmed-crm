@@ -9,10 +9,13 @@ import {
   ListChecks,
   LoaderCircle,
   MessageSquareText,
+  Pencil,
   Plus,
   ReceiptText,
+  Save,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
@@ -44,6 +47,7 @@ import {
 import {
   conciergeDialogContentClassName,
   ConciergeDialogBody,
+  ConciergeDialogFooter,
   ConciergeDialogHeader,
 } from "./dialog-layout";
 import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
@@ -107,6 +111,10 @@ const copy = {
     comment_added: "Kommentar hinzugefügt",
     checklist_item_added: "Checklistenpunkt hinzugefügt",
     checklist_item_toggled: "Checklistenpunkt aktualisiert",
+    checklist_item_edited: "Checklistenpunkt bearbeitet",
+    checklist_item_deleted: "Checklistenpunkt gelöscht",
+    comment_edited: "Kommentar bearbeitet",
+    comment_deleted: "Kommentar gelöscht",
     attachment_added: "Anhang hinzugefügt",
     attachment_deleted: "Anhang entfernt",
     archived: "Aufgabe archiviert",
@@ -127,6 +135,16 @@ const copy = {
     reversed: "Storniert",
     noReceipt: "Kein Beleg",
     downloadReceipt: "Beleg herunterladen",
+    edit: "Bearbeiten",
+    save: "Speichern",
+    edited: "Bearbeitet",
+    confirmStatus: "OK",
+    cancelStatus: "Änderung verwerfen",
+    cancelEdit: "Bearbeitung abbrechen",
+    deleteChecklistTitle: "Checklistenpunkt löschen?",
+    deleteChecklistMessage: "Der Checklistenpunkt wird entfernt. Die Änderung bleibt im Aktivitätsverlauf erhalten.",
+    deleteCommentTitle: "Kommentar löschen?",
+    deleteCommentMessage: "Der Kommentar wird entfernt. Die Änderung bleibt im Aktivitätsverlauf erhalten.",
   },
   ru: {
     loading: "Загрузка задачи",
@@ -172,6 +190,10 @@ const copy = {
     comment_added: "Добавлен комментарий",
     checklist_item_added: "Добавлен пункт чек-листа",
     checklist_item_toggled: "Пункт чек-листа изменён",
+    checklist_item_edited: "Пункт чек-листа отредактирован",
+    checklist_item_deleted: "Пункт чек-листа удалён",
+    comment_edited: "Комментарий отредактирован",
+    comment_deleted: "Комментарий удалён",
     attachment_added: "Файл прикреплён",
     attachment_deleted: "Файл удалён",
     archived: "Задача перемещена в архив",
@@ -192,14 +214,28 @@ const copy = {
     reversed: "Отменено",
     noReceipt: "Документа нет",
     downloadReceipt: "Скачать подтверждение",
+    edit: "Изменить",
+    save: "Сохранить",
+    edited: "Изменено",
+    confirmStatus: "ОК",
+    cancelStatus: "Отменить изменение",
+    cancelEdit: "Отменить редактирование",
+    deleteChecklistTitle: "Удалить пункт чек-листа?",
+    deleteChecklistMessage: "Пункт будет удалён. Изменение сохранится в истории действий.",
+    deleteCommentTitle: "Удалить комментарий?",
+    deleteCommentMessage: "Комментарий будет удалён. Изменение сохранится в истории действий.",
   },
 } as const;
 
 const CHILD_REALTIME_EVENTS = [
   "concierge_operational_item.updated",
   "concierge_operational_item.comment_added",
+  "concierge_operational_item.comment_edited",
+  "concierge_operational_item.comment_deleted",
   "concierge_operational_item.checklist_item_added",
   "concierge_operational_item.checklist_item_toggled",
+  "concierge_operational_item.checklist_item_edited",
+  "concierge_operational_item.checklist_item_deleted",
   "concierge_operational_item.attachment_added",
   "concierge_operational_item.attachment_deleted",
 ] as const;
@@ -262,7 +298,7 @@ function TaskDetailSection({
 }) {
   return (
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
-      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
@@ -287,12 +323,14 @@ export function ConciergeTaskDetailDialog({
   taskId,
   lang,
   open,
+  openExpenseOnLoad = false,
   onOpenChange,
   onChanged,
 }: {
   taskId: string | null;
   lang: Lang;
   open: boolean;
+  openExpenseOnLoad?: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
 }) {
@@ -303,6 +341,15 @@ export function ConciergeTaskDetailDialog({
   const [error, setError] = useState("");
   const [comment, setComment] = useState("");
   const [checklistLabel, setChecklistLabel] = useState("");
+  const [editingChecklistId, setEditingChecklistId] = useState<string | null>(null);
+  const [checklistDraft, setChecklistDraft] = useState("");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [pendingStatus, setPendingStatus] = useState("");
+  const [pendingChildDelete, setPendingChildDelete] = useState<{
+    kind: "checklist" | "comment";
+    id: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [expenseService, setExpenseService] = useState<ConciergeService | null>(null);
@@ -318,10 +365,12 @@ export function ConciergeTaskDetailDialog({
   const canChangeStatus = detail
     ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
     : false;
+  const canCollaborate = canModify || canChangeStatus;
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
   const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
   const expenseLoadSequenceRef = useRef(0);
+  const autoExpenseOpenedRef = useRef(false);
   const canReadLinkedExpenses = Boolean(
     detail?.item.concierge_service_id
     && (user?.role === "ceo" || user?.role === "billing" || user?.role === "concierge"),
@@ -331,6 +380,7 @@ export function ConciergeTaskDetailDialog({
     && (user?.role === "ceo"
       || (user?.role === "concierge" && expenseService.assigned_concierge_id === user.id)),
   );
+  const statusDirty = Boolean(detail && pendingStatus && pendingStatus !== detail.item.status);
 
   const load = useCallback(async () => {
     if (!taskId) return;
@@ -339,6 +389,7 @@ export function ConciergeTaskDetailDialog({
     try {
       const payload = await apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${taskId}`, { forceFresh: true });
       setDetail(payload);
+      setPendingStatus(payload.item.status);
     } catch (loadError) {
       setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
     } finally {
@@ -357,6 +408,13 @@ export function ConciergeTaskDetailDialog({
     setDetail(null);
     setComment("");
     setChecklistLabel("");
+    setEditingChecklistId(null);
+    setChecklistDraft("");
+    setEditingCommentId(null);
+    setCommentDraft("");
+    setPendingStatus("");
+    setPendingChildDelete(null);
+    autoExpenseOpenedRef.current = false;
     commentRequestRef.current = null;
     checklistRequestRef.current = null;
     toggleRequestRef.current = null;
@@ -399,6 +457,13 @@ export function ConciergeTaskDetailDialog({
         if (expenseLoadSequenceRef.current === loadSequence) setExpenseLoading(false);
       });
   }, [canReadLinkedExpenses, detail?.item.concierge_service_id, labels.expenseLoadFailed, open]);
+
+  useEffect(() => {
+    if (!open || !openExpenseOnLoad || expenseLoading || !canSubmitLinkedExpense || !expenseService) return;
+    if (autoExpenseOpenedRef.current) return;
+    autoExpenseOpenedRef.current = true;
+    setExpenseDialogOpen(true);
+  }, [canSubmitLinkedExpense, expenseLoading, expenseService, open, openExpenseOnLoad]);
 
   async function addComment() {
     if (!taskId || !comment.trim() || busy) return;
@@ -503,6 +568,97 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function updateChecklistItem(item: ConciergeTaskChecklistItem) {
+    if (!taskId || !canCollaborate || busy || !checklistDraft.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const row = await apiFetch<ConciergeTaskChecklistItem>(`/concierge-operational-items/${taskId}/checklist/${item.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({ request_id: crypto.randomUUID(), label: checklistDraft.trim() }),
+      });
+      setDetail((current) => current ? {
+        ...current,
+        checklist: current.checklist.map((entry) => entry.id === row.id ? row : entry),
+      } : current);
+      setEditingChecklistId(null);
+      setChecklistDraft("");
+      clearApiCache("/concierge-operational-items");
+      onChanged();
+    } catch (mutationError) {
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.edit));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateCommentItem(item: ConciergeTaskComment) {
+    if (!taskId || item.created_by !== user?.id || busy || !commentDraft.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const row = await apiFetch<ConciergeTaskComment>(`/concierge-operational-items/${taskId}/comments/${item.id}/update`, {
+        method: "POST",
+        body: JSON.stringify({ request_id: crypto.randomUUID(), body: commentDraft.trim() }),
+      });
+      setDetail((current) => current ? {
+        ...current,
+        comments: current.comments.map((entry) => entry.id === row.id ? row : entry),
+      } : current);
+      setEditingCommentId(null);
+      setCommentDraft("");
+      clearApiCache("/concierge-operational-items");
+      onChanged();
+    } catch (mutationError) {
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.edit));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteChildItem() {
+    if (!taskId || !pendingChildDelete || busy) return;
+    const target = pendingChildDelete;
+    setBusy(true);
+    setError("");
+    try {
+      const path = target.kind === "comment"
+        ? `/concierge-operational-items/${taskId}/comments/${target.id}/delete`
+        : `/concierge-operational-items/${taskId}/checklist/${target.id}/delete`;
+      await apiFetch<void>(path, {
+        method: "POST",
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      });
+      setDetail((current) => {
+        if (!current) return current;
+        if (target.kind === "comment") {
+          return {
+            ...current,
+            comments: current.comments.filter((entry) => entry.id !== target.id),
+            item: { ...current.item, comment_count: Math.max(0, current.item.comment_count - 1) },
+          };
+        }
+        const removed = current.checklist.find((entry) => entry.id === target.id);
+        return {
+          ...current,
+          checklist: current.checklist.filter((entry) => entry.id !== target.id),
+          item: {
+            ...current.item,
+            checklist_total: Math.max(0, current.item.checklist_total - 1),
+            checklist_completed: Math.max(0, current.item.checklist_completed - (removed?.is_completed ? 1 : 0)),
+          },
+        };
+      });
+      setPendingChildDelete(null);
+      clearApiCache("/concierge-operational-items");
+      onChanged();
+    } catch (mutationError) {
+      setError(conciergeTaskErrorMessage(mutationError, lang, labels.delete));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteTask() {
     if (!taskId || busy) return;
     setBusy(true);
@@ -520,8 +676,8 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
-  async function changeStatus(status: string) {
-    if (!taskId || !detail || !canChangeStatus || busy || status === detail.item.status) return;
+  async function changeStatus() {
+    if (!taskId || !detail || !canChangeStatus || busy || !pendingStatus || pendingStatus === detail.item.status) return;
     setBusy(true);
     setError("");
     try {
@@ -529,7 +685,7 @@ export function ConciergeTaskDetailDialog({
         method: "POST",
         body: JSON.stringify({
           expected_updated_at: detail.item.updated_at,
-          status,
+          status: pendingStatus,
         }),
       });
       clearApiCache("/concierge-operational-items");
@@ -594,8 +750,8 @@ export function ConciergeTaskDetailDialog({
   return (
     <>
       <Dialog
-        open={open}
-        dirty={false}
+        open={open && !openExpenseOnLoad && !expenseDialogOpen}
+        dirty={statusDirty || Boolean(editingChecklistId) || Boolean(editingCommentId)}
         onOpenChange={onOpenChange}
       >
       <DialogContent className={conciergeDialogContentClassName} style={{ maxWidth: "64rem" }}>
@@ -622,14 +778,14 @@ export function ConciergeTaskDetailDialog({
                     value={canChangeStatus ? (
                       <SelectField
                         className="h-9 min-w-40"
-                        value={detail.item.status}
+                        value={pendingStatus || detail.item.status}
                         disabled={busy || Boolean(detail.item.archived_at)}
                         aria-label={labels.status}
                         options={availableConciergeTaskStatuses(detail.item, user?.id, user?.role).map((status) => ({
                           value: status,
                           label: labels[status],
                         }))}
-                        onValueChange={(status) => void changeStatus(status)}
+                        onValueChange={setPendingStatus}
                       />
                     ) : (
                       <Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
@@ -732,19 +888,88 @@ export function ConciergeTaskDetailDialog({
               <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
                 <div className="divide-y divide-border/60">
                   {detail.checklist.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChecklist}</p> : detail.checklist.map((item) => (
-                    <button key={item.id} type="button" className="flex w-full items-start gap-2 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-muted/20" disabled={busy || Boolean(detail.item.archived_at)} onClick={() => void toggleChecklist(item)}>
-                      {item.is_completed ? <Check className="mt-0.5 size-4 text-emerald-600" /> : <Circle className="mt-0.5 size-4 text-muted-foreground" />}
-                      <span className={cn("min-w-0 flex-1", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
-                    </button>
+                    <div key={item.id} className="flex items-start gap-1.5 px-3 py-2 text-sm">
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        className="-ml-1.5 size-7 shrink-0 rounded-full"
+                        disabled={busy || Boolean(detail.item.archived_at)}
+                        aria-label={item.label}
+                        onClick={() => void toggleChecklist(item)}
+                      >
+                        {item.is_completed ? <Check className="size-4 text-emerald-600" /> : <Circle className="size-4 text-muted-foreground" />}
+                      </Button>
+                      {editingChecklistId === item.id ? (
+                        <div className="flex min-w-0 flex-1 gap-1.5">
+                          <Input
+                            autoFocus
+                            className="h-8 min-w-0"
+                            value={checklistDraft}
+                            maxLength={500}
+                            onChange={(event) => setChecklistDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void updateChecklistItem(item);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingChecklistId(null);
+                                setChecklistDraft("");
+                              }
+                            }}
+                          />
+                          <Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistDraft.trim()} aria-label={labels.save} onClick={() => void updateChecklistItem(item)}><Save /></Button>
+                          <Button type="button" size="icon-sm" variant="ghost" className="size-8" aria-label={labels.cancelEdit} onClick={() => { setEditingChecklistId(null); setChecklistDraft(""); }}><X /></Button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="min-w-0 flex-1 pt-0.5">
+                            <span className={cn("block break-words", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
+                            <time className="mt-0.5 block text-[10px] font-normal text-muted-foreground">{dateTime(item.created_at, lang)}</time>
+                          </span>
+                          {canCollaborate && !detail.item.archived_at ? (
+                            <div className="flex shrink-0 items-center gap-0.5">
+                              <Button type="button" size="icon-sm" variant="ghost" className="size-7" aria-label={labels.edit} onClick={() => { setEditingChecklistId(item.id); setChecklistDraft(item.label); }}><Pencil /></Button>
+                              <Button type="button" size="icon-sm" variant="ghost" className="size-7 text-destructive hover:text-destructive" aria-label={labels.delete} onClick={() => setPendingChildDelete({ kind: "checklist", id: item.id })}><Trash2 /></Button>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
                   ))}
-                  {!detail.item.archived_at ? <div className="flex gap-2 p-3"><Input className="h-9" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div> : null}
+                  {!detail.item.archived_at ? <div className="flex gap-1.5 p-2.5"><Input className="h-8" value={checklistLabel} maxLength={500} placeholder={labels.checklistPlaceholder} onChange={(event) => setChecklistLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addChecklistItem(); } }} /><Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistLabel.trim()} aria-label={labels.addChecklist} onClick={() => void addChecklistItem()}><Plus /></Button></div> : null}
                 </div>
               </TaskDetailSection>
 
               <TaskDetailSection title={labels.comments} action={<Badge variant="secondary" className="rounded-full">{detail.comments.length}</Badge>}>
                 <div className="divide-y divide-border/60">
-                  {detail.comments.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => <article key={item.id} className="px-3.5 py-2.5"><div className="flex justify-between gap-2 text-[10px] text-muted-foreground"><strong className="text-foreground">{item.created_by_name}</strong><time>{dateTime(item.created_at, lang)}</time></div><p className="mt-1.5 whitespace-pre-wrap text-sm">{item.body}</p></article>)}
-                  {!detail.item.archived_at ? <div className="space-y-2 p-3"><textarea className="min-h-20 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><Button type="button" size="sm" className="w-full" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div> : null}
+                  {detail.comments.length === 0 ? <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyComments}</p> : detail.comments.map((item) => (
+                    <article key={item.id} className="px-3 py-2">
+                      <div className="flex items-start justify-between gap-2 text-[10px] text-muted-foreground">
+                        <div className="min-w-0"><strong className="text-foreground">{item.created_by_name}</strong>{item.edited_at ? <span className="ml-1.5">· {labels.edited}</span> : null}</div>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <time className="mr-1 pt-1.5">{dateTime(item.created_at, lang)}</time>
+                          {item.created_by === user?.id && !detail.item.archived_at ? (
+                            <>
+                              <Button type="button" size="icon-sm" variant="ghost" className="size-7" aria-label={labels.edit} onClick={() => { setEditingCommentId(item.id); setCommentDraft(item.body); }}><Pencil /></Button>
+                              <Button type="button" size="icon-sm" variant="ghost" className="size-7 text-destructive hover:text-destructive" aria-label={labels.delete} onClick={() => setPendingChildDelete({ kind: "comment", id: item.id })}><Trash2 /></Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                      {editingCommentId === item.id ? (
+                        <div className="mt-2 space-y-2">
+                          <textarea autoFocus className="min-h-24 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={commentDraft} maxLength={4000} onChange={(event) => setCommentDraft(event.target.value)} />
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" size="sm" variant="outline" onClick={() => { setEditingCommentId(null); setCommentDraft(""); }}><X />{labels.cancelEdit}</Button>
+                            <Button type="button" size="sm" disabled={busy || !commentDraft.trim()} onClick={() => void updateCommentItem(item)}>{busy ? <LoaderCircle className="animate-spin" /> : <Save />}{labels.save}</Button>
+                          </div>
+                        </div>
+                      ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-snug">{item.body}</p>}
+                    </article>
+                  ))}
+                  {!detail.item.archived_at ? <div className="space-y-1.5 p-2.5"><textarea className="min-h-16 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none placeholder:font-normal focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={comment} maxLength={4000} placeholder={labels.commentPlaceholder} onChange={(event) => setComment(event.target.value)} /><div className="flex justify-end"><Button type="button" size="sm" className="h-8 px-3" disabled={busy || !comment.trim()} onClick={() => void addComment()}>{busy ? <LoaderCircle className="animate-spin" /> : <MessageSquareText />}{labels.addComment}</Button></div></div> : null}
                 </div>
               </TaskDetailSection>
             </div>
@@ -765,6 +990,23 @@ export function ConciergeTaskDetailDialog({
             </div>
           ) : null}
         </ConciergeDialogBody>
+        {statusDirty ? (
+          <ConciergeDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setPendingStatus(detail?.item.status ?? "")}
+            >
+              <X />
+              {labels.cancelStatus}
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void changeStatus()}>
+              {busy ? <LoaderCircle className="animate-spin" /> : <Check />}
+              {labels.confirmStatus}
+            </Button>
+          </ConciergeDialogFooter>
+        ) : null}
       </DialogContent>
       <DirtyDismissConfirmDialog
         open={deleteConfirmOpen}
@@ -776,6 +1018,19 @@ export function ConciergeTaskDetailDialog({
         confirmDisabled={busy}
         onCancel={() => setDeleteConfirmOpen(false)}
         onConfirm={() => void deleteTask()}
+      />
+      <DirtyDismissConfirmDialog
+        open={Boolean(pendingChildDelete)}
+        title={pendingChildDelete?.kind === "comment" ? labels.deleteCommentTitle : labels.deleteChecklistTitle}
+        message={pendingChildDelete?.kind === "comment" ? labels.deleteCommentMessage : labels.deleteChecklistMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={labels.delete}
+        destructive
+        confirmDisabled={busy}
+        onCancel={() => {
+          if (!busy) setPendingChildDelete(null);
+        }}
+        onConfirm={() => void deleteChildItem()}
       />
       </Dialog>
       <ConciergeExpenseReceiptDialog
@@ -807,7 +1062,10 @@ export function ConciergeTaskDetailDialog({
         ]}
         onOpenChange={(nextOpen) => {
           setExpenseDialogOpen(nextOpen);
-          if (!nextOpen) setExpenseProgress(0);
+          if (!nextOpen) {
+            setExpenseProgress(0);
+            if (openExpenseOnLoad) onOpenChange(false);
+          }
         }}
         onSubmit={submitLinkedExpense}
         onDownload={downloadLinkedExpenseReceipt}

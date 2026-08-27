@@ -87,8 +87,24 @@ pub fn router() -> Router<AppState> {
             post(add_comment),
         )
         .route(
+            "/concierge-operational-items/{item_id}/comments/{comment_id}/update",
+            post(update_comment),
+        )
+        .route(
+            "/concierge-operational-items/{item_id}/comments/{comment_id}/delete",
+            post(delete_comment),
+        )
+        .route(
             "/concierge-operational-items/{item_id}/checklist",
             post(add_checklist_item),
+        )
+        .route(
+            "/concierge-operational-items/{item_id}/checklist/{checklist_id}/update",
+            post(update_checklist_item),
+        )
+        .route(
+            "/concierge-operational-items/{item_id}/checklist/{checklist_id}/delete",
+            post(delete_checklist_item),
         )
         .route(
             "/concierge-operational-items/{item_id}/checklist/{checklist_id}/toggle",
@@ -190,7 +206,27 @@ struct AddCommentRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct UpdateCommentRequest {
+    request_id: Uuid,
+    body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChildDeleteRequest {
+    request_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AddChecklistItemRequest {
+    request_id: Uuid,
+    label: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateChecklistItemRequest {
     request_id: Uuid,
     label: String,
 }
@@ -236,9 +272,9 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
-          (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
-          (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.is_completed) AS checklist_completed,
-          (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id) AS comment_count,
+          (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
+          (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL AND ci.is_completed) AS checklist_completed,
+          (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id AND cc.deleted_at IS NULL) AS comment_count,
           (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
           assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
           assigner.role AS assigned_by_role,
@@ -258,10 +294,10 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    WHERE t.id = $1 AND t.task_scope = 'concierge_operational' AND t.deleted_at IS NULL"#;
 
 const COMMENT_RESPONSE_QUERY: &str = r#"SELECT comment.id, comment.body, comment.created_by,
-          author.name AS created_by_name, comment.created_at
+          author.name AS created_by_name, comment.created_at, comment.updated_at, comment.edited_at
    FROM concierge_operational_task_comments comment
    JOIN users author ON author.id = comment.created_by
-   WHERE comment.id = $1"#;
+   WHERE comment.id = $1 AND comment.deleted_at IS NULL"#;
 
 const CHECKLIST_ITEM_RESPONSE_QUERY: &str = r#"SELECT item.id, item.label, item.position, item.is_completed,
           item.completed_by, item.completed_at, item.created_by,
@@ -271,7 +307,7 @@ const CHECKLIST_ITEM_RESPONSE_QUERY: &str = r#"SELECT item.id, item.label, item.
    FROM concierge_operational_task_checklist_items item
    JOIN users creator ON creator.id = item.created_by
    LEFT JOIN users completer ON completer.id = item.completed_by
-   WHERE item.id = $1"#;
+   WHERE item.id = $1 AND item.deleted_at IS NULL"#;
 
 async fn list_items(
     State(state): State<AppState>,
@@ -321,9 +357,9 @@ async fn list_items(
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
-                  (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id) AS checklist_total,
-                  (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.is_completed) AS checklist_completed,
-                  (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id) AS comment_count,
+                  (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
+                  (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL AND ci.is_completed) AS checklist_completed,
+                  (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id AND cc.deleted_at IS NULL) AS comment_count,
                   (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
                   assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
                   assigner.role AS assigned_by_role,
@@ -1930,8 +1966,8 @@ async fn delete_item(
     let task = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.title, task.status,
                   task.archived_at,
-                  EXISTS(SELECT 1 FROM concierge_operational_task_comments comment WHERE comment.task_id = task.id) AS has_comments,
-                  EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id) AS has_checklist,
+                  EXISTS(SELECT 1 FROM concierge_operational_task_comments comment WHERE comment.task_id = task.id AND comment.deleted_at IS NULL) AS has_comments,
+                  EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id AND checklist.deleted_at IS NULL) AS has_checklist,
                   EXISTS(SELECT 1 FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = task.id AND attachment.deleted_at IS NULL) AS has_attachments,
                   creator.role AS assigned_by_role
            FROM tasks task
@@ -2117,7 +2153,7 @@ async fn get_item_detail(
            FROM concierge_operational_task_checklist_items item
            JOIN users creator ON creator.id = item.created_by
            LEFT JOIN users completer ON completer.id = item.completed_by
-           WHERE item.task_id = $1
+           WHERE item.task_id = $1 AND item.deleted_at IS NULL
            ORDER BY item.position, item.created_at, item.id"#,
     )
     .bind(item_id)
@@ -2132,10 +2168,11 @@ async fn get_item_detail(
     };
     let comment_rows = match sqlx::query(
         r#"SELECT comment.id, comment.body, comment.created_by,
-                  author.name AS created_by_name, comment.created_at
+                  author.name AS created_by_name, comment.created_at,
+                  comment.updated_at, comment.edited_at
            FROM concierge_operational_task_comments comment
            JOIN users author ON author.id = comment.created_by
-           WHERE comment.task_id = $1
+           WHERE comment.task_id = $1 AND comment.deleted_at IS NULL
            ORDER BY comment.created_at, comment.id"#,
     )
     .bind(item_id)
@@ -2368,6 +2405,283 @@ async fn add_comment(
     Json(comment).into_response()
 }
 
+async fn update_comment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((item_id, comment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateCommentRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    let comment_body = body.body.trim();
+    if comment_body.is_empty() || comment_body.chars().count() > 4_000 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Comment is required (max 4000)",
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge comment update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let replay = match sqlx::query(
+        r#"SELECT event_type, payload
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(item_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge comment update replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(replay) = replay {
+        let payload = replay
+            .try_get::<serde_json::Value, _>("payload")
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let comment_id_text = comment_id.to_string();
+        if replay
+            .try_get::<String, _>("event_type")
+            .unwrap_or_default()
+            != "comment_edited"
+            || payload.get("comment_id").and_then(|value| value.as_str())
+                != Some(comment_id_text.as_str())
+            || payload.get("body").and_then(|value| value.as_str()) != Some(comment_body)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
+        }
+        let comment = match load_comment_in_transaction(&mut tx, comment_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Comment not found"),
+            Err(response) => return response,
+        };
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit concierge comment update replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return Json(comment).into_response();
+    }
+    let existing = match sqlx::query(
+        r#"SELECT body, created_by
+           FROM concierge_operational_task_comments
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(item_id)
+    .bind(comment_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Comment not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "load concierge comment for update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if existing.try_get::<Uuid, _>("created_by").ok() != Some(auth.user_id) {
+        return err(StatusCode::FORBIDDEN, "Only the comment author can edit it");
+    }
+    let previous_body = existing.try_get::<String, _>("body").unwrap_or_default();
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_operational_task_comments
+           SET body = $3, updated_at = now(), edited_at = now()
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(comment_id)
+    .bind(comment_body)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "update concierge comment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (
+               task_id, event_type, actor_id, request_id, payload
+           ) VALUES ($1, 'comment_edited', $2, $3, $4)"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .bind(body.request_id)
+    .bind(serde_json::json!({
+        "comment_id": comment_id,
+        "previous_body": previous_body,
+        "body": comment_body,
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "record concierge comment update history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let comment = match load_comment_in_transaction(&mut tx, comment_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Comment not found"),
+        Err(response) => return response,
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge comment update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.comment_edited",
+        item_id,
+        assigned_to,
+        serde_json::json!({ "comment_id": comment_id }),
+    )
+    .await;
+    Json(comment).into_response()
+}
+
+async fn delete_comment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((item_id, comment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ChildDeleteRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge comment deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let replay = match sqlx::query(
+        r#"SELECT event_type, payload
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(item_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge comment deletion replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(replay) = replay {
+        let payload = replay
+            .try_get::<serde_json::Value, _>("payload")
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let comment_id_text = comment_id.to_string();
+        if replay
+            .try_get::<String, _>("event_type")
+            .unwrap_or_default()
+            != "comment_deleted"
+            || payload.get("comment_id").and_then(|value| value.as_str())
+                != Some(comment_id_text.as_str())
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit concierge comment deletion replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let existing = match sqlx::query(
+        r#"SELECT body, created_by
+           FROM concierge_operational_task_comments
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(item_id)
+    .bind(comment_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Comment not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "load concierge comment for deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if existing.try_get::<Uuid, _>("created_by").ok() != Some(auth.user_id) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the comment author can delete it",
+        );
+    }
+    let previous_body = existing.try_get::<String, _>("body").unwrap_or_default();
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_operational_task_comments
+           SET deleted_at = now(), deleted_by = $3, updated_at = now()
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(comment_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "delete concierge comment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (
+               task_id, event_type, actor_id, request_id, payload
+           ) VALUES ($1, 'comment_deleted', $2, $3, $4)"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .bind(body.request_id)
+    .bind(serde_json::json!({ "comment_id": comment_id, "previous_body": previous_body }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, comment_id = %comment_id, "record concierge comment deletion history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge comment deletion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.comment_deleted",
+        item_id,
+        assigned_to,
+        serde_json::json!({ "comment_id": comment_id }),
+    )
+    .await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn add_checklist_item(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2490,6 +2804,275 @@ async fn add_checklist_item(
     Json(checklist_item).into_response()
 }
 
+async fn update_checklist_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((item_id, checklist_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateChecklistItemRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    let label = body.label.trim();
+    if label.is_empty() || label.chars().count() > 500 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Checklist label is required (max 500)",
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge checklist update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let replay = match sqlx::query(
+        r#"SELECT event_type, payload
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(item_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge checklist update replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(replay) = replay {
+        let payload = replay
+            .try_get::<serde_json::Value, _>("payload")
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let checklist_id_text = checklist_id.to_string();
+        if replay
+            .try_get::<String, _>("event_type")
+            .unwrap_or_default()
+            != "checklist_item_edited"
+            || payload.get("checklist_id").and_then(|value| value.as_str())
+                != Some(checklist_id_text.as_str())
+            || payload.get("label").and_then(|value| value.as_str()) != Some(label)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
+        }
+        let checklist_item = match load_checklist_item_in_transaction(&mut tx, checklist_id).await {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Checklist item not found"),
+            Err(response) => return response,
+        };
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist update replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return Json(checklist_item).into_response();
+    }
+    let previous_label = match sqlx::query_scalar::<_, String>(
+        r#"SELECT label
+           FROM concierge_operational_task_checklist_items
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(item_id)
+    .bind(checklist_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Checklist item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "load concierge checklist item for update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_operational_task_checklist_items
+           SET label = $3, updated_at = now()
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(checklist_id)
+    .bind(label)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "update concierge checklist item");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (
+               task_id, event_type, actor_id, request_id, payload
+           ) VALUES ($1, 'checklist_item_edited', $2, $3, $4)"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .bind(body.request_id)
+    .bind(serde_json::json!({
+        "checklist_id": checklist_id,
+        "previous_label": previous_label,
+        "label": label,
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "record concierge checklist update history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let checklist_item = match load_checklist_item_in_transaction(&mut tx, checklist_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Checklist item not found"),
+        Err(response) => return response,
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.checklist_item_edited",
+        item_id,
+        assigned_to,
+        serde_json::json!({ "checklist_id": checklist_id }),
+    )
+    .await;
+    Json(checklist_item).into_response()
+}
+
+async fn delete_checklist_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((item_id, checklist_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ChildDeleteRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin concierge checklist deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let assigned_to = match lock_item_access(&mut tx, &auth, item_id, true).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let replay = match sqlx::query(
+        r#"SELECT event_type, payload
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(item_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load concierge checklist deletion replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(replay) = replay {
+        let payload = replay
+            .try_get::<serde_json::Value, _>("payload")
+            .unwrap_or_else(|_| serde_json::json!({}));
+        let checklist_id_text = checklist_id.to_string();
+        if replay
+            .try_get::<String, _>("event_type")
+            .unwrap_or_default()
+            != "checklist_item_deleted"
+            || payload.get("checklist_id").and_then(|value| value.as_str())
+                != Some(checklist_id_text.as_str())
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used with different data",
+            );
+        }
+        if let Err(error) = tx.commit().await {
+            tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist deletion replay");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    let previous_label = match sqlx::query_scalar::<_, String>(
+        r#"SELECT label
+           FROM concierge_operational_task_checklist_items
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(item_id)
+    .bind(checklist_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Checklist item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "load concierge checklist item for deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_operational_task_checklist_items
+           SET deleted_at = now(), deleted_by = $3, updated_at = now()
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(item_id)
+    .bind(checklist_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "delete concierge checklist item");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO concierge_operational_task_events (
+               task_id, event_type, actor_id, request_id, payload
+           ) VALUES ($1, 'checklist_item_deleted', $2, $3, $4)"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .bind(body.request_id)
+    .bind(serde_json::json!({
+        "checklist_id": checklist_id,
+        "previous_label": previous_label,
+    }))
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %error, item_id = %item_id, checklist_id = %checklist_id, "record concierge checklist deletion history");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit concierge checklist deletion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    publish_operational_child_event(
+        &state,
+        &auth,
+        "concierge_operational_item.checklist_item_deleted",
+        item_id,
+        assigned_to,
+        serde_json::json!({ "checklist_id": checklist_id }),
+    )
+    .await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn toggle_checklist_item(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2561,7 +3144,7 @@ async fn toggle_checklist_item(
                completed_by = CASE WHEN $3 THEN $4 ELSE NULL END,
                completed_at = CASE WHEN $3 THEN now() ELSE NULL END,
                updated_at = now()
-           WHERE id = $2 AND task_id = $1
+           WHERE id = $2 AND task_id = $1 AND deleted_at IS NULL
            RETURNING id"#,
     )
     .bind(item_id)
@@ -2903,6 +3486,8 @@ fn build_comment_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> 
         "created_by": row.try_get::<Uuid, _>("created_by").ok()?,
         "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
         "created_at": format_datetime(row, "created_at"),
+        "updated_at": format_datetime(row, "updated_at"),
+        "edited_at": format_datetime(row, "edited_at"),
     }))
 }
 

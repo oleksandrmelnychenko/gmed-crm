@@ -41,6 +41,8 @@ import {
 import {
   completeClinicalDocumentImport,
   clinicalDocumentImportAfterPrepare,
+  clinicalDocumentPreviewPage,
+  clinicalDocumentTextPages,
   clinicalImportNeedsSourceCountry,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
@@ -964,6 +966,7 @@ export function ClinicalDocumentImportSheet({
   const [manualTarget, setManualTarget] = useState<ClinicalDocumentImportTarget>("diagnosis");
   const [manualValue, setManualValue] = useState("");
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [sourcePageNumber, setSourcePageNumber] = useState(1);
   const [preview, setPreview] = useState<{ url: string; contentType: string } | null>(null);
   const [previewError, setPreviewError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1038,6 +1041,7 @@ export function ClinicalDocumentImportSheet({
       setManualTarget("diagnosis");
       setManualValue("");
       setActiveCandidateId(null);
+      setSourcePageNumber(1);
       if (fileRef.current) fileRef.current.value = "";
     }
     onOpenChange(nextOpen);
@@ -1106,6 +1110,7 @@ export function ClinicalDocumentImportSheet({
       setDocumentImport(detail);
       setCandidates(nextCandidates);
       setActiveCandidateId(snapshotCandidates[0]?.id ?? null);
+      setSourcePageNumber(1);
       setActiveTab("all");
       if (detail.status === "applying" || detail.status === "applied") {
         setSourceCountry(detail.prepared_source_country ?? "");
@@ -1153,6 +1158,7 @@ export function ClinicalDocumentImportSheet({
         setDocumentImport(null);
         setCandidates([]);
         setActiveCandidateId(null);
+        setSourcePageNumber(1);
         setActiveTab("all");
       }
       setDeleteTarget(null);
@@ -1174,6 +1180,7 @@ export function ClinicalDocumentImportSheet({
     setDocumentImport(null);
     setCandidates([]);
     setActiveCandidateId(null);
+    setSourcePageNumber(1);
     setActiveTab("all");
     setSourceCountry("");
     setPatientIdentityConfirmed(false);
@@ -1308,6 +1315,25 @@ export function ClinicalDocumentImportSheet({
     [activeTab, candidates],
   );
   const activeCandidate = candidates.find((item) => item.id === activeCandidateId) ?? null;
+  useEffect(() => {
+    const candidatePage = activeCandidate?.source.page;
+    if (candidatePage && candidatePage > 0) {
+      setSourcePageNumber(clinicalDocumentPreviewPage(candidatePage, null));
+    }
+  }, [activeCandidate?.id, activeCandidate?.source.page]);
+  const sourcePages = useMemo(
+    () => clinicalDocumentTextPages(documentImport?.draft),
+    [documentImport?.draft],
+  );
+  const selectedSourcePage = sourcePages.find(
+    (page) => page.pageNumber === sourcePageNumber,
+  ) ?? sourcePages[0] ?? null;
+  useEffect(() => {
+    if (sourcePages.length === 0) return;
+    if (!sourcePages.some((page) => page.pageNumber === sourcePageNumber)) {
+      setSourcePageNumber(sourcePages[0].pageNumber);
+    }
+  }, [sourcePageNumber, sourcePages]);
   const subjectCheck = useMemo(
     () => checkClinicalDocumentSubject(documentImport?.draft.subject, patientIdentity),
     [documentImport?.draft.subject, patientIdentity],
@@ -1333,7 +1359,10 @@ export function ClinicalDocumentImportSheet({
     patientIdentity.birthDate,
     patientIdentity.patientIdentifier,
   ].filter(Boolean).join(" · ");
-  const activePage = activeCandidate?.source.page ?? 1;
+  const activePage = clinicalDocumentPreviewPage(
+    activeCandidate?.source.page,
+    selectedSourcePage?.pageNumber,
+  );
   const hasCountryScopedCandidate = clinicalImportNeedsSourceCountry(selected);
   const newCount = (target: ClinicalDocumentImportTarget) =>
     candidates.filter((item) => item.target === target).length;
@@ -1368,6 +1397,7 @@ export function ClinicalDocumentImportSheet({
       clearApiCache(`/patients/${patientId}/documents`);
       const created = await createClinicalDocumentImport(patientId, uploaded.id);
       setDocumentImport(created);
+      setSourcePageNumber(1);
       setPatientIdentityConfirmed(false);
       await loadPreview(uploaded.id);
       void refreshHistory(true);
@@ -1413,6 +1443,7 @@ export function ClinicalDocumentImportSheet({
       setDocumentImport(rescanned);
       setCandidates([]);
       setActiveCandidateId(null);
+      setSourcePageNumber(1);
       setActiveTab("all");
       setSourceCountry("");
       setPatientIdentityConfirmed(false);
@@ -1437,6 +1468,7 @@ export function ClinicalDocumentImportSheet({
       setDocumentImport(rescanned);
       setCandidates([]);
       setActiveCandidateId(null);
+      setSourcePageNumber(1);
       setActiveTab("all");
       setSourceCountry("");
       setPatientIdentityConfirmed(false);
@@ -2596,22 +2628,95 @@ export function ClinicalDocumentImportSheet({
 
                 {activeTab === "source" ? (
                   <section className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-semibold">
-                        {tx("Полный текст документа", "Vollständiger Dokumenttext")}
-                      </h4>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {tx(
-                          "Выделите фрагмент — он автоматически появится в конструкторе объекта ниже.",
-                          "Text markieren – der Ausschnitt erscheint automatisch im Objekt-Editor unten.",
-                        )}
-                      </p>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold">
+                          {tx("Распознанный текст по страницам", "Erkannter Text nach Seiten")}
+                        </h4>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {tx(
+                            "Выберите страницу. Оригинал справа откроется на той же странице.",
+                            "Seite auswählen. Das Original rechts öffnet dieselbe Seite.",
+                          )}
+                        </p>
+                      </div>
+                      {selectedSourcePage?.extraction ? (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <Badge variant="outline" className="rounded-full bg-white font-normal">
+                            {selectedSourcePage.extraction.source === "ocr"
+                              ? "OCR"
+                              : tx("Текст PDF", "PDF-Text")}
+                          </Badge>
+                          {selectedSourcePage.extraction.ocr_confidence !== null ? (
+                            <Badge variant="outline" className="rounded-full bg-blue-50 font-normal text-blue-700">
+                              {`OCR ${Math.round(selectedSourcePage.extraction.ocr_confidence * 100)}%`}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
 
-                    {documentImport.draft.raw_text ? (
+                    {sourcePages.length > 0 ? (
+                      <div className="overflow-x-auto overscroll-x-contain pb-1">
+                        <div
+                          className="flex w-max min-w-full justify-center gap-1.5"
+                          role="group"
+                          aria-label={tx("Страницы документа", "Dokumentseiten")}
+                        >
+                          {sourcePages.map((page) => {
+                            const selected = page.pageNumber === selectedSourcePage?.pageNumber;
+                            const hasText = page.text.trim().length > 0;
+                            return (
+                              <button
+                                key={page.pageNumber}
+                                type="button"
+                                className={cn(
+                                  "inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors",
+                                  selected
+                                    ? "border-orange-500 bg-orange-500 text-white"
+                                    : "border-border bg-white text-foreground hover:border-orange-200 hover:bg-orange-50",
+                                )}
+                                aria-pressed={selected}
+                                onClick={() => {
+                                  setActiveCandidateId(null);
+                                  setSourcePageNumber(page.pageNumber);
+                                }}
+                              >
+                                <span>{tx(`Страница ${page.pageNumber}`, `Seite ${page.pageNumber}`)}</span>
+                                <span
+                                  aria-label={hasText
+                                    ? tx("Текст распознан", "Text erkannt")
+                                    : tx("Текст не распознан", "Kein Text erkannt")}
+                                  className={cn(
+                                    "size-1.5 rounded-full",
+                                    selected
+                                      ? hasText ? "bg-white" : "bg-white/55"
+                                      : hasText ? "bg-emerald-500" : "bg-slate-300",
+                                  )}
+                                />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {selectedSourcePage?.textScope === "document" ? (
+                      <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                        <AlertTriangle className="size-4 shrink-0" />
+                        <span>
+                          {tx(
+                            "Это старый снимок: текст сохранён целиком без границ страниц. Для точной привязки запустите повторное распознавание.",
+                            "Dies ist ein älterer Snapshot: Der Text wurde ohne Seitengrenzen gespeichert. Für eine genaue Zuordnung erneut erkennen lassen.",
+                          )}
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {selectedSourcePage?.text.trim() ? (
                       <textarea
                         readOnly
-                        value={documentImport.draft.raw_text}
+                        value={selectedSourcePage.text}
                         className="min-h-[560px] max-h-[72vh] w-full resize-y rounded-xl border border-border/70 bg-slate-50/70 p-5 font-mono text-[13px] leading-6 text-foreground outline-none selection:bg-orange-200 focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
                         onSelect={(event) => {
                           if (!reviewReady) return;
@@ -2621,8 +2726,27 @@ export function ClinicalDocumentImportSheet({
                             .trim();
                           if (fragment) setManualValue(fragment);
                         }}
-                        aria-label={tx("Распознанный текст документа", "Erkannter Dokumenttext")}
+                        aria-label={tx(
+                          `Распознанный текст страницы ${selectedSourcePage.pageNumber}`,
+                          `Erkannter Text der Seite ${selectedSourcePage.pageNumber}`,
+                        )}
                       />
+                    ) : selectedSourcePage ? (
+                      <div className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 px-4 py-10 text-center">
+                        <FileText className="size-8 text-muted-foreground/50" />
+                        <p className="mt-2 text-sm font-medium">
+                          {tx(
+                            `На странице ${selectedSourcePage.pageNumber} текст не распознан`,
+                            `Auf Seite ${selectedSourcePage.pageNumber} wurde kein Text erkannt`,
+                          )}
+                        </p>
+                        <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                          {tx(
+                            "Страница не потеряна: оригинал открыт справа. Проверьте его визуально или запустите повторное распознавание.",
+                            "Die Seite ist nicht verloren: Das Original ist rechts geöffnet. Visuell prüfen oder erneut erkennen lassen.",
+                          )}
+                        </p>
+                      </div>
                     ) : (
                       <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-10 text-center">
                         <FileText className="mx-auto size-8 text-muted-foreground/50" />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { ClipboardPlus, LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
@@ -22,6 +22,7 @@ import {
   filterConciergeTaskAssignees,
   type ConciergeAssignee,
   type ConciergeProvider,
+  type ConciergeService,
   type ConciergeTask,
   type ConciergeTaskStatus,
 } from "./model";
@@ -42,8 +43,12 @@ const REALTIME_EVENTS = [
   "concierge_operational_item.restored",
   "concierge_operational_item.reminder_sent",
   "concierge_operational_item.comment_added",
+  "concierge_operational_item.comment_edited",
+  "concierge_operational_item.comment_deleted",
   "concierge_operational_item.checklist_item_added",
   "concierge_operational_item.checklist_item_toggled",
+  "concierge_operational_item.checklist_item_edited",
+  "concierge_operational_item.checklist_item_deleted",
 ] as const;
 
 const copy = {
@@ -51,6 +56,8 @@ const copy = {
     title: "Aufgabenmanager",
     subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
     newTask: "Aufgabe / Termin",
+    newServiceTask: "Serviceaufgabe",
+    serviceRequired: "Wählen Sie einen Service für die Serviceaufgabe aus.",
     refresh: "Aktualisieren",
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
@@ -70,6 +77,8 @@ const copy = {
     title: "Менеджер задач",
     subtitle: "Распределение задач, календарь событий и контроль сроков",
     newTask: "Задача / событие",
+    newServiceTask: "Сервисная задача",
+    serviceRequired: "Для сервисной задачи выберите связанный сервис.",
     refresh: "Обновить",
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
@@ -107,8 +116,11 @@ export function ConciergeTaskManagerPage() {
   const [taskError, setTaskError] = useState("");
   const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [providers, setProviders] = useState<ConciergeProvider[]>([]);
+  const [services, setServices] = useState<ConciergeService[]>([]);
   const [initialTaskDate, setInitialTaskDate] = useState<Date | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
+  const [serviceTaskMode, setServiceTaskMode] = useState(false);
+  const [detailExpenseRequested, setDetailExpenseRequested] = useState(false);
   const hasLoadedRef = useRef(false);
   const createTaskRequestIdRef = useRef<string | null>(null);
   const taskParam = searchParams.get("task");
@@ -124,6 +136,7 @@ export function ConciergeTaskManagerPage() {
     clearApiCache("/concierge-operational-items/assignees");
     clearApiCache("/patients");
     clearApiCache("/providers");
+    clearApiCache("/concierge-services");
     setVersion((current) => current + 1);
   }, []);
 
@@ -140,7 +153,7 @@ export function ConciergeTaskManagerPage() {
       if (!hasLoadedRef.current) setLoading(true);
       setError("");
       try {
-        const [taskRows, assigneeRows, patientRows, providerRows] = await Promise.all([
+        const [taskRows, assigneeRows, patientRows, providerRows, serviceRows] = await Promise.all([
           apiFetch<ConciergeTask[]>(taskListPath, {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
@@ -165,6 +178,10 @@ export function ConciergeTaskManagerPage() {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
           }).catch(() => []),
+          apiFetch<ConciergeService[]>(user?.role === "ceo" ? "/concierge-services" : "/concierge-services?mine_only=true", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }).catch(() => []),
         ]);
         if (!cancelled) {
           setTasks(conciergeTasksVisibleToActor(taskRows, user?.id, user?.role));
@@ -174,6 +191,7 @@ export function ConciergeTaskManagerPage() {
             name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
           })).sort((left, right) => left.name.localeCompare(right.name)));
           setProviders(providerRows.sort((left, right) => left.name.localeCompare(right.name)));
+          setServices(serviceRows);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -223,19 +241,21 @@ export function ConciergeTaskManagerPage() {
     }
   }
 
-  function openCreateTask(date: Date | null = null) {
+  function openCreateTask(date: Date | null = null, requireService = false) {
     setTaskError("");
     setEditingTask(null);
     createTaskRequestIdRef.current = crypto.randomUUID();
     setInitialTaskDate(date);
+    setServiceTaskMode(requireService);
     setTaskDialogOpen(true);
   }
 
-  function openEditTask(task: ConciergeTask) {
+  function openEditTask(task: ConciergeTask, requireService = false) {
     if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
     setInitialTaskDate(null);
+    setServiceTaskMode(requireService);
     setTaskDialogOpen(true);
   }
 
@@ -245,6 +265,17 @@ export function ConciergeTaskManagerPage() {
   }, [loading, searchParams, taskDialogOpen]);
 
   function openTaskDetail(task: ConciergeTask) {
+    setDetailExpenseRequested(false);
+    setDetailTaskId(task.id);
+    const next = new URLSearchParams(searchParams);
+    next.set("task", task.id);
+    setSearchParams(next, { replace: true });
+  }
+
+  function openTaskExpense(task: ConciergeTask) {
+    if (!task.concierge_service_id) return;
+    if (user?.role !== "ceo" && !(user?.role === "concierge" && task.assigned_to === user.id)) return;
+    setDetailExpenseRequested(true);
     setDetailTaskId(task.id);
     const next = new URLSearchParams(searchParams);
     next.set("task", task.id);
@@ -258,6 +289,11 @@ export function ConciergeTaskManagerPage() {
     setTaskError("");
     setError("");
     try {
+      if (serviceTaskMode && !input.concierge_service_id) {
+        const validationError = new Error(labels.serviceRequired);
+        setTaskError(labels.serviceRequired);
+        throw validationError;
+      }
       const { status, ...fields } = input;
       const createRequestId = createTaskRequestIdRef.current ?? crypto.randomUUID();
       if (!editingTask) createTaskRequestIdRef.current = createRequestId;
@@ -284,6 +320,13 @@ export function ConciergeTaskManagerPage() {
           ? current.map((item) => item.id === saved.id ? saved : item)
           : [...current, saved];
       });
+      if (serviceTaskMode && editingTask) {
+        setDetailExpenseRequested(true);
+        setDetailTaskId(saved.id);
+        const next = new URLSearchParams(searchParams);
+        next.set("task", saved.id);
+        setSearchParams(next, { replace: true });
+      }
       return saved;
     } catch (saveError) {
       setTaskError(conciergeTaskErrorMessage(saveError, lang, labels.updateFailed));
@@ -358,6 +401,11 @@ export function ConciergeTaskManagerPage() {
             <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
               <Plus />{labels.newTask}
             </Button>
+            {services.length > 0 ? (
+              <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask(null, true)}>
+                <ClipboardPlus />{labels.newServiceTask}
+              </Button>
+            ) : null}
           </div>
         )}
       />
@@ -383,24 +431,30 @@ export function ConciergeTaskManagerPage() {
         canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
         canDeleteTask={(task) => canDeleteConciergeTask(task, user?.id, user?.role)}
         canChangeTaskStatus={(task) => canChangeConciergeTaskStatus(task, user?.id, user?.role)}
+        canAddExpenseToTask={(task) => Boolean(
+          task.concierge_service_id
+          && (user?.role === "ceo" || (user?.role === "concierge" && task.assigned_to === user.id)),
+        )}
         availableStatusesForTask={(task) => availableConciergeTaskStatuses(task, user?.id, user?.role)}
         onEdit={openEditTask}
         onDelete={setPendingDeleteTask}
         onArchive={(task) => void changeArchiveState(task, true)}
         onRestore={(task) => void changeArchiveState(task, false)}
         onOpen={openTaskDetail}
+        onExpense={openTaskExpense}
         onStatusChange={(task, status) => void changeTaskStatus(task, status)}
         onCreateAt={(date) => openCreateTask(date)}
       />
 
       <ConciergeTaskEventDialog
         item={editingTask}
-        services={[]}
+        services={services}
         assignees={assignees}
         currentUserId={user?.id ?? null}
         canAssign={assignees.length > 0}
         canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
-        showServiceLink={false}
+        showServiceLink={services.length > 0 || Boolean(editingTask?.concierge_service_id)}
+        serviceLinkRequired={serviceTaskMode}
         patients={patients}
         providers={providers}
         initialPatientId={searchParams.get("patient")}
@@ -415,6 +469,7 @@ export function ConciergeTaskManagerPage() {
           if (!open) {
             setEditingTask(null);
             setInitialTaskDate(null);
+            setServiceTaskMode(false);
             createTaskRequestIdRef.current = null;
             const next = new URLSearchParams(searchParams);
             next.delete("create");
@@ -430,9 +485,11 @@ export function ConciergeTaskManagerPage() {
         taskId={detailTaskId}
         lang={lang}
         open={Boolean(detailTaskId)}
+        openExpenseOnLoad={detailExpenseRequested}
         onOpenChange={(open) => {
           if (open) return;
           setDetailTaskId(null);
+          setDetailExpenseRequested(false);
           const next = new URLSearchParams(searchParams);
           next.delete("task");
           setSearchParams(next, { replace: true });

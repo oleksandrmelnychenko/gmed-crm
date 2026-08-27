@@ -20,6 +20,14 @@ Der Vitamin-D-Mangel sollte oral ausgeglichen und der Blutdruck kontrolliert wer
 """
 
 
+def test_empty_leading_pdf_pages_keep_candidate_source_page_number() -> None:
+    draft = parse_clinical_text("\f\fDiagnosen\nArterielle Hypertonie")
+    diagnosis = next(item for item in draft.candidates if item.target == "diagnosis")
+
+    assert diagnosis.source.page == 3
+    assert draft.raw_text.startswith("\f\f")
+
+
 def test_cardiology_report_creates_review_candidates() -> None:
     draft = parse_clinical_text(CARDIOLOGY_TEXT)
 
@@ -556,9 +564,10 @@ def test_wrapped_context_notes_remain_attached_to_their_observation() -> None:
     assert "morgens vor 10 Uhr\t37 - 194" in rows["Cortisol"].normalized[
         "interpretation_note"
     ]
-    assert "abends nach 17 Uhr\tU\t29 - 173\t~" in rows["Cortisol"].normalized[
+    assert "abends nach 17 Uhr\t29 - 173" in rows["Cortisol"].normalized[
         "interpretation_note"
     ]
+    assert "\tU\t" not in rows["Cortisol"].normalized["interpretation_note"]
     assert "Methodenumstellung" in rows["Ak g. TSH-Rezeptor (TRAK)"].normalized[
         "interpretation_note"
     ]
@@ -581,6 +590,25 @@ def test_laboratory_interpretation_note_is_bounded_and_fails_closed() -> None:
     assert not note.endswith("longtok")
     assert "laboratory_interpretation_truncated" in row.normalized["review_reasons"]
     assert row.selected is False
+
+
+def test_hs_crp_risk_range_repairs_ocr_dot_separator() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "CRP, high sensitive\t0.6\tmg/l\n"
+        "Bewertung des kardiovaskulären Risikos:\n"
+        "niedrig\t(\t<\t1\t) mg/l\n"
+        "mittel\t1\t.\t3\t)mg/l\n"
+        "hoch\t>\t3\t)mg/l\n"
+        "Die klinische Ursache muss\n"
+        "geprüft werden."
+    )
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+    note = row.normalized["interpretation_note"]
+
+    assert "mittel\t1 - 3\t)mg/l" in note
+    assert "\t.\t" not in note
+    assert note.endswith("geprüft werden.")
 
 
 def test_dated_normwert_row_recovers_unit_split_from_reference_cell() -> None:
@@ -745,6 +773,19 @@ CRP\t2,1\tmg/l\t(< 5,0)
     assert {row.normalized["laboratory_name"] for row in rows} == {
         "SYNLAB Medizinisches Versorgungszentrum Berlin GmbH"
     }
+
+
+def test_labor_becker_footer_is_normalized_to_catalogue_name() -> None:
+    text = """
+LABOR BECKER MVZ eGbR TELEFON: 000 WWW.LABOR-BECKER.DE
+Laborbefund vom 08.08.2026
+Parameter\tErgebnis\tEinheit\tReferenzbereich
+Lipoprotein (a)\t9\tmg/dl\t( bis 30 )
+"""
+
+    row = next(item for item in parse_clinical_text(text).candidates if item.target == "lab_result")
+
+    assert row.normalized["laboratory_name"] == "Labor Becker"
 
 
 def test_generic_laboratory_heading_is_not_used_as_organisation() -> None:

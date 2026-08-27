@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
@@ -16,6 +18,7 @@ from app.extraction import (
     _estimate_skew_angle,
     _extract_native_page_text,
     _get_paddle_ocr,
+    _join_pdf_pages,
     _normalize_ocr_confidence,
     _ocr_pil_image,
     _outcome_from_paddle_results,
@@ -51,6 +54,15 @@ class ExtractionLimitsTest(unittest.TestCase):
         self.assertEqual(
             extract_text(b"Diagnosen\nHypertonie", "text/plain"),
             "Diagnosen\nHypertonie",
+        )
+
+    def test_pdf_join_preserves_empty_boundary_pages(self) -> None:
+        extracted = _join_pdf_pages(["", "", "Page three", ""])
+
+        self.assertEqual(len(extracted.split("\f")), 4)
+        self.assertEqual(
+            [part.strip(" \t\r\n") for part in extracted.split("\f")],
+            ["", "", "Page three", ""],
         )
 
     def test_extracted_text_character_limit_is_enforced(self) -> None:
@@ -684,6 +696,57 @@ class ExtractionLimitsTest(unittest.TestCase):
         paddle.assert_called_once()
         data_ocr.assert_not_called()
 
+    def test_becker_pages_one_and_two_keep_latin_paddle_route_and_decimals(self) -> None:
+        fixture_path = (
+            Path(__file__).parent / "fixtures" / "becker_lab_pages_1_2_ocr.json"
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        pages = fixture["pages"]
+        paddle_outcomes = [
+            _outcome_from_paddle_results(
+                [SimpleNamespace(json={"res": page["paddle"]})]
+            )
+            for page in pages
+        ]
+        data_ocr = Mock(return_value=fake_tesseract_data())
+
+        with (
+            patch("app.extraction.OCR_ENGINE", "paddle"),
+            patch("app.extraction._run_paddle", side_effect=paddle_outcomes) as paddle,
+            patch("app.extraction._should_try_cyrillic_fallback", return_value=False),
+            mocked_pdf_modules(
+                [FakeNativePage("") for _page in pages],
+                [FakeRenderedPage() for _page in pages],
+                Mock(return_value="unused"),
+                data_ocr=data_ocr,
+                osd_text=[page["osd"] for page in pages],
+            ),
+        ):
+            result = extract_document(b"%PDF-deidentified-becker-pages-1-2", "application/pdf")
+
+        self.assertEqual(result.metadata.page_count, 2)
+        self.assertEqual(
+            [
+                (page.page_number, page.source, page.ocr_engine, page.ocr_languages)
+                for page in result.metadata.pages
+            ],
+            [
+                (1, "ocr", "paddle", "latin"),
+                (2, "ocr", "paddle", "latin"),
+            ],
+        )
+        page_one, page_two = result.text.split("\f")
+        for decimal in ("13.5", "47.0", "4.0"):
+            self.assertIn(decimal, page_one)
+        self.assertNotIn("135", page_one)
+        self.assertNotIn("470", page_one)
+        self.assertNotIn("\t40\t", f"\t{page_one}\t")
+        self.assertIn("CRP, high sensitive", page_two)
+        self.assertIn("1 - 3", page_two)
+        self.assertIn("Lipoprotein (a)", page_two)
+        self.assertEqual(paddle.call_count, 2)
+        data_ocr.assert_not_called()
+
     def test_weak_first_pass_uses_bounded_binarized_retry(self) -> None:
         from PIL import Image
 
@@ -851,7 +914,7 @@ class mocked_pdf_modules:
         reader_error: Exception | None = None,
         reader_warning: bool = False,
         data_ocr: Mock | None = None,
-        osd_text: str | None = None,
+        osd_text: str | list[str] | None = None,
     ) -> None:
         self.native_pages = native_pages
         self.rendered_pages = rendered_pages
@@ -894,7 +957,10 @@ class mocked_pdf_modules:
             fake_tesseract.Output = SimpleNamespace(DICT="dict")
             fake_tesseract.image_to_data = self.data_ocr
         if self.osd_text is not None:
-            fake_tesseract.image_to_osd = Mock(return_value=self.osd_text)
+            if isinstance(self.osd_text, list):
+                fake_tesseract.image_to_osd = Mock(side_effect=self.osd_text)
+            else:
+                fake_tesseract.image_to_osd = Mock(return_value=self.osd_text)
         self.stack = patch.dict(
             sys.modules,
             {

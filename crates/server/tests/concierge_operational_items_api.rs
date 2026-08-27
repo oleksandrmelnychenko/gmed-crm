@@ -1707,6 +1707,38 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{drift}");
+    let comment_id = Uuid::parse_str(first_comment["id"].as_str().expect("comment id")).unwrap();
+    let comment_update_path = format!("{detail_path}/comments/{comment_id}/update");
+    let (status, denied_comment_edit) = json_request(
+        &ctx.app,
+        "POST",
+        &comment_update_path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "body": "Creator must not rewrite another author's comment"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_comment_edit}");
+    let comment_update_request_id = Uuid::new_v4();
+    let (status, edited_comment) = json_request(
+        &ctx.app,
+        "POST",
+        &comment_update_path,
+        &concierge_bearer,
+        Some(json!({
+            "request_id": comment_update_request_id,
+            "body": "Table, arrival time, and contact person confirmed"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited_comment}");
+    assert_eq!(
+        edited_comment["body"],
+        "Table, arrival time, and contact person confirmed"
+    );
+    assert!(edited_comment["edited_at"].is_string());
 
     let checklist_request_id = Uuid::new_v4();
     let checklist_path = format!("{detail_path}/checklist");
@@ -1720,6 +1752,23 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
     .await;
     assert_eq!(status, StatusCode::OK, "{checklist}");
     let checklist_id = Uuid::parse_str(checklist["id"].as_str().expect("checklist id")).unwrap();
+    let checklist_update_path = format!("{checklist_path}/{checklist_id}/update");
+    let (status, edited_checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &checklist_update_path,
+        &concierge_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "label": "Send written booking confirmation"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited_checklist}");
+    assert_eq!(
+        edited_checklist["label"],
+        "Send written booking confirmation"
+    );
     let toggle_request_id = Uuid::new_v4();
     let toggle_path = format!("{checklist_path}/{checklist_id}/toggle");
     let toggle_body = json!({ "request_id": toggle_request_id, "completed": true });
@@ -1764,6 +1813,58 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
             .iter()
             .any(|event| event["event_type"] == "checklist_item_toggled")
     );
+    assert!(
+        detail["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| event["event_type"] == "comment_edited")
+    );
+    assert!(
+        detail["history"]
+            .as_array()
+            .expect("history")
+            .iter()
+            .any(|event| event["event_type"] == "checklist_item_edited")
+    );
+
+    let (status, deleted_comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{detail_path}/comments/{comment_id}/delete"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{deleted_comment}");
+    let (status, deleted_checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{checklist_path}/{checklist_id}/delete"),
+        &concierge_bearer,
+        Some(json!({ "request_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{deleted_checklist}");
+    let (status, detail_after_delete) =
+        json_request(&ctx.app, "GET", &detail_path, &concierge_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail_after_delete}");
+    assert_eq!(
+        detail_after_delete["comments"]
+            .as_array()
+            .expect("comments")
+            .len(),
+        0
+    );
+    assert_eq!(
+        detail_after_delete["checklist"]
+            .as_array()
+            .expect("checklist")
+            .len(),
+        0
+    );
+    assert_eq!(detail_after_delete["item"]["comment_count"], 0);
+    assert_eq!(detail_after_delete["item"]["checklist_total"], 0);
 
     let scheduler_state = AppState::new(
         ctx.pool.clone(),

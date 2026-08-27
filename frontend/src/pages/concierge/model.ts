@@ -414,6 +414,8 @@ export type ConciergeTaskComment = {
   created_by: string;
   created_by_name: string;
   created_at: string;
+  updated_at: string;
+  edited_at: string | null;
 };
 
 export type ConciergeTaskHistoryEvent = {

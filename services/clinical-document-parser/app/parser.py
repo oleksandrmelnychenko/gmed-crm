@@ -258,7 +258,7 @@ def _normalize_text(text: str) -> str:
     # them into spaces made laboratory rows impossible to reconstruct reliably.
     text = re.sub(r" {2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return text.strip(" \t\n")
 
 
 def _normalize_layout_text(text: str) -> str:
@@ -268,7 +268,9 @@ def _normalize_layout_text(text: str) -> str:
     text = re.sub(r"[\ud800-\udfff]", "\ufffd", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    # Keep leading and trailing form-feeds. They encode empty PDF pages and
+    # are required for stable one-based source page numbers.
+    return text.strip(" \t\n")
 
 
 SUBJECT_NAME_TOKEN_PATTERN = r"[A-ZÄÖÜ][A-Za-zÄÖÜäöüßÀ-ÖØ-öø-ÿ'’-]{1,}"
@@ -546,6 +548,11 @@ def _laboratory_name(text: str) -> str | None:
             continue
         if re.search(r"\b(?:Parameter|Ergebnis|Referenzbereich|Messwert)\b", line, re.IGNORECASE):
             continue
+        if re.search(r"\bLabor\s+Becker\b", line, re.IGNORECASE):
+            # Becker footers often append the legal form, contact channels,
+            # address and accreditation text to the same OCR line. Keep the
+            # stable organisation name used by the provider catalogue.
+            line = "Labor Becker"
         score = 20 - min(index, 20)
         if re.search(r"\b(?:SYNLAB|LADR|amedes)\b", line, re.IGNORECASE):
             score += 40
@@ -2025,6 +2032,22 @@ def _append_laboratory_interpretation_note(
     clean_note = "\n".join(line.strip() for line in note.splitlines() if line.strip())
     if not clean_note:
         return
+    note_cells = _lab_cells(clean_note)
+    note_key = _heading_key(note_cells[0]) if note_cells else ""
+    if note_key.startswith(("morgensvor", "abendsnach")):
+        reference = _lab_reference_from_cells(
+            note_cells[1:],
+            analyte=note_cells[0],
+            inherited_unit=None,
+        )
+        if reference:
+            clean_note = f"{note_cells[0]}\t{reference}"
+    clean_note = re.sub(
+        r"(?P<low>[+-]?\d+(?:[.,]\d+)?)\s*\t\s*[.·]\s*\t\s*"
+        r"(?P<high>[+-]?\d+(?:[.,]\d+)?)",
+        r"\g<low> - \g<high>",
+        clean_note,
+    )
     existing = candidate.normalized.get("interpretation_note")
     if (
         isinstance(existing, str)
@@ -2114,7 +2137,11 @@ def _looks_like_laboratory_note_continuation(line: str) -> bool:
     ):
         return False
     words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}", compact)
-    return len(words) >= 3
+    if len(words) >= 3:
+        return True
+    if _standalone_lab_analyte(compact):
+        return False
+    return bool(words)
 
 
 def _narrative_laboratory_candidates(
