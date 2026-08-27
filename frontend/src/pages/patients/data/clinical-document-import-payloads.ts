@@ -63,6 +63,9 @@ export function labResultImportPayload(
     reference_text: typeof normalized.reference_text === "string" ? normalized.reference_text : null,
     reference_low: typeof normalized.reference_low === "number" ? normalized.reference_low : null,
     reference_high: typeof normalized.reference_high === "number" ? normalized.reference_high : null,
+    interpretation_note: typeof normalized.interpretation_note === "string"
+      ? normalized.interpretation_note.trim() || null
+      : null,
     abnormal_flag: typeof normalized.abnormal_flag === "string" ? normalized.abnormal_flag : "unknown",
     source_country: sourceCountry,
     source_import_id: importId,

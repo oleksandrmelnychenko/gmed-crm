@@ -334,7 +334,7 @@ export function ConciergePartnerInteractionDialog({
               </div>
                   </ConciergeField>
                   <ConciergeField label={labels.note} className="sm:col-span-2">
-                    <textarea value={note} maxLength={2000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" />
+                    <textarea value={note} maxLength={2000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" />
                   </ConciergeField>
                 </div>
                 <div className="flex justify-end border-t border-border/60 pt-3">

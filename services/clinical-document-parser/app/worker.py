@@ -99,7 +99,7 @@ def claim_job(connection: Any) -> dict[str, Any] | None:
             SET status = 'processing', worker_id = %s, locked_at = now(), updated_at = now()
             FROM next_job
             WHERE import.id = next_job.id
-            RETURNING import.id, import.document_id
+            RETURNING import.id, import.document_id, import.force_reextract
             """,
             (LEASE_SECONDS, WORKER_ID),
         )
@@ -117,7 +117,12 @@ def claim_job(connection: Any) -> dict[str, Any] | None:
         document = cursor.fetchone()
         if not document:
             return {**claimed, "storage_key": None, "mime_type": None, "extracted_text": None}
-        return {**claimed, **document}
+        job = {**claimed, **document}
+        if job.get("force_reextract"):
+            # A rescan must read the source file even if stale cached text was
+            # repopulated by another document workflow after it was queued.
+            job["extracted_text"] = None
+        return job
 
 
 def finish_job(connection: Any, job_id: str, draft: dict[str, Any]) -> None:

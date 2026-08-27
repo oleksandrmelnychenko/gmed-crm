@@ -25,7 +25,6 @@ import {
 const copy = {
   de: {
     title: "Anfrage bearbeiten",
-    description: "Status und operative Details dieser Concierge-Anfrage aktualisieren.",
     request: "Anfrage",
     requestTitle: "Bezeichnung",
     patient: "Patient",
@@ -51,7 +50,6 @@ const copy = {
   },
   ru: {
     title: "Изменить запрос",
-    description: "Обновите статус и операционные данные запроса консьерж-сервиса.",
     request: "Запрос",
     requestTitle: "Название",
     patient: "Пациент",
@@ -189,16 +187,14 @@ export function ConciergeServiceRequestDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader
-          icon={ClipboardPenLine}
-          tone="plain"
+          tone="dot"
           title={labels.title}
-          description={labels.description}
-          meta={service ? <Badge variant="secondary" className="rounded-full font-mono">#{service.id.slice(0, 8)}</Badge> : null}
+          meta={service ? <Badge variant="outline" className="rounded-full font-mono text-[10px]">#{service.id.slice(0, 8)}</Badge> : null}
         />
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
-              <ConciergeDialogSection title={labels.request}>
+              <ConciergeDialogSection title={labels.request} dot>
                 <div className="space-y-3">
                   <ConciergeField label={labels.patient}>
                     <div className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-sm">
@@ -216,7 +212,7 @@ export function ConciergeServiceRequestDialog({
                 </div>
               </ConciergeDialogSection>
 
-              <ConciergeDialogSection title={labels.details}>
+              <ConciergeDialogSection title={labels.details} dot>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ConciergeField label={labels.provider}><Input value={vendorName} maxLength={255} onChange={(event) => setVendorName(event.target.value)} /></ConciergeField>
                   <ConciergeField label={labels.contact}><Input value={vendorContact} maxLength={255} onChange={(event) => setVendorContact(event.target.value)} /></ConciergeField>
@@ -227,7 +223,7 @@ export function ConciergeServiceRequestDialog({
                     <div className="flex gap-2"><Input type="number" min="0" step="0.01" value={actualCost} onChange={(event) => setActualCost(event.target.value)} /><span className="flex h-9 items-center rounded-lg border border-border/70 bg-muted/25 px-3 text-sm text-muted-foreground">{service?.currency || "EUR"}</span></div>
                   </ConciergeField>
                   <ConciergeField label={labels.notes} className="sm:col-span-2">
-                    <textarea className="min-h-28 w-full resize-y rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30" value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />
+                    <textarea className="min-h-28 w-full resize-y rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30" value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />
                   </ConciergeField>
                 </div>
                 {error ? <p role="alert" className="mt-3 flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertCircle className="mt-0.5 size-4 shrink-0" />{error}</p> : null}

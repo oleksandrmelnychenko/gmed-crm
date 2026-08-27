@@ -844,7 +844,7 @@ function UsersPanel({
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder={t.topbar_message_placeholder}
-              className="h-9 min-w-0 flex-1 rounded-full bg-muted px-4 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-9 min-w-0 flex-1 rounded-full bg-muted px-4 text-sm outline-none placeholder:text-muted-foreground/45 focus-visible:ring-2 focus-visible:ring-ring"
             />
             <button
               type="submit"

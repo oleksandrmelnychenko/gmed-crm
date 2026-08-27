@@ -15,7 +15,7 @@ import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const caveTextareaClassName = cn(
   textareaClass,
-  "min-h-[200px] border-rose-200 bg-rose-50/40 text-rose-900 placeholder:text-rose-400 focus:border-rose-400 focus:ring-rose-200/60",
+  "min-h-[200px] border-rose-200 bg-rose-50/40 text-rose-900 placeholder:text-rose-400/45 focus:border-rose-400 focus:ring-rose-200/60",
 );
 
 export function PatientCaveNotesSheet({

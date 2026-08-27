@@ -340,6 +340,8 @@ External calls are fail-closed behind all of these server-side requirements:
 - `GMED_MEDICATION_AI_ENABLED=true`;
 - `GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED=true` after an environment-specific
   data-protection/vendor review;
+- a non-empty `GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID` identifying that exact
+  environment approval (`[A-Za-z0-9._-]`, at most 96 characters);
 - a server-only `GMED_OPENAI_API_KEY`;
 - an explicitly approved `GMED_OPENAI_MODEL` identifier.
 
@@ -348,30 +350,32 @@ redirects, applies connection/request/input/output limits, sends `store=false`,
 enables no tools, and requests a strict JSON-schema response. Neither the client
 nor stored patient data can select a provider endpoint, model, system prompt, or
 tool. The API key never reaches the browser, database, audit payload, or log.
+The governance review ID is also omitted from browser capability payloads and
+general logs; it is exposed only through an internal provider getter for durable
+job provenance and configuration-change fencing.
 
 The outbound payload is constructed from the frozen bundle and excludes patient
 ID, medication row ID, name, date of birth, contacts, source URLs, raw documents,
 free-form patient notes, diagnoses and demographic fields. It contains only
-bounded finding category/severity codes, missing-data codes, normalized
-official-source authority/health metadata, exact G-BA assessment fields and a
-closed list of request-local citation aliases such as `evidence:0001`. Finding
-titles, missing-data explanations and local source IDs are intentionally
-removed before transfer because future source content could contain a product
-or locally meaningful label. Local citation IDs and `evidence_refs` are never
-sent because they can embed medication-row or snapshot UUIDs. The server maps
-an accepted alias back to its immutable local citation after the response and
-rejects every unknown alias.
+bounded finding category/severity codes, missing-data and source-kind/health
+codes, numeric G-BA decision IDs, ISO dates and a closed list of request-local
+citation aliases such as `evidence:0001`. Finding titles, missing-data
+explanations, source authority/labels, G-BA indication/patient-group/benefit
+free text, substance names and local source IDs are intentionally removed before
+transfer. Local citation IDs and `evidence_refs` are never sent because they can
+embed medication-row or snapshot UUIDs.
 The vendor's contractual retention, regional processing and zero-data-retention
 options still require separate approval; `store=false` is an API control, not a
 substitute for that review.
 
-The model may return only bilingual evidence-summary items, verification
-questions and limitations. Factual items must cite references from the frozen
-bundle. The backend rejects unknown citations, URLs, control characters,
-oversized output, refusals/incomplete or ambiguous multi-text responses,
-non-bilingual items, provider identifiers that are unsafe for storage, explicit
-treatment/stopping/dose-change directions and any newly generated numeric dose
-amount. Accepted output is stored separately with its model,
+The model may return only server-issued claim IDs and the exact request-local
+citation aliases attached to those claims. It cannot return RU/DE prose. The
+backend rejects unknown, duplicate or cross-section claim IDs, altered citation
+sets, extra fields, oversized output, refusals/incomplete or ambiguous
+multi-text responses, and provider identifiers unsafe for storage. The server
+then renders RU/DE text deterministically from typed frozen evidence and closed
+templates, maps aliases back to immutable local citations, and applies the
+output-safety validator again. Accepted output is stored separately with its model,
 provider response ID, SHA-256 fingerprint, immutable prompt-contract version,
 state-transition history and audit event. It remains visibly marked as
 AI-generated and read-only.
@@ -382,24 +386,33 @@ deployment configuration and request idempotency keys. Patient erasure removes
 the complete review/AI graph through the patient-owned cascade while retaining
 only separately governed audit evidence required by the compliance policy.
 
-Jobs use bounded leases, `FOR UPDATE SKIP LOCKED`, three attempts for transient
-transport/rate/server errors, crash recovery and a manual retry from `failed`.
-Permanent provider/schema/safety failures are not retried automatically. The
-local evidence package remains available when AI is disabled or fails.
+Jobs use bounded leases, a unique fencing token per claim,
+`FOR UPDATE SKIP LOCKED`, three attempts for transient transport/rate/server
+errors, crash recovery and a manual retry from `failed`. A provider result can
+change state only while the same token still owns an unexpired lease; a stale
+worker cannot publish output, failure, lifecycle events or operator
+notifications after recovery/reclaim. Permanent provider/schema/safety
+failures are not retried automatically. The local evidence package remains
+available when AI is disabled or fails.
 
-Operators can inspect a PHI-free AI section in **System Health**. It exposes the
+Operators can inspect a PHI-free AI section in **System Health**. Its backend
+health payload exposes the
 provider/call gate state, configured model identifier, aggregate queue counts,
-expired leases, the oldest runnable request and the last success/failure times.
+expired leases, recoveries/exhaustions in the last 24 hours, the oldest runnable
+request and the last success/failure/recovery times.
 It never exposes API keys, patient or review identifiers, prompts, response IDs
 or generated content. During a rolling deployment, a backend without the new
 health field is normalized to `not_configured` instead of breaking the page.
 
 Prometheus receives only bounded lifecycle labels through
 `gmed_medication_ai_jobs_total{outcome,reason}` and provider-attempt latency
-through `gmed_medication_ai_provider_duration_seconds{outcome}`. PROD rules
-alert on a terminal AI job failure and on a retry burst. Alerts deliberately
-contain no patient identifiers or content; the deterministic package stays
-available during every AI incident.
+through `gmed_medication_ai_provider_duration_seconds{outcome}`. Attempts whose
+lease was lost or expired are counted separately by
+`gmed_medication_ai_fenced_attempts_total{attempt_outcome}`. PROD rules alert
+on a terminal failure, retry burst or fenced attempt. Metrics and operational
+logs contain only aggregate counts and closed reason/outcome codes: no patient,
+review, analysis, actor, lease or provider-response identifiers and no content.
+The deterministic package stays available during every AI incident.
 
 When a job becomes `ready` or reaches terminal `failed`, its requesting
 operator receives a generic in-app notification and realtime bell update linked
@@ -409,12 +422,15 @@ copy according to the active interface language. Notification text contains no
 patient name, medication, diagnosis, generated text or provider response ID.
 
 No current role can medically approve an AI draft. Production enablement
-requires, at minimum, documented vendor/GDPR approval, an approved model ID,
+requires, at minimum, documented vendor/GDPR approval, its bounded governance
+review ID, an approved model ID,
 DEV validation with synthetic data, output-safety regression tests, monitoring,
 an operator rollback procedure, tested alert delivery, and the intended-purpose/MDR gate described
 above. Enablement is a configuration/restart operation; rollback is setting
 `GMED_MEDICATION_AI_ENABLED=false` and restarting the backend. Existing local
-evidence bundles remain usable.
+evidence bundles remain usable. The migration/rollback and incident procedure
+is documented in
+[`04_medication-ai-worker-runbook_ua.md`](../engineering/04_medication-ai-worker-runbook_ua.md).
 
 ## Next implementation slices
 

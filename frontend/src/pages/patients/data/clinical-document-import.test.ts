@@ -15,6 +15,7 @@ import {
   persistClinicalDocumentMedication,
   persistClinicalDocumentVital,
   prepareClinicalDocumentImport,
+  rescanClinicalDocumentImport,
   retryClinicalDocumentImport,
   type ClinicalDocumentImportDraft,
 } from "./clinical-document-import";
@@ -29,6 +30,7 @@ describe("clinical document import API", () => {
     await fetchClinicalDocumentImports("patient-1");
     await fetchClinicalDocumentImport("patient-1", "import-1");
     await retryClinicalDocumentImport("patient-1", "import-1");
+    await rescanClinicalDocumentImport("patient-1", "import-1");
 
     expect(apiFetch).toHaveBeenNthCalledWith(
       1,
@@ -48,6 +50,11 @@ describe("clinical document import API", () => {
     expect(apiFetch).toHaveBeenNthCalledWith(
       4,
       "/patients/patient-1/clinical-document-imports/import-1/retry",
+      { method: "POST", body: JSON.stringify({}) },
+    );
+    expect(apiFetch).toHaveBeenNthCalledWith(
+      5,
+      "/patients/patient-1/clinical-document-imports/import-1/rescan",
       { method: "POST", body: JSON.stringify({}) },
     );
   });

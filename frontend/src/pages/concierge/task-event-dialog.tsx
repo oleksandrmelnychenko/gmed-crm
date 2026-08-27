@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarClock, Link2, ListTodo, LoaderCircle, MapPin, MessageSquareText, UsersRound } from "lucide-react";
+import { LoaderCircle, MessageSquareText } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -197,7 +197,7 @@ function assigneeRoleLabel(role: string, lang: Lang) {
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 const textAreaClass =
-  "flex min-h-32 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
+  "flex min-h-32 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 
 export type SaveConciergeOperationalItemInput = {
   kind: "task" | "event";
@@ -349,9 +349,14 @@ export function ConciergeTaskEventDialog({
 
   const sortedServices = useMemo(
     () => services
-      .filter((service) => !assigneeId || service.assigned_concierge_id === assigneeId)
+      .filter((service) => (
+        service.id === serviceId
+        || !assigneeId
+        || !service.assigned_concierge_id
+        || service.assigned_concierge_id === assigneeId
+      ))
       .sort((left, right) => conciergeServiceDisplayTitle(left, lang).localeCompare(conciergeServiceDisplayTitle(right, lang))),
-    [assigneeId, lang, services],
+    [assigneeId, lang, serviceId, services],
   );
 
   useEffect(() => {
@@ -457,9 +462,7 @@ export function ConciergeTaskEventDialog({
           note: note.trim() || null,
           concierge_service_id: showServiceLink
             ? serviceId || null
-            : item && assigneeId !== item.assigned_to
-              ? null
-              : item?.concierge_service_id ?? null,
+            : item?.concierge_service_id ?? null,
           due_at: kind === "task" ? toIso(dueAt) : null,
           starts_at: kind === "event" ? toIso(startsAt) : null,
           ends_at: kind === "event" ? toIso(endsAt) : null,
@@ -503,32 +506,58 @@ export function ConciergeTaskEventDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader icon={kind === "event" ? CalendarClock : ListTodo} tone="plain" title={item ? labels.editTitle : labels.createTitle} />
+        <ConciergeDialogHeader tone="dot" title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             {error ? <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              <ConciergeDialogSection title={labels.detailsSection} icon={kind === "event" ? CalendarClock : ListTodo}>
+            <div className="space-y-4">
+              <div className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.1fr)]">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
-                    {(["task", "event"] as const).map((value) => (
-                      <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} onClick={() => setKind(value)}>
-                        {value === "task" ? <ListTodo /> : <CalendarClock />}{labels[value]}
-                      </Button>
-                    ))}
-                  </div>
-                  <ConciergeField label={labels.title}>
-                    <Input className="bg-field" value={title} maxLength={255} required placeholder={labels.titlePlaceholder} onChange={(event) => setTitle(event.target.value)} />
-                  </ConciergeField>
-                  <ConciergeField label={labels.note}>
-                    <textarea className={textAreaClass} value={note} maxLength={4000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} />
-                  </ConciergeField>
-                </div>
-              </ConciergeDialogSection>
+                  <ConciergeDialogSection title={labels.detailsSection} dot>
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
+                        {(["task", "event"] as const).map((value) => (
+                          <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} onClick={() => setKind(value)}>
+                            {labels[value]}
+                          </Button>
+                        ))}
+                      </div>
+                      <ConciergeField label={labels.title}>
+                        <Input className="bg-field" value={title} maxLength={255} required placeholder={labels.titlePlaceholder} onChange={(event) => setTitle(event.target.value)} />
+                      </ConciergeField>
+                      <ConciergeField label={labels.note}>
+                        <textarea className={textAreaClass} value={note} maxLength={4000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} />
+                      </ConciergeField>
+                    </div>
+                  </ConciergeDialogSection>
 
-              <div className="space-y-4">
-                <ConciergeDialogSection title={labels.audience} icon={UsersRound}>
+                  {showServiceLink || canAssign ? (
+                    <ConciergeDialogSection title={labels.assignmentSection} dot>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                        {showServiceLink ? (
+                          <ConciergeField label={labels.linkedService}>
+                            <select className={selectClass} value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
+                              <option value="">{labels.noService}</option>
+                              {sortedServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)}</option>)}
+                            </select>
+                          </ConciergeField>
+                        ) : null}
+                        {canAssign ? (
+                          <ConciergeField label={audience === "external" ? labels.internalOwner : labels.assignee}>
+                            <NativeComboboxSelect className={selectClass} value={assigneeId} required searchPlaceholder={labels.searchAssignee} onChange={(event) => setAssigneeId(event.target.value)}>
+                              <option value="" disabled>{labels.chooseAssignee}</option>
+                              {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name} · {assigneeRoleLabel(assignee.role, lang)}</option>)}
+                            </NativeComboboxSelect>
+                          </ConciergeField>
+                        ) : null}
+                      </div>
+                    </ConciergeDialogSection>
+                  ) : null}
+                </div>
+
+                <div className="space-y-4">
+                <ConciergeDialogSection title={labels.audience} dot>
                   <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
                     {(["internal", "external"] as const).map((value) => (
                       <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={audience === value ? "default" : "ghost"} onClick={() => setAudience(value)}>
@@ -565,30 +594,7 @@ export function ConciergeTaskEventDialog({
                     ) : null}
                   </div>
                 </ConciergeDialogSection>
-                {showServiceLink || canAssign ? (
-                  <ConciergeDialogSection title={labels.assignmentSection} icon={Link2}>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-                      {showServiceLink ? (
-                        <ConciergeField label={labels.linkedService}>
-                          <select className={selectClass} value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
-                            <option value="">{labels.noService}</option>
-                            {sortedServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)}</option>)}
-                          </select>
-                        </ConciergeField>
-                      ) : null}
-                    {canAssign ? (
-                      <ConciergeField label={audience === "external" ? labels.internalOwner : labels.assignee}>
-                        <NativeComboboxSelect className={selectClass} value={assigneeId} required searchPlaceholder={labels.searchAssignee} onChange={(event) => { setAssigneeId(event.target.value); setServiceId(""); }}>
-                          <option value="" disabled>{labels.chooseAssignee}</option>
-                          {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name} · {assigneeRoleLabel(assignee.role, lang)}</option>)}
-                        </NativeComboboxSelect>
-                      </ConciergeField>
-                    ) : null}
-                    </div>
-                  </ConciergeDialogSection>
-                ) : null}
-
-                <ConciergeDialogSection title={labels.planningSection} icon={Bell}>
+                <ConciergeDialogSection title={labels.planningSection} dot>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {kind === "task" ? (
                       <ConciergeField label={labels.dueAt} className="sm:col-span-2">
@@ -600,7 +606,7 @@ export function ConciergeTaskEventDialog({
                         <ConciergeField label={labels.endsAt}><Input className="bg-field" type="datetime-local" value={endsAt} min={startsAt || undefined} onChange={(event) => setEndsAt(event.target.value)} /></ConciergeField>
                       </>
                     )}
-                    <ConciergeField label={<span className="flex items-center gap-1.5"><MapPin className="size-3.5" />{labels.location}</span>} className="sm:col-span-2">
+                    <ConciergeField label={labels.location} className="sm:col-span-2">
                       <Input className="bg-field" value={location} maxLength={500} placeholder={labels.locationPlaceholder} onChange={(event) => setLocation(event.target.value)} />
                     </ConciergeField>
                     <ConciergeField label={labels.priority}>
@@ -609,18 +615,20 @@ export function ConciergeTaskEventDialog({
                     {item ? (
                       <ConciergeField label={labels.status}><select className={selectClass} value={status} onChange={(event) => setStatus(event.target.value)}>{editableStatuses.map((value) => <option key={value} value={value}>{labels[value]}</option>)}</select></ConciergeField>
                     ) : (
-                      <div className="grid content-end gap-1.5 text-xs font-medium text-muted-foreground">{labels.status}<Badge variant="outline" className="h-9 justify-center rounded-md bg-field text-foreground">{labels.open}</Badge></div>
+                      <div className="grid content-end gap-1.5 text-xs font-medium text-muted-foreground">{labels.status}<Badge variant="outline" className="h-9 w-full justify-center rounded-md bg-field text-foreground">{labels.open}</Badge></div>
                     )}
                     <ConciergeField label={labels.reminderAt} className="sm:col-span-2"><Input className="bg-field" type="datetime-local" value={reminderAt} aria-label={labels.reminderAt} placeholder={labels.noReminder} onChange={(event) => setReminderAt(event.target.value)} /></ConciergeField>
                   </div>
                 </ConciergeDialogSection>
+                </div>
               </div>
+
               {item ? (
-                <div className="lg:col-span-2">
+                <div>
                   <ConciergeTaskAttachments taskId={item.id} lang={lang} canModify={canModifyAttachments} />
                 </div>
               ) : (
-                <div className="lg:col-span-2">
+                <div>
                   <ConciergeTaskStagedAttachments
                     files={pendingFiles}
                     lang={lang}
@@ -634,8 +642,8 @@ export function ConciergeTaskEventDialog({
                 </div>
               )}
               {item ? (
-                <div className="lg:col-span-2">
-                  <ConciergeDialogSection title={labels.comments} icon={MessageSquareText}>
+                <div>
+                  <ConciergeDialogSection title={labels.comments} dot>
                     {commentError ? <p role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{commentError}</p> : null}
                     <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
                       {commentsLoading ? (
@@ -657,7 +665,7 @@ export function ConciergeTaskEventDialog({
                       )}
                       <div className="space-y-2 border-t border-border/70 p-3">
                         <textarea
-                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                          className="min-h-20 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                           value={comment}
                           maxLength={4000}
                           placeholder={labels.commentPlaceholder}

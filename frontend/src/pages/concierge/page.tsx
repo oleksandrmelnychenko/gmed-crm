@@ -336,6 +336,10 @@ function ServiceCard({
     : service.provider_name || service.vendor_name;
   const overdue = isConciergeServiceOverdue(service, now);
   const costVariance = conciergeServiceCostVariance(service);
+  const actionButtonClass = cn(
+    "h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary",
+    compact && "sm:w-auto",
+  );
 
   return (
     <article
@@ -378,14 +382,18 @@ function ServiceCard({
 
       <div className={cn("mt-3 min-w-0 space-y-2.5 border-t border-border/60 pt-3", compact && "lg:mt-0 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0")}>
         <ServiceFact icon={UserRound} label={labels.patient}>
-          <Badge
-            variant="outline"
-            className="max-w-full rounded-full border-emerald-200 bg-emerald-50 text-[10px] font-medium text-emerald-800"
-            title={`${labels.patient}: ${service.patient_name}`}
-          >
-            <span className="truncate">{service.patient_name}</span>
-          </Badge>
-          <span className="font-mono text-[10px] text-muted-foreground">{service.patient_pid}</span>
+          <div className="grid min-w-0 flex-1 gap-1">
+            <Badge
+              variant="outline"
+              className="w-fit max-w-full rounded-full border-emerald-200 bg-emerald-50 text-[10px] font-medium text-emerald-800"
+              title={`${labels.patient}: ${service.patient_name}`}
+            >
+              <span className="truncate">{service.patient_name}</span>
+            </Badge>
+            <span className="block truncate whitespace-nowrap font-mono text-[10px] text-muted-foreground" title={service.patient_pid}>
+              {service.patient_pid}
+            </span>
+          </div>
         </ServiceFact>
         <ServiceFact icon={CalendarClock} label={labels.schedule}>
           <span className="truncate">{formatDateTime(service.starts_at, lang, labels.notSet)}</span>
@@ -430,14 +438,14 @@ function ServiceCard({
       </div>
 
       <div className={cn(
-        "mt-3 grid min-w-0 grid-cols-2 gap-2 border-t border-border/60 pt-3",
+        "mt-3 grid min-w-0 grid-cols-1 gap-2 border-t border-border/60 pt-3",
         compact && "lg:col-span-3 lg:flex lg:max-w-full lg:flex-wrap lg:justify-end lg:justify-self-stretch",
       )}>
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+          className={actionButtonClass}
           onClick={() => onEdit(service)}
         >
           <ClipboardPenLine />
@@ -447,7 +455,7 @@ function ServiceCard({
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+          className={actionButtonClass}
           onClick={() => onCreateTask(service)}
         >
           <ListPlus />
@@ -458,7 +466,7 @@ function ServiceCard({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+            className={actionButtonClass}
             onClick={() => onOpenPartner(service)}
           >
             <MessageSquareText />
@@ -469,7 +477,7 @@ function ServiceCard({
           type="button"
           size="sm"
           variant="outline"
-          className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+          className={actionButtonClass}
           onClick={() => onOpenExpense(service)}
         >
           <ReceiptText />
@@ -480,7 +488,7 @@ function ServiceCard({
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary sm:w-auto"
+            className={actionButtonClass}
             onClick={() => onOpenKey(service)}
           >
             <KeyRound />
@@ -492,7 +500,7 @@ function ServiceCard({
           options={requestStatusOptions(lang, service, canReopen)}
           disabled={updating}
           aria-label={labels.status}
-          className="col-span-2 h-8 min-w-40 text-xs sm:col-span-1 sm:w-auto"
+          className={cn("h-8 w-full min-w-0 text-xs", compact && "sm:w-auto sm:min-w-40")}
           onValueChange={(status) => onStatusChange(service, status)}
         />
       </div>
@@ -1043,13 +1051,16 @@ export function ConciergeWorkspacePage() {
     setError("");
     try {
       const { status, ...fields } = input;
+      const taskFields = taskSourceService
+        ? { ...fields, concierge_service_id: taskSourceService.id }
+        : fields;
       const createRequestId = createTaskRequestIdRef.current ?? crypto.randomUUID();
       if (!editingTask) createTaskRequestIdRef.current = createRequestId;
       const saved = editingTask
         ? await apiFetch<ConciergeTask>(`/concierge-operational-items/${editingTask.id}/update`, {
             method: "POST",
             body: JSON.stringify({
-              ...fields,
+              ...taskFields,
               status,
               expected_updated_at: editingTask.updated_at,
             }),
@@ -1057,7 +1068,7 @@ export function ConciergeWorkspacePage() {
         : await apiFetch<ConciergeTask>("/concierge-operational-items", {
             method: "POST",
             body: JSON.stringify({
-              ...fields,
+              ...taskFields,
               request_id: createRequestId,
             }),
           });
@@ -1155,14 +1166,14 @@ export function ConciergeWorkspacePage() {
           onBookProvider={openProviderBooking}
         />
       ) : (
-        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className={cn("grid items-start gap-3", viewMode !== "board" && "xl:grid-cols-[minmax(0,1fr)_20rem]")}>
           <div className="min-w-0">
             {visibleServices.length === 0 ? (
               <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">
                 {labels.empty}
               </div>
             ) : viewMode === "board" ? (
-              <section className="grid grid-cols-1 items-start gap-3 md:grid-cols-2" aria-label={labels.board}>
+              <section className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" aria-label={labels.board}>
                 {CONCIERGE_BOARD_COLUMNS.map((column) => {
                   const rows = servicesByColumn.get(column.id) ?? [];
                   return (
@@ -1233,13 +1244,15 @@ export function ConciergeWorkspacePage() {
               </section>
             )}
           </div>
-          <ConciergeTaskQueue
-            tasks={workspaceTasks}
-            lang={lang}
-            now={now}
-            onOpen={openWorkspaceTaskDetail}
-            onOpenAll={() => staffGo("/task-manager")}
-          />
+          {viewMode !== "board" ? (
+            <ConciergeTaskQueue
+              tasks={workspaceTasks}
+              lang={lang}
+              now={now}
+              onOpen={openWorkspaceTaskDetail}
+              onOpenAll={() => staffGo("/task-manager")}
+            />
+          ) : null}
         </div>
       )}
       <ConciergePartnerInteractionDialog

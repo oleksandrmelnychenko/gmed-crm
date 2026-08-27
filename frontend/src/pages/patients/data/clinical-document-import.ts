@@ -76,6 +76,8 @@ export type ClinicalDocumentImportSummary = {
   source_language: string | null;
   parser_version: string | null;
   candidate_count: number;
+  force_reextract?: boolean;
+  replaces_import_id?: string | null;
   applied_counts: Record<string, number>;
   error_message: string | null;
   prepared_source_country?: string | null;
@@ -100,6 +102,8 @@ export type ClinicalDocumentImport = {
   parser_version: string | null;
   draft: ClinicalDocumentImportDraft;
   reviewed_draft: ClinicalDocumentImportDraft | null;
+  force_reextract?: boolean;
+  replaces_import_id?: string | null;
   applied_counts: Record<string, number>;
   error_message: string | null;
   prepared_source_country?: string | null;
@@ -165,6 +169,7 @@ export type ImportedLabResultPayload = {
   reference_text: string | null;
   reference_low: number | null;
   reference_high: number | null;
+  interpretation_note: string | null;
   abnormal_flag: string;
   source_country: string;
   source_import_id: string;

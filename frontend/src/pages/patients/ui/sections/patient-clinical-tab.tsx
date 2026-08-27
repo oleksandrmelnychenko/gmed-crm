@@ -1806,6 +1806,7 @@ function PatientLabHistoryTable({
   onEdit: (row: PatientLabResult) => void;
   onDelete: (row: PatientLabResult) => void;
 }) {
+  const [notePreview, setNotePreview] = useState<PatientLabResult | null>(null);
   const columns = useMemo<ColumnDef<PatientLabResult>[]>(
     () => [
       {
@@ -1852,9 +1853,27 @@ function PatientLabHistoryTable({
       {
         id: "reference",
         label: tx("Референс", "Referenz"),
-        accessor: (row) => row.reference_text,
-        width: 150,
-        render: (row) => <span className="text-muted-foreground">{row.reference_text || "—"}</span>,
+        accessor: (row) => `${row.reference_text ?? ""} ${row.interpretation_note ?? ""}`.trim(),
+        width: 280,
+        cellClassName: "whitespace-normal",
+        render: (row) => (
+          <div className="min-w-0 space-y-1 text-muted-foreground">
+            <span className="block font-medium text-foreground/80">{row.reference_text || "—"}</span>
+            {row.interpretation_note ? (
+              <button
+                type="button"
+                className="block max-w-full truncate text-left text-[11px] font-medium leading-4 text-blue-700 hover:text-blue-800 hover:underline"
+                title={row.interpretation_note}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setNotePreview(row);
+                }}
+              >
+                {tx("Примечание лаборатории", "Laborhinweis")}
+              </button>
+            ) : null}
+          </div>
+        ),
       },
       {
         id: "laboratory",
@@ -1894,35 +1913,51 @@ function PatientLabHistoryTable({
   );
 
   return (
-    <DataTable
-      rows={rows}
-      columns={columns}
-      rowId={(row) => row.id}
-      storageKey={storageKey}
-      density="compact"
-      disableRowHover
-      rowHeightOverrides={{ comfortable: 100, compact: 92, condensed: 84 }}
-      rowActions={canManage ? (row) => (
-        <div className="flex items-center justify-end gap-1">
-          <PatientLabResultEditAction
-            label={tx("Исправить", "Korrigieren")}
-            onEdit={() => onEdit(row)}
-          />
-          <PatientLabResultDeleteAction
-            label={tx("Удалить", "Löschen")}
-            onDelete={() => onDelete(row)}
-          />
-        </div>
-      ) : undefined}
-      rowActionsLabel={tx("Действия", "Aktionen")}
-      rowActionsWidth={80}
-      className="w-full min-w-0 shadow-none"
-      footer={
-        <span className="tabular-nums">
-          {rows.length} {tx("результатов", "Ergebnisse")}
-        </span>
-      }
-    />
+    <>
+      <DataTable
+        rows={rows}
+        columns={columns}
+        rowId={(row) => row.id}
+        storageKey={storageKey}
+        density="compact"
+        disableRowHover
+        rowHeightOverrides={{ comfortable: 100, compact: 92, condensed: 84 }}
+        rowActions={canManage ? (row) => (
+          <div className="flex items-center justify-end gap-1">
+            <PatientLabResultEditAction
+              label={tx("Исправить", "Korrigieren")}
+              onEdit={() => onEdit(row)}
+            />
+            <PatientLabResultDeleteAction
+              label={tx("Удалить", "Löschen")}
+              onDelete={() => onDelete(row)}
+            />
+          </div>
+        ) : undefined}
+        rowActionsLabel={tx("Действия", "Aktionen")}
+        rowActionsWidth={80}
+        className="w-full min-w-0 shadow-none"
+        footer={
+          <span className="tabular-nums">
+            {rows.length} {tx("результатов", "Ergebnisse")}
+          </span>
+        }
+      />
+
+      <Dialog open={notePreview !== null} onOpenChange={(open) => !open && setNotePreview(null)}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{tx("Примечание лаборатории", "Laborhinweis")}</DialogTitle>
+            <DialogDescription>
+              {[notePreview?.analyte_name, notePreview?.reference_text].filter(Boolean).join(" · ")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="whitespace-pre-line rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-sm leading-6 text-slate-700">
+            {notePreview?.interpretation_note}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

@@ -30,6 +30,7 @@ describe("updatePatientLabResult", () => {
       reference_text: "12.0–16.0",
       reference_low: 12,
       reference_high: 16,
+      interpretation_note: "Age-specific limits from source",
       abnormal_flag: "normal",
       correction_note: "OCR decimal corrected",
     };

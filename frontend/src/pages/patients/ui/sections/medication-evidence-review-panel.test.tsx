@@ -10,8 +10,15 @@ import type {
 import {
   MedicationEvidenceReviewContent,
   MedicationEvidenceReviewPanelContent,
+  MedicationAiAnalysisSection,
+  clearMedicationAiIdempotencyAttempt,
+  createSingleFlightRunner,
+  isMedicationAiRequestAbort,
+  medicationAiAnalysisBelongsToReview,
+  medicationAiRealtimeEventMatches,
   medicationEvidenceOperationForError,
   officialSourceLabel,
+  resolveMedicationAiIdempotencyAttempt,
   resolveMedicationEvidenceIdempotencyKey,
   startSequentialPolling,
 } from "./medication-evidence-review-panel";
@@ -375,6 +382,70 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(first).toBe("attempt-1");
     expect(retry).toBe("attempt-1");
   });
+
+  it("scopes an ambiguous AI create attempt to one patient review", () => {
+    const first = resolveMedicationAiIdempotencyAttempt(
+      null,
+      "patient-1",
+      "review-1",
+      () => "ai-attempt-1",
+    );
+    const createRetryKey = vi.fn(() => "should-not-be-used");
+    const sameReviewRetry = resolveMedicationAiIdempotencyAttempt(
+      first,
+      "patient-1",
+      "review-1",
+      createRetryKey,
+    );
+    const otherReview = resolveMedicationAiIdempotencyAttempt(
+      first,
+      "patient-1",
+      "review-2",
+      () => "ai-attempt-2",
+    );
+    const otherPatient = resolveMedicationAiIdempotencyAttempt(
+      first,
+      "patient-2",
+      "review-1",
+      () => "ai-attempt-3",
+    );
+
+    expect(sameReviewRetry).toBe(first);
+    expect(createRetryKey).not.toHaveBeenCalled();
+    expect(otherReview.key).toBe("ai-attempt-2");
+    expect(otherPatient.key).toBe("ai-attempt-3");
+  });
+
+  it("clears only the AI create attempt proven by a matching response", () => {
+    const attempt = {
+      patientId: "patient-1",
+      reviewId: "review-1",
+      key: "ai-attempt-1",
+    };
+
+    expect(clearMedicationAiIdempotencyAttempt(
+      attempt,
+      "patient-1",
+      "review-1",
+      "ai-attempt-1",
+    )).toBeNull();
+    expect(clearMedicationAiIdempotencyAttempt(
+      attempt,
+      "patient-1",
+      "review-1",
+    )).toBeNull();
+    expect(clearMedicationAiIdempotencyAttempt(
+      attempt,
+      "patient-1",
+      "review-1",
+      "newer-attempt",
+    )).toBe(attempt);
+    expect(clearMedicationAiIdempotencyAttempt(
+      attempt,
+      "patient-1",
+      "review-2",
+    )).toBe(attempt);
+  });
 });
 
 describe("startSequentialPolling", () => {
@@ -407,5 +478,252 @@ describe("startSequentialPolling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not reschedule after cleanup while a poll is still in flight", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = deferred<void>();
+      const poll = vi.fn<() => Promise<void>>(() => request.promise);
+      const stop = startSequentialPolling({ poll, delayMs: 2_000 });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(poll).toHaveBeenCalledTimes(1);
+
+      stop();
+      request.resolve(undefined);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(poll).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("medication AI realtime refresh", () => {
+  it("matches only ready/failed events for the open patient review", () => {
+    const baseEvent = {
+      type: "patient.medication_ai_analysis_ready",
+      entity_type: "patient",
+      entity_id: "patient-1",
+      patient_id: "patient-1",
+      payload: { review_id: "review-1", analysis_id: "analysis-1", status: "ready" },
+    };
+
+    expect(medicationAiRealtimeEventMatches(baseEvent, "patient-1", "review-1")).toBe(true);
+    expect(medicationAiRealtimeEventMatches(
+      { ...baseEvent, type: "patient.medication_ai_analysis_failed" },
+      "patient-1",
+      "review-1",
+    )).toBe(true);
+    expect(medicationAiRealtimeEventMatches(
+      { ...baseEvent, patient_id: "patient-2" },
+      "patient-1",
+      "review-1",
+    )).toBe(false);
+    expect(medicationAiRealtimeEventMatches(
+      { ...baseEvent, payload: { ...baseEvent.payload, review_id: "review-2" } },
+      "patient-1",
+      "review-1",
+    )).toBe(false);
+    expect(medicationAiRealtimeEventMatches(
+      { ...baseEvent, type: "patient.medication_ai_analysis_requested" },
+      "patient-1",
+      "review-1",
+    )).toBe(false);
+  });
+
+  it("accepts the patient entity fallback when patient_id is absent", () => {
+    expect(medicationAiRealtimeEventMatches({
+      type: "patient.medication_ai_analysis_ready",
+      entity_type: "patient",
+      entity_id: "patient-1",
+      payload: { review_id: "review-1" },
+    }, "patient-1", "review-1")).toBe(true);
+  });
+
+  it("coalesces realtime and polling loads for the same review", async () => {
+    const runner = createSingleFlightRunner();
+    const request = deferred<void>();
+    const fetchAnalysis = vi.fn(() => request.promise);
+
+    const realtimeLoad = runner.run("patient-1:review-1", fetchAnalysis);
+    const pollingLoad = runner.run("patient-1:review-1", fetchAnalysis);
+
+    expect(realtimeLoad).toBe(pollingLoad);
+    expect(fetchAnalysis).toHaveBeenCalledTimes(1);
+
+    request.resolve(undefined);
+    await realtimeLoad;
+
+    await runner.run("patient-1:review-1", fetchAnalysis);
+    expect(fetchAnalysis).toHaveBeenCalledTimes(2);
+  });
+
+  it("detaches an in-flight load when dialog or patient cleanup clears it", async () => {
+    const runner = createSingleFlightRunner();
+    const oldRequest = deferred<void>();
+    const freshRequest = deferred<void>();
+    const signals: AbortSignal[] = [];
+    const fetchAnalysis = vi
+      .fn<(signal: AbortSignal) => Promise<void>>()
+      .mockImplementationOnce((signal) => {
+        signals.push(signal);
+        return oldRequest.promise;
+      })
+      .mockImplementationOnce((signal) => {
+        signals.push(signal);
+        return freshRequest.promise;
+      });
+
+    const oldLoad = runner.run("patient-1:review-1", fetchAnalysis);
+    runner.clear();
+    const freshLoad = runner.run("patient-1:review-1", fetchAnalysis);
+
+    expect(freshLoad).not.toBe(oldLoad);
+    expect(fetchAnalysis).toHaveBeenCalledTimes(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+
+    oldRequest.resolve(undefined);
+    await oldLoad;
+    expect(runner.run("patient-1:review-1", fetchAnalysis)).toBe(freshLoad);
+    expect(fetchAnalysis).toHaveBeenCalledTimes(2);
+
+    freshRequest.resolve(undefined);
+    await freshLoad;
+  });
+
+  it("aborts the previous request when the patient-review key changes", async () => {
+    const runner = createSingleFlightRunner();
+    const firstRequest = deferred<void>();
+    const secondRequest = deferred<void>();
+    const signals: AbortSignal[] = [];
+    const fetchAnalysis = vi
+      .fn<(signal: AbortSignal) => Promise<void>>()
+      .mockImplementationOnce((signal) => {
+        signals.push(signal);
+        return firstRequest.promise;
+      })
+      .mockImplementationOnce((signal) => {
+        signals.push(signal);
+        return secondRequest.promise;
+      });
+
+    const firstLoad = runner.run("patient-1:review-1", fetchAnalysis);
+    const secondLoad = runner.run("patient-1:review-2", fetchAnalysis);
+
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+
+    firstRequest.resolve(undefined);
+    secondRequest.resolve(undefined);
+    await Promise.all([firstLoad, secondLoad]);
+  });
+
+  it("recognizes wrapped and native abort errors as non-user-facing", () => {
+    const nativeAbort = new Error("aborted");
+    nativeAbort.name = "AbortError";
+
+    expect(isMedicationAiRequestAbort(
+      new ApiRequestError("cancelled", { code: "aborted" }),
+    )).toBe(true);
+    expect(isMedicationAiRequestAbort(nativeAbort)).toBe(true);
+    expect(isMedicationAiRequestAbort(
+      new ApiRequestError("timeout", { code: "timeout" }),
+    )).toBe(false);
+  });
+
+  it("rejects status payloads that do not belong to the requested review", () => {
+    const analysis = {
+      id: "analysis-1",
+      review_id: "review-1",
+      status: "processing" as const,
+      requested_at: "2026-08-27T10:00:00Z",
+      started_at: null,
+      completed_at: null,
+      provider: preview().ai_provider,
+      prompt_version: "medication-evidence-draft-v1",
+      draft: null,
+      error_code: null,
+    };
+
+    expect(medicationAiAnalysisBelongsToReview(analysis, "review-1")).toBe(true);
+    expect(medicationAiAnalysisBelongsToReview(analysis, "review-2")).toBe(false);
+    expect(medicationAiAnalysisBelongsToReview({ ...analysis, id: "" }, "review-1")).toBe(false);
+  });
+
+  it("fails closed when a ready backend payload has no displayable draft", () => {
+    const html = renderToStaticMarkup(
+      <MedicationAiAnalysisSection
+        review={review()}
+        provider={{
+          kind: "openai",
+          status: "ready",
+          external_calls_enabled: true,
+          reason_code: "ready",
+          model: "gpt-test",
+        }}
+        analysis={{
+          id: "analysis-1",
+          review_id: "review-1",
+          status: "ready",
+          requested_at: "2026-08-27T10:00:00Z",
+          started_at: "2026-08-27T10:00:01Z",
+          completed_at: "2026-08-27T10:00:02Z",
+          provider: {
+            kind: "openai",
+            status: "ready",
+            external_calls_enabled: true,
+            reason_code: "ready",
+            model: "gpt-test",
+          },
+          prompt_version: "medication-evidence-draft-v1",
+          draft: null,
+          error_code: null,
+        }}
+        loading={false}
+        error={null}
+        lang="ru"
+        onCreate={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("AI-результат имеет неполный формат");
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain("Краткий вывод");
+  });
+
+  it("keeps an existing ready draft visible when a later refresh fails", () => {
+    const html = renderToStaticMarkup(
+      <MedicationAiAnalysisSection
+        review={review()}
+        provider={preview().ai_provider}
+        analysis={{
+          id: "analysis-1",
+          review_id: "review-1",
+          status: "ready",
+          requested_at: "2026-08-27T10:00:00Z",
+          started_at: "2026-08-27T10:00:01Z",
+          completed_at: "2026-08-27T10:00:02Z",
+          provider: preview().ai_provider,
+          prompt_version: "medication-evidence-draft-v1",
+          draft: review().draft,
+          error_code: null,
+        }}
+        loading={false}
+        error="Не удалось обновить статус AI-анализа."
+        lang="ru"
+        onCreate={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Не удалось обновить статус AI-анализа.");
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Краткий вывод");
   });
 });

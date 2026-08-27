@@ -245,7 +245,7 @@ export function CommandPalette() {
               }
             }}
             placeholder={t.common_search}
-            className="h-11 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            className="h-11 w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/45"
           />
           {busy ? (
             <LoaderCircle className="size-3.5 shrink-0 animate-spin text-muted-foreground" />

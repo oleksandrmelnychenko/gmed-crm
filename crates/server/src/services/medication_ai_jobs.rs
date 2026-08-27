@@ -15,6 +15,7 @@ use crate::services::medication_evidence_reviews::EvidenceSnapshot;
 use crate::state::AppState;
 
 const MAX_ATTEMPTS: i16 = 3;
+pub(crate) const LEGACY_GOVERNANCE_REVIEW_ID: &str = "legacy-unrecorded";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MedicationAiAnalysisView {
@@ -56,6 +57,21 @@ pub enum MedicationAiJobError {
     Json(#[from] serde_json::Error),
 }
 
+impl MedicationAiJobError {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::ProviderUnavailable => "provider_unavailable",
+            Self::ReviewNotFound => "review_not_found",
+            Self::ReviewNotReady => "review_not_ready",
+            Self::InvalidInput => "invalid_input",
+            Self::IdempotencyConflict => "idempotency_conflict",
+            Self::InvalidStoredData => "invalid_stored_data",
+            Self::Database(_) => "database_error",
+            Self::Json(_) => "json_error",
+        }
+    }
+}
+
 struct ClaimedAnalysis {
     id: Uuid,
     lease_token: Uuid,
@@ -65,6 +81,7 @@ struct ClaimedAnalysis {
     snapshot: EvidenceSnapshot,
     provider_model: String,
     prompt_version: String,
+    governance_review_id: String,
 }
 
 pub async fn create_analysis(
@@ -115,6 +132,13 @@ pub async fn create_analysis(
         .model
         .as_deref()
         .ok_or(MedicationAiJobError::ProviderUnavailable)?;
+    let governance_review_id = state
+        .medication_ai
+        .governance_review_id()
+        .ok_or(MedicationAiJobError::ProviderUnavailable)?;
+    if governance_review_id == LEGACY_GOVERNANCE_REVIEW_ID {
+        return Err(MedicationAiJobError::ProviderUnavailable);
+    }
 
     let mut tx = state.db.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
@@ -135,10 +159,12 @@ pub async fn create_analysis(
     }
     let analysis_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO medication_ai_analyses
-               (patient_id, review_id, bundle_id, provider_kind, provider_model,
-                prompt_version, input_fingerprint, idempotency_key, requested_by)
-           VALUES ($1, $2, $3, 'openai', $4, $5, $6, $7, $8)
-           ON CONFLICT (review_id, input_fingerprint, provider_model, prompt_version) DO NOTHING
+           (patient_id, review_id, bundle_id, provider_kind, provider_model,
+                prompt_version, governance_review_id, input_fingerprint,
+                idempotency_key, requested_by)
+           VALUES ($1, $2, $3, 'openai', $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (review_id, input_fingerprint, provider_model, prompt_version,
+                        governance_review_id) DO NOTHING
            RETURNING id"#,
     )
     .bind(patient_id)
@@ -146,6 +172,7 @@ pub async fn create_analysis(
     .bind(bundle_id)
     .bind(model)
     .bind(MEDICATION_AI_PROMPT_VERSION)
+    .bind(governance_review_id)
     .bind(&fingerprint)
     .bind(idempotency_key)
     .bind(actor_id)
@@ -157,17 +184,22 @@ pub async fn create_analysis(
             sqlx::query_scalar::<_, Uuid>(
                 r#"SELECT id FROM medication_ai_analyses
                    WHERE review_id = $1 AND input_fingerprint = $2
-                     AND provider_model = $3 AND prompt_version = $4"#,
+                     AND provider_model = $3 AND prompt_version = $4
+                     AND governance_review_id = $5"#,
             )
             .bind(review_id)
             .bind(&fingerprint)
             .bind(model)
             .bind(MEDICATION_AI_PROMPT_VERSION)
+            .bind(governance_review_id)
             .fetch_one(&mut *tx)
             .await?,
             false,
         ),
     };
+    if !created {
+        persist_idempotency_alias(&mut tx, actor_id, idempotency_key, analysis_id).await?;
+    }
     if created {
         sqlx::query(
             r#"INSERT INTO medication_ai_analysis_events
@@ -180,7 +212,14 @@ pub async fn create_analysis(
         .await?;
     }
     tx.commit().await?;
-    let view = load_analysis(&state.db, patient_id, review_id, capability).await?;
+    let view = load_analysis_by_id(
+        &state.db,
+        patient_id,
+        review_id,
+        analysis_id,
+        capability,
+    )
+    .await?;
     Ok(CreateMedicationAiAnalysisResult { view, created })
 }
 
@@ -208,6 +247,31 @@ pub async fn load_analysis(
     view_from_row(row, capability)
 }
 
+async fn load_analysis_by_id(
+    pool: &PgPool,
+    patient_id: Uuid,
+    review_id: Uuid,
+    analysis_id: Uuid,
+    capability: MedicationAiCapability,
+) -> Result<MedicationAiAnalysisView, MedicationAiJobError> {
+    let row = sqlx::query(
+        r#"SELECT id, patient_id, review_id, status, requested_at, started_at,
+                  completed_at, provider_kind,
+                  COALESCE(provider_response_model, provider_model) AS provider_model,
+                  prompt_version,
+                  output_json, error_code
+           FROM medication_ai_analyses
+           WHERE patient_id = $1 AND review_id = $2 AND id = $3"#,
+    )
+    .bind(patient_id)
+    .bind(review_id)
+    .bind(analysis_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or(MedicationAiJobError::ReviewNotFound)?;
+    view_from_row(row, capability)
+}
+
 pub async fn retry_analysis(
     state: &AppState,
     patient_id: Uuid,
@@ -222,20 +286,37 @@ pub async fn retry_analysis(
         .model
         .as_deref()
         .ok_or(MedicationAiJobError::ProviderUnavailable)?;
+    let governance_review_id = state
+        .medication_ai
+        .governance_review_id()
+        .ok_or(MedicationAiJobError::ProviderUnavailable)?;
+    if governance_review_id == LEGACY_GOVERNANCE_REVIEW_ID {
+        return Err(MedicationAiJobError::ProviderUnavailable);
+    }
     let mut tx = state.db.begin().await?;
     let analysis_id = sqlx::query_scalar::<_, Uuid>(
-        r#"UPDATE medication_ai_analyses
+        r#"WITH candidate AS (
+               SELECT id
+               FROM medication_ai_analyses
+               WHERE patient_id = $1 AND review_id = $2 AND status = 'failed'
+                 AND provider_model = $3 AND prompt_version = $4
+                 AND governance_review_id = $5
+               ORDER BY requested_at DESC, id DESC
+               FOR UPDATE LIMIT 1
+           )
+           UPDATE medication_ai_analyses AS analysis
            SET status = 'requested', started_at = NULL, completed_at = NULL,
                lease_until = NULL, lease_token = NULL, attempts = 0, error_code = NULL,
                available_at = now(), updated_at = now()
-           WHERE patient_id = $1 AND review_id = $2 AND status = 'failed'
-             AND provider_model = $3 AND prompt_version = $4
-           RETURNING id"#,
+           FROM candidate
+           WHERE analysis.id = candidate.id
+           RETURNING analysis.id"#,
     )
     .bind(patient_id)
     .bind(review_id)
     .bind(model)
     .bind(MEDICATION_AI_PROMPT_VERSION)
+    .bind(governance_review_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(MedicationAiJobError::ReviewNotReady)?;
@@ -249,7 +330,14 @@ pub async fn retry_analysis(
     )
     .await?;
     tx.commit().await?;
-    load_analysis(&state.db, patient_id, review_id, capability).await
+    load_analysis_by_id(
+        &state.db,
+        patient_id,
+        review_id,
+        analysis_id,
+        capability,
+    )
+    .await
 }
 
 fn view_from_row(
@@ -297,7 +385,10 @@ pub fn spawn_medication_ai_worker(state: AppState) {
         loop {
             ticker.tick().await;
             if let Err(error) = process_one(&state).await {
-                tracing::error!(error = %error, "Medication AI worker iteration failed");
+                tracing::error!(
+                    error_code = error.code(),
+                    "Medication AI worker iteration failed"
+                );
             }
         }
     });
@@ -309,9 +400,13 @@ async fn process_one(state: &AppState) -> Result<(), MedicationAiJobError> {
         return Ok(());
     };
     let current = state.medication_ai.capability();
-    if current.model.as_deref() != Some(job.provider_model.as_str())
-        || job.prompt_version != MEDICATION_AI_PROMPT_VERSION
-    {
+    if !configuration_is_current(
+        current.model.as_deref(),
+        state.medication_ai.governance_review_id(),
+        &job.provider_model,
+        &job.prompt_version,
+        &job.governance_review_id,
+    ) {
         fail_or_retry(
             state,
             &job,
@@ -394,22 +489,31 @@ async fn process_one(state: &AppState) -> Result<(), MedicationAiJobError> {
                     state,
                     job.requested_by,
                     job.patient_id,
-                    job.id,
                     "medication_ai_ready",
                     "AI-черновик готов · KI-Entwurf bereit",
                     "Обезличенный черновик доступен для проверки по источникам. · Der de-identifizierte Entwurf kann anhand der Quellen geprüft werden.",
                 )
                 .await;
             } else {
-                tracing::warn!(
-                    analysis_id = %job.id,
-                    "Discarded medication AI result from stale or expired worker lease"
-                );
+                record_fenced_attempt("success", None);
             }
         }
         Err(error) => fail_or_retry(state, &job, &error).await?,
     }
     Ok(())
+}
+
+fn configuration_is_current(
+    current_model: Option<&str>,
+    current_governance_review_id: Option<&str>,
+    job_model: &str,
+    job_prompt_version: &str,
+    job_governance_review_id: &str,
+) -> bool {
+    current_model == Some(job_model)
+        && job_prompt_version == MEDICATION_AI_PROMPT_VERSION
+        && job_governance_review_id != LEGACY_GOVERNANCE_REVIEW_ID
+        && current_governance_review_id == Some(job_governance_review_id)
 }
 
 async fn claim_next(pool: &PgPool) -> Result<Option<ClaimedAnalysis>, MedicationAiJobError> {
@@ -430,6 +534,7 @@ async fn claim_next(pool: &PgPool) -> Result<Option<ClaimedAnalysis>, Medication
            RETURNING analysis.id, analysis.patient_id, analysis.review_id,
                      analysis.requested_by, analysis.bundle_id,
                      analysis.provider_model, analysis.prompt_version,
+                     analysis.governance_review_id,
                      analysis.lease_token"#,
     )
     .bind(MAX_ATTEMPTS)
@@ -467,6 +572,7 @@ async fn claim_next(pool: &PgPool) -> Result<Option<ClaimedAnalysis>, Medication
         snapshot,
         provider_model: row.get("provider_model"),
         prompt_version: row.get("prompt_version"),
+        governance_review_id: row.get("governance_review_id"),
     }))
 }
 
@@ -524,6 +630,10 @@ async fn recover_expired_jobs(state: &AppState) -> Result<(), MedicationAiJobErr
             "reason" => "worker_lease_expired"
         )
         .increment(recovered_count);
+        tracing::warn!(
+            recovered_jobs = recovered_count,
+            "Recovered Medication AI jobs after expired worker leases"
+        );
     }
     if exhausted_count > 0 {
         metrics::counter!(
@@ -532,6 +642,10 @@ async fn recover_expired_jobs(state: &AppState) -> Result<(), MedicationAiJobErr
             "reason" => "worker_lease_exhausted"
         )
         .increment(exhausted_count);
+        tracing::warn!(
+            exhausted_jobs = exhausted_count,
+            "Medication AI jobs exhausted attempts after expired worker leases"
+        );
     }
     for row in failed_rows {
         publish_terminal_failure(
@@ -565,11 +679,7 @@ async fn fail_or_retry(
     .await?;
     let Some(attempts) = attempts else {
         tx.rollback().await?;
-        tracing::warn!(
-            analysis_id = %job.id,
-            error_code = error.code(),
-            "Discarded medication AI failure from stale or expired worker lease"
-        );
+        record_fenced_attempt("error", Some(error.code()));
         return Ok(());
     };
     let retryable = error.is_retryable();
@@ -591,11 +701,7 @@ async fn fail_or_retry(
         .rows_affected();
         if changed != 1 {
             tx.rollback().await?;
-            tracing::warn!(
-                analysis_id = %job.id,
-                error_code = error.code(),
-                "Discarded medication AI retry from expired worker lease"
-            );
+            record_fenced_attempt("error", Some(error.code()));
             return Ok(());
         }
         insert_event(
@@ -624,11 +730,7 @@ async fn fail_or_retry(
         .rows_affected();
         if changed != 1 {
             tx.rollback().await?;
-            tracing::warn!(
-                analysis_id = %job.id,
-                error_code = error.code(),
-                "Discarded medication AI terminal failure from expired worker lease"
-            );
+            record_fenced_attempt("error", Some(error.code()));
             return Ok(());
         }
         insert_event(&mut tx, job.id, "processing", "failed", error.code(), None).await?;
@@ -687,7 +789,6 @@ async fn publish_terminal_failure(
         state,
         requested_by,
         patient_id,
-        analysis_id,
         "medication_ai_failed",
         "AI-черновик не сформирован · KI-Entwurf fehlgeschlagen",
         "Безопасная обработка завершилась ошибкой; локальный пакет не изменён. · Die sichere Verarbeitung ist fehlgeschlagen; das lokale Paket blieb unverändert.",
@@ -699,7 +800,6 @@ async fn notify_requester(
     state: &AppState,
     requested_by: Uuid,
     patient_id: Uuid,
-    analysis_id: Uuid,
     kind: &str,
     title: &str,
     body: &str,
@@ -728,13 +828,34 @@ async fn notify_requester(
             )
             .await;
         }
-        Err(error) => {
+        Err(_) => {
             tracing::warn!(
-                error = %error,
-                analysis_id = %analysis_id,
+                error_code = "notification_persist_failed",
                 "create medication AI operator notification"
             );
         }
+    }
+}
+
+fn record_fenced_attempt(attempt_outcome: &'static str, error_code: Option<&'static str>) {
+    metrics::counter!(
+        crate::business_metrics::MEDICATION_AI_FENCED_ATTEMPTS_TOTAL,
+        "attempt_outcome" => attempt_outcome
+    )
+    .increment(1);
+    if let Some(error_code) = error_code {
+        tracing::warn!(
+            attempt_outcome = attempt_outcome,
+            error_code = error_code,
+            reason_code = "lease_not_owned_or_expired",
+            "Discarded Medication AI provider attempt after lease fencing"
+        );
+    } else {
+        tracing::warn!(
+            attempt_outcome = attempt_outcome,
+            reason_code = "lease_not_owned_or_expired",
+            "Discarded Medication AI provider attempt after lease fencing"
+        );
     }
 }
 
@@ -767,12 +888,17 @@ async fn load_by_idempotency(
     key: &str,
 ) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error> {
     sqlx::query(
-        r#"SELECT id, patient_id, review_id, status, requested_at, started_at,
-                  completed_at, provider_kind,
-                  COALESCE(provider_response_model, provider_model) AS provider_model,
-                  prompt_version,
-                  output_json, error_code
-           FROM medication_ai_analyses WHERE requested_by = $1 AND idempotency_key = $2"#,
+        r#"SELECT analysis.id, analysis.patient_id, analysis.review_id,
+                  analysis.status, analysis.requested_at, analysis.started_at,
+                  analysis.completed_at, analysis.provider_kind,
+                  COALESCE(analysis.provider_response_model, analysis.provider_model)
+                      AS provider_model,
+                  analysis.prompt_version, analysis.output_json, analysis.error_code
+           FROM medication_ai_analysis_idempotency_keys AS idempotency
+           JOIN medication_ai_analyses AS analysis
+             ON analysis.id = idempotency.analysis_id
+           WHERE idempotency.idempotency_owner_id = $1
+             AND idempotency.idempotency_key = $2"#,
     )
     .bind(actor_id)
     .bind(key)
@@ -786,17 +912,59 @@ async fn load_by_idempotency_tx(
     key: &str,
 ) -> Result<Option<sqlx::postgres::PgRow>, sqlx::Error> {
     sqlx::query(
-        r#"SELECT id, patient_id, review_id, status, requested_at, started_at,
-                  completed_at, provider_kind,
-                  COALESCE(provider_response_model, provider_model) AS provider_model,
-                  prompt_version,
-                  output_json, error_code
-           FROM medication_ai_analyses WHERE requested_by = $1 AND idempotency_key = $2"#,
+        r#"SELECT analysis.id, analysis.patient_id, analysis.review_id,
+                  analysis.status, analysis.requested_at, analysis.started_at,
+                  analysis.completed_at, analysis.provider_kind,
+                  COALESCE(analysis.provider_response_model, analysis.provider_model)
+                      AS provider_model,
+                  analysis.prompt_version, analysis.output_json, analysis.error_code
+           FROM medication_ai_analysis_idempotency_keys AS idempotency
+           JOIN medication_ai_analyses AS analysis
+             ON analysis.id = idempotency.analysis_id
+           WHERE idempotency.idempotency_owner_id = $1
+             AND idempotency.idempotency_key = $2"#,
     )
     .bind(actor_id)
     .bind(key)
     .fetch_optional(&mut **tx)
     .await
+}
+
+async fn persist_idempotency_alias(
+    tx: &mut Transaction<'_, Postgres>,
+    actor_id: Uuid,
+    key: &str,
+    analysis_id: Uuid,
+) -> Result<(), MedicationAiJobError> {
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO medication_ai_analysis_idempotency_keys
+               (idempotency_owner_id, idempotency_key, analysis_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (idempotency_owner_id, idempotency_key) DO NOTHING
+           RETURNING analysis_id"#,
+    )
+    .bind(actor_id)
+    .bind(key)
+    .bind(analysis_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if inserted.is_some() {
+        return Ok(());
+    }
+
+    let existing = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT analysis_id
+           FROM medication_ai_analysis_idempotency_keys
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(actor_id)
+    .bind(key)
+    .fetch_one(&mut **tx)
+    .await?;
+    if existing != analysis_id {
+        return Err(MedicationAiJobError::IdempotencyConflict);
+    }
+    Ok(())
 }
 
 fn validate_idempotency_key(value: &str) -> Result<(), MedicationAiJobError> {
@@ -820,5 +988,37 @@ mod tests {
         assert!(validate_idempotency_key(" ").is_err());
         assert!(validate_idempotency_key(" ai-review-1").is_err());
         assert!(validate_idempotency_key(&"a".repeat(129)).is_err());
+    }
+
+    #[test]
+    fn queued_job_requires_the_same_governance_review() {
+        assert!(configuration_is_current(
+            Some("gpt-test"),
+            Some("governance-review-v1"),
+            "gpt-test",
+            MEDICATION_AI_PROMPT_VERSION,
+            "governance-review-v1",
+        ));
+        assert!(!configuration_is_current(
+            Some("gpt-test"),
+            Some("governance-review-v2"),
+            "gpt-test",
+            MEDICATION_AI_PROMPT_VERSION,
+            "governance-review-v1",
+        ));
+        assert!(!configuration_is_current(
+            Some("gpt-test"),
+            None,
+            "gpt-test",
+            MEDICATION_AI_PROMPT_VERSION,
+            "governance-review-v1",
+        ));
+        assert!(!configuration_is_current(
+            Some("gpt-test"),
+            Some(LEGACY_GOVERNANCE_REVIEW_ID),
+            "gpt-test",
+            MEDICATION_AI_PROMPT_VERSION,
+            LEGACY_GOVERNANCE_REVIEW_ID,
+        ));
     }
 }

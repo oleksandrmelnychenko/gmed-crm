@@ -82,9 +82,13 @@ interface HealthData {
       stale_processing: number;
       ready_last_24h: number;
       failed_last_24h: number;
+      lease_recovered_last_24h: number;
+      lease_exhausted_last_24h: number;
       oldest_requested_seconds: number | null;
       last_ready_at: string | null;
       last_failed_at: string | null;
+      last_lease_recovery_at: string | null;
+      last_lease_exhausted_at: string | null;
     };
   };
 }
@@ -108,16 +112,45 @@ const DEFAULT_MEDICATION_AI_HEALTH: HealthData["medication_ai"] = {
     stale_processing: 0,
     ready_last_24h: 0,
     failed_last_24h: 0,
+    lease_recovered_last_24h: 0,
+    lease_exhausted_last_24h: 0,
     oldest_requested_seconds: null,
     last_ready_at: null,
     last_failed_at: null,
+    last_lease_recovery_at: null,
+    last_lease_exhausted_at: null,
   },
 };
+
+type MedicationAiHealthPayload = Partial<
+  Omit<HealthData["medication_ai"], "provider" | "queue">
+> & {
+  provider?: Partial<HealthData["medication_ai"]["provider"]>;
+  queue?: Partial<HealthData["medication_ai"]["queue"]>;
+};
+
+export function normalizeMedicationAiHealth(
+  value: MedicationAiHealthPayload | null | undefined,
+): HealthData["medication_ai"] {
+  if (!value) return DEFAULT_MEDICATION_AI_HEALTH;
+  return {
+    ...DEFAULT_MEDICATION_AI_HEALTH,
+    ...value,
+    provider: {
+      ...DEFAULT_MEDICATION_AI_HEALTH.provider,
+      ...value.provider,
+    },
+    queue: {
+      ...DEFAULT_MEDICATION_AI_HEALTH.queue,
+      ...value.queue,
+    },
+  };
+}
 
 function normalizeHealthData(payload: HealthData): HealthData {
   return {
     ...payload,
-    medication_ai: payload.medication_ai ?? DEFAULT_MEDICATION_AI_HEALTH,
+    medication_ai: normalizeMedicationAiHealth(payload.medication_ai),
   };
 }
 
@@ -140,9 +173,13 @@ export function aiHealthCopy(lang: "ru" | "de") {
         stale: "Abgelaufene Leases",
         ready24h: "Bereit in 24 Std.",
         failed24h: "Fehler in 24 Std.",
+        leaseRecovered24h: "Lease-Recoveries in 24 Std.",
+        leaseExhausted24h: "Lease-Abbrüche in 24 Std.",
         oldest: "Ältester wartender Auftrag",
         lastReady: "Letztes Ergebnis",
         lastFailed: "Letzter Fehler",
+        lastLeaseRecovery: "Letzte Lease-Recovery",
+        lastLeaseExhausted: "Letzter Lease-Abbruch",
         model: "Freigegebenes Modell",
         externalCalls: "Externe Aufrufe",
         enabled: "Aktiv",
@@ -152,6 +189,8 @@ export function aiHealthCopy(lang: "ru" | "de") {
         privacy: "Es werden weder API-Schlüssel noch Patienten- oder Antwortinhalte angezeigt.",
         attentionFailed: "KI-Aufträge mit Fehlern in den letzten 24 Stunden",
         attentionStale: "KI-Aufträge mit abgelaufener Verarbeitungssperre",
+        attentionLeaseRecovered: "KI-Aufträge nach abgelaufener Lease wieder eingeplant",
+        attentionLeaseExhausted: "KI-Aufträge nach Lease-Ablauf endgültig fehlgeschlagen",
         attentionDelayed: "KI-Aufträge warten länger als zwei Minuten",
         attentionBlocked: "Der konfigurierte KI-Anbieter ist blockiert",
         attentionUnavailable: "Der KI-Warteschlangenstatus konnte nicht gelesen werden",
@@ -187,9 +226,13 @@ export function aiHealthCopy(lang: "ru" | "de") {
         stale: "Просроченные блокировки обработки",
         ready24h: "Готовы за 24 часа",
         failed24h: "Ошибки за 24 часа",
+        leaseRecovered24h: "Восстановлены после lease за 24 часа",
+        leaseExhausted24h: "Исчерпали lease-попытки за 24 часа",
         oldest: "Самая старая ожидающая задача",
         lastReady: "Последний результат",
         lastFailed: "Последняя ошибка",
+        lastLeaseRecovery: "Последнее восстановление lease",
+        lastLeaseExhausted: "Последнее исчерпание lease",
         model: "Разрешённая модель",
         externalCalls: "Внешние вызовы",
         enabled: "Включены",
@@ -199,6 +242,8 @@ export function aiHealthCopy(lang: "ru" | "de") {
         privacy: "API-ключи, данные пациентов и содержимое ответов здесь не отображаются.",
         attentionFailed: "AI-задачи с ошибками за последние 24 часа",
         attentionStale: "AI-задачи с просроченной блокировкой обработки",
+        attentionLeaseRecovered: "AI-задачи повторно поставлены в очередь после истечения lease",
+        attentionLeaseExhausted: "AI-задачи завершились ошибкой после исчерпания lease-попыток",
         attentionDelayed: "AI-задачи ожидают обработки больше двух минут",
         attentionBlocked: "Настроенный AI-провайдер заблокирован",
         attentionUnavailable: "Не удалось прочитать состояние AI-очереди",
@@ -229,6 +274,21 @@ export function aiStatusLabel(status: string, copy: AiHealthCopy) {
 
 export function aiReasonLabel(reason: string, copy: AiHealthCopy) {
   return copy.reasons[reason as keyof typeof copy.reasons] ?? copy.statuses.unavailable;
+}
+
+export function aiLeaseAttention(
+  recoveredLast24h: number,
+  exhaustedLast24h: number,
+  copy: AiHealthCopy,
+) {
+  const attention: string[] = [];
+  if (recoveredLast24h > 0) {
+    attention.push(`${copy.attentionLeaseRecovered}: ${recoveredLast24h}`);
+  }
+  if (exhaustedLast24h > 0) {
+    attention.push(`${copy.attentionLeaseExhausted}: ${exhaustedLast24h}`);
+  }
+  return attention;
 }
 
 function aiQueueAge(seconds: number | null, lang: "ru" | "de") {
@@ -428,7 +488,7 @@ function AdminHealthDetailSheet({
                     </div>
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                     <div className="text-xs text-muted-foreground">{aiCopy.requested}</div>
                     <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.requested}</div>
@@ -440,6 +500,14 @@ function AdminHealthDetailSheet({
                   <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
                     <div className="text-xs text-muted-foreground">{aiCopy.stale}</div>
                     <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.stale_processing}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.leaseRecovered24h}</div>
+                    <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.lease_recovered_last_24h}</div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
+                    <div className="text-xs text-muted-foreground">{aiCopy.leaseExhausted24h}</div>
+                    <div className="mt-1 font-mono text-lg font-semibold">{data.medication_ai.queue.lease_exhausted_last_24h}</div>
                   </div>
                 </div>
                 <div className="space-y-2 rounded-lg border border-border/60 bg-background p-3 text-sm">
@@ -454,6 +522,14 @@ function AdminHealthDetailSheet({
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-muted-foreground">{aiCopy.lastFailed}</span>
                     <span className="text-right text-xs">{aiEventTimestamp(data.medication_ai.queue.last_failed_at, lang, aiCopy)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">{aiCopy.lastLeaseRecovery}</span>
+                    <span className="text-right text-xs">{aiEventTimestamp(data.medication_ai.queue.last_lease_recovery_at, lang, aiCopy)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">{aiCopy.lastLeaseExhausted}</span>
+                    <span className="text-right text-xs">{aiEventTimestamp(data.medication_ai.queue.last_lease_exhausted_at, lang, aiCopy)}</span>
                   </div>
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">{aiCopy.privacy}</p>
@@ -648,6 +724,13 @@ export function AdminHealthPage() {
     if (data.medication_ai.queue.failed_last_24h > 0) {
       attention.push(`${aiCopy.attentionFailed}: ${data.medication_ai.queue.failed_last_24h}`);
     }
+    attention.push(
+      ...aiLeaseAttention(
+        data.medication_ai.queue.lease_recovered_last_24h,
+        data.medication_ai.queue.lease_exhausted_last_24h,
+        aiCopy,
+      ),
+    );
     if ((data.medication_ai.queue.oldest_requested_seconds ?? 0) > 120) {
       attention.push(
         `${aiCopy.attentionDelayed}: ${aiQueueAge(data.medication_ai.queue.oldest_requested_seconds, lang)}`,
@@ -890,7 +973,7 @@ export function AdminHealthPage() {
               </span>
               <span className="text-xs text-muted-foreground">{aiCopy.privacy}</span>
             </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <StatCard
                 label={aiCopy.provider}
                 value={aiStatusLabel(data.medication_ai.provider.status, aiCopy)}
@@ -912,6 +995,16 @@ export function AdminHealthPage() {
                 label={aiCopy.failed24h}
                 value={data.medication_ai.queue.failed_last_24h}
                 description={`${aiCopy.stale}: ${data.medication_ai.queue.stale_processing}`}
+              />
+              <StatCard
+                label={aiCopy.leaseRecovered24h}
+                value={data.medication_ai.queue.lease_recovered_last_24h}
+                description={aiEventTimestamp(data.medication_ai.queue.last_lease_recovery_at, lang, aiCopy)}
+              />
+              <StatCard
+                label={aiCopy.leaseExhausted24h}
+                value={data.medication_ai.queue.lease_exhausted_last_24h}
+                description={aiEventTimestamp(data.medication_ai.queue.last_lease_exhausted_at, lang, aiCopy)}
               />
             </div>
           </Section>

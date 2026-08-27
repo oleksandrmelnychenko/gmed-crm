@@ -356,7 +356,7 @@ export function InternalNotesPage() {
               <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteBody}</span>
                 <textarea
-                  className="min-h-40 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                  className="min-h-40 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                   value={draftBody}
                   maxLength={20_000}
                   placeholder={labels.bodyPlaceholder}
@@ -420,7 +420,7 @@ export function InternalNotesPage() {
             <label className="grid gap-1.5 text-sm font-medium">
               <span>{labels.noteBody}</span>
               <textarea
-                className="min-h-52 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                className="min-h-52 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                 value={newBody}
                 maxLength={20_000}
                 placeholder={labels.bodyPlaceholder}

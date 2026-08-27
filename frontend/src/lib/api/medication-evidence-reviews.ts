@@ -321,6 +321,110 @@ function draftItems(value: unknown): MedicationEvidenceDraftItem[] {
   });
 }
 
+const AI_DRAFT_MAX_ITEMS = 12;
+const AI_DRAFT_MAX_LIMITATIONS = 8;
+const AI_DRAFT_MAX_TEXT_CHARS = 700;
+const AI_DRAFT_MAX_ITEM_CITATIONS = 8;
+const AI_DRAFT_MAX_TOTAL_CITATIONS = (
+  AI_DRAFT_MAX_ITEMS * 2 + AI_DRAFT_MAX_LIMITATIONS
+) * AI_DRAFT_MAX_ITEM_CITATIONS;
+
+function strictAiDraftItems(
+  value: unknown,
+  options: {
+    maxItems: number;
+    requireItem: boolean;
+    requireCitation: boolean;
+  },
+  seenItems: Set<string>,
+): MedicationEvidenceDraftItem[] | null {
+  if (
+    !Array.isArray(value)
+    || value.length > options.maxItems
+    || (options.requireItem && value.length === 0)
+  ) return null;
+
+  const normalized: MedicationEvidenceDraftItem[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return null;
+    const payload = item as Record<string, unknown>;
+    if (typeof payload.text_ru !== "string" || typeof payload.text_de !== "string") return null;
+    const textRu = payload.text_ru.trim();
+    const textDe = payload.text_de.trim();
+    if (
+      !textRu
+      || !textDe
+      || Array.from(textRu).length > AI_DRAFT_MAX_TEXT_CHARS
+      || Array.from(textDe).length > AI_DRAFT_MAX_TEXT_CHARS
+    ) return null;
+    if (!Array.isArray(payload.citation_refs)) return null;
+    if (
+      payload.citation_refs.length > AI_DRAFT_MAX_ITEM_CITATIONS
+      || (options.requireCitation && payload.citation_refs.length === 0)
+      || payload.citation_refs.some(
+        (reference) => typeof reference !== "string" || reference.trim().length === 0,
+      )
+    ) return null;
+    const citationRefs = payload.citation_refs as string[];
+    if (new Set(citationRefs).size !== citationRefs.length) return null;
+
+    const itemKey = `${textRu.toLowerCase()}\u0000${textDe.toLowerCase()}`;
+    if (seenItems.has(itemKey)) return null;
+    seenItems.add(itemKey);
+    normalized.push({
+      text_ru: payload.text_ru,
+      text_de: payload.text_de,
+      citation_refs: citationRefs,
+    });
+  }
+  return normalized;
+}
+
+function aiDraft(value: unknown): MedicationAiAnalysis["draft"] {
+  const payload = record(value);
+  if (!Array.isArray(payload.citation_refs)) return null;
+  if (
+    payload.citation_refs.length > AI_DRAFT_MAX_TOTAL_CITATIONS
+    || payload.citation_refs.some(
+      (reference) => typeof reference !== "string" || reference.trim().length === 0,
+    )
+  ) return null;
+  const citationRefs = payload.citation_refs as string[];
+  if (new Set(citationRefs).size !== citationRefs.length) return null;
+
+  const seenItems = new Set<string>();
+  const evidenceSummary = strictAiDraftItems(payload.evidence_summary, {
+    maxItems: AI_DRAFT_MAX_ITEMS,
+    requireItem: false,
+    requireCitation: true,
+  }, seenItems);
+  const verificationQuestions = strictAiDraftItems(payload.verification_questions, {
+    maxItems: AI_DRAFT_MAX_ITEMS,
+    requireItem: false,
+    requireCitation: true,
+  }, seenItems);
+  const limitations = strictAiDraftItems(payload.limitations, {
+    maxItems: AI_DRAFT_MAX_LIMITATIONS,
+    requireItem: true,
+    requireCitation: false,
+  }, seenItems);
+  if (!evidenceSummary || !verificationQuestions || !limitations) return null;
+  const usedCitationRefs = new Set(
+    [...evidenceSummary, ...verificationQuestions, ...limitations]
+      .flatMap((item) => item.citation_refs),
+  );
+  if (
+    usedCitationRefs.size !== citationRefs.length
+    || citationRefs.some((reference) => !usedCitationRefs.has(reference))
+  ) return null;
+  return {
+    evidence_summary: evidenceSummary,
+    verification_questions: verificationQuestions,
+    limitations,
+    citation_refs: citationRefs,
+  };
+}
+
 export function normalizeMedicationEvidenceReviewPreview(
   value: unknown,
 ): MedicationEvidenceReviewPreview {
@@ -494,7 +598,6 @@ export async function fetchMedicationEvidenceReview(
 
 export function normalizeMedicationAiAnalysis(value: unknown): MedicationAiAnalysis {
   const payload = record(value);
-  const draft = record(payload.draft);
   const status = payload.status === "processing"
     || payload.status === "ready"
     || payload.status === "failed"
@@ -510,14 +613,7 @@ export function normalizeMedicationAiAnalysis(value: unknown): MedicationAiAnaly
     completed_at: nullableString(payload.completed_at),
     provider: aiProvider(payload.provider),
     prompt_version: string(payload.prompt_version),
-    draft: Object.keys(draft).length === 0
-      ? null
-      : {
-          evidence_summary: draftItems(draft.evidence_summary),
-          verification_questions: draftItems(draft.verification_questions),
-          limitations: draftItems(draft.limitations),
-          citation_refs: stringArray(draft.citation_refs),
-        },
+    draft: aiDraft(payload.draft),
     error_code: nullableString(payload.error_code),
   };
 }
@@ -540,8 +636,12 @@ export async function createMedicationAiAnalysis(
 export async function fetchMedicationAiAnalysis(
   patientId: string,
   reviewId: string,
+  signal?: AbortSignal,
 ): Promise<MedicationAiAnalysis> {
-  const payload = await get<unknown>(aiAnalysisPath(patientId, reviewId));
+  const path = aiAnalysisPath(patientId, reviewId);
+  const payload = await (signal
+    ? get<unknown>(path, { signal })
+    : get<unknown>(path));
   return normalizeMedicationAiAnalysis(payload);
 }
 

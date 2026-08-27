@@ -1025,8 +1025,13 @@ async fn create_item(
         return response;
     }
     if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) =
-            validate_service_assignment_in_transaction(&mut tx, service_id, assigned_to).await
+        && let Err(response) = ensure_service_assignment_in_transaction(
+            &mut tx,
+            service_id,
+            assigned_to,
+            auth.role == Role::Ceo,
+        )
+        .await
     {
         return response;
     }
@@ -1219,6 +1224,7 @@ async fn update_item(
     };
     let existing = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.status, task.reminder_at,
+                  task.concierge_service_id,
                   task.archived_at,
                   task.updated_at, creator.role AS assigned_by_role
            FROM tasks task
@@ -1243,6 +1249,9 @@ async fn update_item(
     let existing_status = existing.try_get::<String, _>("status").unwrap_or_default();
     let existing_reminder_at = existing
         .try_get::<Option<DateTime<Utc>>, _>("reminder_at")
+        .unwrap_or_default();
+    let existing_service_id = existing
+        .try_get::<Option<Uuid>, _>("concierge_service_id")
         .unwrap_or_default();
     let assigned_by = existing
         .try_get::<Uuid, _>("assigned_by")
@@ -1308,7 +1317,13 @@ async fn update_item(
         Err(response) => return response,
     };
     if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) = validate_service_assignment(&state, service_id, assigned_to).await
+        && let Err(response) = ensure_service_assignment_in_transaction(
+            &mut tx,
+            service_id,
+            assigned_to,
+            existing_service_id == Some(service_id),
+        )
+        .await
     {
         return response;
     }
@@ -2972,71 +2987,71 @@ async fn validate_active_operational_assignee_in_transaction(
     Ok(())
 }
 
-async fn validate_service_assignment_in_transaction(
+async fn ensure_service_assignment_in_transaction(
     tx: &mut Transaction<'_, Postgres>,
     service_id: Uuid,
     assigned_to: Uuid,
+    allow_reassignment: bool,
 ) -> Result<(), axum::response::Response> {
-    let is_safe_assignment = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS (
-               SELECT 1
-               FROM concierge_services cs
-               LEFT JOIN providers p ON p.id = cs.provider_id
-               LEFT JOIN appointments a ON a.id = cs.appointment_id
-               WHERE cs.id = $1
-                 AND cs.assigned_concierge_id = $2
-                 AND (cs.provider_id IS NULL OR p.provider_type = 'non_medical')
-                 AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
-           )"#,
+    let service = sqlx::query(
+        r#"SELECT cs.assigned_concierge_id,
+                  (cs.provider_id IS NULL OR p.provider_type = 'non_medical')
+                  AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
+                      AS is_non_medical
+           FROM concierge_services cs
+           LEFT JOIN providers p ON p.id = cs.provider_id
+           LEFT JOIN appointments a ON a.id = cs.appointment_id
+           WHERE cs.id = $1
+           FOR UPDATE OF cs"#,
     )
     .bind(service_id)
-    .bind(assigned_to)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|error| {
         tracing::error!(error = %error, service_id = %service_id, "validate operational service link");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
-    if !is_safe_assignment {
+    let Some(service) = service else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "concierge_service_id must reference an assigned non-medical service",
+        ));
+    };
+    if !service
+        .try_get::<bool, _>("is_non_medical")
+        .unwrap_or(false)
+    {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "concierge_service_id must reference an assigned non-medical service",
         ));
     }
-    Ok(())
-}
-
-async fn validate_service_assignment(
-    state: &AppState,
-    service_id: Uuid,
-    assigned_to: Uuid,
-) -> Result<(), axum::response::Response> {
-    let is_safe_assignment = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS (
-               SELECT 1
-               FROM concierge_services cs
-               LEFT JOIN providers p ON p.id = cs.provider_id
-               LEFT JOIN appointments a ON a.id = cs.appointment_id
-               WHERE cs.id = $1
-                 AND cs.assigned_concierge_id = $2
-                 AND (cs.provider_id IS NULL OR p.provider_type = 'non_medical')
-                 AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
-           )"#,
+    let current_assignee = service
+        .try_get::<Option<Uuid>, _>("assigned_concierge_id")
+        .unwrap_or_default();
+    if current_assignee == Some(assigned_to) {
+        return Ok(());
+    }
+    if current_assignee.is_some() && !allow_reassignment {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "concierge_service_id must reference an assigned non-medical service",
+        ));
+    }
+    sqlx::query(
+        r#"UPDATE concierge_services
+           SET assigned_concierge_id = $2,
+               updated_at = now()
+           WHERE id = $1"#,
     )
     .bind(service_id)
     .bind(assigned_to)
-    .fetch_one(&state.db)
+    .execute(&mut **tx)
     .await
     .map_err(|error| {
-        tracing::error!(error = %error, service_id = %service_id, "validate operational service link");
+        tracing::error!(error = %error, service_id = %service_id, assigned_to = %assigned_to, "synchronize operational service assignee");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
-    if !is_safe_assignment {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "concierge_service_id must reference an assigned non-medical service",
-        ));
-    }
     Ok(())
 }
 

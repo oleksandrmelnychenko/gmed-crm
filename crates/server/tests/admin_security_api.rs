@@ -134,6 +134,7 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
     };
     let secret = "sk-test-health-secret-must-never-leak";
     let model = "gpt-test-health";
+    let governance_review_id = "gov-review-test-001";
     let state = AppState::new(
         app.suite.pool.clone(),
         TEST_SECRET,
@@ -143,16 +144,16 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
         enabled: true,
         explicitly_configured: true,
         patient_data_transfer_approved: true,
+        governance_review_id: Some(governance_review_id.to_string()),
         openai_api_key: Some(SecretString::from(secret.to_string())),
         openai_model: Some(model.to_string()),
     });
-    let configured_app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(
-        ConnectInfo(
+    let configured_app =
+        gmed_server::build_app_for_role_contract_tests(state).layer(Extension(ConnectInfo(
             "127.0.0.1:40124"
                 .parse::<std::net::SocketAddr>()
                 .expect("valid peer address"),
-        ),
-    ));
+        )));
 
     let (status, body) = json_request(
         &configured_app,
@@ -177,6 +178,7 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
     let serialized = serde_json::to_string(&body).expect("serialize health response");
     for forbidden in [
         secret,
+        governance_review_id,
         "api_key",
         "authorization",
         "instructions",
@@ -189,7 +191,7 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
         "review_id",
         "bundle_id",
         "requested_by",
-        "medication-evidence-draft-v1",
+        "medication-evidence-selection-v1",
     ] {
         assert!(
             !serialized.to_ascii_lowercase().contains(forbidden),

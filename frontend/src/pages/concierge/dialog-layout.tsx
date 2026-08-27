@@ -6,7 +6,7 @@ import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/di
 import { cn } from "@/lib/utils";
 
 export const conciergeDialogContentClassName =
-  "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
+  "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 [&_input]:!text-foreground [&_select]:!text-foreground [&_textarea]:!text-foreground [&_input:disabled]:!opacity-100 [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!opacity-100 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
 
 type DialogTone = "amber" | "dot" | "indigo" | "orange" | "plain" | "slate";
 
@@ -79,21 +79,25 @@ export function ConciergeDialogFooter({ children }: { children: ReactNode }) {
 export function ConciergeDialogSection({
   title,
   icon: Icon,
+  dot = false,
   className,
   children,
 }: {
   title: string;
   icon?: LucideIcon;
+  dot?: boolean;
   className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className={cn("rounded-lg border border-border/70 bg-card p-3 sm:p-4", className)}>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {Icon ? <Icon className="size-3.5 text-primary" /> : null}
-        {title}
-      </h3>
-      {children}
+    <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
+      <div className="border-b border-border/70 bg-muted/20 px-3.5 py-2.5 sm:px-4">
+        <h3 className="flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+          {dot ? <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" /> : Icon ? <Icon className="size-3.5 text-primary" /> : null}
+          {title}
+        </h3>
+      </div>
+      <div className="p-3 sm:p-4">{children}</div>
     </section>
   );
 }

@@ -361,6 +361,24 @@ async fn ceo_can_rescan_review_ready_import_and_clear_previous_draft() {
     .execute(&pool)
     .await
     .unwrap();
+    let document_id: Uuid =
+        sqlx::query_scalar("SELECT document_id FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = 'stale cached OCR', text_extraction_status = 'completed',
+               text_extraction_method = 'parser_ocr', text_extracted_at = now(),
+               text_extracted_by = $2
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, body) = json_request(
         &app,
@@ -379,6 +397,224 @@ async fn ceo_can_rescan_review_ready_import_and_clear_previous_draft() {
     assert!(body["source_language"].is_null());
     assert!(body["parser_version"].is_null());
     assert!(body["error_message"].is_null());
+    assert_eq!(body["force_reextract"], true);
+    assert!(body["replaces_import_id"].is_null());
+
+    let extraction_state = sqlx::query_as::<
+        _,
+        (
+            Option<String>,
+            String,
+            Option<String>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<Uuid>,
+        ),
+    >(
+        r#"SELECT extracted_text, text_extraction_status, text_extraction_method,
+                  text_extracted_at, text_extracted_by
+           FROM documents WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(extraction_state.0.is_none());
+    assert_eq!(extraction_state.1, "not_started");
+    assert!(extraction_state.2.is_none());
+    assert!(extraction_state.3.is_none());
+    assert!(extraction_state.4.is_none());
+}
+
+#[tokio::test]
+async fn applied_import_rescan_creates_auditable_attempt_and_atomically_replaces_lab_results() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("clinical-import-applied-rescan");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let old_import_id =
+        seed_medication_review_import(&pool, patient_id, admin_id, "old-lab", &tag).await;
+    let document_id: Uuid =
+        sqlx::query_scalar("SELECT document_id FROM clinical_document_imports WHERE id = $1")
+            .bind(old_import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET status = 'applied', applied_at = now(), applied_by = $2
+           WHERE id = $1"#,
+    )
+    .bind(old_import_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let old_lab_result_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_lab_results (
+                patient_id, measured_at, panel, analyte_name, result_text,
+                numeric_result, comparator, unit, reference_text,
+                reference_low, reference_high, abnormal_flag, source_country,
+                source_document_id, source_import_id, source_candidate_id,
+                source_page, recorded_by
+           ) VALUES (
+                $1, '2026-01-16T00:00:00Z', 'Trace elements', 'Selen', '250',
+                250, '=', 'µg/l', '100 - 140', 100, 140, 'high', 'DE',
+                $2, $3, 'old-selen', 1, $4
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .bind(old_import_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = 'stale Selen OCR', text_extraction_status = 'completed',
+               text_extraction_method = 'parser_ocr', text_extracted_at = now(),
+               text_extracted_by = $2
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let bearer = auth_header_for(admin_id, "ceo");
+    let (status, queued) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports/{old_import_id}/rescan"),
+        &bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{queued:?}");
+    let new_import_id = Uuid::parse_str(queued["id"].as_str().unwrap()).unwrap();
+    assert_ne!(new_import_id, old_import_id);
+    assert_eq!(queued["status"], "queued");
+    assert_eq!(queued["force_reextract"], true);
+    assert_eq!(queued["replaces_import_id"], old_import_id.to_string());
+    let old_status: String =
+        sqlx::query_scalar("SELECT status FROM clinical_document_imports WHERE id = $1")
+            .bind(old_import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(old_status, "applied");
+    let cached_text: Option<String> =
+        sqlx::query_scalar("SELECT extracted_text FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(cached_text.is_none());
+
+    let reviewed_draft = json!({
+        "candidates": [{
+            "id": "new-selen",
+            "target": "lab_result",
+            "value": "Selen 125 µg/l",
+            "selected": true
+        }],
+        "warnings": []
+    });
+    sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET status = 'applying', draft = $2, reviewed_draft = $2,
+               prepared_identity_gate_version = 1
+           WHERE id = $1"#,
+    )
+    .bind(new_import_id)
+    .bind(&reviewed_draft)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Completion is fail-closed until every reviewed replacement row exists.
+    // The old active observation must remain visible after the rolled-back try.
+    let (status, incomplete) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{new_import_id}/complete"
+        ),
+        &bearer,
+        Some(json!({ "reviewed_draft": reviewed_draft.clone() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{incomplete:?}");
+    let old_deleted_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT deleted_at FROM patient_lab_results WHERE id = $1")
+            .bind(old_lab_result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(old_deleted_at.is_none());
+
+    let new_lab_result_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_lab_results (
+                patient_id, measured_at, panel, analyte_name, result_text,
+                numeric_result, comparator, unit, reference_text,
+                reference_low, reference_high, abnormal_flag, source_country,
+                source_import_id, source_candidate_id, source_page, recorded_by
+           ) VALUES (
+                $1, '2026-01-16T00:00:00Z', 'Trace elements', 'Selen', '125',
+                125, '=', 'µg/l', '100 - 140', 100, 140, 'normal', 'DE',
+                $2, 'new-selen', 1, $3
+           ) RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(new_import_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, completed) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{patient_id}/clinical-document-imports/{new_import_id}/complete"
+        ),
+        &bearer,
+        Some(json!({ "reviewed_draft": reviewed_draft })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed:?}");
+    assert_eq!(completed["status"], "applied");
+
+    let old_deletion = sqlx::query_as::<
+        _,
+        (
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<Uuid>,
+            Option<String>,
+        ),
+    >(
+        "SELECT deleted_at, deleted_by, deletion_note FROM patient_lab_results WHERE id = $1",
+    )
+    .bind(old_lab_result_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(old_deletion.0.is_some());
+    assert_eq!(old_deletion.1, Some(admin_id));
+    let expected_deletion_note = format!("Superseded by reviewed rescan {new_import_id}");
+    assert_eq!(
+        old_deletion.2.as_deref(),
+        Some(expected_deletion_note.as_str())
+    );
+    let new_deleted_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT deleted_at FROM patient_lab_results WHERE id = $1")
+            .bind(new_lab_result_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(new_deleted_at.is_none());
 }
 
 #[tokio::test]
@@ -1753,6 +1989,7 @@ async fn ceo_can_persist_and_read_lab_results_during_clinical_import_review() {
             "result_text": "6.1",
             "numeric_result": 6.1,
             "unit": "10^9/L",
+            "interpretation_note": "Risk bands are documented in the source laboratory report.",
             "abnormal_flag": "normal",
             "source_country": "DE",
         })),
@@ -1772,6 +2009,10 @@ async fn ceo_can_persist_and_read_lab_results_during_clinical_import_review() {
     assert_eq!(listed["count"], 1);
     assert_eq!(listed["items"][0]["analyte_name"], "Leukocytes");
     assert_eq!(listed["items"][0]["measured_at_precision"], "datetime");
+    assert_eq!(
+        listed["items"][0]["interpretation_note"],
+        "Risk bands are documented in the source laboratory report."
+    );
 }
 
 #[tokio::test]
@@ -1824,6 +2065,7 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
         "reference_text": "4.000 - 10.000 /μL",
         "reference_low": 4000.0,
         "reference_high": 10000.0,
+        "interpretation_note": "Verified source-specific reference tree.",
         "abnormal_flag": "high",
         "correction_note": "OCR digit checked against source document",
     });
@@ -1930,6 +2172,10 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
     assert_eq!(corrected["item"]["result_text"], "14.000");
     assert_eq!(corrected["item"]["numeric_result"], 14000.0);
     assert_eq!(corrected["item"]["measured_at_precision"], "date");
+    assert_eq!(
+        corrected["item"]["interpretation_note"],
+        "Verified source-specific reference tree."
+    );
     assert_eq!(corrected["item"]["source_country"], "DE");
     assert_eq!(
         corrected["item"]["source_document_id"],
@@ -2011,6 +2257,10 @@ async fn ceo_can_correct_imported_lab_result_without_mutating_provenance() {
     .unwrap();
     assert_eq!(audit.0["result_text"], "13.2");
     assert_eq!(audit.1["result_text"], "14.000");
+    assert_eq!(
+        audit.1["interpretation_note"],
+        "Verified source-specific reference tree."
+    );
     assert_eq!(
         audit.2["reason"],
         "OCR digit checked against source document"

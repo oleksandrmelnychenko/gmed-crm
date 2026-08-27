@@ -419,6 +419,23 @@ Toxischer Bereich\t> 150 (ng/ml)\t150
     assert rows[0].normalized["reference_text"] == "< 200"
     assert rows[2].normalized["unit"] == "ng/ml"
     assert rows[2].normalized["reference_text"] == "> 30"
+    assert rows[0].normalized["interpretation_note"] == (
+        "grenzwertig\t200 - 239 (mg/dl)\t200\n"
+        "abklärungsbedürftig\t>= 240 (mg/dl)\t240"
+    )
+    assert rows[1].normalized["interpretation_note"] == (
+        "bei moderatem Risiko\t< 130 (mg/dl)\t130\n"
+        "bei hohem Risiko\t< 100 (mg/dl)\t100\n"
+        "bei sehr hohem Risiko\t< 85 (mg/dl)\t85\n"
+        "niedrig\t< 1\t1\n"
+        "mittel\t1 - 3\t3\n"
+        "hoch\t> 3\t3"
+    )
+    assert rows[2].normalized["interpretation_note"] == (
+        "Graubereich\t20 - 29 (ng/ml)\t29\n"
+        "Mangel\t< 20 (ng/ml)\t20\n"
+        "Toxischer Bereich\t> 150 (ng/ml)\t150"
+    )
 
 
 def test_malformed_laboratory_reference_requires_manual_confirmation() -> None:
@@ -429,6 +446,192 @@ def test_malformed_laboratory_reference_requires_manual_confirmation() -> None:
 
     assert row.selected is False
     assert "laboratory_reference_requires_confirmation" in row.normalized["review_reasons"]
+
+
+def test_becker_dated_normwert_rows_recover_fragmented_ranges_and_units() -> None:
+    text = """
+Testbezeichnung
+07.01.26
+Normwert
+Hämatologie
+Magnesium intraerythrozytär\t2.00\t(\t1.65\t2.65\t)mmol/l
+Eisen\t73\t70\t180\t) μg/dl
+Ferritin\t56\t20\t250\t) µg/l
+Selen (Se)\t108\t50\t120\tμg/l
+"""
+
+    rows = [item for item in parse_clinical_text(text).candidates if item.target == "lab_result"]
+
+    assert [row.normalized["analyte_name"] for row in rows] == [
+        "Magnesium intraerythrozytär",
+        "Eisen",
+        "Ferritin",
+        "Selen (Se)",
+    ]
+    assert [row.normalized["numeric_result"] for row in rows] == [2, 73, 56, 108]
+    assert [row.normalized["unit"] for row in rows] == [
+        "mmol/l",
+        "μg/dl",
+        "µg/l",
+        "μg/l",
+    ]
+    assert [row.normalized["reference_low"] for row in rows] == [1.65, 70, 20, 50]
+    assert [row.normalized["reference_high"] for row in rows] == [2.65, 180, 250, 120]
+    assert all(row.normalized["abnormal_flag"] == "normal" for row in rows)
+    assert all(row.selected for row in rows)
+
+
+def test_paddle_style_split_range_and_comparator_cells_are_normalized() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "Hämoglobin\t15.4\t(\t13.5\t-\t17.5\t) g/dl\n"
+        "GOT (ASAT)\t15\t<\t50\t) U/I"
+    )
+    rows = {
+        item.normalized["analyte_name"]: item
+        for item in draft.candidates
+        if item.target == "lab_result"
+    }
+
+    assert rows["Hämoglobin"].normalized["numeric_result"] == 15.4
+    assert rows["Hämoglobin"].normalized["reference_text"] == "13.5 - 17.5"
+    assert rows["Hämoglobin"].normalized["unit"] == "g/dl"
+    assert rows["GOT (ASAT)"].normalized["reference_text"] == "< 50"
+    assert rows["GOT (ASAT)"].normalized["unit"] == "U/l"
+    assert all(row.selected for row in rows.values())
+
+
+def test_context_rows_and_narrative_are_notes_not_analytes() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "Selen (Se)\t108\t50\t120\t) μg/l\n"
+        "BAT-Wert\t<\t150\n"
+        "BAR-Wert\t<\t100\n"
+        "Serotonin (HPLC)\t170\t<\t200\t) μg/l\n"
+        "Foregut- und Hindgut-Tumore benötigen eine ergänzende Einordnung.\n"
+        "Weitere Marker können für die Befundbewertung erforderlich sein.\n"
+        "ba Diese Untersuchung wurde in einem anderen Laborkontext durchgeführt."
+    )
+    rows = [
+        item for item in draft.candidates if item.target == "lab_result"
+    ]
+
+    assert [row.normalized["analyte_name"] for row in rows] == [
+        "Selen (Se)",
+        "Serotonin (HPLC)",
+    ]
+    assert rows[0].normalized["interpretation_note"] == "BAT-Wert\t<\t150\nBAR-Wert\t<\t100"
+    assert rows[1].normalized["interpretation_note"] == (
+        "Foregut- und Hindgut-Tumore benötigen eine ergänzende Einordnung.\n"
+        "Weitere Marker können für die Befundbewertung erforderlich sein."
+    )
+
+
+def test_wrapped_context_notes_remain_attached_to_their_observation() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "LDL-Cholesterin\t124\tmg/dl\n"
+        "Zielwerte (nach Leitlinie)\t116\n"
+        "bei niedrigem Risiko\t<\t)\n"
+        "Insulin\t6.3\t(\t2.0\t.\t23.0\t) mU/I\n"
+        "Die Bestimmung kann durch Antikörper im Serum gestört\n"
+        "werden.\n"
+        "Cortisol\t106\tμg/l\n"
+        "morgens vor 10 Uhr\t37 - 194\n"
+        "abends nach 17 Uhr\tU\t29 - 173\t~\n"
+        "Ak g. TSH-Rezeptor (TRAK)\t<1.26\t<\t3.10\t)IU/\n"
+        "Bite beachten Sie den geänderten Referenzbereich. Bedingt durch eine Methodenumstellung\n"
+        "liegen die Testergebnisse höher."
+    )
+    rows = {
+        item.normalized["analyte_name"]: item
+        for item in draft.candidates
+        if item.target == "lab_result"
+    }
+
+    assert rows["LDL-Cholesterin"].normalized["interpretation_note"] == (
+        "Zielwerte (nach Leitlinie)\nbei niedrigem Risiko\t<\t116"
+    )
+    assert rows["Insulin"].normalized["interpretation_note"].endswith("\nwerden.")
+    assert "morgens vor 10 Uhr\t37 - 194" in rows["Cortisol"].normalized[
+        "interpretation_note"
+    ]
+    assert "abends nach 17 Uhr\tU\t29 - 173\t~" in rows["Cortisol"].normalized[
+        "interpretation_note"
+    ]
+    assert "Methodenumstellung" in rows["Ak g. TSH-Rezeptor (TRAK)"].normalized[
+        "interpretation_note"
+    ]
+
+
+def test_laboratory_interpretation_note_is_bounded_and_fails_closed() -> None:
+    narrative = "\n".join(
+        f"Der altersentsprechende Median benötigt longtoken {index} zur Einordnung."
+        for index in range(120)
+    )
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "GFR (CKD-EPI-Formel)\t88\t>\t60\t) ml/min\n"
+        f"{narrative}"
+    )
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+    note = row.normalized["interpretation_note"]
+
+    assert len(note) <= 4000
+    assert not note.endswith("longtok")
+    assert "laboratory_interpretation_truncated" in row.normalized["review_reasons"]
+    assert row.selected is False
+
+
+def test_dated_normwert_row_recovers_unit_split_from_reference_cell() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\nFerritin\t20 - 250\t(µg/l)\t56"
+    )
+    row = next(item for item in draft.candidates if item.target == "lab_result")
+
+    assert row.normalized["result_text"] == "56"
+    assert row.normalized["unit"] == "µg/l"
+    assert row.normalized["reference_low"] == 20
+    assert row.normalized["reference_high"] == 250
+
+
+def test_dated_normwert_row_recovers_reference_wrapped_across_two_lines() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "Thrombozyten\t256\t(\t146\n"
+        ".\n"
+        "328\t)Tsd./μl"
+    )
+    rows = [item for item in draft.candidates if item.target == "lab_result"]
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.normalized["analyte_name"] == "Thrombozyten"
+    assert row.normalized["result_text"] == "256"
+    assert row.normalized["unit"] == "Tsd./μl"
+    assert row.normalized["reference_low"] == 146
+    assert row.normalized["reference_high"] == 328
+    assert row.selected is True
+
+
+def test_dated_normwert_row_preserves_damaged_result_as_one_review_candidate() -> None:
+    draft = parse_clinical_text(
+        "Testbezeichnung\n07.01.26\nNormwert\n"
+        "Monozyten\tL'8\t)\t00\t.\t12.0\t) %"
+    )
+    rows = [item for item in draft.candidates if item.target == "lab_result"]
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.normalized["analyte_name"] == "Monozyten"
+    assert row.normalized["result_text"] == "L'8"
+    assert row.normalized["unit"] == "%"
+    assert row.normalized["reference_text"] == "00 - 12.0"
+    assert row.normalized["numeric_result"] is None
+    assert row.normalized["review_reasons"] == [
+        "laboratory_result_requires_confirmation"
+    ]
+    assert row.selected is False
 
 
 def test_dated_normwert_scan_recovers_headerless_first_page_and_split_rows() -> None:

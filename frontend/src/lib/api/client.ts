@@ -5,9 +5,13 @@
 
 import { apiFetch } from "@/lib/api";
 
+type GetOptions = {
+  signal?: AbortSignal;
+};
+
 /** GET shorthand */
-export function get<T>(path: string): Promise<T> {
-  return apiFetch<T>(path);
+export function get<T>(path: string, options: GetOptions = {}): Promise<T> {
+  return apiFetch<T>(path, options);
 }
 
 /** POST with JSON body */

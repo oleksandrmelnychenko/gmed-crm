@@ -34,6 +34,7 @@ export type PatientLabResultCorrectionForm = {
   referenceText: string;
   referenceLow: string;
   referenceHigh: string;
+  interpretationNote: string;
   abnormalFlag: PatientLabResult["abnormal_flag"];
   correctionNote: string;
 };
@@ -49,6 +50,7 @@ export type PatientLabCorrectionValidationError =
   | "reference_text"
   | "reference_low"
   | "reference_high"
+  | "interpretation_note"
   | "reference_range"
   | "result_numeric_mismatch"
   | "result_comparator_mismatch"
@@ -94,6 +96,7 @@ export function patientLabCorrectionFormFromResult(
     referenceText: result.reference_text ?? "",
     referenceLow: numberToForm(result.reference_low),
     referenceHigh: numberToForm(result.reference_high),
+    interpretationNote: result.interpretation_note ?? "",
     abnormalFlag: result.abnormal_flag,
     correctionNote: "",
   };
@@ -326,6 +329,7 @@ export function buildPatientLabCorrectionPayload(
   const laboratoryName = form.laboratoryName.trim();
   const unit = form.unit.trim();
   const referenceText = form.referenceText.trim();
+  const interpretationNote = form.interpretationNote.trim();
 
   let measuredAt: string;
   if (form.measuredAtPrecision === "date") {
@@ -345,6 +349,7 @@ export function buildPatientLabCorrectionPayload(
   if (laboratoryName.length > 160) return { ok: false, error: "laboratory_name" };
   if (unit.length > 80) return { ok: false, error: "unit" };
   if (referenceText.length > 240) return { ok: false, error: "reference_text" };
+  if (interpretationNote.length > 4000) return { ok: false, error: "interpretation_note" };
   if (!correctionNote || Array.from(correctionNote).length > 500) {
     return { ok: false, error: "correction_note" };
   }
@@ -409,6 +414,7 @@ export function buildPatientLabCorrectionPayload(
       reference_text: referenceText || null,
       reference_low: referenceLow.value,
       reference_high: referenceHigh.value,
+      interpretation_note: interpretationNote || null,
       abnormal_flag: form.abnormalFlag,
       correction_note: correctionNote,
     },
@@ -425,6 +431,7 @@ function validationErrorLabel(error: PatientLabCorrectionValidationError, tx: Bi
     numeric_result: tx("Числовое значение имеет неверный формат.", "Der numerische Wert hat ein ungültiges Format."),
     unit: tx("Единица не должна превышать 80 символов.", "Die Einheit darf höchstens 80 Zeichen enthalten."),
     reference_text: tx("Референс не должен превышать 240 символов.", "Die Referenz darf höchstens 240 Zeichen enthalten."),
+    interpretation_note: tx("Примечание не должно превышать 4000 символов.", "Der Hinweis darf höchstens 4000 Zeichen enthalten."),
     reference_low: tx("Нижняя граница имеет неверный формат.", "Die Untergrenze hat ein ungültiges Format."),
     reference_high: tx("Верхняя граница имеет неверный формат.", "Die Obergrenze hat ein ungültiges Format."),
     reference_range: tx("Нижняя граница не может быть выше верхней.", "Die Untergrenze darf nicht über der Obergrenze liegen."),
@@ -760,6 +767,22 @@ export function PatientLabResultEditSheet({
                 />
               </Field>
             </div>
+            <Field
+              label={tx("Примечание и дерево референсов", "Hinweis und Referenzstruktur")}
+              htmlFor="lab-correction-interpretation-note"
+            >
+              <textarea
+                id="lab-correction-interpretation-note"
+                value={form.interpretationNote}
+                onChange={(event) => patchForm({ interpretationNote: event.target.value })}
+                className={cn(textareaClass, "min-h-[96px]")}
+                maxLength={4000}
+                placeholder={tx(
+                  "Пороговые значения, группы риска и пояснения лаборатории",
+                  "Grenzwerte, Risikogruppen und Laborhinweise",
+                )}
+              />
+            </Field>
           </FormSection>
 
           <FormSection title={tx("Причина исправления", "Korrekturgrund")}>

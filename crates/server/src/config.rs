@@ -27,7 +27,7 @@ pub struct Config {
     pub gba_ais_download_url: Option<SecretString>,
     /// Optional external AI used only to draft a privacy-minimised medication
     /// evidence summary. External calls are possible only when both explicit
-    /// feature and data-transfer gates are enabled.
+    /// gates and a bounded environment governance-review identifier are present.
     pub medication_ai: MedicationAiConfig,
 }
 
@@ -36,6 +36,9 @@ pub struct MedicationAiConfig {
     pub enabled: bool,
     pub explicitly_configured: bool,
     pub patient_data_transfer_approved: bool,
+    /// Opaque identifier of the environment-specific governance approval.
+    /// Kept server-side and intentionally excluded from capability payloads.
+    pub governance_review_id: Option<String>,
     pub openai_api_key: Option<SecretString>,
     pub openai_model: Option<String>,
 }
@@ -109,6 +112,11 @@ impl Config {
             env_flag("GMED_MEDICATION_AI_ENABLED");
         let (patient_data_transfer_approved, _) =
             env_flag("GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED");
+        let governance_review_id =
+            std::env::var("GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
         let openai_api_key = std::env::var("GMED_OPENAI_API_KEY")
             .ok()
             .map(|value| value.trim().to_string())
@@ -141,6 +149,7 @@ impl Config {
                 enabled: medication_ai_enabled,
                 explicitly_configured: medication_ai_explicitly_configured,
                 patient_data_transfer_approved,
+                governance_review_id,
                 openai_api_key,
                 openai_model,
             },

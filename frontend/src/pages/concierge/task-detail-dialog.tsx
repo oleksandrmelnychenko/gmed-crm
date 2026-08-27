@@ -3,12 +3,14 @@ import {
   Building2,
   Cake,
   Check,
+  ChevronDown,
   Circle,
   ExternalLink,
   ListChecks,
   LoaderCircle,
   MessageSquareText,
   Plus,
+  ReceiptText,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -44,6 +46,20 @@ import {
   ConciergeDialogBody,
   ConciergeDialogHeader,
 } from "./dialog-layout";
+import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
+import {
+  downloadConciergeExpenseReceipt,
+  getConciergeExpenseContext,
+  getConciergeExpenses,
+  uploadConciergeExpense,
+} from "./expense-receipt-api";
+import type {
+  ConciergeExpenseContext,
+  ConciergeExpenseItem,
+  ConciergeExpenseMutationResponse,
+  ConciergeExpenseSubmitInput,
+} from "./expense-receipt-model";
+import type { ConciergeService } from "./model";
 import { ConciergeTaskAttachments } from "./task-attachments";
 
 const copy = {
@@ -101,6 +117,16 @@ const copy = {
     cancel: "Abbrechen",
     overview: "Aufgabendaten",
     links: "Verknüpfungen",
+    expenses: "Ausgaben",
+    addExpense: "Ausgabe erfassen",
+    emptyExpenses: "Für diesen Service wurden noch keine Ausgaben erfasst.",
+    expenseLoadFailed: "Die Ausgaben des verknüpften Services konnten nicht geladen werden.",
+    pending_review: "Zur Prüfung",
+    posted: "Bestätigt",
+    rejected: "Abgelehnt",
+    reversed: "Storniert",
+    noReceipt: "Kein Beleg",
+    downloadReceipt: "Beleg herunterladen",
   },
   ru: {
     loading: "Загрузка задачи",
@@ -156,10 +182,21 @@ const copy = {
     cancel: "Отмена",
     overview: "Данные задачи",
     links: "Связи",
+    expenses: "Расходы",
+    addExpense: "Добавить расход",
+    emptyExpenses: "По связанному сервису расходы ещё не добавлены.",
+    expenseLoadFailed: "Не удалось загрузить расходы связанного сервиса.",
+    pending_review: "На проверке",
+    posted: "Подтверждено",
+    rejected: "Отклонено",
+    reversed: "Отменено",
+    noReceipt: "Документа нет",
+    downloadReceipt: "Скачать подтверждение",
   },
 } as const;
 
 const CHILD_REALTIME_EVENTS = [
+  "concierge_operational_item.updated",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.checklist_item_added",
   "concierge_operational_item.checklist_item_toggled",
@@ -182,6 +219,34 @@ function dateOnly(value: string | null, lang: Lang) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
+}
+
+function expenseMoney(value: string, currency: string, lang: Lang) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return `${value} ${currency}`;
+  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    style: "currency",
+    currency: currency || "EUR",
+  }).format(amount);
+}
+
+function expenseStatusClassName(status: ConciergeExpenseItem["status"]) {
+  if (status === "posted") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "rejected" || status === "reversed") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function taskPriorityClassName(priority: string) {
+  if (priority === "urgent") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (priority === "high") return "border-orange-200 bg-orange-50 text-orange-700";
+  if (priority === "low") return "border-slate-200 bg-slate-50 text-slate-600";
+  return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+function taskAudienceClassName(audience: string) {
+  return audience === "external"
+    ? "border-violet-200 bg-violet-50 text-violet-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
 function TaskDetailSection({
@@ -240,6 +305,14 @@ export function ConciergeTaskDetailDialog({
   const [checklistLabel, setChecklistLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [expenseService, setExpenseService] = useState<ConciergeService | null>(null);
+  const [expenseContext, setExpenseContext] = useState<ConciergeExpenseContext | null>(null);
+  const [expenseItems, setExpenseItems] = useState<ConciergeExpenseItem[]>([]);
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseError, setExpenseError] = useState("");
+  const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
+  const [submittingExpense, setSubmittingExpense] = useState(false);
+  const [expenseProgress, setExpenseProgress] = useState(0);
   const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
   const canDelete = detail ? canDeleteConciergeTask(detail.item, user?.id, user?.role) : false;
   const canChangeStatus = detail
@@ -248,6 +321,16 @@ export function ConciergeTaskDetailDialog({
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
   const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
+  const expenseLoadSequenceRef = useRef(0);
+  const canReadLinkedExpenses = Boolean(
+    detail?.item.concierge_service_id
+    && (user?.role === "ceo" || user?.role === "billing" || user?.role === "concierge"),
+  );
+  const canSubmitLinkedExpense = Boolean(
+    expenseService
+    && (user?.role === "ceo"
+      || (user?.role === "concierge" && expenseService.assigned_concierge_id === user.id)),
+  );
 
   const load = useCallback(async () => {
     if (!taskId) return;
@@ -279,6 +362,43 @@ export function ConciergeTaskDetailDialog({
     toggleRequestRef.current = null;
     void load();
   }, [load, open]);
+
+  useEffect(() => {
+    const serviceId = detail?.item.concierge_service_id;
+    const loadSequence = expenseLoadSequenceRef.current + 1;
+    expenseLoadSequenceRef.current = loadSequence;
+    setExpenseDialogOpen(false);
+    setExpenseService(null);
+    setExpenseContext(null);
+    setExpenseItems([]);
+    setExpenseError("");
+    setExpenseProgress(0);
+
+    if (!open || !serviceId || !canReadLinkedExpenses) {
+      setExpenseLoading(false);
+      return;
+    }
+
+    setExpenseLoading(true);
+    void Promise.all([
+      apiFetch<ConciergeService>(`/concierge-services/${serviceId}`, { forceFresh: true }),
+      getConciergeExpenseContext(serviceId),
+      getConciergeExpenses(serviceId),
+    ])
+      .then(([service, context, history]) => {
+        if (expenseLoadSequenceRef.current !== loadSequence) return;
+        setExpenseService(service);
+        setExpenseContext(context);
+        setExpenseItems(history.items);
+      })
+      .catch(() => {
+        if (expenseLoadSequenceRef.current !== loadSequence) return;
+        setExpenseError(labels.expenseLoadFailed);
+      })
+      .finally(() => {
+        if (expenseLoadSequenceRef.current === loadSequence) setExpenseLoading(false);
+      });
+  }, [canReadLinkedExpenses, detail?.item.concierge_service_id, labels.expenseLoadFailed, open]);
 
   async function addComment() {
     if (!taskId || !comment.trim() || busy) return;
@@ -422,8 +542,62 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function submitLinkedExpense(
+    input: ConciergeExpenseSubmitInput,
+  ): Promise<ConciergeExpenseMutationResponse> {
+    if (!expenseService || submittingExpense || !canSubmitLinkedExpense) {
+      throw new Error(labels.expenseLoadFailed);
+    }
+    setSubmittingExpense(true);
+    setExpenseError("");
+    setExpenseProgress(0);
+    try {
+      const response = await uploadConciergeExpense(
+        expenseService.id,
+        input,
+        setExpenseProgress,
+      );
+      setExpenseItems((current) => [
+        response.item,
+        ...current.filter((item) => item.id !== response.item.id),
+      ]);
+      clearApiCache(`/concierge-services/${expenseService.id}/expenses`);
+      onChanged();
+      return response;
+    } catch (submitError) {
+      setExpenseError(
+        submitError instanceof Error ? submitError.message : labels.expenseLoadFailed,
+      );
+      throw submitError;
+    } finally {
+      setSubmittingExpense(false);
+    }
+  }
+
+  async function downloadLinkedExpenseReceipt(item: ConciergeExpenseItem) {
+    if (!expenseService || !item.receipt) return;
+    setExpenseError("");
+    try {
+      await downloadConciergeExpenseReceipt(
+        expenseService.id,
+        item.id,
+        item.receipt.original_filename,
+      );
+    } catch (downloadError) {
+      setExpenseError(
+        downloadError instanceof Error ? downloadError.message : labels.expenseLoadFailed,
+      );
+      throw downloadError;
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog
+        open={open}
+        dirty={false}
+        onOpenChange={onOpenChange}
+      >
       <DialogContent className={conciergeDialogContentClassName} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
@@ -461,8 +635,8 @@ export function ConciergeTaskDetailDialog({
                       <Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
                     )}
                   />
-                  <TaskDetailRow label={labels.priority} value={<Badge variant="outline" className="rounded-full">{labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>} />
-                  <TaskDetailRow label={labels.category} value={<Badge variant="outline" className="rounded-full">{detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>} />
+                  <TaskDetailRow label={labels.priority} value={<Badge variant="outline" className={cn("rounded-full", taskPriorityClassName(detail.item.priority))}>{labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>} />
+                  <TaskDetailRow label={labels.category} value={<Badge variant="outline" className={cn("rounded-full", taskAudienceClassName(detail.item.task_audience))}>{detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>} />
                 </div>
               </TaskDetailSection>
 
@@ -485,6 +659,70 @@ export function ConciergeTaskDetailDialog({
                     ) : null}
                     {detail.item.task_audience === "external" ? <TaskDetailRow label={labels.externalAssignee} value={<><p>{detail.item.external_assignee_name || "—"}</p><p className="mt-0.5 text-xs font-normal text-muted-foreground">{[detail.item.external_assignee_phone, detail.item.external_assignee_email].filter(Boolean).join(" · ")}</p></>} /> : null}
                   </div>
+                </TaskDetailSection>
+              ) : null}
+
+              {canReadLinkedExpenses ? (
+                <TaskDetailSection
+                  title={labels.expenses}
+                  action={canSubmitLinkedExpense ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8"
+                      disabled={expenseLoading || submittingExpense || Boolean(detail.item.archived_at)}
+                      onClick={() => setExpenseDialogOpen(true)}
+                    >
+                      {expenseLoading ? <LoaderCircle className="animate-spin" /> : <ReceiptText />}
+                      {labels.addExpense}
+                    </Button>
+                  ) : undefined}
+                >
+                  {expenseError ? (
+                    <p role="alert" className="border-b border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-700">
+                      {expenseError}
+                    </p>
+                  ) : null}
+                  {expenseLoading ? (
+                    <div className="flex items-center justify-center gap-2 px-3.5 py-6 text-xs text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {labels.loading}
+                    </div>
+                  ) : expenseItems.length === 0 ? (
+                    <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyExpenses}</p>
+                  ) : (
+                    <div className="divide-y divide-border/60">
+                      {expenseItems.map((item) => (
+                        <article key={item.id} className="flex flex-col gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <strong className="truncate text-sm text-foreground">{item.vendor}</strong>
+                              <Badge variant="outline" className={cn("rounded-full text-[10px]", expenseStatusClassName(item.status))}>
+                                {labels[item.status]}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {dateOnly(item.expense_date, lang)} · {expenseMoney(item.amount_gross, item.currency, lang)}
+                            </p>
+                          </div>
+                          {item.receipt ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-8 shrink-0"
+                              onClick={() => void downloadLinkedExpenseReceipt(item)}
+                            >
+                              <ReceiptText />
+                              {labels.downloadReceipt}
+                            </Button>
+                          ) : (
+                            <Badge variant="secondary" className="w-fit rounded-full text-[10px]">{labels.noReceipt}</Badge>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </TaskDetailSection>
               ) : null}
 
@@ -511,11 +749,19 @@ export function ConciergeTaskDetailDialog({
               </TaskDetailSection>
             </div>
 
-            <TaskDetailSection title={labels.history}>
-              <div className="divide-y divide-border/60">
+            <details className="group overflow-hidden rounded-lg border border-border/70 bg-card">
+              <summary className="flex min-w-0 cursor-pointer list-none items-center justify-between gap-3 bg-muted/20 px-3.5 py-2.5 transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+                  <span className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{labels.history}</span>
+                  <Badge variant="secondary" className="rounded-full">{detail.history.length}</Badge>
+                </span>
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="divide-y divide-border/60 border-t border-border/70">
                 {detail.history.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at, lang)}</time></div>)}
               </div>
-            </TaskDetailSection>
+            </details>
             </div>
           ) : null}
         </ConciergeDialogBody>
@@ -531,6 +777,41 @@ export function ConciergeTaskDetailDialog({
         onCancel={() => setDeleteConfirmOpen(false)}
         onConfirm={() => void deleteTask()}
       />
-    </Dialog>
+      </Dialog>
+      <ConciergeExpenseReceiptDialog
+        service={expenseService}
+        lang={lang}
+        open={expenseDialogOpen}
+        context={expenseContext}
+        expenses={expenseItems}
+        loading={expenseLoading}
+        error={expenseError}
+        submitting={submittingExpense}
+        progress={expenseProgress}
+        vendorSuggestions={[
+          ...(detail?.item.provider_name ? [{
+            id: `provider:${detail.item.provider_id ?? detail.item.provider_name}`,
+            value: detail.item.provider_name,
+            description: labels.provider,
+          }] : []),
+          ...(detail?.item.external_assignee_name ? [{
+            id: `external:${detail.item.external_assignee_name}`,
+            value: detail.item.external_assignee_name,
+            description: labels.externalAssignee,
+          }] : []),
+          ...(detail?.item.assigned_to_name ? [{
+            id: `user:${detail.item.assigned_to}`,
+            value: detail.item.assigned_to_name,
+            description: labels.assignee,
+          }] : []),
+        ]}
+        onOpenChange={(nextOpen) => {
+          setExpenseDialogOpen(nextOpen);
+          if (!nextOpen) setExpenseProgress(0);
+        }}
+        onSubmit={submitLinkedExpense}
+        onDownload={downloadLinkedExpenseReceipt}
+      />
+    </>
   );
 }

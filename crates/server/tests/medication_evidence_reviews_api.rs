@@ -19,6 +19,7 @@ use gmed_server::state::AppState;
 use secrecy::SecretString;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
+const TEST_GOVERNANCE_REVIEW_ID: &str = "governance-review-test-v1";
 
 async fn json_request(
     app: &axum::Router,
@@ -51,6 +52,10 @@ fn auth_header_for(user_id: Uuid, role: &str) -> String {
 }
 
 fn ai_enabled_app(pool: PgPool) -> axum::Router {
+    ai_enabled_app_with_governance(pool, TEST_GOVERNANCE_REVIEW_ID)
+}
+
+fn ai_enabled_app_with_governance(pool: PgPool, governance_review_id: &str) -> axum::Router {
     let state = AppState::new(
         pool,
         TEST_SECRET,
@@ -62,6 +67,7 @@ fn ai_enabled_app(pool: PgPool) -> axum::Router {
         patient_data_transfer_approved: true,
         openai_api_key: Some(SecretString::from("test-server-only-key".to_string())),
         openai_model: Some("gpt-test".to_string()),
+        governance_review_id: Some(governance_review_id.to_string()),
     });
     gmed_server::build_app_for_role_contract_tests(state).layer(axum::Extension(
         axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 40124))),
@@ -543,6 +549,48 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
             .unwrap();
     assert_eq!(injected_rows, 0);
 
+    let review_uuid = Uuid::parse_str(review_id).unwrap();
+    let bundle_uuid = Uuid::parse_str(review["review"]["bundle_id"].as_str().unwrap()).unwrap();
+    let legacy_writer = sqlx::query(
+        r#"INSERT INTO medication_ai_analyses
+               (patient_id, review_id, bundle_id, provider_kind, provider_model,
+                prompt_version, input_fingerprint, idempotency_key, requested_by)
+           VALUES ($1, $2, $3, 'openai', 'gpt-test',
+                   'medication-evidence-selection-v1', $4, $5, $6)"#,
+    )
+    .bind(patient_id)
+    .bind(review_uuid)
+    .bind(bundle_uuid)
+    .bind("c".repeat(64))
+    .bind(format!("legacy-ai-writer-{patient_id}"))
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        legacy_writer.is_err(),
+        "a pre-governance writer must fail closed after the migration"
+    );
+    let reserved_sentinel_writer = sqlx::query(
+        r#"INSERT INTO medication_ai_analyses
+               (patient_id, review_id, bundle_id, provider_kind, provider_model,
+                prompt_version, governance_review_id, input_fingerprint,
+                idempotency_key, requested_by)
+           VALUES ($1, $2, $3, 'openai', 'gpt-test',
+                   'medication-evidence-selection-v1', 'legacy-unrecorded', $4, $5, $6)"#,
+    )
+    .bind(patient_id)
+    .bind(review_uuid)
+    .bind(bundle_uuid)
+    .bind("d".repeat(64))
+    .bind(format!("reserved-ai-writer-{patient_id}"))
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        reserved_sentinel_writer.is_err(),
+        "new jobs must never use the historical provenance sentinel"
+    );
+
     let ai_key = format!("ai-job-{patient_id}");
     let (created_status, created) = json_request(
         &ai_app,
@@ -556,7 +604,10 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     assert_eq!(created["status"], "requested");
     assert_eq!(created["provider"]["kind"], "openai");
     assert_eq!(created["provider"]["model"], "gpt-test");
-    assert_eq!(created["prompt_version"], "medication-evidence-draft-v1");
+    assert_eq!(
+        created["prompt_version"],
+        "medication-evidence-selection-v1"
+    );
     assert!(created["draft"].is_null());
 
     let (replay_status, replay) = json_request(
@@ -571,6 +622,41 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     assert_eq!(replay["id"], created["id"]);
 
     let analysis_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let primary_idempotency_analysis: Uuid = sqlx::query_scalar(
+        r#"SELECT analysis_id
+           FROM medication_ai_analysis_idempotency_keys
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(ctx.admin_id)
+    .bind(&ai_key)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(primary_idempotency_analysis, analysis_id);
+    let stored_governance_review_id: String = sqlx::query_scalar(
+        "SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1",
+    )
+    .bind(analysis_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_governance_review_id, TEST_GOVERNANCE_REVIEW_ID);
+
+    let provenance_rewrite = sqlx::query(
+        r#"UPDATE medication_ai_analyses
+           SET status = 'processing', started_at = now(),
+               lease_until = now() + interval '75 seconds',
+               lease_token = gen_random_uuid(), attempts = 1,
+               governance_review_id = 'governance-review-test-v2'
+           WHERE id = $1"#,
+    )
+    .bind(analysis_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        provenance_rewrite.is_err(),
+        "governance review provenance must remain immutable"
+    );
     sqlx::query(
         r#"UPDATE medication_ai_analyses
            SET status = 'processing', started_at = now(),
@@ -765,6 +851,177 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
         1
     );
 
+    let renewed_governance_review_id = "governance-review-test-v2";
+    let renewed_idempotency_key = format!("ai-job-renewed-{patient_id}");
+    let renewed_ai_app = ai_enabled_app_with_governance(
+        ctx.pool.clone(),
+        renewed_governance_review_id,
+    );
+    let (renewed_status, renewed) = json_request(
+        &renewed_ai_app,
+        Method::POST,
+        &ai_path,
+        &ceo,
+        Some(json!({"idempotency_key": renewed_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(renewed_status, StatusCode::ACCEPTED, "{renewed}");
+    assert_ne!(renewed["id"], created["id"]);
+    let renewed_analysis_id = Uuid::parse_str(renewed["id"].as_str().unwrap()).unwrap();
+    let renewed_stored_review: String = sqlx::query_scalar(
+        "SELECT governance_review_id FROM medication_ai_analyses WHERE id = $1",
+    )
+    .bind(renewed_analysis_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(renewed_stored_review, renewed_governance_review_id);
+
+    let reverted_idempotency_key = format!("ai-job-reverted-{patient_id}");
+    let reverted_ai_app = ai_enabled_app(ctx.pool.clone());
+    let (reverted_status, reverted) = json_request(
+        &reverted_ai_app,
+        Method::POST,
+        &ai_path,
+        &ceo,
+        Some(json!({"idempotency_key": reverted_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(reverted_status, StatusCode::OK, "{reverted}");
+    assert_eq!(
+        reverted["id"], created["id"],
+        "a reverted approval must resolve its own provenance-matched analysis"
+    );
+    let deduplicated_alias_analysis: Uuid = sqlx::query_scalar(
+        r#"SELECT analysis_id
+           FROM medication_ai_analysis_idempotency_keys
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(ctx.admin_id)
+    .bind(&reverted_idempotency_key)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(deduplicated_alias_analysis, analysis_id);
+
+    let alias_rewrite = sqlx::query(
+        r#"UPDATE medication_ai_analysis_idempotency_keys
+           SET analysis_id = $3
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(ctx.admin_id)
+    .bind(&reverted_idempotency_key)
+    .bind(renewed_analysis_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        alias_rewrite.is_err(),
+        "successful idempotency bindings must remain immutable"
+    );
+    let alias_delete = sqlx::query(
+        r#"DELETE FROM medication_ai_analysis_idempotency_keys
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(ctx.admin_id)
+    .bind(&reverted_idempotency_key)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        alias_delete.is_err(),
+        "a live analysis binding must not be directly deletable"
+    );
+
+    let (rotated_replay_status, rotated_replay) = json_request(
+        &renewed_ai_app,
+        Method::POST,
+        &ai_path,
+        &ceo,
+        Some(json!({"idempotency_key": reverted_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(rotated_replay_status, StatusCode::OK, "{rotated_replay}");
+    assert_eq!(
+        rotated_replay["id"], created["id"],
+        "a semantic-dedup key must stay bound across governance rotation"
+    );
+
+    let secondary_owner_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = 'esther.berg@gmed.de'")
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_ne!(secondary_owner_id, ctx.admin_id);
+    let secondary_owner = auth_header_for(secondary_owner_id, "ceo");
+    let cross_actor_idempotency_key = format!("ai-job-cross-actor-{patient_id}");
+    let (cross_actor_status, cross_actor) = json_request(
+        &reverted_ai_app,
+        Method::POST,
+        &ai_path,
+        &secondary_owner,
+        Some(json!({"idempotency_key": cross_actor_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(cross_actor_status, StatusCode::OK, "{cross_actor}");
+    assert_eq!(cross_actor["id"], created["id"]);
+    let cross_actor_alias_analysis: Uuid = sqlx::query_scalar(
+        r#"SELECT analysis_id
+           FROM medication_ai_analysis_idempotency_keys
+           WHERE idempotency_owner_id = $1 AND idempotency_key = $2"#,
+    )
+    .bind(secondary_owner_id)
+    .bind(&cross_actor_idempotency_key)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(cross_actor_alias_analysis, analysis_id);
+
+    let (cross_actor_replay_status, cross_actor_replay) = json_request(
+        &renewed_ai_app,
+        Method::POST,
+        &ai_path,
+        &secondary_owner,
+        Some(json!({"idempotency_key": cross_actor_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(cross_actor_replay_status, StatusCode::OK, "{cross_actor_replay}");
+    assert_eq!(cross_actor_replay["id"], created["id"]);
+
+    let cross_review_path = format!(
+        "/api/v1/patients/{patient_id}/medication-evidence-reviews/{}/ai-analysis",
+        Uuid::new_v4()
+    );
+    let (cross_review_status, cross_review) = json_request(
+        &renewed_ai_app,
+        Method::POST,
+        &cross_review_path,
+        &ceo,
+        Some(json!({"idempotency_key": reverted_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(cross_review_status, StatusCode::CONFLICT, "{cross_review}");
+    assert!(
+        !cross_review.to_string().contains(&analysis_id.to_string()),
+        "cross-review conflicts must not disclose the bound analysis ID"
+    );
+    let cross_patient_path = format!(
+        "/api/v1/patients/{}/medication-evidence-reviews/{}/ai-analysis",
+        Uuid::new_v4(),
+        Uuid::new_v4()
+    );
+    let (cross_patient_status, cross_patient) = json_request(
+        &renewed_ai_app,
+        Method::POST,
+        &cross_patient_path,
+        &ceo,
+        Some(json!({"idempotency_key": reverted_idempotency_key.clone()})),
+    )
+    .await;
+    assert_eq!(cross_patient_status, StatusCode::CONFLICT, "{cross_patient}");
+    assert!(
+        !cross_patient.to_string().contains(&analysis_id.to_string()),
+        "cross-patient conflicts must not disclose the bound analysis ID"
+    );
+
     let export_path = format!("/api/v1/admin/compliance/patient/{patient_id}/export");
     let (export_status, export) =
         json_request(&ctx.app, Method::GET, &export_path, &ceo, None).await;
@@ -793,10 +1050,18 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
             item["analysis_id"] == json!(analysis_id) && item["to_status"] == "ready"
         })
     );
-    assert!(
-        !export.to_string().contains(&ai_key),
-        "idempotency keys are operational secrets and must not be exported"
-    );
+    let serialized_export = export.to_string();
+    for idempotency_key in [
+        &ai_key,
+        &renewed_idempotency_key,
+        &reverted_idempotency_key,
+        &cross_actor_idempotency_key,
+    ] {
+        assert!(
+            !serialized_export.contains(idempotency_key),
+            "idempotency keys are operational secrets and must not be exported"
+        );
+    }
 }
 
 #[tokio::test]
@@ -828,13 +1093,14 @@ async fn patient_privacy_erasure_cascades_review_graph() {
     let analysis_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO medication_ai_analyses
                (patient_id, review_id, bundle_id, provider_kind, provider_model,
-                input_fingerprint, idempotency_key, requested_by)
-           VALUES ($1, $2, $3, 'openai', 'gpt-test', $4, $5, $6)
+                governance_review_id, input_fingerprint, idempotency_key, requested_by)
+           VALUES ($1, $2, $3, 'openai', 'gpt-test', $4, $5, $6, $7)
            RETURNING id"#,
     )
     .bind(patient_id)
     .bind(review_id)
     .bind(bundle_id)
+    .bind(TEST_GOVERNANCE_REVIEW_ID)
     .bind("a".repeat(64))
     .bind(format!("erase-ai-{patient_id}"))
     .bind(ctx.admin_id)
@@ -851,6 +1117,15 @@ async fn patient_privacy_erasure_cascades_review_graph() {
     .execute(&ctx.pool)
     .await
     .unwrap();
+
+    let analysis_idempotency_count_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM medication_ai_analysis_idempotency_keys WHERE analysis_id = $1",
+    )
+    .bind(analysis_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(analysis_idempotency_count_before, 1);
 
     sqlx::query("DELETE FROM patients WHERE id = $1")
         .bind(patient_id)
@@ -883,10 +1158,18 @@ async fn patient_privacy_erasure_cascades_review_graph() {
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
+    let analysis_idempotency_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM medication_ai_analysis_idempotency_keys WHERE analysis_id = $1",
+    )
+    .bind(analysis_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
     assert_eq!(request_count, 0);
     assert_eq!(bundle_count, 0);
     assert_eq!(analysis_count, 0);
     assert_eq!(analysis_event_count, 0);
+    assert_eq!(analysis_idempotency_count, 0);
 }
 
 fn gba_assessment_sample() -> Vec<u8> {

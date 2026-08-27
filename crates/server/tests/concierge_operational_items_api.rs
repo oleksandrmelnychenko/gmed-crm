@@ -352,6 +352,93 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
 }
 
 #[tokio::test]
+async fn service_generated_task_claims_unassigned_service_and_keeps_expense_link_on_reassignment() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let first_concierge_id =
+        seed_user(&ctx.pool, "concierge", &format!("service-task-first-{tag}")).await;
+    let second_concierge_id = seed_user(
+        &ctx.pool,
+        "concierge",
+        &format!("service-task-second-{tag}"),
+    )
+    .await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &tag).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &tag).await;
+    let service_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_services (
+               patient_id, provider_id, service_kind, title, created_by
+           ) VALUES ($1, $2, 'chauffeur', 'Airport driver', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let path = "/api/v1/concierge-operational-items";
+
+    let (status, created) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Запрос: Шофёр",
+            "assigned_to": first_concierge_id,
+            "concierge_service_id": service_id,
+            "due_at": "2026-08-27T18:00:00Z",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["concierge_service_id"], service_id.to_string());
+    let assigned_after_create: Option<Uuid> =
+        sqlx::query_scalar("SELECT assigned_concierge_id FROM concierge_services WHERE id = $1")
+            .bind(service_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(assigned_after_create, Some(first_concierge_id));
+
+    let task_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let (status, updated) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{path}/{task_id}/update"),
+        &ceo_bearer,
+        Some(json!({
+            "expected_updated_at": created["updated_at"],
+            "kind": "task",
+            "title": "Запрос: Шофёр",
+            "assigned_to": second_concierge_id,
+            "concierge_service_id": service_id,
+            "due_at": "2026-08-27T18:00:00Z",
+            "priority": "normal",
+            "status": "open"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["assigned_to"], second_concierge_id.to_string());
+    assert_eq!(updated["concierge_service_id"], service_id.to_string());
+    let assigned_after_update: Option<Uuid> =
+        sqlx::query_scalar("SELECT assigned_concierge_id FROM concierge_services WHERE id = $1")
+            .bind(service_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(assigned_after_update, Some(second_concierge_id));
+}
+
+#[tokio::test]
 async fn terminal_tasks_can_be_archived_filtered_restored_and_keep_history() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;

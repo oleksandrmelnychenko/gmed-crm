@@ -109,7 +109,7 @@
 }
 
 .gmed-login-input::placeholder {
-  color: rgb(109 116 129 / 50%);
+  color: rgb(109 116 129 / 45%);
 }
 
 .gmed-login-input:focus-visible {

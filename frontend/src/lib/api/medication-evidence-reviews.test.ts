@@ -254,22 +254,90 @@ describe("medication evidence review API", () => {
       draft: {
         evidence_summary: [{ text_ru: "Факт", text_de: "Fakt", citation_refs: ["source:1"] }],
         verification_questions: [],
-        limitations: [],
+        limitations: [{
+          text_ru: "Требуется проверка специалистом.",
+          text_de: "Eine fachliche Prüfung ist erforderlich.",
+          citation_refs: [],
+        }],
         citation_refs: ["source:1"],
       },
     });
     expect(normalized.status).toBe("ready");
     expect(normalized.prompt_version).toBe("medication-evidence-draft-v1");
     expect(normalized.draft?.evidence_summary[0].citation_refs).toEqual(["source:1"]);
+    expect(normalizeMedicationAiAnalysis({
+      id: "analysis-malformed",
+      review_id: "review/1",
+      status: "ready",
+      draft: { limitations: [] },
+    }).draft).toBeNull();
 
     vi.mocked(post).mockResolvedValue({ id: "analysis-1", status: "requested" });
     vi.mocked(get).mockResolvedValue({ id: "analysis-1", status: "processing" });
     await createMedicationAiAnalysis("patient/1", "review/1", "ai-key-1");
-    await fetchMedicationAiAnalysis("patient/1", "review/1");
+    const controller = new AbortController();
+    await fetchMedicationAiAnalysis("patient/1", "review/1", controller.signal);
     await retryMedicationAiAnalysis("patient/1", "review/1");
     const path = "/patients/patient%2F1/medication-evidence-reviews/review%2F1/ai-analysis";
     expect(post).toHaveBeenNthCalledWith(1, path, { idempotency_key: "ai-key-1" });
-    expect(get).toHaveBeenCalledWith(path);
+    expect(get).toHaveBeenCalledWith(path, { signal: controller.signal });
     expect(post).toHaveBeenNthCalledWith(2, `${path}/retry`, {});
+  });
+
+  it("fails closed for malformed or excessive AI draft items", () => {
+    const item = {
+      text_ru: "Зафиксирован проверяемый факт.",
+      text_de: "Ein prüfbarer Fakt wurde erfasst.",
+      citation_refs: ["source:1"],
+    };
+    const limitation = {
+      text_ru: "Требуется проверка специалистом.",
+      text_de: "Eine fachliche Prüfung ist erforderlich.",
+      citation_refs: [] as string[],
+    };
+    const draft = {
+      evidence_summary: [item],
+      verification_questions: [],
+      limitations: [limitation],
+      citation_refs: ["source:1"],
+    };
+    const normalizeDraft = (nextDraft: unknown) => normalizeMedicationAiAnalysis({
+      id: "analysis-1",
+      review_id: "review-1",
+      status: "ready",
+      draft: nextDraft,
+    }).draft;
+
+    expect(normalizeDraft(draft)).not.toBeNull();
+    expect(normalizeDraft({
+      ...draft,
+      limitations: [{ ...limitation, citation_refs: ["source:2"] }],
+      citation_refs: ["source:1", "source:2"],
+    })).not.toBeNull();
+    const malformedDrafts = [
+      { ...draft, evidence_summary: [{ ...item, text_ru: " " }] },
+      { ...draft, evidence_summary: [{ ...item, text_de: 7 }] },
+      { ...draft, evidence_summary: [{ ...item, citation_refs: "source:1" }] },
+      { ...draft, evidence_summary: [{ ...item, citation_refs: [] }] },
+      { ...draft, evidence_summary: [{ ...item, citation_refs: ["source:1", "source:1"] }] },
+      {
+        ...draft,
+        evidence_summary: [{
+          ...item,
+          citation_refs: Array.from({ length: 9 }, (_, index) => `source:${index}`),
+        }],
+      },
+      { ...draft, evidence_summary: [item, { ...item }] },
+      { ...draft, evidence_summary: Array.from({ length: 13 }, () => item) },
+      { ...draft, limitations: [] },
+      { ...draft, limitations: Array.from({ length: 9 }, () => limitation) },
+      { ...draft, citation_refs: ["source:1", "source:1"] },
+      { ...draft, citation_refs: [] },
+      { ...draft, citation_refs: ["source:1", "source:2"] },
+      { ...draft, evidence_summary: [{ ...item, text_ru: "я".repeat(701) }] },
+    ];
+    for (const malformed of malformedDrafts) {
+      expect(normalizeDraft(malformed)).toBeNull();
+    }
   });
 });

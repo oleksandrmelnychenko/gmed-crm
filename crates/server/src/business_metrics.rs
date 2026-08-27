@@ -58,6 +58,13 @@ pub const LOGIN_ATTEMPTS_TOTAL: &str = "gmed_login_attempts_total";
 ///   - `reason` = a bounded provider/job reason code.
 pub const MEDICATION_AI_JOBS_TOTAL: &str = "gmed_medication_ai_jobs_total";
 
+/// Counter: worker attempts discarded by lease fencing.
+///
+/// Label `attempt_outcome` is the closed enum `success | error`. Job,
+/// patient, review, actor, provider-response and lease identifiers are
+/// deliberately excluded.
+pub const MEDICATION_AI_FENCED_ATTEMPTS_TOTAL: &str = "gmed_medication_ai_fenced_attempts_total";
+
 /// Histogram: duration of one OpenAI Responses API attempt.
 ///
 /// Label `outcome` is `success | error`; patient, actor, model and response
@@ -85,6 +92,11 @@ pub fn describe_all() {
         MEDICATION_AI_JOBS_TOTAL,
         Unit::Count,
         "Medication Evidence AI job lifecycle outcomes. Labels contain only bounded outcome and reason codes; no patient or provider response identifiers."
+    );
+    describe_counter!(
+        MEDICATION_AI_FENCED_ATTEMPTS_TOTAL,
+        Unit::Count,
+        "Medication Evidence AI worker attempts discarded because the worker no longer owned an unexpired lease. Labelled only by the bounded attempt outcome; no identifiers."
     );
     describe_histogram!(
         MEDICATION_AI_PROVIDER_DURATION_SECONDS,

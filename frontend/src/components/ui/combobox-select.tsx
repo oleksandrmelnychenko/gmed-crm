@@ -307,7 +307,7 @@ function ComboboxSelect({
         onBlur={onBlur}
         onFocus={onFocus}
         className={cn(
-          "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground [&_span]:min-w-0 [&_span]:truncate",
+          "flex h-9 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground transition-colors outline-none hover:bg-muted/35 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 data-placeholder:text-muted-foreground/45 [&_span]:min-w-0 [&_span]:truncate",
           className,
           triggerClassName,
         )}
@@ -334,7 +334,7 @@ function ComboboxSelect({
               <ComboboxPrimitive.Input
                 autoComplete={autoComplete}
                 placeholder={resolvedSearchPlaceholder}
-                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/45"
               />
             </div>
             <ComboboxPrimitive.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto p-1">

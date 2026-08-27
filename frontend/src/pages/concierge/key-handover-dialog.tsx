@@ -164,7 +164,7 @@ export function ConciergeKeyHandoverDialog({
               <ConciergeDialogSection title={labels.nextAction} icon={ShieldCheck}>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <ConciergeField label={labels.time}><Input className="bg-field" type="datetime-local" value={occurredAt} max={localDateTimeValue(new Date(Date.now() + 5 * 60_000))} onChange={(event) => setOccurredAt(event.target.value)} /></ConciergeField>
-                  <ConciergeField label={labels.note}><textarea value={note} maxLength={1000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" /></ConciergeField>
+                  <ConciergeField label={labels.note}><textarea value={note} maxLength={1000} rows={4} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} className="flex min-h-28 w-full resize-y rounded-md border border-input bg-field px-3 py-2 text-sm text-foreground shadow-xs outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" /></ConciergeField>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {nextActions.map((action) => (

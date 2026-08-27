@@ -12,6 +12,7 @@ import {
   ListChecks,
   MessageSquareText,
   Pencil,
+  ReceiptText,
   Search,
   Trash2,
   UserRound,
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SelectField } from "@/components/ui/select-field";
+import { Section } from "@/components/ui-shell";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +103,7 @@ const copy = {
     showLess: "Weniger anzeigen",
     patient: "Patient",
     provider: "Anbieter",
+    expenses: "Ausgaben",
     activeTasks: "Aktiv",
     archivedTasks: "Archiv",
     allTasks: "Alle",
@@ -161,6 +164,7 @@ const copy = {
     showLess: "Свернуть",
     patient: "Пациент",
     provider: "Провайдер",
+    expenses: "Расходы",
     activeTasks: "Активные",
     archivedTasks: "Архив",
     allTasks: "Все",
@@ -204,8 +208,21 @@ function taskAccent(priority: string) {
   return "border-l-sky-400";
 }
 
+function assigneeRoleTone(role?: string) {
+  if (role === "ceo") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (role === "ceo_assistant") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (role === "billing") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (role === "patient_manager") return "border-cyan-200 bg-cyan-50 text-cyan-700";
+  if (role === "sales") return "border-blue-200 bg-blue-50 text-blue-700";
+  if (role === "teamlead_interpreter") return "border-violet-200 bg-violet-50 text-violet-700";
+  if (role === "interpreter") return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  if (role === "concierge") return "border-orange-200 bg-orange-50 text-orange-700";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
 function TaskCard({
   task,
+  assignedToRole,
   lang,
   now,
   compact = false,
@@ -224,6 +241,7 @@ function TaskCard({
   onStatusChange,
 }: {
   task: ConciergeTask;
+  assignedToRole?: string;
   lang: Lang;
   now: Date;
   compact?: boolean;
@@ -274,13 +292,32 @@ function TaskCard({
               <span className="truncate">{labels.provider}: {task.provider_name}</span>
             </Badge>
           ) : null}
+          {task.concierge_service_id ? (
+            <Badge
+              variant="outline"
+              className="rounded-full border-cyan-200 bg-cyan-50 text-[10px] text-cyan-800"
+              title={labels.expenses}
+            >
+              <ReceiptText className="size-3 shrink-0" />
+              {labels.expenses}
+            </Badge>
+          ) : null}
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
           {archived ? <Badge variant="outline" className="rounded-full border-slate-300 bg-slate-100 text-[10px] text-slate-700">{labels.archived}</Badge> : null}
         </div>
         <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{task.title}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
-          <p className="truncate"><UsersRound className="mr-1.5 inline size-3.5" />{task.assigned_to_name}</p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <UsersRound className="size-3.5 shrink-0" />
+            <Badge
+              variant="outline"
+              className={cn("min-w-0 max-w-full rounded-full text-[10px] font-medium", assigneeRoleTone(assignedToRole))}
+              title={task.assigned_to_name}
+            >
+              <span className="truncate">{task.assigned_to_name}</span>
+            </Badge>
+          </div>
           {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>
         <div className="mt-2 flex flex-wrap gap-2 border-t border-border/60 pt-2 text-[10px] text-muted-foreground">
@@ -364,6 +401,7 @@ export function ConciergeTaskManager({
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
+  const assigneeRoles = useMemo(() => new Map(assignees.map((assignee) => [assignee.id, assignee.role])), [assignees]);
   const days = useMemo(() => taskCalendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
   const calendarWeeks = useMemo(() => taskCalendarWeeks(days), [days]);
   const calendarLocale = lang === "de" ? "de-DE" : "ru-RU";
@@ -418,8 +456,7 @@ export function ConciergeTaskManager({
   return (
     <section className="space-y-3" aria-label={labels.title}>
       {canManageTeam ? (
-        <div className="rounded-lg border border-border/70 bg-card p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.teamWorkload}</h3>
+        <Section title={labels.teamWorkload} className="rounded-lg border border-border/70 bg-card p-3">
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {workload.map(({ assignee, active: assigneeActive, overdue: assigneeOverdue, today }) => (
               <button key={assignee.id} type="button" className={cn("rounded-lg border p-3 text-left", filters.assignee === assignee.id ? "border-primary bg-primary/5" : "border-border/70")} onClick={() => setFilters((current) => ({ ...current, assignee: current.assignee === assignee.id ? "all" : assignee.id }))}>
@@ -428,7 +465,7 @@ export function ConciergeTaskManager({
               </button>
             ))}
           </div>
-        </div>
+        </Section>
       ) : null}
 
       <div className="relative z-20 grid grid-cols-2 gap-2 rounded-lg border border-border/70 bg-card p-2.5 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8 2xl:px-3 2xl:py-2">
@@ -452,12 +489,12 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-5")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onStatusChange={onStatusChange} />)}</div> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">

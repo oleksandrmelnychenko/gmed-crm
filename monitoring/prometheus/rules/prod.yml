@@ -234,6 +234,18 @@ groups:
           summary: "Medication AI retry burst ({{ $labels.reason }})"
           description: "Three or more Medication Evidence AI retries were scheduled within 15 minutes. Check provider availability/rate limits and the queue before allowing more operator requests. Metric labels contain no patient identifiers."
 
+      - alert: ProdMedicationAiFencedAttempt
+        expr: |
+          sum by (attempt_outcome) (
+            increase(gmed_medication_ai_fenced_attempts_total[15m])
+          ) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Medication AI attempt fenced ({{ $labels.attempt_outcome }})"
+          description: "A provider attempt finished after its worker lease expired or was reclaimed, so its result was safely discarded. Check backend restarts, database latency, provider duration and lease-recovery counts in System Health. Do not copy patient content into incident notes."
+
   - name: prod-containers
     interval: 30s
     rules:

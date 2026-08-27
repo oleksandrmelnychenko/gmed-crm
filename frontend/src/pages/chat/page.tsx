@@ -1673,7 +1673,7 @@ function useChatPageContent() {
                 rows={1}
                 maxLength={10_000}
                 aria-label={t.chat_type_message}
-                className="min-h-10 max-h-28 flex-1 resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="min-h-10 max-h-28 flex-1 resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
               <button
                 type="submit"

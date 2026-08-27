@@ -2236,7 +2236,8 @@ async fn create_import(
                      prepared_at,
                      applied_counts, error_message, worker_id,
                      requested_by, reviewed_by, applied_by, locked_at, completed_at,
-                     applied_at, created_at, updated_at"#,
+                     applied_at, created_at, updated_at, force_reextract,
+                     replaces_import_id"#,
     )
     .bind(patient_id)
     .bind(body.document_id)
@@ -2386,7 +2387,8 @@ async fn retry_import(
            RETURNING id, patient_id, document_id, status, document_type, source_language,
                      parser_version, draft, reviewed_draft, applied_counts, error_message, worker_id,
                      requested_by, reviewed_by, applied_by, locked_at, completed_at,
-                     applied_at, created_at, updated_at"#,
+                     applied_at, created_at, updated_at, force_reextract,
+                     replaces_import_id"#,
     )
     .bind(import_id)
     .bind(patient_id)
@@ -2411,55 +2413,147 @@ async fn rescan_import(
     if let Err(response) = ensure_access(&state, &auth, patient_id).await {
         return response;
     }
-    let row = match sqlx::query(
-        r#"UPDATE clinical_document_imports
-           SET status = 'queued', document_type = NULL, source_language = NULL,
-               parser_version = NULL,
-               draft = '{"candidates":[],"warnings":[]}'::jsonb,
-               reviewed_draft = NULL, applied_counts = '{}'::jsonb,
-               error_message = NULL, reviewed_by = NULL, applied_by = NULL,
-               worker_id = NULL, locked_at = NULL, completed_at = NULL,
-               applied_at = NULL, prepared_payload_fingerprint = NULL,
-               prepared_source_country = NULL, prepared_candidate_payloads = '{}'::jsonb,
-               prepared_patient_identity_confirmed = false,
-               prepared_identity_gate_version = 0, prepared_at = NULL,
-               updated_at = now()
-           WHERE id = $1 AND patient_id = $2
-             AND status IN ('review_required', 'failed')
-             AND deleted_at IS NULL
-           RETURNING id, patient_id, document_id, status, document_type, source_language,
-                     parser_version, draft, reviewed_draft, prepared_source_country,
-                     prepared_patient_identity_confirmed, prepared_identity_gate_version,
-                     prepared_at, applied_counts, error_message, worker_id,
-                     requested_by, reviewed_by, applied_by, locked_at, completed_at,
-                     applied_at, created_at, updated_at"#,
-    )
-    .bind(import_id)
-    .bind(patient_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return err(
-                StatusCode::CONFLICT,
-                "Only failed or review-ready imports can be rescanned",
-            );
-        }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
         Err(error) => {
-            tracing::error!(error = %error, import_id = %import_id, "rescan clinical document import");
+            tracing::error!(error = %error, import_id = %import_id, "begin clinical document rescan");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
         }
     };
+    let source = match sqlx::query(
+        r#"SELECT id, document_id, status
+           FROM clinical_document_imports
+           WHERE id = $1 AND patient_id = $2 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(import_id)
+    .bind(patient_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Import not found"),
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, "lock clinical document import for rescan");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
+        }
+    };
+    let source_status: String = source.get("status");
+    if !matches!(
+        source_status.as_str(),
+        "review_required" | "failed" | "applied"
+    ) {
+        return err(
+            StatusCode::CONFLICT,
+            "Only failed, review-ready, or applied imports can be rescanned",
+        );
+    }
+    let document_id: Uuid = source.get("document_id");
+
+    // A rescan must never replay cached OCR/native text. Keep the cache
+    // invalidation in the same transaction as queueing the extraction attempt.
+    let document_invalidated = match sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = NULL, text_extraction_status = 'not_started',
+               text_extraction_method = NULL, text_extracted_at = NULL,
+               text_extracted_by = NULL
+           WHERE id = $1 AND patient_id = $2 AND file_deleted_at IS NULL"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected() == 1,
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, document_id = %document_id, "invalidate document extraction cache for rescan");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
+        }
+    };
+    if !document_invalidated {
+        return err(StatusCode::CONFLICT, "Document file is unavailable");
+    }
+
+    let is_replacement = source_status == "applied";
+    let row_result = if is_replacement {
+        sqlx::query(
+            r#"INSERT INTO clinical_document_imports
+                   (patient_id, document_id, requested_by, force_reextract, replaces_import_id)
+               VALUES ($1, $2, $3, true, $4)
+               RETURNING id, patient_id, document_id, status, document_type, source_language,
+                         parser_version, draft, reviewed_draft, prepared_source_country,
+                         prepared_patient_identity_confirmed, prepared_identity_gate_version,
+                         prepared_at, applied_counts, error_message, worker_id,
+                         requested_by, reviewed_by, applied_by, locked_at, completed_at,
+                         applied_at, created_at, updated_at, force_reextract,
+                         replaces_import_id"#,
+        )
+        .bind(patient_id)
+        .bind(document_id)
+        .bind(auth.user_id)
+        .bind(import_id)
+        .fetch_one(&mut *tx)
+        .await
+    } else {
+        sqlx::query(
+            r#"UPDATE clinical_document_imports
+               SET status = 'queued', document_type = NULL, source_language = NULL,
+                   parser_version = NULL,
+                   draft = '{"candidates":[],"warnings":[]}'::jsonb,
+                   reviewed_draft = NULL, applied_counts = '{}'::jsonb,
+                   error_message = NULL, reviewed_by = NULL, applied_by = NULL,
+                   worker_id = NULL, locked_at = NULL, completed_at = NULL,
+                   applied_at = NULL, prepared_payload_fingerprint = NULL,
+                   prepared_source_country = NULL, prepared_candidate_payloads = '{}'::jsonb,
+                   prepared_patient_identity_confirmed = false,
+                   prepared_identity_gate_version = 0, prepared_at = NULL,
+                   force_reextract = true, updated_at = now()
+               WHERE id = $1 AND patient_id = $2
+                 AND status IN ('review_required', 'failed')
+                 AND deleted_at IS NULL
+               RETURNING id, patient_id, document_id, status, document_type, source_language,
+                         parser_version, draft, reviewed_draft, prepared_source_country,
+                         prepared_patient_identity_confirmed, prepared_identity_gate_version,
+                         prepared_at, applied_counts, error_message, worker_id,
+                         requested_by, reviewed_by, applied_by, locked_at, completed_at,
+                         applied_at, created_at, updated_at, force_reextract,
+                         replaces_import_id"#,
+        )
+        .bind(import_id)
+        .bind(patient_id)
+        .fetch_one(&mut *tx)
+        .await
+    };
+    let row = match row_result {
+        Ok(row) => row,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(
+                StatusCode::CONFLICT,
+                "A rescan attempt for this document is already active",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, "queue clinical document rescan");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, import_id = %import_id, "commit clinical document rescan");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to rescan import");
+    }
+    let queued_import_id: Uuid = row.get("id");
     state.audit_sender.try_send(audit::domain_event(
         "rescan_clinical_document_import",
         Some(auth.user_id),
         "clinical_document_import",
-        Some(import_id),
+        Some(queued_import_id),
         json!({
             "patient_id": patient_id,
-            "document_id": row.get::<Uuid, _>("document_id"),
+            "document_id": document_id,
             "status": "queued",
+            "source_import_id": import_id,
+            "replacement_attempt": is_replacement,
+            "force_reextract": true,
         }),
     ));
     Json(import_json(&row)).into_response()
@@ -3001,6 +3095,10 @@ async fn complete_import(
         .iter()
         .filter(|candidate| candidate.selected)
         .collect::<Vec<_>>();
+    let selected_lab_result_count = selected
+        .iter()
+        .filter(|candidate| candidate.target == "lab_result")
+        .count();
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3013,7 +3111,8 @@ async fn complete_import(
         }
     };
     let import_row = match sqlx::query(
-        r#"SELECT document_id, draft, reviewed_draft, prepared_identity_gate_version
+        r#"SELECT document_id, draft, reviewed_draft, prepared_identity_gate_version,
+                  replaces_import_id
            FROM clinical_document_imports
            WHERE id = $1 AND patient_id = $2 AND status = 'applying'
              AND deleted_at IS NULL
@@ -3232,6 +3331,62 @@ async fn complete_import(
         }
     }
     let applied_counts = Value::Object(applied_counts);
+    let replaces_import_id: Option<Uuid> = import_row.get("replaces_import_id");
+    let replaced_lab_result_count = if let Some(replaced_import_id) = replaces_import_id {
+        let active_replaced_lab_result_count = match sqlx::query_scalar::<_, i64>(
+            r#"SELECT count(*)
+               FROM patient_lab_results
+               WHERE patient_id = $1 AND source_import_id = $2 AND deleted_at IS NULL"#,
+        )
+        .bind(patient_id)
+        .bind(replaced_import_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(count) => count,
+            Err(error) => {
+                tracing::error!(error = %error, import_id = %import_id, replaced_import_id = %replaced_import_id, "count replaced clinical import lab results");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to complete import",
+                );
+            }
+        };
+        if active_replaced_lab_result_count > 0 && selected_lab_result_count == 0 {
+            return err(
+                StatusCode::CONFLICT,
+                "A replacement import with existing laboratory results must include reviewed laboratory results",
+            );
+        }
+        if active_replaced_lab_result_count == 0 {
+            0
+        } else {
+            let deletion_note = format!("Superseded by reviewed rescan {import_id}");
+            match sqlx::query(
+                r#"UPDATE patient_lab_results
+                   SET deleted_at = now(), deleted_by = $3, deletion_note = $4
+                   WHERE patient_id = $1 AND source_import_id = $2 AND deleted_at IS NULL"#,
+            )
+            .bind(patient_id)
+            .bind(replaced_import_id)
+            .bind(auth.user_id)
+            .bind(deletion_note)
+            .execute(&mut *tx)
+            .await
+            {
+                Ok(result) => result.rows_affected(),
+                Err(error) => {
+                    tracing::error!(error = %error, import_id = %import_id, replaced_import_id = %replaced_import_id, "soft-delete replaced clinical import lab results");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to complete import",
+                    );
+                }
+            }
+        }
+    } else {
+        0
+    };
     let row = match sqlx::query(
         r#"UPDATE clinical_document_imports
            SET status = 'applied', reviewed_draft = $3, reviewed_by = $4,
@@ -3244,7 +3399,8 @@ async fn complete_import(
                      prepared_at,
                      applied_counts, error_message, worker_id,
                      requested_by, reviewed_by, applied_by, locked_at, completed_at,
-                     applied_at, created_at, updated_at"#,
+                     applied_at, created_at, updated_at, force_reextract,
+                     replaces_import_id"#,
     )
     .bind(import_id)
     .bind(patient_id)
@@ -3281,6 +3437,8 @@ async fn complete_import(
             "patient_id": patient_id,
             "document_id": row.get::<Uuid, _>("document_id"),
             "applied_counts": applied_counts,
+            "replaces_import_id": replaces_import_id,
+            "replaced_lab_result_count": replaced_lab_result_count,
         }),
     ));
     Json(import_json(&row)).into_response()
@@ -3312,7 +3470,7 @@ fn import_select() -> &'static str {
               i.prepared_identity_gate_version, i.prepared_at,
               i.applied_counts, i.error_message, i.worker_id, i.requested_by, i.reviewed_by,
               i.applied_by, i.locked_at, i.completed_at, i.applied_at,
-              i.created_at, i.updated_at,
+              i.created_at, i.updated_at, i.force_reextract, i.replaces_import_id,
               d.original_filename AS document_name, d.mime_type
        FROM clinical_document_imports i
        JOIN documents d ON d.id = i.document_id"#
@@ -3324,6 +3482,7 @@ fn import_list_select() -> &'static str {
               i.prepared_source_country, i.prepared_patient_identity_confirmed,
               i.prepared_identity_gate_version, i.prepared_at,
               i.completed_at, i.applied_at, i.created_at, i.updated_at,
+              i.force_reextract, i.replaces_import_id,
               COALESCE(jsonb_array_length(i.draft->'candidates'), 0)::bigint AS candidate_count,
               d.original_filename AS document_name, d.mime_type
        FROM clinical_document_imports i
@@ -3352,6 +3511,8 @@ fn import_summary_json(row: &sqlx::postgres::PgRow) -> Value {
         "applied_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("applied_at"),
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at"),
+        "force_reextract": row.try_get::<bool, _>("force_reextract").unwrap_or(false),
+        "replaces_import_id": row.try_get::<Option<Uuid>, _>("replaces_import_id").unwrap_or_default(),
     })
 }
 
@@ -3382,6 +3543,8 @@ fn import_json(row: &sqlx::postgres::PgRow) -> Value {
         "applied_at": row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("applied_at"),
         "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at"),
+        "force_reextract": row.try_get::<bool, _>("force_reextract").unwrap_or(false),
+        "replaces_import_id": row.try_get::<Option<Uuid>, _>("replaces_import_id").unwrap_or_default(),
     })
 }
 

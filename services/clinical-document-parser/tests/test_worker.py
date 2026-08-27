@@ -40,6 +40,55 @@ class WorkerHardeningTest(unittest.TestCase):
         self.assertEqual(job["storage_key"], "file.pdf")
         self.assertEqual(cursor.executions[0][1], (37, "worker-test"))
         self.assertIn("interval '1 second'", cursor.executions[0][0])
+        self.assertIn("import.force_reextract", cursor.executions[0][0])
+
+    def test_force_reextract_job_ignores_stale_document_text_cache(self) -> None:
+        cursor = FakeCursor(
+            fetch_rows=[
+                {
+                    "id": "job-1",
+                    "document_id": "document-1",
+                    "force_reextract": True,
+                },
+                {
+                    "storage_key": "file.pdf",
+                    "mime_type": "application/pdf",
+                    "extracted_text": "stale cached OCR",
+                },
+            ]
+        )
+        connection = FakeConnection(cursor)
+        fake_psycopg_rows = SimpleNamespace(dict_row=object())
+
+        with patch.dict(sys.modules, {"psycopg.rows": fake_psycopg_rows}):
+            job = worker.claim_job(connection)
+
+        self.assertTrue(job["force_reextract"])
+        self.assertIsNone(job["extracted_text"])
+
+    def test_regular_job_keeps_usable_document_text_cache(self) -> None:
+        cursor = FakeCursor(
+            fetch_rows=[
+                {
+                    "id": "job-1",
+                    "document_id": "document-1",
+                    "force_reextract": False,
+                },
+                {
+                    "storage_key": "file.pdf",
+                    "mime_type": "application/pdf",
+                    "extracted_text": "usable cached text",
+                },
+            ]
+        )
+        connection = FakeConnection(cursor)
+        fake_psycopg_rows = SimpleNamespace(dict_row=object())
+
+        with patch.dict(sys.modules, {"psycopg.rows": fake_psycopg_rows}):
+            job = worker.claim_job(connection)
+
+        self.assertFalse(job["force_reextract"])
+        self.assertEqual(job["extracted_text"], "usable cached text")
 
     def test_finish_requires_current_worker_lease(self) -> None:
         connection = FakeConnection(FakeCursor(rowcount=0))

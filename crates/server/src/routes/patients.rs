@@ -473,6 +473,7 @@ struct CreatePatientLabResultRequest {
     reference_text: Option<String>,
     reference_low: Option<f64>,
     reference_high: Option<f64>,
+    interpretation_note: Option<String>,
     abnormal_flag: Option<String>,
     source_country: Option<String>,
     source_import_id: Option<Uuid>,
@@ -499,6 +500,7 @@ pub(crate) struct NormalizedPatientLabResult {
     reference_text: Option<String>,
     reference_low: Option<f64>,
     reference_high: Option<f64>,
+    interpretation_note: Option<String>,
     abnormal_flag: String,
     pub(crate) source_country: Option<String>,
     pub(crate) source_import_id: Option<Uuid>,
@@ -540,6 +542,8 @@ pub(crate) fn normalize_patient_lab_result_payload(
     let laboratory_name = normalize_optional_text(body.laboratory_name, "laboratory_name", 160)?;
     let unit = normalize_optional_text(body.unit, "unit", 80)?;
     let reference_text = normalize_optional_text(body.reference_text, "reference_text", 240)?;
+    let interpretation_note =
+        normalize_optional_text(body.interpretation_note, "interpretation_note", 4000)?;
     let source_candidate_id =
         normalize_optional_text(body.source_candidate_id, "source_candidate_id", 128)?;
     if body.numeric_result.is_some_and(|value| !value.is_finite())
@@ -623,6 +627,7 @@ pub(crate) fn normalize_patient_lab_result_payload(
         reference_text,
         reference_low: body.reference_low,
         reference_high: body.reference_high,
+        interpretation_note,
         abnormal_flag: abnormal_flag.to_string(),
         source_country,
         source_import_id: body.source_import_id,
@@ -647,6 +652,7 @@ fn normalize_patient_lab_result_correction_payload(
         "reference_text",
         "reference_low",
         "reference_high",
+        "interpretation_note",
         "abnormal_flag",
         "correction_note",
     ];
@@ -3469,7 +3475,8 @@ async fn list_patient_lab_results(
         r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
                   lr.panel, lr.laboratory_name, lr.analyte_name, lr.result_text,
                   lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
-                  lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
+                  lr.reference_low, lr.reference_high, lr.interpretation_note,
+                  lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
                   lr.source_page, lr.recorded_by, lr.created_at,
                   lr.corrected_at, lr.corrected_by, lr.correction_note,
@@ -3513,6 +3520,7 @@ fn patient_lab_result_json(row: &PgRow) -> Value {
         "reference_text": row.get::<Option<String>, _>("reference_text"),
         "reference_low": row.get::<Option<f64>, _>("reference_low"),
         "reference_high": row.get::<Option<f64>, _>("reference_high"),
+        "interpretation_note": row.get::<Option<String>, _>("interpretation_note"),
         "abnormal_flag": row.get::<String, _>("abnormal_flag"),
         "source_country": row.get::<Option<String>, _>("source_country"),
         "source_document_id": row.get::<Option<Uuid>, _>("source_document_id"),
@@ -3571,7 +3579,7 @@ async fn update_patient_lab_result(
     let previous = match sqlx::query(
         r#"SELECT measured_at, measured_at_precision, panel, laboratory_name, analyte_name, result_text,
                   numeric_result, comparator, unit, reference_text, reference_low,
-                  reference_high, abnormal_flag, source_country, source_document_id,
+                  reference_high, interpretation_note, abnormal_flag, source_country, source_document_id,
                   source_import_id, source_candidate_id, source_page,
                   corrected_at, corrected_by, correction_note
            FROM patient_lab_results
@@ -3607,6 +3615,7 @@ async fn update_patient_lab_result(
         "reference_text": previous.get::<Option<String>, _>("reference_text"),
         "reference_low": previous.get::<Option<f64>, _>("reference_low"),
         "reference_high": previous.get::<Option<f64>, _>("reference_high"),
+        "interpretation_note": previous.get::<Option<String>, _>("interpretation_note"),
         "abnormal_flag": previous.get::<String, _>("abnormal_flag"),
         "correction_note": previous.get::<Option<String>, _>("correction_note"),
         "corrected_at": previous
@@ -3677,10 +3686,11 @@ async fn update_patient_lab_result(
                reference_text = $12,
                reference_low = $13,
                reference_high = $14,
-               abnormal_flag = $15,
+               interpretation_note = $15,
+               abnormal_flag = $16,
                corrected_at = now(),
-               corrected_by = $16,
-               correction_note = $17,
+               corrected_by = $17,
+               correction_note = $18,
                updated_at = now()
            WHERE id = $1 AND patient_id = $2"#,
     )
@@ -3698,6 +3708,7 @@ async fn update_patient_lab_result(
     .bind(&lab.reference_text)
     .bind(lab.reference_low)
     .bind(lab.reference_high)
+    .bind(&lab.interpretation_note)
     .bind(&lab.abnormal_flag)
     .bind(auth.user_id)
     .bind(&correction_note)
@@ -3715,7 +3726,8 @@ async fn update_patient_lab_result(
         r#"SELECT lr.id, lr.measured_at, lr.measured_at_precision,
                   lr.panel, lr.laboratory_name, lr.analyte_name, lr.result_text,
                   lr.numeric_result, lr.comparator, lr.unit, lr.reference_text,
-                  lr.reference_low, lr.reference_high, lr.abnormal_flag, lr.source_country,
+                  lr.reference_low, lr.reference_high, lr.interpretation_note,
+                  lr.abnormal_flag, lr.source_country,
                   lr.source_document_id, lr.source_import_id, lr.source_candidate_id,
                   lr.source_page, lr.recorded_by, lr.created_at,
                   lr.corrected_at, lr.corrected_by, lr.correction_note,
@@ -3755,6 +3767,7 @@ async fn update_patient_lab_result(
         "reference_text": item["reference_text"],
         "reference_low": item["reference_low"],
         "reference_high": item["reference_high"],
+        "interpretation_note": item["interpretation_note"],
         "abnormal_flag": item["abnormal_flag"],
         "correction_note": item["correction_note"],
         "corrected_at": item["corrected_at"],
@@ -3832,7 +3845,7 @@ async fn delete_patient_lab_result(
     let previous = match sqlx::query(
         r#"SELECT measured_at, measured_at_precision, panel, laboratory_name, analyte_name, result_text,
                   numeric_result, comparator, unit, reference_text, reference_low,
-                  reference_high, abnormal_flag, source_country, source_document_id,
+                  reference_high, interpretation_note, abnormal_flag, source_country, source_document_id,
                   source_import_id, source_candidate_id, source_page,
                   corrected_at, corrected_by, correction_note
            FROM patient_lab_results
@@ -3898,6 +3911,7 @@ async fn delete_patient_lab_result(
         "reference_text": previous.get::<Option<String>, _>("reference_text"),
         "reference_low": previous.get::<Option<f64>, _>("reference_low"),
         "reference_high": previous.get::<Option<f64>, _>("reference_high"),
+        "interpretation_note": previous.get::<Option<String>, _>("interpretation_note"),
         "abnormal_flag": previous.get::<String, _>("abnormal_flag"),
         "corrected_at": previous
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("corrected_at")
@@ -4074,10 +4088,10 @@ async fn create_patient_lab_result(
         r#"INSERT INTO patient_lab_results (
                 patient_id, measured_at, panel, laboratory_name, analyte_name, result_text,
                 numeric_result, comparator, unit, reference_text, reference_low,
-                reference_high, abnormal_flag, source_country, source_document_id,
+                reference_high, interpretation_note, abnormal_flag, source_country, source_document_id,
                 source_import_id, source_candidate_id, source_page, recorded_by,
                 measured_at_precision
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
            ON CONFLICT (source_import_id, source_candidate_id)
              WHERE source_import_id IS NOT NULL AND source_candidate_id IS NOT NULL
            DO UPDATE SET updated_at = patient_lab_results.updated_at
@@ -4094,6 +4108,7 @@ async fn create_patient_lab_result(
                  patient_lab_results.reference_text,
                  patient_lab_results.reference_low,
                  patient_lab_results.reference_high,
+                 patient_lab_results.interpretation_note,
                  patient_lab_results.abnormal_flag,
                  patient_lab_results.source_country,
                  patient_lab_results.source_document_id,
@@ -4112,6 +4127,7 @@ async fn create_patient_lab_result(
                  EXCLUDED.reference_text,
                  EXCLUDED.reference_low,
                  EXCLUDED.reference_high,
+                 EXCLUDED.interpretation_note,
                  EXCLUDED.abnormal_flag,
                  EXCLUDED.source_country,
                  EXCLUDED.source_document_id,
@@ -4132,6 +4148,7 @@ async fn create_patient_lab_result(
     .bind(&lab.reference_text)
     .bind(lab.reference_low)
     .bind(lab.reference_high)
+    .bind(&lab.interpretation_note)
     .bind(&lab.abnormal_flag)
     .bind(&lab.source_country)
     .bind(source_document_id)

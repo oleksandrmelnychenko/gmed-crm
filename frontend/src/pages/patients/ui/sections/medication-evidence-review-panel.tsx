@@ -29,6 +29,7 @@ import {
 } from "@/lib/api/medication-evidence-reviews";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { useRealtimeSubscription, type RealtimeEvent } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 
@@ -37,6 +38,11 @@ import { officialSourceLabel } from "../../data/official-medication-source-label
 export { officialSourceLabel } from "../../data/official-medication-source-label";
 
 type Bilingual = (ru: string, de: string) => string;
+
+const MEDICATION_AI_RESULT_REALTIME_EVENTS = [
+  "patient.medication_ai_analysis_ready",
+  "patient.medication_ai_analysis_failed",
+] as const;
 
 type MedicationEvidenceReviewPanelProps = {
   patientId: string;
@@ -733,7 +739,7 @@ function aiProviderMessage(provider: MedicationAiProvider, tx: Bilingual) {
   return tx("AI-провайдер пока не настроен.", "Der KI-Anbieter ist noch nicht konfiguriert.");
 }
 
-function MedicationAiAnalysisSection({
+export function MedicationAiAnalysisSection({
   review,
   provider,
   analysis,
@@ -762,12 +768,17 @@ function MedicationAiAnalysisSection({
   return (
     <section aria-label={tx("AI-результат", "KI-Ergebnis")}>
       <div className="space-y-2.5">
+        {error && analysis?.status === "ready" ? (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+            {error}
+          </div>
+        ) : null}
         {!ready && analysis?.status !== "ready" ? (
           <p className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/10 px-3 py-3 text-xs text-muted-foreground">
             <AiMark className="mt-0.5 size-3.5 text-foreground" />
             <span>{aiProviderMessage(displayProvider, tx)}</span>
           </p>
-        ) : error ? (
+        ) : error && analysis?.status !== "ready" ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
             <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={analysis?.status === "failed" ? onRetry : onCreate}>
@@ -848,7 +859,14 @@ function MedicationAiAnalysisSection({
               </div>
             </div>
           </>
-        ) : null}
+        ) : (
+          <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800">
+            {tx(
+              "AI-результат имеет неполный формат и не может быть показан. Используйте локальный пакет доказательств.",
+              "Das KI-Ergebnis ist unvollständig und kann nicht angezeigt werden. Verwenden Sie das lokale Evidenzpaket.",
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -866,6 +884,39 @@ export function resolveMedicationEvidenceIdempotencyKey(
   },
 ) {
   return current || create();
+}
+
+export type MedicationAiIdempotencyAttempt = {
+  patientId: string;
+  reviewId: string;
+  key: string;
+};
+
+export function resolveMedicationAiIdempotencyAttempt(
+  current: MedicationAiIdempotencyAttempt | null,
+  patientId: string,
+  reviewId: string,
+  create: () => string = () => {
+    if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+    return `medication-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  },
+): MedicationAiIdempotencyAttempt {
+  if (current?.patientId === patientId && current.reviewId === reviewId) return current;
+  return { patientId, reviewId, key: create() };
+}
+
+export function clearMedicationAiIdempotencyAttempt(
+  current: MedicationAiIdempotencyAttempt | null,
+  patientId: string,
+  reviewId: string,
+  expectedKey?: string,
+): MedicationAiIdempotencyAttempt | null {
+  if (
+    current?.patientId === patientId
+    && current.reviewId === reviewId
+    && (expectedKey === undefined || current.key === expectedKey)
+  ) return null;
+  return current;
 }
 
 type SequentialPollingOptions = {
@@ -903,6 +954,77 @@ export function startSequentialPolling({
   };
 }
 
+type SingleFlightRequest = {
+  key: string;
+  promise: Promise<void>;
+  controller: AbortController;
+};
+
+export function createSingleFlightRunner() {
+  let inFlight: SingleFlightRequest | null = null;
+
+  return {
+    run(key: string, request: (signal: AbortSignal) => Promise<void>): Promise<void> {
+      if (inFlight?.key === key) return inFlight.promise;
+      if (inFlight) {
+        const previous = inFlight;
+        inFlight = null;
+        previous.controller.abort();
+      }
+
+      const controller = new AbortController();
+      let promise: Promise<void>;
+      try {
+        promise = request(controller.signal);
+      } catch (error) {
+        promise = Promise.reject(error);
+      }
+      let trackedPromise!: Promise<void>;
+      trackedPromise = promise.finally(() => {
+        if (inFlight?.promise === trackedPromise) inFlight = null;
+      });
+      inFlight = { key, promise: trackedPromise, controller };
+      return trackedPromise;
+    },
+    clear(): void {
+      const current = inFlight;
+      inFlight = null;
+      current?.controller.abort();
+    },
+  };
+}
+
+export function isMedicationAiRequestAbort(error: unknown): boolean {
+  return (error instanceof ApiRequestError && error.code === "aborted")
+    || (error instanceof Error && error.name === "AbortError");
+}
+
+export function medicationAiAnalysisBelongsToReview(
+  analysis: MedicationAiAnalysis,
+  reviewId: string,
+): boolean {
+  return analysis.id.length > 0 && analysis.review_id === reviewId;
+}
+
+export function medicationAiRealtimeEventMatches(
+  event: RealtimeEvent,
+  patientId: string,
+  reviewId: string,
+): boolean {
+  if (!MEDICATION_AI_RESULT_REALTIME_EVENTS.includes(
+    event.type as (typeof MEDICATION_AI_RESULT_REALTIME_EVENTS)[number],
+  )) return false;
+
+  if (event.patient_id != null) {
+    if (event.patient_id !== patientId) return false;
+  } else if (event.entity_type !== "patient" || event.entity_id !== patientId) {
+    return false;
+  }
+
+  return typeof event.payload?.review_id === "string"
+    && event.payload.review_id === reviewId;
+}
+
 export function MedicationEvidenceReviewPanel({
   patientId,
   refreshKey,
@@ -929,8 +1051,11 @@ export function MedicationEvidenceReviewPanel({
   const [aiError, setAiError] = useState<string | null>(null);
   const requestEpochRef = useRef(0);
   const aiRequestEpochRef = useRef(0);
+  const dialogOpenRef = useRef(false);
+  const activeReviewIdRef = useRef<string | null>(null);
+  const [aiLoadRunner] = useState(createSingleFlightRunner);
   const idempotencyKeyRef = useRef<string | null>(null);
-  const aiIdempotencyKeyRef = useRef<string | null>(null);
+  const aiIdempotencyAttemptRef = useRef<MedicationAiIdempotencyAttempt | null>(null);
   const pendingFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -950,6 +1075,8 @@ export function MedicationEvidenceReviewPanel({
 
   useEffect(() => {
     requestEpochRef.current += 1;
+    dialogOpenRef.current = false;
+    activeReviewIdRef.current = null;
     setDialogOpen(false);
     setDialogTab("ai");
     setReview(null);
@@ -961,34 +1088,65 @@ export function MedicationEvidenceReviewPanel({
     setOperation("idle");
     setOperationError(null);
     idempotencyKeyRef.current = null;
-    aiIdempotencyKeyRef.current = null;
+    aiIdempotencyAttemptRef.current = null;
     pendingFingerprintRef.current = null;
     aiRequestEpochRef.current += 1;
-  }, [patientId]);
+    aiLoadRunner.clear();
+  }, [aiLoadRunner, patientId]);
+
+  useEffect(() => () => {
+    aiRequestEpochRef.current += 1;
+    dialogOpenRef.current = false;
+    activeReviewIdRef.current = null;
+    aiLoadRunner.clear();
+  }, [aiLoadRunner]);
 
   const currentPreview = previewState.patientId === patientId
     ? previewState
     : { patientId, data: null, loading: true, error: false };
 
-  const loadExistingAiAnalysis = useCallback(async (nextReviewId: string, showLoading = true) => {
-    const epoch = ++aiRequestEpochRef.current;
+  const loadExistingAiAnalysis = useCallback((nextReviewId: string, showLoading = true) => {
     if (showLoading) setAiLoading(true);
-    setAiError(null);
-    try {
-      const loaded = await fetchMedicationAiAnalysis(patientId, nextReviewId);
-      if (epoch !== aiRequestEpochRef.current) return;
-      setAiAnalysis(loaded);
-    } catch (loadError) {
-      if (epoch !== aiRequestEpochRef.current) return;
-      if (loadError instanceof ApiRequestError && loadError.status === 404) {
-        setAiAnalysis(null);
-      } else {
-        setAiError(lang === "de" ? "Der KI-Status konnte nicht geladen werden." : "Не удалось загрузить статус AI-анализа.");
+    const requestKey = `${patientId}:${nextReviewId}`;
+    return aiLoadRunner.run(requestKey, async (signal) => {
+      const epoch = ++aiRequestEpochRef.current;
+      setAiError(null);
+      try {
+        const loaded = await fetchMedicationAiAnalysis(patientId, nextReviewId, signal);
+        if (epoch !== aiRequestEpochRef.current) return;
+        if (!medicationAiAnalysisBelongsToReview(loaded, nextReviewId)) {
+          setAiAnalysis(null);
+          setAiError(lang === "de"
+            ? "Die KI-Antwort gehört nicht zur geöffneten Evidenzprüfung."
+            : "Ответ AI не относится к открытой проверке доказательств.");
+          return;
+        }
+        aiIdempotencyAttemptRef.current = clearMedicationAiIdempotencyAttempt(
+          aiIdempotencyAttemptRef.current,
+          patientId,
+          nextReviewId,
+        );
+        setAiAnalysis(loaded);
+      } catch (loadError) {
+        if (epoch !== aiRequestEpochRef.current) return;
+        if (isMedicationAiRequestAbort(loadError)) return;
+        if (loadError instanceof ApiRequestError && loadError.status === 404) {
+          setAiAnalysis(null);
+        } else {
+          setAiError(lang === "de" ? "Der KI-Status konnte nicht geladen werden." : "Не удалось загрузить статус AI-анализа.");
+        }
+      } finally {
+        if (epoch === aiRequestEpochRef.current) setAiLoading(false);
       }
-    } finally {
-      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
-    }
-  }, [lang, patientId]);
+    });
+  }, [aiLoadRunner, lang, patientId]);
+
+  useRealtimeSubscription(MEDICATION_AI_RESULT_REALTIME_EVENTS, (event) => {
+    const activeReviewId = activeReviewIdRef.current;
+    if (!dialogOpenRef.current || !activeReviewId) return;
+    if (!medicationAiRealtimeEventMatches(event, patientId, activeReviewId)) return;
+    void loadExistingAiAnalysis(activeReviewId, false);
+  });
 
   useEffect(() => {
     if (
@@ -998,25 +1156,40 @@ export function MedicationEvidenceReviewPanel({
       || (aiAnalysis?.status !== "requested" && aiAnalysis?.status !== "processing")
     ) return;
     return startSequentialPolling({
-      poll: () => loadExistingAiAnalysis(reviewId, false),
+      poll: () => dialogOpenRef.current && activeReviewIdRef.current === reviewId
+        ? loadExistingAiAnalysis(reviewId, false)
+        : Promise.resolve(),
       delayMs: 2_000,
     });
   }, [aiAnalysis?.provider.status, aiAnalysis?.status, dialogOpen, loadExistingAiAnalysis, reviewId]);
 
   const createAiDraftForReview = async (nextReviewId: string) => {
     const epoch = ++aiRequestEpochRef.current;
-    const idempotencyKey = aiIdempotencyKeyRef.current
-      || (typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `medication-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    aiIdempotencyKeyRef.current = idempotencyKey;
+    aiLoadRunner.clear();
+    const attempt = resolveMedicationAiIdempotencyAttempt(
+      aiIdempotencyAttemptRef.current,
+      patientId,
+      nextReviewId,
+    );
+    aiIdempotencyAttemptRef.current = attempt;
     setAiLoading(true);
     setAiError(null);
     try {
-      const created = await createMedicationAiAnalysis(patientId, nextReviewId, idempotencyKey);
+      const created = await createMedicationAiAnalysis(patientId, nextReviewId, attempt.key);
       if (epoch !== aiRequestEpochRef.current) return;
+      if (!medicationAiAnalysisBelongsToReview(created, nextReviewId)) {
+        setAiError(lang === "de"
+          ? "Die KI-Antwort gehört nicht zur geöffneten Evidenzprüfung."
+          : "Ответ AI не относится к открытой проверке доказательств.");
+        return;
+      }
       setAiAnalysis(created);
-      aiIdempotencyKeyRef.current = null;
+      aiIdempotencyAttemptRef.current = clearMedicationAiIdempotencyAttempt(
+        aiIdempotencyAttemptRef.current,
+        patientId,
+        nextReviewId,
+        attempt.key,
+      );
     } catch {
       if (epoch !== aiRequestEpochRef.current) return;
       setAiError(lang === "de" ? "Die KI-Analyse konnte nicht angefordert werden." : "Не удалось запустить AI-анализ.");
@@ -1042,9 +1215,14 @@ export function MedicationEvidenceReviewPanel({
       pendingFingerprintRef.current = null;
       setOperation("idle");
       if (created.permissions.can_read_review) {
+        aiRequestEpochRef.current += 1;
+        aiLoadRunner.clear();
+        setAiLoading(false);
         setReview(created);
         setReviewId(created.review.id);
+        activeReviewIdRef.current = created.review.id;
         setReviewError(null);
+        dialogOpenRef.current = true;
         setDialogOpen(true);
         setAiAnalysis(null);
         setAiError(null);
@@ -1073,13 +1251,18 @@ export function MedicationEvidenceReviewPanel({
 
   const openReview = async (nextReviewId: string) => {
     const epoch = ++requestEpochRef.current;
+    aiRequestEpochRef.current += 1;
+    aiLoadRunner.clear();
+    activeReviewIdRef.current = nextReviewId;
     setReviewId(nextReviewId);
     setReview(null);
     setReviewError(null);
     setReviewLoading(true);
     setAiAnalysis(null);
+    setAiLoading(false);
     setAiError(null);
     setDialogTab("ai");
+    dialogOpenRef.current = true;
     setDialogOpen(true);
     try {
       const loaded = await fetchMedicationEvidenceReview(patientId, nextReviewId);
@@ -1106,17 +1289,34 @@ export function MedicationEvidenceReviewPanel({
   const retryAiDraft = async () => {
     if (!reviewId) return;
     const epoch = ++aiRequestEpochRef.current;
+    aiLoadRunner.clear();
     setAiLoading(true);
     setAiError(null);
     try {
       const retried = await retryMedicationAiAnalysis(patientId, reviewId);
       if (epoch !== aiRequestEpochRef.current) return;
+      if (!medicationAiAnalysisBelongsToReview(retried, reviewId)) {
+        setAiAnalysis(null);
+        setAiError(lang === "de"
+          ? "Die KI-Antwort gehört nicht zur geöffneten Evidenzprüfung."
+          : "Ответ AI не относится к открытой проверке доказательств.");
+        return;
+      }
       setAiAnalysis(retried);
+      aiIdempotencyAttemptRef.current = clearMedicationAiIdempotencyAttempt(
+        aiIdempotencyAttemptRef.current,
+        patientId,
+        reviewId,
+      );
     } catch (retryError) {
       if (epoch !== aiRequestEpochRef.current) return;
       if (retryError instanceof ApiRequestError && retryError.status === 409) {
         setAiAnalysis(null);
-        aiIdempotencyKeyRef.current = null;
+        aiIdempotencyAttemptRef.current = clearMedicationAiIdempotencyAttempt(
+          aiIdempotencyAttemptRef.current,
+          patientId,
+          reviewId,
+        );
         setAiError(lang === "de"
           ? "Die KI-Konfiguration wurde geändert. Starten Sie die KI-Analyse erneut."
           : "Конфигурация AI изменилась. Запустите AI-анализ повторно.");
@@ -1165,11 +1365,15 @@ export function MedicationEvidenceReviewPanel({
         open={dialogOpen}
         onOpenChange={(open) => {
           if (open) return;
+          dialogOpenRef.current = false;
+          activeReviewIdRef.current = null;
           requestEpochRef.current += 1;
           aiRequestEpochRef.current += 1;
+          aiLoadRunner.clear();
           setDialogOpen(false);
           setReviewLoading(false);
           setReviewError(null);
+          setAiLoading(false);
         }}
       >
         <DialogContent className="max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-h-[min(88dvh,760px)] sm:max-w-5xl">

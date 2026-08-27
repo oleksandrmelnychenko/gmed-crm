@@ -1409,9 +1409,7 @@ export function ClinicalDocumentImportSheet({
     if (!documentImport) return;
     setBusy(true);
     try {
-      const rescanned = documentImport.status === "applied"
-        ? await createClinicalDocumentImport(patientId, documentImport.document_id)
-        : await rescanClinicalDocumentImport(patientId, documentImport.id);
+      const rescanned = await rescanClinicalDocumentImport(patientId, documentImport.id);
       setDocumentImport(rescanned);
       setCandidates([]);
       setActiveCandidateId(null);
@@ -1435,9 +1433,7 @@ export function ClinicalDocumentImportSheet({
     if (!["review_required", "failed", "applied"].includes(item.status)) return;
     setHistoryBusyId(item.id);
     try {
-      const rescanned = item.status === "applied"
-        ? await createClinicalDocumentImport(patientId, item.document_id)
-        : await rescanClinicalDocumentImport(patientId, item.id);
+      const rescanned = await rescanClinicalDocumentImport(patientId, item.id);
       setDocumentImport(rescanned);
       setCandidates([]);
       setActiveCandidateId(null);
@@ -3005,6 +3001,26 @@ export function ClinicalDocumentImportSheet({
                                           <option value="high">{tx("Выше", "Hoch")}</option>
                                           <option value="abnormal">{tx("Отклонение", "Auffällig")}</option>
                                         </select>
+                                      </label>
+                                      <label className="space-y-1 sm:col-span-2 xl:col-span-4">
+                                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                          {tx("Примечание и дерево референсов", "Hinweis und Referenzstruktur")}
+                                        </span>
+                                        <textarea
+                                          value={typeof candidate.normalized.interpretation_note === "string" ? candidate.normalized.interpretation_note : ""}
+                                          disabled={snapshotReadOnly || !candidate.selected}
+                                          maxLength={4000}
+                                          className="min-h-20 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-default disabled:opacity-100"
+                                          placeholder={tx(
+                                            "Пороговые значения, группы риска и пояснения лаборатории",
+                                            "Grenzwerte, Risikogruppen und Laborhinweise",
+                                          )}
+                                          onFocus={() => setActiveCandidateId(candidate.id)}
+                                          onChange={(event) => {
+                                            const nextNormalized = { ...candidate.normalized, interpretation_note: event.target.value };
+                                            patchCandidate(candidate.id, { normalized: nextNormalized });
+                                          }}
+                                        />
                                       </label>
                                     </div>
                                   ) : (

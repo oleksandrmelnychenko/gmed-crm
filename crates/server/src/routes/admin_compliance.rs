@@ -114,6 +114,23 @@ pub(crate) fn parse_patient_export_format(
     }
 }
 
+#[allow(clippy::result_large_err)]
+fn require_patient_export_section<T>(
+    result: Result<T, sqlx::Error>,
+    section: &'static str,
+) -> Result<T, axum::response::Response> {
+    result.map_err(|_| {
+        tracing::error!(
+            export_section = section,
+            "patient export section failed"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build complete patient export",
+        )
+    })
+}
+
 async fn export_patient_data(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -155,40 +172,33 @@ pub(crate) async fn build_patient_export_payload(
     .fetch_optional(&state.db)
     .await;
 
-    let patient = match patient {
-        Ok(Some(p)) => p,
-        Ok(None) => return Err(err(StatusCode::NOT_FOUND, "Patient not found")),
-        Err(e) => {
-            tracing::error!(error = %e, "export patient");
-            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
-        }
-    };
+    let patient = require_patient_export_section(patient, "patient")?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient not found"))?;
 
-    let appointments = sqlx::query!(
+    let appointments = require_patient_export_section(sqlx::query!(
         "SELECT id, title, date, time_start, time_end, appointment_type, status, location, notes FROM appointments WHERE patient_id = $1 ORDER BY date DESC",
         patient_id
-    ).fetch_all(&state.db).await.unwrap_or_default();
+    ).fetch_all(&state.db).await, "appointments")?;
 
-    let cases = sqlx::query(
+    let cases = require_patient_export_section(sqlx::query(
         "SELECT id, case_id, status, hauptanfragegrund, intake_snapshot, notes, created_at FROM cases WHERE patient_id = $1 ORDER BY created_at DESC",
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "cases")?;
 
-    let orders = sqlx::query!(
+    let orders = require_patient_export_section(sqlx::query!(
         "SELECT id, order_number, phase, status, notes, created_at FROM orders WHERE patient_id = $1 ORDER BY created_at DESC",
         patient_id
-    ).fetch_all(&state.db).await.unwrap_or_default();
+    ).fetch_all(&state.db).await, "orders")?;
 
-    let assignments = sqlx::query!(
+    let assignments = require_patient_export_section(sqlx::query!(
         r#"SELECT pa.user_id, u.name AS "user_name!", u.role AS "role!", pa.assigned_at
            FROM patient_assignments pa JOIN users u ON u.id = pa.user_id WHERE pa.patient_id = $1 AND pa.revoked_at IS NULL"#,
         patient_id
-    ).fetch_all(&state.db).await.unwrap_or_default();
+    ).fetch_all(&state.db).await, "assignments")?;
 
-    let consents = sqlx::query(
+    let consents = require_patient_export_section(sqlx::query(
         r#"SELECT cr.id, cr.consent_type, cr.granted, cr.granted_at, cr.expires_at, cr.revoked_at,
                   cr.context, cr.created_at, u.name AS managed_by_name
            FROM consent_records cr
@@ -198,10 +208,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "consents")?;
 
-    let documents = sqlx::query(
+    let documents = require_patient_export_section(sqlx::query(
         r#"SELECT id, order_id, appointment_id, auto_name, original_filename, art, category,
                   status, visibility, is_medical, mime_type, file_size, klinik, ursprung,
                   notes, version_number, created_at, updated_at
@@ -211,10 +220,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "documents")?;
 
-    let invoices = sqlx::query(
+    let invoices = require_patient_export_section(sqlx::query(
         r#"SELECT id, quote_id, order_id, invoice_number, invoice_type, status, issued_at,
                   due_date, total_net, total_vat, total_gross, paid_amount, paid_at,
                   line_items, notes, created_at, updated_at
@@ -224,10 +232,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "invoices")?;
 
-    let invoice_dunning_events = sqlx::query(
+    let invoice_dunning_events = require_patient_export_section(sqlx::query(
         r#"SELECT ide.id, ide.invoice_id, ide.level, ide.note, ide.due_date_snapshot,
                   ide.balance_due, ide.sent_at, ide.created_at
            FROM invoice_dunning_events ide
@@ -237,10 +244,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "invoice_dunning_events")?;
 
-    let quotes = sqlx::query(
+    let quotes = require_patient_export_section(sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.valid_until,
                   q.total_net, q.total_vat, q.total_gross, q.paid_amount, q.paid_at,
                   q.line_items, q.notes, q.created_at, q.updated_at
@@ -251,10 +257,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "quotes")?;
 
-    let tasks = sqlx::query(
+    let tasks = require_patient_export_section(sqlx::query(
         r#"SELECT DISTINCT t.id, t.title, t.description, t.assigned_to, t.assigned_by,
                   t.patient_id, t.order_id, t.appointment_id, t.due_date, t.priority,
                   t.status, t.completed_at, t.created_at, t.updated_at,
@@ -270,10 +275,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "tasks")?;
 
-    let reminders = sqlx::query(
+    let reminders = require_patient_export_section(sqlx::query(
         r#"SELECT r.id, r.appointment_id, r.user_id, r.remind_at, r.title, r.description,
                   r.is_completed, r.completed_at, r.created_at,
                   u.name AS user_name,
@@ -287,10 +291,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    .await, "reminders")?;
 
-    let patient_user_ids = sqlx::query(
+    let patient_user_rows = require_patient_export_section(sqlx::query(
         r#"SELECT DISTINCT u.id
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
@@ -299,16 +302,19 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .unwrap_or_default()
-    .into_iter()
-    .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
-    .collect::<Vec<_>>();
+    .await, "patient_users")?;
+    let patient_user_ids = require_patient_export_section(
+        patient_user_rows
+            .into_iter()
+            .map(|row| row.try_get::<Uuid, _>("id"))
+            .collect::<Result<Vec<_>, _>>(),
+        "patient_users_decode",
+    )?;
 
     let messages = if patient_user_ids.is_empty() {
         Vec::<PgRow>::new()
     } else {
-        sqlx::query(
+        require_patient_export_section(sqlx::query(
             r#"SELECT dm.id, dm.from_user, dm.to_user, dm.message, dm.message_ciphertext,
                       dm.message_nonce, dm.encryption_key_id, dm.is_read, dm.read_at, dm.created_at,
                       dm.attachment_filename, dm.attachment_mime, dm.attachment_size,
@@ -323,11 +329,10 @@ pub(crate) async fn build_patient_export_payload(
         )
         .bind(&patient_user_ids)
         .fetch_all(&state.db)
-        .await
-        .unwrap_or_default()
+        .await, "messages")?
     };
 
-    let medication_evidence_reviews = sqlx::query(
+    let medication_evidence_reviews = require_patient_export_section(sqlx::query(
         r#"SELECT request.id, request.status, request.requested_by,
                   request.requested_at, request.completed_at,
                   bundle.id AS bundle_id, bundle.bundle_version,
@@ -345,20 +350,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(
-            error = %error,
-            patient_id = %patient_id,
-            "export medication evidence reviews"
-        );
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build complete patient export",
-        )
-    })?;
+    .await, "medication_evidence_reviews")?;
 
-    let medication_ai_analyses = sqlx::query(
+    let medication_ai_analyses = require_patient_export_section(sqlx::query(
         r#"SELECT id, review_id, bundle_id, status, provider_kind, provider_model,
                   input_schema_version, prompt_version, input_fingerprint,
                   requested_by, requested_at, started_at, completed_at,
@@ -370,20 +364,9 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(
-            error = %error,
-            patient_id = %patient_id,
-            "export medication AI analyses"
-        );
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build complete patient export",
-        )
-    })?;
+    .await, "medication_ai_analyses")?;
 
-    let medication_ai_analysis_events = sqlx::query(
+    let medication_ai_analysis_events = require_patient_export_section(sqlx::query(
         r#"SELECT event.id, event.analysis_id, event.from_status, event.to_status,
                   event.reason_code, event.actor_id, event.created_at
            FROM medication_ai_analysis_events event
@@ -393,18 +376,112 @@ pub(crate) async fn build_patient_export_payload(
     )
     .bind(patient_id)
     .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(
-            error = %error,
-            patient_id = %patient_id,
-            "export medication AI analysis events"
-        );
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build complete patient export",
-        )
-    })?;
+    .await, "medication_ai_analysis_events")?;
+
+    let medication_evidence_reviews = require_patient_export_section(
+        medication_evidence_reviews
+            .into_iter()
+            .map(|row| -> Result<Value, sqlx::Error> {
+                let completed_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("completed_at")?;
+                let draft_id: Option<Uuid> = row.try_get("draft_id")?;
+                let draft_status: Option<String> = row.try_get("draft_status")?;
+                let evidence_summary: Option<Value> = row.try_get("evidence_summary")?;
+                let verification_questions: Option<Value> =
+                    row.try_get("verification_questions")?;
+                let limitations: Option<Value> = row.try_get("limitations")?;
+                let citation_refs: Option<Value> = row.try_get("citation_refs")?;
+                let draft_created_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("draft_created_at")?;
+                Ok(json!({
+                    "id": row.try_get::<Uuid, _>("id")?,
+                    "status": row.try_get::<String, _>("status")?,
+                    "requested_by": row.try_get::<Uuid, _>("requested_by")?,
+                    "requested_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at")?
+                        .to_rfc3339(),
+                    "completed_at": completed_at.map(|value| value.to_rfc3339()),
+                    "bundle": {
+                        "id": row.try_get::<Uuid, _>("bundle_id")?,
+                        "version": row.try_get::<String, _>("bundle_version")?,
+                        "intelligence_fingerprint": row.try_get::<String, _>("intelligence_fingerprint")?,
+                        "evidence_snapshot": row.try_get::<Value, _>("evidence_snapshot")?,
+                        "created_at": row
+                            .try_get::<chrono::DateTime<chrono::Utc>, _>("bundle_created_at")?
+                            .to_rfc3339(),
+                    },
+                    "draft": draft_id.map(|draft_id| json!({
+                        "id": draft_id,
+                        "status": draft_status,
+                        "evidence_summary": evidence_summary,
+                        "verification_questions": verification_questions,
+                        "limitations": limitations,
+                        "citation_refs": citation_refs,
+                        "created_at": draft_created_at.map(|value| value.to_rfc3339()),
+                    })),
+                }))
+            })
+            .collect::<Result<Vec<_>, _>>(),
+        "medication_evidence_reviews_decode",
+    )?;
+
+    let medication_ai_analyses = require_patient_export_section(
+        medication_ai_analyses
+            .into_iter()
+            .map(|row| -> Result<Value, sqlx::Error> {
+                let started_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("started_at")?;
+                let completed_at: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("completed_at")?;
+                Ok(json!({
+                    "id": row.try_get::<Uuid, _>("id")?,
+                    "review_id": row.try_get::<Uuid, _>("review_id")?,
+                    "bundle_id": row.try_get::<Uuid, _>("bundle_id")?,
+                    "status": row.try_get::<String, _>("status")?,
+                    "provider_kind": row.try_get::<String, _>("provider_kind")?,
+                    "provider_model": row.try_get::<String, _>("provider_model")?,
+                    "input_schema_version": row.try_get::<String, _>("input_schema_version")?,
+                    "prompt_version": row.try_get::<String, _>("prompt_version")?,
+                    "input_fingerprint": row.try_get::<String, _>("input_fingerprint")?,
+                    "requested_by": row.try_get::<Uuid, _>("requested_by")?,
+                    "requested_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at")?
+                        .to_rfc3339(),
+                    "started_at": started_at.map(|value| value.to_rfc3339()),
+                    "completed_at": completed_at.map(|value| value.to_rfc3339()),
+                    "output": row.try_get::<Option<Value>, _>("output_json")?,
+                    "output_fingerprint": row.try_get::<Option<String>, _>("output_fingerprint")?,
+                    "provider_response_id": row.try_get::<Option<String>, _>("provider_response_id")?,
+                    "provider_response_model": row.try_get::<Option<String>, _>("provider_response_model")?,
+                    "error_code": row.try_get::<Option<String>, _>("error_code")?,
+                    "updated_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")?
+                        .to_rfc3339(),
+                }))
+            })
+            .collect::<Result<Vec<_>, _>>(),
+        "medication_ai_analyses_decode",
+    )?;
+
+    let medication_ai_analysis_events = require_patient_export_section(
+        medication_ai_analysis_events
+            .into_iter()
+            .map(|row| -> Result<Value, sqlx::Error> {
+                Ok(json!({
+                    "id": row.try_get::<Uuid, _>("id")?,
+                    "analysis_id": row.try_get::<Uuid, _>("analysis_id")?,
+                    "from_status": row.try_get::<Option<String>, _>("from_status")?,
+                    "to_status": row.try_get::<String, _>("to_status")?,
+                    "reason_code": row.try_get::<String, _>("reason_code")?,
+                    "actor_id": row.try_get::<Option<Uuid>, _>("actor_id")?,
+                    "created_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?
+                        .to_rfc3339(),
+                }))
+            })
+            .collect::<Result<Vec<_>, _>>(),
+        "medication_ai_analysis_events_decode",
+    )?;
 
     let export = serde_json::json!({
         "export_type": "DSGVO Art. 15 - Right of Access",
@@ -590,59 +667,9 @@ pub(crate) async fn build_patient_export_payload(
                 "redaction_reason": row.try_get::<Option<String>, _>("redaction_reason").unwrap_or_default(),
             })
         }).collect::<Vec<_>>(),
-        "medication_evidence_reviews": medication_evidence_reviews.into_iter().map(|row| serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-            "status": row.try_get::<String, _>("status").unwrap_or_default(),
-            "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
-            "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            "bundle": {
-                "id": row.try_get::<Uuid, _>("bundle_id").unwrap_or_else(|_| Uuid::nil()),
-                "version": row.try_get::<String, _>("bundle_version").unwrap_or_default(),
-                "intelligence_fingerprint": row.try_get::<String, _>("intelligence_fingerprint").unwrap_or_default(),
-                "evidence_snapshot": row.try_get::<serde_json::Value, _>("evidence_snapshot").unwrap_or_else(|_| serde_json::json!({})),
-                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("bundle_created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            },
-            "draft": row.try_get::<Option<Uuid>, _>("draft_id").unwrap_or_default().map(|draft_id| serde_json::json!({
-                "id": draft_id,
-                "status": row.try_get::<Option<String>, _>("draft_status").unwrap_or_default(),
-                "evidence_summary": row.try_get::<Option<serde_json::Value>, _>("evidence_summary").unwrap_or_default(),
-                "verification_questions": row.try_get::<Option<serde_json::Value>, _>("verification_questions").unwrap_or_default(),
-                "limitations": row.try_get::<Option<serde_json::Value>, _>("limitations").unwrap_or_default(),
-                "citation_refs": row.try_get::<Option<serde_json::Value>, _>("citation_refs").unwrap_or_default(),
-                "created_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("draft_created_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            })),
-        })).collect::<Vec<_>>(),
-        "medication_ai_analyses": medication_ai_analyses.into_iter().map(|row| serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-            "review_id": row.try_get::<Uuid, _>("review_id").unwrap_or_else(|_| Uuid::nil()),
-            "bundle_id": row.try_get::<Uuid, _>("bundle_id").unwrap_or_else(|_| Uuid::nil()),
-            "status": row.try_get::<String, _>("status").unwrap_or_default(),
-            "provider_kind": row.try_get::<String, _>("provider_kind").unwrap_or_default(),
-            "provider_model": row.try_get::<String, _>("provider_model").unwrap_or_default(),
-            "input_schema_version": row.try_get::<String, _>("input_schema_version").unwrap_or_default(),
-            "prompt_version": row.try_get::<String, _>("prompt_version").unwrap_or_default(),
-            "input_fingerprint": row.try_get::<String, _>("input_fingerprint").unwrap_or_default(),
-            "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
-            "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            "started_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("started_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-            "output": row.try_get::<Option<serde_json::Value>, _>("output_json").unwrap_or_default(),
-            "output_fingerprint": row.try_get::<Option<String>, _>("output_fingerprint").unwrap_or_default(),
-            "provider_response_id": row.try_get::<Option<String>, _>("provider_response_id").unwrap_or_default(),
-            "provider_response_model": row.try_get::<Option<String>, _>("provider_response_model").unwrap_or_default(),
-            "error_code": row.try_get::<Option<String>, _>("error_code").unwrap_or_default(),
-            "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        })).collect::<Vec<_>>(),
-        "medication_ai_analysis_events": medication_ai_analysis_events.into_iter().map(|row| serde_json::json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-            "analysis_id": row.try_get::<Uuid, _>("analysis_id").unwrap_or_else(|_| Uuid::nil()),
-            "from_status": row.try_get::<Option<String>, _>("from_status").unwrap_or_default(),
-            "to_status": row.try_get::<String, _>("to_status").unwrap_or_default(),
-            "reason_code": row.try_get::<String, _>("reason_code").unwrap_or_default(),
-            "actor_id": row.try_get::<Option<Uuid>, _>("actor_id").unwrap_or_default(),
-            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        })).collect::<Vec<_>>(),
+        "medication_evidence_reviews": medication_evidence_reviews,
+        "medication_ai_analyses": medication_ai_analyses,
+        "medication_ai_analysis_events": medication_ai_analysis_events,
     });
 
     state.audit_sender.try_send(audit::domain_event(

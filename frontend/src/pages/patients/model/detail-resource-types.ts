@@ -37,6 +37,7 @@ export type PatientLabResult = {
   reference_text?: string | null;
   reference_low?: number | null;
   reference_high?: number | null;
+  interpretation_note?: string | null;
   abnormal_flag: "normal" | "low" | "high" | "abnormal" | "unknown";
   source_country?: string | null;
   source_document_id?: string | null;

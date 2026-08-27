@@ -13,6 +13,7 @@ export type PatientLabResultCorrectionPayload = {
   reference_text: string | null;
   reference_low: number | null;
   reference_high: number | null;
+  interpretation_note: string | null;
   abnormal_flag: PatientLabResult["abnormal_flag"];
   correction_note: string;
 };

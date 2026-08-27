@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import re
+from statistics import median
 import threading
 import time
 import unicodedata
@@ -28,6 +29,9 @@ OCR_DOCUMENT_TIMEOUT_SECONDS = float(os.environ.get("PARSER_OCR_DOCUMENT_TIMEOUT
 OCR_OSD_TIMEOUT_SECONDS = float(os.environ.get("PARSER_OCR_OSD_TIMEOUT_SECONDS", "8"))
 OCR_MIN_ORIENTATION_CONFIDENCE = float(
     os.environ.get("PARSER_OCR_MIN_ORIENTATION_CONFIDENCE", "5")
+)
+OCR_MIN_SCRIPT_CONFIDENCE = float(
+    os.environ.get("PARSER_OCR_MIN_SCRIPT_CONFIDENCE", "10")
 )
 OCR_PRIMARY_LANGUAGES = os.environ.get("PARSER_OCR_PRIMARY_LANGUAGES", "deu+eng")
 OCR_CYRILLIC_LANGUAGES = os.environ.get(
@@ -94,6 +98,9 @@ _OSD_ORIENTATION_CONF_PATTERN = re.compile(
     r"^Orientation confidence:\s*([\d.]+)", re.MULTILINE
 )
 _OSD_SCRIPT_PATTERN = re.compile(r"^Script:\s*([^\r\n]+)", re.MULTILINE)
+_OSD_SCRIPT_CONF_PATTERN = re.compile(
+    r"^Script confidence:\s*([\d.]+)", re.MULTILINE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -546,7 +553,7 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
             # Tesseract directly; preprocessing is an accuracy enhancement.
             prepared = image
 
-        rotation, script = _detect_orientation(prepared, page_deadline)
+        rotation, script, script_confidence = _detect_orientation(prepared, page_deadline)
         oriented = prepared
         if rotation:
             try:
@@ -574,7 +581,11 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
                 deskewed = oriented
                 deskew_angle = 0.0
 
-        primary_languages = _select_ocr_languages(text_hint, script)
+        primary_languages = _select_ocr_languages(
+            text_hint,
+            script,
+            script_confidence,
+        )
         primary = _run_ocr_engine(deskewed, primary_languages, page_deadline)
         primary = _replace_ocr_geometry(primary, rotation, deskew_angle)
 
@@ -754,23 +765,27 @@ def _remove_table_rules(image: object) -> tuple[object, int]:
         grayscale.close()
 
 
-def _detect_orientation(image: object, deadline: float) -> tuple[int, str | None]:
+def _detect_orientation(
+    image: object,
+    deadline: float,
+) -> tuple[int, str | None, float | None]:
     import pytesseract
 
     image_to_osd = getattr(pytesseract, "image_to_osd", None)
     if not callable(image_to_osd):
-        return 0, None
+        return 0, None, None
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        return 0, None
+        return 0, None, None
     timeout = min(OCR_OSD_TIMEOUT_SECONDS, remaining)
     try:
         output = image_to_osd(image, timeout=timeout)
     except (RuntimeError, TypeError, ValueError):
-        return 0, None
+        return 0, None, None
     rotate_match = _OSD_ROTATE_PATTERN.search(str(output))
     confidence_match = _OSD_ORIENTATION_CONF_PATTERN.search(str(output))
     script_match = _OSD_SCRIPT_PATTERN.search(str(output))
+    script_confidence_match = _OSD_SCRIPT_CONF_PATTERN.search(str(output))
     rotation = int(rotate_match.group(1)) % 360 if rotate_match else 0
     confidence = float(confidence_match.group(1)) if confidence_match else 0.0
     if (
@@ -779,7 +794,12 @@ def _detect_orientation(image: object, deadline: float) -> tuple[int, str | None
     ):
         rotation = 0
     script = script_match.group(1).strip() if script_match else None
-    return rotation, script
+    script_confidence = (
+        float(script_confidence_match.group(1))
+        if script_confidence_match
+        else None
+    )
+    return rotation, script, script_confidence
 
 
 def _estimate_skew_angle(image: object) -> float:
@@ -843,14 +863,23 @@ def _projection_score(image: object, angle: float) -> float:
         rotated.close()
 
 
-def _select_ocr_languages(text_hint: str, script: str | None) -> str:
+def _select_ocr_languages(
+    text_hint: str,
+    script: str | None,
+    script_confidence: float | None = None,
+) -> str:
     if _UKRAINIAN_DISTINCTIVE_PATTERN.search(text_hint):
         return OCR_UKRAINIAN_LANGUAGES
     if _RUSSIAN_DISTINCTIVE_PATTERN.search(text_hint):
         return OCR_RUSSIAN_LANGUAGES
     if _CYRILLIC_PATTERN.search(text_hint):
         return OCR_CYRILLIC_LANGUAGES
-    if script and "cyrillic" in script.casefold():
+    if (
+        script
+        and "cyrillic" in script.casefold()
+        and script_confidence is not None
+        and script_confidence >= OCR_MIN_SCRIPT_CONFIDENCE
+    ):
         return OCR_CYRILLIC_LANGUAGES
     return OCR_PRIMARY_LANGUAGES
 
@@ -1060,7 +1089,7 @@ def _outcome_from_paddle_results(results: object) -> _OcrOutcome:
             bbox = _paddle_bbox(boxes[index]) if index < len(boxes) else (0, 0, 0, 0)
             rows.append({"text": text, "confidence": confidence, "bbox": bbox})
 
-    rows = _sort_paddle_rows(rows)
+    rows = _sort_paddle_rows(_without_vertical_margin_artifacts(rows))
 
     output_parts: list[str] = []
     blocks: list[OcrBlockMetadata] = []
@@ -1190,6 +1219,45 @@ def _sort_paddle_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def _without_vertical_margin_artifacts(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Drop OCR fragments produced by vertically printed page-margin text.
+
+    German laboratory forms often contain copy-protection text rotated along
+    the extreme left edge. Paddle occasionally recognizes two or three glyphs
+    from that text as horizontal table cells. They must not participate in row
+    grouping because a tall fragment can attach the result from one laboratory
+    row to the analyte on the next row.
+
+    The filter is deliberately geometric. It only removes very narrow boxes on
+    the first 25 pixels of the rendered page, plus extremely low-confidence
+    short text spread over an implausibly wide box. Normal clinical labels and
+    result cells are retained regardless of confidence.
+    """
+
+    retained: list[dict[str, Any]] = []
+    for row in rows:
+        left, _top, width, height = row["bbox"]
+        text = str(row.get("text") or "").strip()
+        confidence = row.get("confidence")
+        vertical_margin_fragment = bool(
+            left <= 25
+            and width <= 25
+            and height >= max(12, round(width * 1.45))
+        )
+        implausibly_wide_short_fragment = bool(
+            confidence is not None
+            and float(confidence) < 50
+            and len(re.sub(r"\s+", "", text)) <= 4
+            and width >= max(180, height * 4)
+        )
+        if vertical_margin_fragment or implausibly_wide_short_fragment:
+            continue
+        retained.append(row)
+    return retained
+
+
 def _looks_like_table(rows: list[dict[str, Any]]) -> bool:
     """Detect repeated numeric cells aligned on shared row baselines."""
 
@@ -1206,7 +1274,7 @@ def _looks_like_table(rows: list[dict[str, Any]]) -> bool:
 
 def _row_major_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups = _aligned_row_groups(rows)
-    groups.sort(key=lambda group: min(row["bbox"][1] for row in group))
+    groups.sort(key=lambda group: _row_group_band(group)[0])
     return [
         row
         for group in groups
@@ -1216,23 +1284,88 @@ def _row_major_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _aligned_row_groups(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     groups: list[list[dict[str, Any]]] = []
-    for row in sorted(rows, key=lambda item: item["bbox"][1]):
-        top = row["bbox"][1]
-        height = max(1, row["bbox"][3])
-        center = top + height / 2
+    for row in sorted(rows, key=lambda item: _row_box_center(item["bbox"])):
         matched: list[dict[str, Any]] | None = None
+        matched_distance = math.inf
+        row_center = _row_box_center(row["bbox"])
+        row_height = max(1, row["bbox"][3])
         for group in groups:
-            group_row = group[0]
-            group_height = max(1, group_row["bbox"][3])
-            group_center = group_row["bbox"][1] + group_height / 2
-            if abs(center - group_center) <= max(height, group_height) * 0.65:
+            group_center, group_height = _row_group_band(group)
+            distance = abs(row_center - group_center)
+            tolerance = max(
+                4.0,
+                min(row_height, group_height) * 0.45,
+            )
+            overlap_ratio = _row_group_overlap_ratio(row["bbox"], group)
+            comparable_heights = (
+                max(row_height, group_height) / max(1.0, min(row_height, group_height))
+                <= 1.75
+            )
+            same_column = any(
+                _horizontal_box_overlap_ratio(row["bbox"], item["bbox"]) >= 0.50
+                for item in group
+            )
+            aligned = not same_column and (
+                distance <= tolerance
+                or (comparable_heights and overlap_ratio >= 0.55)
+            )
+            if aligned and distance < matched_distance:
                 matched = group
-                break
+                matched_distance = distance
         if matched is None:
             groups.append([row])
         else:
             matched.append(row)
     return groups
+
+
+def _row_box_center(bbox: tuple[int, int, int, int]) -> float:
+    return bbox[1] + max(1, bbox[3]) / 2
+
+
+def _row_group_band(group: list[dict[str, Any]]) -> tuple[float, float]:
+    """Return a stable center and height for one OCR row.
+
+    Each new box is compared with the row consensus, never with an arbitrary
+    member. This prevents tall unit and parenthesis boxes from transitively
+    chaining adjacent laboratory rows into one group.
+    """
+
+    centers = [_row_box_center(item["bbox"]) for item in group]
+    heights = [max(1, item["bbox"][3]) for item in group]
+    return float(median(centers)), float(median(heights))
+
+
+def _row_group_overlap_ratio(
+    bbox: tuple[int, int, int, int],
+    group: list[dict[str, Any]],
+) -> float:
+    """Return vertical overlap against the group's robust row band."""
+
+    center, height = _row_group_band(group)
+    row_top = float(bbox[1])
+    row_height = float(max(1, bbox[3]))
+    row_bottom = row_top + row_height
+    group_top = center - height / 2
+    group_bottom = center + height / 2
+    overlap = max(0.0, min(row_bottom, group_bottom) - max(row_top, group_top))
+    return overlap / max(1.0, min(row_height, height))
+
+
+def _horizontal_box_overlap_ratio(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> float:
+    first_left = float(first[0])
+    first_width = float(max(1, first[2]))
+    second_left = float(second[0])
+    second_width = float(max(1, second[2]))
+    overlap = max(
+        0.0,
+        min(first_left + first_width, second_left + second_width)
+        - max(first_left, second_left),
+    )
+    return overlap / max(1.0, min(first_width, second_width))
 
 
 def _paddle_result_payload(result: object) -> dict[str, Any]:

@@ -1284,11 +1284,14 @@ LAB_ROW_LEADING_ARTIFACT_RE = re.compile(
 LAB_INTERPRETATION_ROW_RE = re.compile(
     r"^(?:"
     r"grenzwertig|abkl[aä]rungsbed[uü]rftig|"
-    r"niedrig|mittel|hoch|graubereich|mangel|toxischer\s+bereich|"
+    r"(?:e?erh[oö]t)|niedrig|mittel|hoch|graubereich|mangel|toxischer\s+bereich|"
     r"bei\s+(?:(?:sehr|besonders)\s+)?(?:niedrigem|moderatem|hohem)\s+risiko"
     r")$",
     re.IGNORECASE,
 )
+
+MAX_LAB_INTERPRETATION_NOTE_CHARS = 4000
+LAB_STATUS_CELL_RE = re.compile(r"^(?:S{1,6}|E|M|MS|WSSWSSS)$")
 
 
 def _looks_like_lab_panel_heading(value: str) -> bool:
@@ -1300,6 +1303,257 @@ def _looks_like_lab_interpretation_row(value: str) -> bool:
 
     normalized = " ".join(value.strip().strip(":").split())
     return bool(LAB_INTERPRETATION_ROW_RE.fullmatch(normalized))
+
+
+def _normalized_lab_unit(value: str) -> str | None:
+    """Return a canonical unit from one OCR cell or embedded cell token."""
+
+    for token in (value, *re.split(r"\s+", value.strip())):
+        raw = token.strip().strip("()[]~ ")
+        if not raw or LAB_STATUS_CELL_RE.fullmatch(raw):
+            continue
+        aliases = {
+            "mmoll": "mmol/l",
+            "u/i": "U/l",
+            "u/": "U/l",
+            "mu/l": "mU/l",
+            "mu/i": "mU/l",
+            "iu/": "IU/l",
+        }
+        alias = aliases.get(raw.casefold())
+        if alias:
+            return alias
+        if _looks_like_lab_unit(raw):
+            if raw.endswith("/I"):
+                return f"{raw[:-1]}l"
+            return raw
+    return None
+
+
+def _lab_unit_from_cells(cells: list[str]) -> str | None:
+    return next(
+        (unit for cell in cells if (unit := _normalized_lab_unit(cell)) is not None),
+        None,
+    )
+
+
+def _lab_reference_from_cells(
+    cells: list[str],
+    *,
+    analyte: str,
+    inherited_unit: str | None,
+) -> str | None:
+    compact = " ".join(cell.strip() for cell in cells if cell.strip())
+    if not compact:
+        return None
+    range_match = LAB_REFERENCE_RANGE_RE.search(compact)
+    if range_match:
+        return f"{range_match.group('low')} - {range_match.group('high')}"
+    limit_match = LAB_REFERENCE_LIMIT_RE.search(compact)
+    if limit_match:
+        return f"{limit_match.group('comparator')} {limit_match.group('number')}"
+    bis_match = re.search(r"\bbis\s*(?P<number>[+-]?[\d.,]+)", compact, re.IGNORECASE)
+    if bis_match:
+        return f"<= {bis_match.group('number')}"
+
+    numbers = re.findall(r"(?<![\w])([+-]?\d+(?:[.,]\d+)?)", compact)
+    # In the source table a narrow ``>`` glyph in the percent-index row is
+    # recognized as ``1``. This correction is intentionally constrained to
+    # the exact index/reference shape; otherwise two numbers remain a range.
+    if (
+        inherited_unit == "%"
+        and "index" in analyte.casefold()
+        and len(numbers) == 2
+        and numbers[0] == "1"
+        and compact.strip().endswith(")")
+    ):
+        return f"> {numbers[1]}"
+    if len(numbers) >= 2:
+        return f"{numbers[0]} - {numbers[1]}"
+    return None
+
+
+def _structured_single_date_lab_row(
+    cells: list[str],
+    *,
+    inherited_unit: str | None = None,
+) -> tuple[str, str, str | None, str | None] | None:
+    """Parse an unambiguous one-result row independently of column order.
+
+    The grammar requires the result immediately after the analyte. Reference
+    bounds and the unit may be split across multiple OCR cells, but no result
+    is inferred from a later numeric cell.
+    """
+
+    while (
+        len(cells) >= 3
+        and len(cells[0].strip()) <= 2
+        and not any(character.isdigit() for character in cells[0])
+        and any(character.isalpha() for character in cells[1])
+    ):
+        cells = cells[1:]
+    if len(cells) < 2:
+        return None
+    analyte = cells[0].strip(" -*•")
+    if (
+        not analyte
+        or len(analyte) > 160
+        or not any(character.isalpha() for character in analyte)
+        or _looks_like_lab_interpretation_row(analyte)
+    ):
+        return None
+    result_text = cells[1].strip(" |[]{}")
+    if not (
+        LAB_RESULT_RE.fullmatch(result_text)
+        or LAB_TEXT_RESULT_RE.fullmatch(result_text)
+    ):
+        return None
+
+    explicit_unit = _lab_unit_from_cells(cells[2:])
+    may_inherit_unit = bool(
+        inherited_unit
+        and (re.match(r"^\d{1,2}:\d", analyte) or "index" in analyte.casefold())
+    )
+    unit = explicit_unit or (inherited_unit if may_inherit_unit else None)
+    reference_text = _lab_reference_from_cells(
+        cells[2:],
+        analyte=analyte,
+        inherited_unit=unit,
+    )
+    has_trailing_number = bool(
+        re.search(r"(?<![\w])[+-]?\d+(?:[.,]\d+)?", " ".join(cells[2:]))
+    )
+    if reference_text is None and has_trailing_number:
+        # Preserve ambiguous OCR as a malformed reference so the candidate is
+        # not auto-selected by `_lab_candidate`.
+        reference_text = " ".join(cells[2:]).strip() or None
+    if unit is None and reference_text is None:
+        return None
+    return analyte, result_text, unit, reference_text
+
+
+def _laboratory_unit_context_heading(cells: list[str]) -> tuple[str, str] | None:
+    if not cells or any(
+        LAB_RESULT_RE.fullmatch(cell.strip(" |[]{}")) for cell in cells
+    ):
+        return None
+    unit = _lab_unit_from_cells(cells)
+    if unit is None:
+        return None
+    labels = [
+        cell.strip(" -*•")
+        for cell in cells
+        if any(character.isalpha() for character in cell)
+        and _normalized_lab_unit(cell) is None
+        and not LAB_STATUS_CELL_RE.fullmatch(cell.strip())
+    ]
+    if not labels:
+        return None
+    label = max(labels, key=len)
+    return (label, unit) if len(label) >= 4 else None
+
+
+def _standalone_lab_analyte(line: str) -> bool:
+    cells = _lab_cells(line)
+    compact = cells[0].strip() if len(cells) == 1 else ""
+    return bool(
+        compact
+        and len(compact) <= 160
+        and any(character.isalpha() for character in compact)
+        and not compact.endswith((".", ":", "!", "?"))
+        and not _looks_like_lab_interpretation_row(compact)
+        and not _looks_like_lab_panel_heading(compact)
+    )
+
+
+def _starts_structured_lab_result(line: str) -> bool:
+    cells = _lab_cells(line)
+    return bool(
+        cells
+        and LAB_RESULT_RE.fullmatch(cells[0].strip(" |[]{}"))
+        and (
+            _lab_unit_from_cells(cells[1:]) is not None
+            or _lab_reference_from_cells(cells[1:], analyte="", inherited_unit=None)
+            is not None
+        )
+    )
+
+
+def _repair_wrapped_single_result_laboratory_rows(page: str) -> str:
+    """Join wrapped cells and paired analyte/result row runs conservatively."""
+
+    source_lines = page.splitlines()
+    paired: list[str] = []
+    index = 0
+    while index < len(source_lines):
+        if _standalone_lab_analyte(source_lines[index]):
+            labels: list[str] = []
+            cursor = index
+            while cursor < len(source_lines) and _standalone_lab_analyte(
+                source_lines[cursor]
+            ):
+                labels.append(source_lines[cursor].strip())
+                cursor += 1
+            results: list[str] = []
+            result_cursor = cursor
+            while (
+                result_cursor < len(source_lines)
+                and len(results) < len(labels)
+                and _starts_structured_lab_result(source_lines[result_cursor])
+            ):
+                results.append(source_lines[result_cursor].strip())
+                result_cursor += 1
+            if labels and len(results) == len(labels):
+                paired.extend(
+                    f"{label}\t{result}"
+                    for label, result in zip(labels, results, strict=True)
+                )
+                index = result_cursor
+                continue
+        paired.append(source_lines[index])
+        index += 1
+
+    repaired: list[str] = []
+    index = 0
+    while index < len(paired):
+        current = paired[index]
+        cells = _lab_cells(current)
+        has_result = bool(
+            len(cells) >= 2
+            and any(character.isalpha() for character in cells[0])
+            and LAB_RESULT_RE.fullmatch(cells[1].strip(" |[]{}"))
+        )
+        if has_result and _lab_unit_from_cells(cells[2:]) is None:
+            # A ruled reference interval can wrap over two OCR lines, e.g.
+            # ``Thrombozyten  256  (  146`` / ``.`` /
+            # ``328  )Tsd./μl``. Accumulate at most two metadata-only lines
+            # and commit the repair only after a real laboratory unit appears.
+            continuations: list[str] = []
+            continuation_cursor = index + 1
+            joined = False
+            while continuation_cursor < len(paired) and len(continuations) < 2:
+                continuation = paired[continuation_cursor]
+                continuation_cells = _lab_cells(continuation)
+                begins_with_metadata = bool(
+                    continuation_cells
+                    and not any(
+                        character.isalpha() for character in continuation_cells[0]
+                    )
+                )
+                if not begins_with_metadata:
+                    break
+                continuations.append(continuation.strip())
+                if _lab_unit_from_cells(continuation_cells) is not None:
+                    repaired.append("\t".join([current, *continuations]))
+                    index = continuation_cursor + 1
+                    joined = True
+                    break
+                continuation_cursor += 1
+            if joined:
+                continue
+        repaired.append(current)
+        index += 1
+    return "\n".join(repaired)
 
 
 def _lab_row_metadata(
@@ -1344,8 +1598,47 @@ def _lab_row_metadata(
             unit = cell
         elif header in {"norm", "referenz", "referenzbereich", "reference"}:
             reference_text = cell
+    if unit is None:
+        unit = next(
+            (
+                cell.strip().strip("()[] ")
+                for cell in cells[1:]
+                if _looks_like_lab_unit(cell)
+            ),
+            None,
+        )
     if reference_text is None:
-        reference_text = cells[-1]
+        reference_text = next(
+            (
+                cell
+                for cell in cells[1:]
+                if LAB_REFERENCE_RANGE_RE.search(cell)
+                or LAB_REFERENCE_LIMIT_RE.search(cell)
+            ),
+            None,
+        )
+    if reference_text is None:
+        reference_text = next(
+            (
+                cell
+                for cell in reversed(cells[1:])
+                if not _looks_like_lab_unit(cell)
+                and cell.strip("()[] -–—|/")
+            ),
+            None,
+        )
+    if reference_text is None:
+        # Keep an OCR-damaged reference token such as ``(`` instead of
+        # silently treating the row as if no reference had been printed.
+        # ``_lab_candidate`` will then fail closed and request confirmation.
+        reference_text = next(
+            (
+                cell
+                for cell in reversed(cells[1:])
+                if cell.strip() and not _looks_like_lab_unit(cell)
+            ),
+            None,
+        )
 
     parenthetical_unit = re.search(r"\s*\((?P<unit>[^()]{1,24})\)\s*$", analyte)
     if parenthetical_unit and _looks_like_lab_unit(parenthetical_unit.group("unit")):
@@ -1371,6 +1664,118 @@ def _lab_row_metadata(
     if not analyte or len(analyte) > 160 or not any(character.isalpha() for character in analyte):
         return None
     return analyte, unit, reference_text or None
+
+
+def _fragmented_dated_normwert_row(
+    cells: list[str],
+) -> tuple[str, str, str, str] | None:
+    """Recover ``analyte / result / low / high / unit`` OCR rows.
+
+    In ruled German lab forms Paddle may recognize the two reference bounds as
+    separate boxes and omit the printed dash and opening parenthesis. The
+    dated ``Normwert`` table still gives the cells an unambiguous meaning when
+    the row has exactly one result followed by exactly two numeric bounds and
+    a laboratory unit. Do not guess when any extra textual cell is present.
+    """
+
+    if len(cells) < 5:
+        return None
+    analyte = cells[0].strip(" -*•")
+    if not analyte or not any(character.isalpha() for character in analyte):
+        return None
+
+    unit_index = next(
+        (
+            index
+            for index in range(len(cells) - 1, 0, -1)
+            if _looks_like_lab_unit(cells[index])
+        ),
+        None,
+    )
+    if unit_index is None:
+        return None
+    unit = cells[unit_index].strip().strip("()[] ")
+    value_cells = cells[1:unit_index]
+    numeric: list[re.Match[str]] = []
+    for cell in value_cells:
+        compact = cell.strip(" |[]{}")
+        if not compact or not compact.strip("()[]{}.,;: -–—"):
+            continue
+        match = LAB_RESULT_RE.fullmatch(compact)
+        if match is None:
+            return None
+        numeric.append(match)
+    if len(numeric) != 3:
+        return None
+
+    result_match, low_match, high_match = numeric
+    if low_match.group("comparator") or high_match.group("comparator"):
+        return None
+    low = _parse_localized_number(low_match.group("number"))
+    high = _parse_localized_number(high_match.group("number"))
+    if low is None or high is None or low > high:
+        return None
+    result_text = result_match.group(0).strip()
+    reference_text = f"{low_match.group('number')} - {high_match.group('number')}"
+    return analyte, result_text, unit, reference_text
+
+
+def _malformed_dated_normwert_row(
+    cells: list[str],
+) -> tuple[str, str, str, str] | None:
+    """Preserve one OCR-damaged result row for explicit human review.
+
+    A result such as ``L'8`` must never make the parser reinterpret the first
+    reference bound as the measured value. When the remaining row shape is
+    still unambiguous (analyte, damaged result, two bounds, unit), emit one
+    fail-closed candidate containing the raw OCR tokens.
+    """
+
+    if len(cells) < 5:
+        return None
+    analyte = cells[0].strip(" -*•")
+    if not analyte or not any(character.isalpha() for character in analyte):
+        return None
+
+    raw_result = cells[1].strip(" |[]{}")
+    if (
+        not raw_result
+        or LAB_RESULT_RE.fullmatch(raw_result)
+        or LAB_TEXT_RESULT_RE.fullmatch(raw_result)
+        or not any(character.isdigit() for character in raw_result)
+    ):
+        return None
+
+    unit_index = next(
+        (
+            index
+            for index in range(len(cells) - 1, 1, -1)
+            if _looks_like_lab_unit(cells[index])
+        ),
+        None,
+    )
+    if unit_index is None:
+        return None
+    unit = cells[unit_index].strip().strip("()[] ")
+
+    bounds: list[re.Match[str]] = []
+    for cell in cells[2:unit_index]:
+        compact = cell.strip(" |[]{}")
+        if not compact or not compact.strip("()[]{}.,;: -–—"):
+            continue
+        match = LAB_RESULT_RE.fullmatch(compact)
+        if match is None or match.group("comparator"):
+            return None
+        bounds.append(match)
+    if len(bounds) != 2:
+        return None
+
+    low = _parse_localized_number(bounds[0].group("number"))
+    high = _parse_localized_number(bounds[1].group("number"))
+    if low is None or high is None or low > high:
+        return None
+    reference_text = f"{bounds[0].group('number')} - {bounds[1].group('number')}"
+    return analyte, raw_result, unit, reference_text
 
 
 def _repair_split_laboratory_result_rows(page: str) -> str:
@@ -1572,28 +1977,144 @@ def _lab_candidate(
         }
         if not recognized_text_reference:
             reasons.append("laboratory_reference_requires_confirmation")
+    normalized: dict[str, Any] = {
+        "panel": panel,
+        "analyte_name": analyte,
+        "result_text": result_text,
+        "numeric_result": numeric_result,
+        "comparator": comparator,
+        "unit": unit,
+        "reference_text": reference_text,
+        "reference_low": reference_low,
+        "reference_high": reference_high,
+        "abnormal_flag": abnormal_flag,
+        "measured_on": measured_on,
+        "auto_select": measured_on is not None and not reasons,
+        "review_reasons": reasons,
+        "semantic_role": "laboratory_observation",
+    }
+    if _looks_like_lab_interpretation_row(analyte):
+        # `_candidate` deliberately exposes the normalized candidate value as
+        # source evidence. Preserve the exact OCR row separately so legends
+        # can be attached losslessly to the preceding observation.
+        normalized["interpretation_note"] = source_text.strip()
     return _candidate(
         "lab_result",
         value,
-        {
-            "panel": panel,
-            "analyte_name": analyte,
-            "result_text": result_text,
-            "numeric_result": numeric_result,
-            "comparator": comparator,
-            "unit": unit,
-            "reference_text": reference_text,
-            "reference_low": reference_low,
-            "reference_high": reference_high,
-            "abnormal_flag": abnormal_flag,
-            "measured_on": measured_on,
-            "auto_select": measured_on is not None and not reasons,
-            "review_reasons": reasons,
-            "semantic_role": "laboratory_observation",
-        },
+        normalized,
         section,
         ("specific_section_role", "structured_date") if measured_on else ("specific_section_role",),
     )
+
+
+def _bounded_laboratory_interpretation_note(value: str) -> tuple[str, bool]:
+    normalized = "\n".join(line.strip() for line in value.splitlines() if line.strip())
+    if len(normalized) <= MAX_LAB_INTERPRETATION_NOTE_CHARS:
+        return normalized, False
+    prefix = normalized[:MAX_LAB_INTERPRETATION_NOTE_CHARS]
+    boundary = max(prefix.rfind("\n"), prefix.rfind("\t"), prefix.rfind(" "))
+    if boundary >= int(MAX_LAB_INTERPRETATION_NOTE_CHARS * 0.8):
+        prefix = prefix[:boundary]
+    return prefix.rstrip(), True
+
+
+def _append_laboratory_interpretation_note(
+    candidate: ClinicalCandidate,
+    note: str,
+) -> None:
+    clean_note = "\n".join(line.strip() for line in note.splitlines() if line.strip())
+    if not clean_note:
+        return
+    existing = candidate.normalized.get("interpretation_note")
+    if (
+        isinstance(existing, str)
+        and re.match(r"^bei\s+(?:niedrigem|moderatem|hohem)\s+risiko\b", clean_note, re.I)
+        and not re.search(r"\d", clean_note)
+    ):
+        existing_lines = existing.splitlines()
+        threshold_match = (
+            re.match(r"^(?P<label>Zielwerte\b.*?)\s+(?P<number>\d+(?:[.,]\d+)?)$", existing_lines[-1], re.I)
+            if existing_lines
+            else None
+        )
+        if threshold_match:
+            existing_lines[-1] = threshold_match.group("label").rstrip()
+            existing = "\n".join(existing_lines)
+            clean_note = f"{clean_note.rstrip(' )\t')}\t{threshold_match.group('number')}"
+    combined = (
+        f"{existing}\n{clean_note}"
+        if isinstance(existing, str) and existing
+        else clean_note
+    )
+    bounded, truncated = _bounded_laboratory_interpretation_note(combined)
+    candidate.normalized["interpretation_note"] = bounded
+    if truncated:
+        reasons = candidate.normalized.setdefault("review_reasons", [])
+        if "laboratory_interpretation_truncated" not in reasons:
+            reasons.append("laboratory_interpretation_truncated")
+        candidate.normalized["auto_select"] = False
+        candidate.selected = False
+
+
+def _laboratory_context_note_route(line: str) -> str | None:
+    """Classify non-observation rows that explain a nearby lab result."""
+
+    cells = _lab_cells(line)
+    first = cells[0].strip() if cells else line.strip()
+    key = _heading_key(first.rstrip(":"))
+    if _looks_like_lab_interpretation_row(first):
+        return "previous"
+    if key.startswith(("batwert", "barwert", "zielwerte", "bewertungdes")):
+        return "previous"
+    if key.startswith(("morgensvor", "abendsnach")):
+        return "previous"
+    lowered = line.casefold().strip()
+    if lowered.startswith(
+        (
+            "der altersentsprechende median",
+            "der omega-3-index",
+            "die bestimmung kann",
+            "foregut- und hindgut-tumore",
+            "(infektionen, malignome",
+        )
+    ):
+        return "previous"
+    if re.match(r"^bitt?e beachten sie den geänderten referenzbereich", lowered):
+        return "previous" if "methodenumstellung" in lowered else "next"
+    if lowered.startswith("liegen die testergebnisse"):
+        return "previous"
+    return None
+
+
+def _looks_like_laboratory_note_continuation(line: str) -> bool:
+    compact = line.strip()
+    lowered = compact.casefold()
+    footer_probe = re.sub(r"^[^a-zà-öø-ÿ]*(?:ba|\*)?\s*", "", lowered)
+    if not compact or lowered.startswith(
+        (
+            "mit freundlichen",
+            "diese untersuchung wurde",
+            "diese untersuchung wird",
+            "labor becker",
+            "telefon:",
+            "fax:",
+        )
+    ) or footer_probe.startswith(("diese untersuchung wurde", "diese untersuchung wird")):
+        return False
+    if re.match(r"^\d{1,2}\.\d{1,2}\.\d{2,4}\s+\d{1,2}:\d{2}", compact):
+        return False
+    if re.fullmatch(r"(?:werden|wird|sind|ist)\.?", lowered):
+        return True
+    cells = _lab_cells(compact)
+    if len(cells) >= 2 and any(
+        LAB_RESULT_RE.fullmatch(cell.strip(" |[]{}"))
+        or LAB_REFERENCE_RANGE_RE.search(cell)
+        or LAB_REFERENCE_LIMIT_RE.search(cell)
+        for cell in cells[1:]
+    ):
+        return False
+    words = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]{2,}", compact)
+    return len(words) >= 3
 
 
 def _narrative_laboratory_candidates(
@@ -1821,7 +2342,13 @@ def _laboratory_candidates(
     )
 
     for page_number, original_page in enumerate(pages, start=1):
-        page = _repair_split_laboratory_result_rows(original_page)
+        page = _repair_wrapped_single_result_laboratory_rows(
+            _repair_split_laboratory_result_rows(original_page)
+        )
+        last_page_candidate: ClinicalCandidate | None = None
+        pending_interpretation_notes: list[str] = []
+        capturing_interpretation = False
+        contextual_unit: str | None = None
         split_header_date = _dated_normwert_table_date(page)
         inherited_header_date = (
             document_table_date
@@ -1920,6 +2447,89 @@ def _laboratory_candidates(
 
             if len(column_dates) == 1:
                 cells = _lab_cells(raw_line)
+                note_route = _laboratory_context_note_route(line)
+                if note_route == "next":
+                    pending_interpretation_notes.append(line)
+                    capturing_interpretation = False
+                    continue
+                if note_route == "previous":
+                    if last_page_candidate is not None:
+                        _append_laboratory_interpretation_note(last_page_candidate, line)
+                        capturing_interpretation = True
+                    continue
+
+                context_heading = _laboratory_unit_context_heading(cells)
+                if context_heading is not None:
+                    current_panel, contextual_unit = context_heading
+                    capturing_interpretation = False
+                    continue
+
+                structured = _structured_single_date_lab_row(
+                    cells,
+                    inherited_unit=contextual_unit,
+                )
+                if structured is not None:
+                    analyte, result_text, unit, reference_text = structured
+                    candidate = _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=unit,
+                        reference_text=reference_text,
+                        measured_on=column_dates[0],
+                        panel=current_panel,
+                        page_number=page_number,
+                        source_text=line,
+                    )
+                    for note in pending_interpretation_notes:
+                        _append_laboratory_interpretation_note(candidate, note)
+                    pending_interpretation_notes.clear()
+                    candidates.append(candidate)
+                    last_page_candidate = candidate
+                    capturing_interpretation = False
+                    continue
+
+                if (
+                    capturing_interpretation
+                    and last_page_candidate is not None
+                    and _looks_like_laboratory_note_continuation(line)
+                ):
+                    _append_laboratory_interpretation_note(last_page_candidate, line)
+                    continue
+                capturing_interpretation = False
+
+                fragmented = _fragmented_dated_normwert_row(cells)
+                if fragmented is not None:
+                    analyte, result_text, unit, reference_text = fragmented
+                    candidate = _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=unit,
+                        reference_text=reference_text,
+                        measured_on=column_dates[0],
+                        panel=current_panel,
+                        page_number=page_number,
+                        source_text=line,
+                    )
+                    candidates.append(candidate)
+                    last_page_candidate = candidate
+                    continue
+                malformed = _malformed_dated_normwert_row(cells)
+                if malformed is not None:
+                    analyte, result_text, unit, reference_text = malformed
+                    candidate = _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=unit,
+                        reference_text=reference_text,
+                        measured_on=column_dates[0],
+                        panel=current_panel,
+                        page_number=page_number,
+                        source_text=line,
+                        review_reasons=("laboratory_result_requires_confirmation",),
+                    )
+                    candidates.append(candidate)
+                    last_page_candidate = candidate
+                    continue
                 for result_index, result_cell in enumerate(cells[1:], start=1):
                     result_text = result_cell.strip(" |[]{}")
                     if not (
@@ -1933,18 +2543,18 @@ def _laboratory_candidates(
                     if metadata is None:
                         continue
                     analyte, unit, reference_text = metadata
-                    candidates.append(
-                        _lab_candidate(
-                            analyte=analyte,
-                            result_text=result_text,
-                            unit=unit,
-                            reference_text=reference_text,
-                            measured_on=column_dates[0],
-                            panel=current_panel,
-                            page_number=page_number,
-                            source_text=line,
-                        )
+                    candidate = _lab_candidate(
+                        analyte=analyte,
+                        result_text=result_text,
+                        unit=unit,
+                        reference_text=reference_text,
+                        measured_on=column_dates[0],
+                        panel=current_panel,
+                        page_number=page_number,
+                        source_text=line,
                     )
+                    candidates.append(candidate)
+                    last_page_candidate = candidate
                     break
                 else:
                     result_index = None
@@ -2020,13 +2630,41 @@ def _laboratory_candidates(
                         source_text=line,
                     )
                 )
-    candidates = [
-        candidate
-        for candidate in candidates
-        if not _looks_like_lab_interpretation_row(
-            str(candidate.normalized.get("analyte_name") or "")
+    retained: list[ClinicalCandidate] = []
+    preceding_by_group: dict[tuple[int | None, str], ClinicalCandidate] = {}
+    for candidate in candidates:
+        analyte_name = str(candidate.normalized.get("analyte_name") or "")
+        panel = str(candidate.normalized.get("panel") or "")
+        group = (candidate.source.page, panel)
+        if _looks_like_lab_interpretation_row(analyte_name):
+            preceding = preceding_by_group.get(group)
+            if preceding is not None:
+                raw_note = candidate.normalized.get("interpretation_note")
+                note = (
+                    raw_note.strip()
+                    if isinstance(raw_note, str) and raw_note.strip()
+                    else candidate.source.text.strip()
+                )
+                _append_laboratory_interpretation_note(preceding, note)
+            continue
+        retained.append(candidate)
+        preceding_by_group[group] = candidate
+    candidates = retained
+    deduplicated: dict[tuple[int | None, str, str], ClinicalCandidate] = {}
+    for candidate in candidates:
+        key = (
+            candidate.source.page,
+            str(candidate.normalized.get("analyte_name") or "").casefold(),
+            str(candidate.normalized.get("result_text") or ""),
         )
-    ]
+        previous = deduplicated.get(key)
+        if previous is not None:
+            previous_note = previous.normalized.get("interpretation_note")
+            current_note = candidate.normalized.get("interpretation_note")
+            if isinstance(previous_note, str) and previous_note and not current_note:
+                _append_laboratory_interpretation_note(candidate, previous_note)
+        deduplicated[key] = candidate
+    candidates = list(deduplicated.values())
     for candidate in candidates:
         candidate.normalized["laboratory_name"] = laboratory_name
     return candidates

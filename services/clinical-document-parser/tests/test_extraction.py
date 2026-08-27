@@ -411,6 +411,220 @@ class ExtractionLimitsTest(unittest.TestCase):
             "Hemoglobin\t12.4\tg/dL\nLeukocytes\t7.1\tG/L\nCRP\t3.0\tmg/L",
         )
 
+    def test_tall_lab_boxes_do_not_transitively_chain_adjacent_rows(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": [
+                        "Magnesium intraerythrozytär",
+                        "Eisen",
+                        "Ferritin",
+                        "Selen (Se)",
+                        "2.00",
+                        "73",
+                        "56",
+                        "108",
+                        "(",
+                        "1.65",
+                        "70",
+                        "20",
+                        "50",
+                        "2.65",
+                        "180",
+                        "250",
+                        "120",
+                        ")mmol/l",
+                        ") μg/dl",
+                        ") µg/l",
+                        "μg/l",
+                    ],
+                    "rec_scores": [0.95] * 21,
+                    "rec_boxes": [
+                        [0, 1016, 387, 1056],
+                        [0, 1049, 85, 1082],
+                        [0, 1081, 105, 1114],
+                        [0, 1111, 156, 1151],
+                        [653, 1013, 719, 1045],
+                        [653, 1044, 696, 1077],
+                        [651, 1076, 696, 1109],
+                        [653, 1109, 709, 1141],
+                        [948, 1026, 961, 1046],
+                        [991, 1019, 1054, 1049],
+                        [1011, 1049, 1054, 1082],
+                        [1011, 1079, 1054, 1116],
+                        [1011, 1112, 1054, 1147],
+                        [1104, 1018, 1170, 1048],
+                        [1106, 1048, 1164, 1080],
+                        [1103, 1076, 1163, 1113],
+                        [1104, 1109, 1162, 1142],
+                        [1192, 1008, 1313, 1050],
+                        [1192, 1038, 1295, 1086],
+                        [1194, 1071, 1279, 1117],
+                        [1192, 1102, 1278, 1148],
+                    ],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertEqual(
+            outcome.text,
+            "Magnesium intraerythrozytär\t2.00\t(\t1.65\t2.65\t)mmol/l\n"
+            "Eisen\t73\t70\t180\t) μg/dl\n"
+            "Ferritin\t56\t20\t250\t) µg/l\n"
+            "Selen (Se)\t108\t50\t120\tμg/l",
+        )
+        self.assertEqual(
+            [outcome.text[block.start_char : block.end_char] for block in outcome.blocks],
+            [
+                "Magnesium intraerythrozytär",
+                "2.00",
+                "(",
+                "1.65",
+                "2.65",
+                ")mmol/l",
+                "Eisen",
+                "73",
+                "70",
+                "180",
+                ") μg/dl",
+                "Ferritin",
+                "56",
+                "20",
+                "250",
+                ") µg/l",
+                "Selen (Se)",
+                "108",
+                "50",
+                "120",
+                "μg/l",
+            ],
+        )
+
+    def test_becker_differential_rows_use_vertical_overlap_not_margin_noise(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": [
+                        "S",
+                        "basophile Granulozyten",
+                        "Lymphozyten",
+                        "Monozyten",
+                        "1.2",
+                        "bis",
+                        "2.0",
+                        ") %",
+                        "35.9",
+                        "17.0",
+                        "47.0",
+                        ") %",
+                        "8.1",
+                        "4.0",
+                        "12.0",
+                        ") %",
+                        "Diesen Befund können",
+                        "neutrophile Granulozyten",
+                        "1.840",
+                        "1.800",
+                        "6.200",
+                        ") Tsd./μl",
+                    ],
+                    "rec_scores": [
+                        0.34,
+                        *([0.99] * 15),
+                        0.32,
+                        *([0.99] * 5),
+                    ],
+                    "rec_boxes": [
+                        [3, 1421, 15, 1441],
+                        [80, 1355, 389, 1397],
+                        [80, 1385, 266, 1425],
+                        [81, 1418, 234, 1451],
+                        [676, 1370, 727, 1403],
+                        [1015, 1376, 1065, 1408],
+                        [1104, 1375, 1159, 1407],
+                        [1191, 1370, 1251, 1410],
+                        [673, 1398, 741, 1433],
+                        [1000, 1406, 1063, 1438],
+                        [1101, 1404, 1171, 1436],
+                        [1187, 1400, 1250, 1442],
+                        [673, 1431, 724, 1463],
+                        [1008, 1436, 1063, 1468],
+                        [1066, 1436, 1171, 1466],
+                        [1191, 1434, 1247, 1467],
+                        [0, 1433, 23, 1566],
+                        [81, 1474, 410, 1516],
+                        [674, 1486, 752, 1521],
+                        [952, 1496, 1057, 1526],
+                        [1103, 1499, 1181, 1524],
+                        [1187, 1497, 1297, 1527],
+                    ],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertEqual(
+            outcome.text,
+            "basophile Granulozyten\t1.2\tbis\t2.0\t) %\n"
+            "Lymphozyten\t35.9\t17.0\t47.0\t) %\n"
+            "Monozyten\t8.1\t4.0\t12.0\t) %\n"
+            "neutrophile Granulozyten\t1.840\t1.800\t6.200\t) Tsd./μl",
+        )
+
+    def test_becker_enzyme_rows_keep_comparator_with_its_analyte(self) -> None:
+        result = SimpleNamespace(
+            json={
+                "res": {
+                    "rec_texts": [
+                        "GOT (ASAT)",
+                        "15",
+                        "<",
+                        "50",
+                        ") U/l",
+                        "GPT (ALAT)",
+                        "18",
+                        "<",
+                        "50",
+                        ") U/l",
+                        "SSS",
+                        "gamma-GT",
+                        "12",
+                        "<",
+                        "60",
+                        ") U/l",
+                    ],
+                    "rec_scores": [0.99] * 16,
+                    "rec_boxes": [
+                        [56, 1605, 222, 1650],
+                        [664, 1617, 704, 1652],
+                        [1021, 1633, 1043, 1658],
+                        [1096, 1630, 1136, 1661],
+                        [1178, 1623, 1251, 1664],
+                        [58, 1638, 217, 1679],
+                        [664, 1646, 704, 1681],
+                        [1021, 1663, 1043, 1686],
+                        [1096, 1656, 1136, 1691],
+                        [1180, 1655, 1253, 1696],
+                        [1354, 1627, 1394, 1726],
+                        [63, 1678, 205, 1708],
+                        [667, 1680, 702, 1711],
+                        [1021, 1694, 1043, 1716],
+                        [1096, 1686, 1136, 1721],
+                        [1183, 1688, 1249, 1724],
+                    ],
+                }
+            }
+        )
+
+        outcome = _outcome_from_paddle_results([result])
+
+        self.assertIn("GOT (ASAT)\t15\t<\t50\t) U/l", outcome.text)
+        self.assertIn("GPT (ALAT)\t18\t<\t50\t) U/l", outcome.text)
+        self.assertIn("gamma-GT\t12\t<\t60\t) U/l", outcome.text)
+
     def test_tesseract_geometry_preserves_lab_column_boundaries(self) -> None:
         outcome = _outcome_from_tesseract_data(
             {
@@ -442,6 +656,34 @@ class ExtractionLimitsTest(unittest.TestCase):
         self.assertEqual(_select_ocr_languages("Зміни відсутні і є", None), "deu+eng+ukr")
         self.assertEqual(_select_ocr_languages("Изменения были", None), "deu+eng+rus")
 
+    def test_low_confidence_cyrillic_osd_keeps_latin_paddle_route(self) -> None:
+        rendered_page = FakeRenderedPage()
+        paddle_outcome = _outcome_from_paddle_results([fake_paddle_result()])
+        data_ocr = Mock(return_value=fake_tesseract_data())
+
+        with (
+            patch("app.extraction.OCR_ENGINE", "paddle"),
+            patch("app.extraction._run_paddle", return_value=paddle_outcome) as paddle,
+            patch("app.extraction._should_try_cyrillic_fallback", return_value=False),
+            mocked_pdf_modules(
+                [FakeNativePage("")],
+                [rendered_page],
+                Mock(return_value="unused"),
+                data_ocr=data_ocr,
+                osd_text=(
+                    "Orientation in degrees: 0\nRotate: 0\n"
+                    "Orientation confidence: 12.0\nScript: Cyrillic\n"
+                    "Script confidence: 2.0\n"
+                ),
+            ),
+        ):
+            result = extract_document(b"%PDF-latin-low-confidence-osd", "application/pdf")
+
+        self.assertEqual(result.metadata.pages[0].ocr_engine, "paddle")
+        self.assertEqual(result.metadata.pages[0].ocr_languages, "latin")
+        paddle.assert_called_once()
+        data_ocr.assert_not_called()
+
     def test_weak_first_pass_uses_bounded_binarized_retry(self) -> None:
         from PIL import Image
 
@@ -465,7 +707,7 @@ class ExtractionLimitsTest(unittest.TestCase):
             with (
                 patch("app.extraction.OCR_MULTIPASS_ENABLED", True),
                 patch("app.extraction.OCR_DESKEW_ENABLED", False),
-                patch("app.extraction._detect_orientation", return_value=(0, None)),
+                patch("app.extraction._detect_orientation", return_value=(0, None, None)),
                 patch("app.extraction._run_ocr_engine", side_effect=[weak, strong]) as run,
             ):
                 outcome = _ocr_pil_image(image, time.monotonic() + 10, "")
@@ -508,6 +750,7 @@ class ExtractionLimitsTest(unittest.TestCase):
                 osd_text=(
                     "Orientation in degrees: 0\nRotate: 0\n"
                     "Orientation confidence: 12.0\nScript: Cyrillic\n"
+                    "Script confidence: 21.0\n"
                 ),
             ),
         ):
