@@ -457,13 +457,68 @@ export function ConciergeTaskManager({
     <section className="space-y-3" aria-label={labels.title}>
       {canManageTeam ? (
         <Section title={labels.teamWorkload} className="rounded-lg border border-border/70 bg-card p-3">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="px-1">
+            <div role="tablist" aria-label={labels.teamWorkload} className="flex w-full flex-wrap justify-center gap-1">
+              <Button
+                type="button"
+                role="tab"
+                size="sm"
+                variant={filters.assignee === "all" ? "default" : "ghost"}
+                aria-selected={filters.assignee === "all"}
+                className="h-9 shrink-0 rounded-md px-3 text-xs"
+                onClick={() => setFilters((current) => ({ ...current, assignee: "all" }))}
+              >
+                {labels.allAssignees}
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] tabular-nums",
+                    filters.assignee === "all"
+                      ? "border-white/25 bg-white/15 text-primary-foreground"
+                      : "border-border/70 bg-background text-muted-foreground",
+                  )}
+                >
+                  {workload.reduce((total, item) => total + item.active, 0)}
+                </Badge>
+              </Button>
             {workload.map(({ assignee, active: assigneeActive, overdue: assigneeOverdue, today }) => (
-              <button key={assignee.id} type="button" className={cn("rounded-lg border p-3 text-left", filters.assignee === assignee.id ? "border-primary bg-primary/5" : "border-border/70")} onClick={() => setFilters((current) => ({ ...current, assignee: current.assignee === assignee.id ? "all" : assignee.id }))}>
-                <p className="truncate text-sm font-semibold">{assignee.name}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{labels.active}: {assigneeActive} · {labels.today}: {today} · {labels.overdue}: {assigneeOverdue}</p>
-              </button>
+              <Button
+                key={assignee.id}
+                type="button"
+                role="tab"
+                size="sm"
+                variant={filters.assignee === assignee.id ? "default" : "ghost"}
+                aria-selected={filters.assignee === assignee.id}
+                aria-label={`${assignee.name}. ${labels.active}: ${assigneeActive}. ${labels.today}: ${today}. ${labels.overdue}: ${assigneeOverdue}.`}
+                className="h-9 shrink-0 rounded-md px-3 text-xs"
+                onClick={() => setFilters((current) => ({ ...current, assignee: assignee.id }))}
+              >
+                <span className="max-w-44 truncate">{assignee.name}</span>
+                <Badge
+                  variant="outline"
+                  title={`${labels.active}: ${assigneeActive}`}
+                  className={cn(
+                    "rounded-full px-1.5 text-[10px] tabular-nums",
+                    filters.assignee === assignee.id
+                      ? "border-white/25 bg-white/15 text-primary-foreground"
+                      : "border-border/70 bg-background text-muted-foreground",
+                  )}
+                >
+                  {assigneeActive}
+                </Badge>
+                {today > 0 ? (
+                  <Badge variant="outline" title={`${labels.today}: ${today}`} className="rounded-full border-amber-200 bg-amber-50 px-1.5 text-[10px] text-amber-700 tabular-nums">
+                    {today}
+                  </Badge>
+                ) : null}
+                {assigneeOverdue > 0 ? (
+                  <Badge variant="outline" title={`${labels.overdue}: ${assigneeOverdue}`} className="rounded-full border-rose-200 bg-rose-50 px-1.5 text-[10px] text-rose-700 tabular-nums">
+                    {assigneeOverdue}
+                  </Badge>
+                ) : null}
+              </Button>
             ))}
+            </div>
           </div>
         </Section>
       ) : null}

@@ -1920,12 +1920,19 @@ export function ClinicalDocumentImportSheet({
       open={open}
       onOpenChange={handleOpenChange}
       maxWidthClassName="overflow-hidden sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:!rounded-2xl"
-      title={tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
+      title={(
+        <span className="flex min-w-0 items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <span className="min-w-0 break-words">
+            {tx("Конструктор импорта медицинского документа", "Assistent für den Import medizinischer Dokumente")}
+          </span>
+        </span>
+      )}
       description={tx(
         "Проверяйте предложения системы рядом с оригиналом.",
         "Systemvorschläge direkt neben dem Original prüfen.",
       )}
-      headerClassName="bg-white px-5 py-3"
+      headerClassName="border-b border-border/70 bg-muted/20 px-5 py-3"
       bodyClassName="!space-y-0 !overflow-hidden !bg-white !p-0"
       bodyWrapperClassName="h-full min-h-0"
       footer={
