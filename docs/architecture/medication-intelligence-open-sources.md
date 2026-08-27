@@ -276,15 +276,44 @@ atomic replacement, immutable import snapshot, idempotency, audit and realtime
 rules remain server-authoritative. A physical-device matrix must still verify
 focus, centre-point detection and low-light behavior before production rollout.
 
+## G-BA AIS complete-delivery ingestion (Phase 8)
+
+The second live-source connector is the G-BA `G-BA_Beschluss_Info` complete XML
+delivery. G-BA publishes an updated complete delivery on the 1st and 15th of
+each month and provides a separately requested permanent URL for automated
+downloads. GMED never automates the request/consent form and never stores or
+returns the issued permanent URL. An operator supplies it only through the
+`GMED_GBA_AIS_DOWNLOAD_URL` deployment secret; without that secret the
+connector remains `planned` and no network job is started.
+
+The worker accepts only HTTPS URLs on `ais.g-ba.de`, does not follow redirects,
+and applies connection, request, payload, XML-node and nesting limits. DTDs,
+processing instructions, CDATA, custom entity references, comments, unknown
+elements and unknown attributes fail the complete delivery instead of being
+ignored. Only XML's predefined and valid numeric character references are
+resolved.
+The generated timestamp is the source version. The raw, bounded XML is retained
+internally with its SHA-256 checksum, while a normalized immutable index stores
+one row per G-BA patient group with the stable decision and group identifiers,
+official G-BA URL, assessed substances, ATC/ASK/PZN evidence, decision validity,
+indication and the published benefit assessment.
+
+The permanent download URL is not provenance. Public and staff-facing status
+continues to link to the ordinary G-BA AIS information page. The patient request
+path reads only local snapshots and performs no G-BA request. Phase 8 does not
+turn a benefit assessment into a treatment recommendation: patient-specific
+retrieval and medical review remain separate, explicitly gated steps.
+
 ## Next implementation slices
 
-1. Ship the read-only patient preflight endpoint and profile panel.
-2. Add versioned source snapshots and job status without remote calls in the
-   patient request path.
-3. Import G-BA AIS XML and BfArM safety/shortage feeds.
-4. Add the local-curated, versioned identity-candidate and staff-confirmation
-   workflow. Keep EMA PMS lookup disabled in production until its terms permit
-   the intended business use and the organisation records source-owner approval.
+1. Obtain the organisation-specific permanent G-BA AIS download URL, configure
+   it in DEV through the secret store, and verify the first complete snapshot.
+2. Add a read-only exact-evidence retrieval layer for verified PZN/ATC/ASK
+   matches. Do not infer indication or patient-group membership from free text.
+3. Review and activate an official BfArM shortage export only after its current
+   machine-readable contract and reuse terms are documented.
+4. Keep EMA PMS lookup disabled in production until its terms permit the
+   intended business use and the organisation records source-owner approval.
 5. Extend the BMP carrier import only after adding lossless weekly/free-text
    dosing fields and an approved current code/PZN reference source; complete
    physical Android scanner QA before production rollout.

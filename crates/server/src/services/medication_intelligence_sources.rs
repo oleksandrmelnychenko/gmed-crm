@@ -7,7 +7,8 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 const MAX_METADATA_BYTES: usize = 256 * 1024;
-const MAX_SOURCE_PAYLOAD_BYTES: usize = 256 * 1024;
+const MAX_BFARM_SOURCE_PAYLOAD_BYTES: usize = 256 * 1024;
+const MAX_GBA_SOURCE_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OfficialSourceStatus {
@@ -78,6 +79,38 @@ pub struct SafetyAlertItemInput {
     pub explicit_substance_labels: Vec<String>,
     pub explicit_substance_keys: Vec<String>,
     pub item_checksum_sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenefitAssessmentItemInput {
+    pub patient_group_id: String,
+    pub decision_id: String,
+    pub dossier_reference: String,
+    pub official_url: String,
+    pub assessment_type: String,
+    pub assessed_substances: Vec<String>,
+    pub atc_codes: Vec<String>,
+    pub ask_numbers: Vec<String>,
+    pub pzns: Vec<String>,
+    pub trade_names: Vec<String>,
+    pub decision_date: chrono::NaiveDate,
+    pub valid_until: Option<chrono::NaiveDate>,
+    pub indication_short: String,
+    pub patient_group: String,
+    pub benefit_extent: String,
+    pub benefit_probability: Option<String>,
+    pub item_checksum_sha256: String,
+}
+
+enum NormalizedSourceBundle {
+    Bfarm {
+        payload: StoredSourcePayloadInput,
+        alerts: Vec<SafetyAlertItemInput>,
+    },
+    GbaAis {
+        payload: StoredSourcePayloadInput,
+        items: Vec<BenefitAssessmentItemInput>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -426,14 +459,40 @@ pub async fn record_bfarm_ingestion_success(
     alerts: Vec<SafetyAlertItemInput>,
 ) -> Result<CompleteAttemptResult, SourceIngestionError> {
     validate_bfarm_bundle(&input, &payload, &alerts)?;
-    record_ingestion_success_inner(pool, job_id, input, Some((payload, alerts))).await
+    record_ingestion_success_inner(
+        pool,
+        job_id,
+        input,
+        Some(NormalizedSourceBundle::Bfarm { payload, alerts }),
+    )
+    .await
+}
+
+/// Atomically records one complete G-BA AIS XML delivery together with the
+/// normalized patient-group index. The permanent download URL is intentionally
+/// absent: public provenance always uses the ordinary G-BA AIS reference page.
+pub async fn record_gba_ais_ingestion_success(
+    pool: &PgPool,
+    job_id: Uuid,
+    input: SuccessfulSnapshotInput,
+    payload: StoredSourcePayloadInput,
+    items: Vec<BenefitAssessmentItemInput>,
+) -> Result<CompleteAttemptResult, SourceIngestionError> {
+    validate_gba_ais_bundle(&input, &payload, &items)?;
+    record_ingestion_success_inner(
+        pool,
+        job_id,
+        input,
+        Some(NormalizedSourceBundle::GbaAis { payload, items }),
+    )
+    .await
 }
 
 async fn record_ingestion_success_inner(
     pool: &PgPool,
     job_id: Uuid,
     input: SuccessfulSnapshotInput,
-    bfarm_bundle: Option<(StoredSourcePayloadInput, Vec<SafetyAlertItemInput>)>,
+    source_bundle: Option<NormalizedSourceBundle>,
 ) -> Result<CompleteAttemptResult, SourceIngestionError> {
     validate_success_input(&input)?;
     let mut transaction = pool.begin().await?;
@@ -467,10 +526,18 @@ async fn record_ingestion_success_inner(
             "snapshot source_url must equal the registered public source URL",
         ));
     }
-    if bfarm_bundle.is_some() && source_id != "bfarm_rote_hand" {
-        return Err(SourceIngestionError::InvalidInput(
-            "safety alert bundle is only valid for bfarm_rote_hand",
-        ));
+    match source_bundle.as_ref() {
+        Some(NormalizedSourceBundle::Bfarm { .. }) if source_id != "bfarm_rote_hand" => {
+            return Err(SourceIngestionError::InvalidInput(
+                "safety alert bundle is only valid for bfarm_rote_hand",
+            ));
+        }
+        Some(NormalizedSourceBundle::GbaAis { .. }) if source_id != "gba_ais_xml" => {
+            return Err(SourceIngestionError::InvalidInput(
+                "benefit assessment bundle is only valid for gba_ais_xml",
+            ));
+        }
+        _ => {}
     }
 
     let snapshot_id = sqlx::query_scalar::<_, Uuid>(
@@ -513,14 +580,13 @@ async fn record_ingestion_success_inner(
         .bind(&input.checksum_sha256)
         .fetch_one(&mut *transaction)
         .await?;
-        if let Some((payload, alerts)) = bfarm_bundle.as_ref() {
-            ensure_bfarm_snapshot_bundle(
+        if let Some(bundle) = source_bundle.as_ref() {
+            ensure_normalized_snapshot_bundle(
                 &mut transaction,
                 snapshot_id,
                 &source_id,
                 &input.checksum_sha256,
-                payload,
-                alerts,
+                bundle,
             )
             .await?;
         }
@@ -548,14 +614,13 @@ async fn record_ingestion_success_inner(
         });
     };
 
-    if let Some((payload, alerts)) = bfarm_bundle.as_ref() {
-        ensure_bfarm_snapshot_bundle(
+    if let Some(bundle) = source_bundle.as_ref() {
+        ensure_normalized_snapshot_bundle(
             &mut transaction,
             snapshot_id,
             &source_id,
             &input.checksum_sha256,
-            payload,
-            alerts,
+            bundle,
         )
         .await?;
     }
@@ -579,6 +644,39 @@ async fn record_ingestion_success_inner(
         idempotent_replay: false,
         duplicate_snapshot: false,
     })
+}
+
+async fn ensure_normalized_snapshot_bundle(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    snapshot_id: Uuid,
+    source_id: &str,
+    checksum_sha256: &str,
+    bundle: &NormalizedSourceBundle,
+) -> Result<(), SourceIngestionError> {
+    match bundle {
+        NormalizedSourceBundle::Bfarm { payload, alerts } => {
+            ensure_bfarm_snapshot_bundle(
+                transaction,
+                snapshot_id,
+                source_id,
+                checksum_sha256,
+                payload,
+                alerts,
+            )
+            .await
+        }
+        NormalizedSourceBundle::GbaAis { payload, items } => {
+            ensure_gba_ais_snapshot_bundle(
+                transaction,
+                snapshot_id,
+                source_id,
+                checksum_sha256,
+                payload,
+                items,
+            )
+            .await
+        }
+    }
 }
 
 async fn ensure_bfarm_snapshot_bundle(
@@ -648,6 +746,94 @@ async fn ensure_bfarm_snapshot_bundle(
         .bind(&alert.explicit_substance_labels)
         .bind(&alert.explicit_substance_keys)
         .bind(&alert.item_checksum_sha256)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn ensure_gba_ais_snapshot_bundle(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    snapshot_id: Uuid,
+    source_id: &str,
+    checksum_sha256: &str,
+    payload: &StoredSourcePayloadInput,
+    items: &[BenefitAssessmentItemInput],
+) -> Result<(), SourceIngestionError> {
+    let payload_exists = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM medication_intelligence_source_payloads
+               WHERE snapshot_id = $1
+           )"#,
+    )
+    .bind(snapshot_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let item_count = sqlx::query_scalar::<_, i64>(
+        r#"SELECT count(*)
+           FROM medication_intelligence_benefit_assessment_items
+           WHERE snapshot_id = $1"#,
+    )
+    .bind(snapshot_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let expected_item_count = i64::try_from(items.len()).map_err(|_| {
+        SourceIngestionError::InvalidInput("source snapshot contains too many assessment items")
+    })?;
+    if payload_exists && item_count == expected_item_count {
+        return Ok(());
+    }
+    if payload_exists || item_count != 0 {
+        return Err(SourceIngestionError::InvalidInput(
+            "existing G-BA snapshot has an incomplete normalized bundle",
+        ));
+    }
+
+    sqlx::query(
+        r#"INSERT INTO medication_intelligence_source_payloads (
+               snapshot_id, source_id, content_type, checksum_sha256, payload
+           ) VALUES ($1, $2, $3, $4, $5)"#,
+    )
+    .bind(snapshot_id)
+    .bind(source_id)
+    .bind(&payload.content_type)
+    .bind(checksum_sha256)
+    .bind(payload.bytes.as_slice())
+    .execute(&mut **transaction)
+    .await?;
+
+    for item in items {
+        sqlx::query(
+            r#"INSERT INTO medication_intelligence_benefit_assessment_items (
+                   snapshot_id, source_id, patient_group_id, decision_id,
+                   dossier_reference, official_url, assessment_type,
+                   assessed_substances, atc_codes, ask_numbers, pzns, trade_names,
+                   decision_date, valid_until, indication_short, patient_group,
+                   benefit_extent, benefit_probability, item_checksum_sha256
+               ) VALUES (
+                   $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                   $11, $12, $13, $14, $15, $16, $17, $18, $19
+               )"#,
+        )
+        .bind(snapshot_id)
+        .bind(source_id)
+        .bind(&item.patient_group_id)
+        .bind(&item.decision_id)
+        .bind(&item.dossier_reference)
+        .bind(&item.official_url)
+        .bind(&item.assessment_type)
+        .bind(&item.assessed_substances)
+        .bind(&item.atc_codes)
+        .bind(&item.ask_numbers)
+        .bind(&item.pzns)
+        .bind(&item.trade_names)
+        .bind(item.decision_date)
+        .bind(item.valid_until)
+        .bind(&item.indication_short)
+        .bind(&item.patient_group)
+        .bind(&item.benefit_extent)
+        .bind(item.benefit_probability.as_deref())
+        .bind(&item.item_checksum_sha256)
         .execute(&mut **transaction)
         .await?;
     }
@@ -789,7 +975,7 @@ fn validate_bfarm_bundle(
     payload: &StoredSourcePayloadInput,
     alerts: &[SafetyAlertItemInput],
 ) -> Result<(), SourceIngestionError> {
-    if payload.bytes.is_empty() || payload.bytes.len() > MAX_SOURCE_PAYLOAD_BYTES {
+    if payload.bytes.is_empty() || payload.bytes.len() > MAX_BFARM_SOURCE_PAYLOAD_BYTES {
         return Err(SourceIngestionError::InvalidInput(
             "source payload must contain 1..=262144 bytes",
         ));
@@ -837,6 +1023,117 @@ fn validate_bfarm_bundle(
         {
             return Err(SourceIngestionError::InvalidInput(
                 "invalid normalized BfArM alert item",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_gba_ais_bundle(
+    input: &SuccessfulSnapshotInput,
+    payload: &StoredSourcePayloadInput,
+    items: &[BenefitAssessmentItemInput],
+) -> Result<(), SourceIngestionError> {
+    if payload.bytes.is_empty() || payload.bytes.len() > MAX_GBA_SOURCE_PAYLOAD_BYTES {
+        return Err(SourceIngestionError::InvalidInput(
+            "G-BA source payload must contain 1..=67108864 bytes",
+        ));
+    }
+    if payload.content_type.trim().is_empty() || payload.content_type.len() > 200 {
+        return Err(SourceIngestionError::InvalidInput(
+            "source payload content_type must contain 1..=200 characters",
+        ));
+    }
+    if i64::try_from(payload.bytes.len()).ok() != Some(input.byte_length) {
+        return Err(SourceIngestionError::InvalidInput(
+            "source payload byte length does not match snapshot",
+        ));
+    }
+    if hex::encode(Sha256::digest(&payload.bytes)) != input.checksum_sha256 {
+        return Err(SourceIngestionError::InvalidInput(
+            "source payload checksum does not match snapshot",
+        ));
+    }
+    if items.is_empty() || items.len() > 100_000 {
+        return Err(SourceIngestionError::InvalidInput(
+            "G-BA snapshot must contain 1..=100000 assessment items",
+        ));
+    }
+    if input.item_count != i64::try_from(items.len()).ok() {
+        return Err(SourceIngestionError::InvalidInput(
+            "G-BA snapshot item count does not match normalized items",
+        ));
+    }
+
+    let mut patient_group_ids = HashSet::with_capacity(items.len());
+    for item in items {
+        let valid_numeric_id = |value: &str| {
+            !value.is_empty() && value.len() <= 9 && value.bytes().all(|byte| byte.is_ascii_digit())
+        };
+        let valid_checksum = item.item_checksum_sha256.len() == 64
+            && item
+                .item_checksum_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+        let valid_atc = |value: &String| {
+            let bytes = value.as_bytes();
+            bytes.len() == 7
+                && bytes[0].is_ascii_uppercase()
+                && bytes[1..3].iter().all(u8::is_ascii_digit)
+                && bytes[3..5].iter().all(u8::is_ascii_uppercase)
+                && bytes[5..7].iter().all(u8::is_ascii_digit)
+        };
+        if !valid_numeric_id(&item.patient_group_id)
+            || !patient_group_ids.insert(item.patient_group_id.as_str())
+            || !valid_numeric_id(&item.decision_id)
+            || item.dossier_reference.trim().is_empty()
+            || item.dossier_reference.len() > 64
+            || !(item.official_url.starts_with("https://www.g-ba.de/")
+                || item.official_url.starts_with("https://g-ba.de/"))
+            || !matches!(
+                item.assessment_type.as_str(),
+                "Beschluss_reg" | "Beschluss_orph" | "Beschluss_antib"
+            )
+            || item.assessed_substances.is_empty()
+            || item.assessed_substances.len() > 32
+            || item
+                .assessed_substances
+                .iter()
+                .any(|value| value.trim().is_empty() || value.len() > 400)
+            || item.atc_codes.len() > 64
+            || item.atc_codes.iter().any(|value| !valid_atc(value))
+            || item.ask_numbers.len() > 64
+            || item
+                .ask_numbers
+                .iter()
+                .any(|value| value.len() != 5 || !value.bytes().all(|byte| byte.is_ascii_digit()))
+            || item.pzns.len() > 4096
+            || item
+                .pzns
+                .iter()
+                .any(|value| value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_digit()))
+            || item.trade_names.len() > 256
+            || item
+                .trade_names
+                .iter()
+                .any(|value| value.trim().is_empty() || value.len() > 255)
+            || item
+                .valid_until
+                .is_some_and(|until| until < item.decision_date)
+            || item.indication_short.trim().is_empty()
+            || item.indication_short.len() > 255
+            || item.patient_group.trim().is_empty()
+            || item.patient_group.len() > 1500
+            || item.benefit_extent.trim().is_empty()
+            || item.benefit_extent.len() > 256
+            || item
+                .benefit_probability
+                .as_ref()
+                .is_some_and(|value| value.trim().is_empty() || value.len() > 64)
+            || !valid_checksum
+        {
+            return Err(SourceIngestionError::InvalidInput(
+                "invalid normalized G-BA benefit assessment item",
             ));
         }
     }

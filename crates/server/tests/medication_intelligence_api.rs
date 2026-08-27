@@ -12,6 +12,7 @@ use gmed_server::auth::jwt;
 use gmed_server::services::bfarm_rote_hand::{
     BFARM_ROTE_HAND_RSS_URL, complete_bfarm_job_from_payload,
 };
+use gmed_server::services::gba_ais::{GBA_AIS_PUBLIC_URL, complete_gba_ais_job_from_payload};
 use gmed_server::services::medication_intelligence_sources::{
     SuccessfulSnapshotInput, claim_ingestion_job, claim_next_ingestion_job,
     enqueue_source_ingestion, load_source_statuses_at, record_ingestion_failure,
@@ -609,6 +610,95 @@ async fn rejected_bfarm_normalization_leaves_no_partial_success_snapshot() {
 }
 
 #[tokio::test]
+async fn gba_ais_complete_delivery_is_stored_atomically_without_exposing_secret_url() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    sqlx::query(
+        "UPDATE medication_intelligence_sources SET connector_status = 'active' WHERE id = 'gba_ais_xml'",
+    )
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let job = enqueue_source_ingestion(
+        &ctx.pool,
+        "gba_ais_xml",
+        &format!("gba-ais-test-{}", Uuid::new_v4()),
+        None,
+        json!({"trigger":"test"}),
+    )
+    .await
+    .unwrap();
+    let claimed = claim_ingestion_job(&ctx.pool, job.job_id, "gba-ais-test-worker")
+        .await
+        .unwrap()
+        .expect("targeted G-BA AIS job claim");
+    assert_eq!(claimed.source_url, GBA_AIS_PUBLIC_URL);
+
+    let secret_marker = "must-not-enter-provenance";
+    let payload = gba_ais_sample();
+    assert!(!String::from_utf8_lossy(&payload).contains(secret_marker));
+    let completed = complete_gba_ais_job_from_payload(
+        &ctx.pool,
+        claimed.id,
+        Utc::now(),
+        "application/xml;charset=utf-8".to_string(),
+        payload.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(completed.job_status, "succeeded");
+
+    let snapshot_source_url: String = sqlx::query_scalar(
+        "SELECT source_url FROM medication_intelligence_source_snapshots WHERE id = $1",
+    )
+    .bind(completed.snapshot_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(snapshot_source_url, GBA_AIS_PUBLIC_URL);
+    assert!(!snapshot_source_url.contains(secret_marker));
+
+    let stored_payload: Vec<u8> = sqlx::query_scalar(
+        "SELECT payload FROM medication_intelligence_source_payloads WHERE snapshot_id = $1",
+    )
+    .bind(completed.snapshot_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_payload, payload);
+    let normalized: (String, String, Vec<String>, Vec<String>, Vec<String>) = sqlx::query_as(
+        r#"SELECT decision_id, patient_group_id, assessed_substances, atc_codes, pzns
+           FROM medication_intelligence_benefit_assessment_items
+           WHERE snapshot_id = $1"#,
+    )
+    .bind(completed.snapshot_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(normalized.0, "321");
+    assert_eq!(normalized.1, "456");
+    assert_eq!(normalized.2, ["Beispielwirkstoff"]);
+    assert_eq!(normalized.3, ["A01AA01"]);
+    assert_eq!(normalized.4, ["12345678"]);
+
+    let statuses = load_source_statuses_at(&ctx.pool, Utc::now())
+        .await
+        .unwrap();
+    let gba = statuses
+        .iter()
+        .find(|source| source.id == "gba_ais_xml")
+        .expect("G-BA source status");
+    assert_eq!(gba.ingestion_status, "available");
+    assert_eq!(gba.health, "fresh");
+    assert_eq!(
+        gba.last_successful_snapshot.as_ref().unwrap().item_count,
+        Some(1)
+    );
+}
+
+#[tokio::test]
 async fn stale_running_source_job_lease_can_be_reclaimed_after_worker_crash() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
@@ -657,4 +747,34 @@ async fn stale_running_source_job_lease_can_be_reclaimed_after_worker_crash() {
     .await
     .unwrap();
     assert_eq!(worker_id, "replacement-worker");
+}
+
+fn gba_ais_sample() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?>
+<BE_COLLECTION generated="2026-08-15T02:00:00Z">
+  <BE>
+    <ID_BE value="321"/>
+    <ID_BE_AKZ value="2026-01-01-D-123"/>
+    <ZUL><NAME_HN value="Beispielmed"/></ZUL>
+    <URL value="https://www.g-ba.de/bewertungsverfahren/nutzenbewertung/321/"/>
+    <REG_NB value="Beschluss_reg"/>
+    <PAT_GR_INFO_COLLECTION>
+      <ID_PAT_GR value="456">
+        <WS_BEW>
+          <NAME_WS_BEW value="Beispielwirkstoff"/>
+          <PZN value="12345678"/>
+          <WS_INFO_BEW>
+            <ATC><ATC_CODE value="A01AA01"/></ATC>
+            <ASK><ASK_NR value="12345"/><NAME_ASK value="Beispielwirkstoff"/></ASK>
+          </WS_INFO_BEW>
+        </WS_BEW>
+        <DATUM_BE_VOM value="2026-08-01"/>
+        <AWG_KURZ value="Beispielindikation"/>
+        <NAME_PAT_GR>Erwachsene mit Beispielindikation</NAME_PAT_GR>
+        <ZVT_ZN><ZN_A value="gering"/><ZN_W value="Hinweis"/></ZVT_ZN>
+      </ID_PAT_GR>
+    </PAT_GR_INFO_COLLECTION>
+  </BE>
+</BE_COLLECTION>"#
+        .to_vec()
 }

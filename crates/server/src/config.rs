@@ -1,5 +1,7 @@
 use std::net::SocketAddr;
 
+use secrecy::SecretString;
+
 use crate::crypto::KeyRegistry;
 
 pub struct Config {
@@ -19,6 +21,10 @@ pub struct Config {
     /// `0.0.0.0:9091`. Set to an empty string to disable the metrics
     /// listener entirely (useful in unit tests; PROD always runs it).
     pub metrics_listen: Option<SocketAddr>,
+    /// Permanent automated G-BA AIS download URL issued after accepting the
+    /// official terms. It may contain an access token, so it is never used as
+    /// public provenance or returned by an API.
+    pub gba_ais_download_url: Option<SecretString>,
 }
 
 impl Config {
@@ -66,6 +72,12 @@ impl Config {
             Err(_) => Some(SocketAddr::from(([0, 0, 0, 0], 9091))),
         };
 
+        let gba_ais_download_url = std::env::var("GMED_GBA_AIS_DOWNLOAD_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(|value| SecretString::from(value.into()));
+
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             listen_addr: SocketAddr::from(([0, 0, 0, 0], port)),
@@ -75,6 +87,7 @@ impl Config {
             message_key_registry,
             audit_ip_salt,
             metrics_listen,
+            gba_ais_download_url,
         }
     }
 }

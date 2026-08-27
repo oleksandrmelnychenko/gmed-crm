@@ -65,6 +65,11 @@ async fn main() {
         app_state.clone(),
     );
     gmed_server::services::bfarm_rote_hand::spawn_bfarm_rote_hand_scheduler(app_state.clone());
+    gmed_server::services::gba_ais::initialize_gba_ais_connector(
+        &app_state,
+        cfg.gba_ais_download_url,
+    )
+    .await;
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
