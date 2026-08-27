@@ -58,6 +58,7 @@ pub enum MedicationAiJobError {
 
 struct ClaimedAnalysis {
     id: Uuid,
+    lease_token: Uuid,
     patient_id: Uuid,
     review_id: Uuid,
     requested_by: Uuid,
@@ -225,7 +226,7 @@ pub async fn retry_analysis(
     let analysis_id = sqlx::query_scalar::<_, Uuid>(
         r#"UPDATE medication_ai_analyses
            SET status = 'requested', started_at = NULL, completed_at = NULL,
-               lease_until = NULL, attempts = 0, error_code = NULL,
+               lease_until = NULL, lease_token = NULL, attempts = 0, error_code = NULL,
                available_at = now(), updated_at = now()
            WHERE patient_id = $1 AND review_id = $2 AND status = 'failed'
              AND provider_model = $3 AND prompt_version = $4
@@ -334,12 +335,14 @@ async fn process_one(state: &AppState) -> Result<(), MedicationAiJobError> {
             let changed = sqlx::query(
                 r#"UPDATE medication_ai_analyses
                    SET status = 'ready', completed_at = now(), lease_until = NULL,
-                       output_json = $2, output_fingerprint = $3,
-                       provider_response_id = $4, provider_response_model = $5,
+                       lease_token = NULL, output_json = $3, output_fingerprint = $4,
+                       provider_response_id = $5, provider_response_model = $6,
                        updated_at = now()
-                   WHERE id = $1 AND status = 'processing'"#,
+                   WHERE id = $1 AND status = 'processing'
+                     AND lease_token = $2 AND lease_until > clock_timestamp()"#,
             )
             .bind(job.id)
+            .bind(job.lease_token)
             .bind(output)
             .bind(fingerprint)
             .bind(&generation.response_id)
@@ -397,6 +400,11 @@ async fn process_one(state: &AppState) -> Result<(), MedicationAiJobError> {
                     "Обезличенный черновик доступен для проверки по источникам. · Der de-identifizierte Entwurf kann anhand der Quellen geprüft werden.",
                 )
                 .await;
+            } else {
+                tracing::warn!(
+                    analysis_id = %job.id,
+                    "Discarded medication AI result from stale or expired worker lease"
+                );
             }
         }
         Err(error) => fail_or_retry(state, &job, &error).await?,
@@ -414,13 +422,15 @@ async fn claim_next(pool: &PgPool) -> Result<Option<ClaimedAnalysis>, Medication
                FOR UPDATE SKIP LOCKED LIMIT 1
            )
            UPDATE medication_ai_analyses analysis
-           SET status = 'processing', started_at = now(), lease_until = now() + interval '75 seconds',
-               attempts = attempts + 1, updated_at = now()
+           SET status = 'processing', started_at = now(),
+               lease_until = clock_timestamp() + interval '75 seconds',
+               lease_token = gen_random_uuid(), attempts = attempts + 1, updated_at = now()
            FROM candidate
            WHERE analysis.id = candidate.id
            RETURNING analysis.id, analysis.patient_id, analysis.review_id,
                      analysis.requested_by, analysis.bundle_id,
-                     analysis.provider_model, analysis.prompt_version"#,
+                     analysis.provider_model, analysis.prompt_version,
+                     analysis.lease_token"#,
     )
     .bind(MAX_ATTEMPTS)
     .fetch_optional(&mut *tx)
@@ -450,6 +460,7 @@ async fn claim_next(pool: &PgPool) -> Result<Option<ClaimedAnalysis>, Medication
         .map_err(|_| MedicationAiJobError::InvalidStoredData)?;
     Ok(Some(ClaimedAnalysis {
         id: analysis_id,
+        lease_token: row.get("lease_token"),
         patient_id: row.get("patient_id"),
         review_id: row.get("review_id"),
         requested_by: row.get("requested_by"),
@@ -463,9 +474,9 @@ async fn recover_expired_jobs(state: &AppState) -> Result<(), MedicationAiJobErr
     let mut tx = state.db.begin().await?;
     let retry_ids = sqlx::query_scalar::<_, Uuid>(
         r#"UPDATE medication_ai_analyses
-           SET status = 'requested', started_at = NULL, lease_until = NULL,
+           SET status = 'requested', started_at = NULL, lease_until = NULL, lease_token = NULL,
                available_at = now() + interval '10 seconds', updated_at = now()
-           WHERE status = 'processing' AND lease_until < now() AND attempts < $1
+           WHERE status = 'processing' AND lease_until <= clock_timestamp() AND attempts < $1
            RETURNING id"#,
     )
     .bind(MAX_ATTEMPTS)
@@ -485,9 +496,9 @@ async fn recover_expired_jobs(state: &AppState) -> Result<(), MedicationAiJobErr
     }
     let failed_rows = sqlx::query(
         r#"UPDATE medication_ai_analyses
-           SET status = 'failed', completed_at = now(), lease_until = NULL,
+           SET status = 'failed', completed_at = now(), lease_until = NULL, lease_token = NULL,
                error_code = 'worker_lease_exhausted', updated_at = now()
-           WHERE status = 'processing' AND lease_until < now() AND attempts >= $1
+           WHERE status = 'processing' AND lease_until <= clock_timestamp() AND attempts >= $1
            RETURNING id, patient_id, review_id, requested_by"#,
     )
     .bind(MAX_ATTEMPTS)
@@ -543,24 +554,50 @@ async fn fail_or_retry(
 ) -> Result<(), MedicationAiJobError> {
     let mut tx = state.db.begin().await?;
     let attempts = sqlx::query_scalar::<_, i16>(
-        "SELECT attempts FROM medication_ai_analyses WHERE id = $1 FOR UPDATE",
+        r#"SELECT attempts FROM medication_ai_analyses
+           WHERE id = $1 AND status = 'processing'
+             AND lease_token = $2 AND lease_until > clock_timestamp()
+           FOR UPDATE"#,
     )
     .bind(job.id)
-    .fetch_one(&mut *tx)
+    .bind(job.lease_token)
+    .fetch_optional(&mut *tx)
     .await?;
+    let Some(attempts) = attempts else {
+        tx.rollback().await?;
+        tracing::warn!(
+            analysis_id = %job.id,
+            error_code = error.code(),
+            "Discarded medication AI failure from stale or expired worker lease"
+        );
+        return Ok(());
+    };
     let retryable = error.is_retryable();
     let terminal_failure = !(retryable && attempts < MAX_ATTEMPTS);
     let metric_outcome = if !terminal_failure {
-        sqlx::query(
+        let changed = sqlx::query(
             r#"UPDATE medication_ai_analyses
                SET status = 'requested', started_at = NULL, lease_until = NULL,
-                   available_at = now() + ($2 * interval '10 seconds'), updated_at = now()
-               WHERE id = $1 AND status = 'processing'"#,
+                   lease_token = NULL,
+                   available_at = now() + ($3 * interval '10 seconds'), updated_at = now()
+               WHERE id = $1 AND status = 'processing'
+                 AND lease_token = $2 AND lease_until > clock_timestamp()"#,
         )
         .bind(job.id)
+        .bind(job.lease_token)
         .bind(i32::from(attempts))
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if changed != 1 {
+            tx.rollback().await?;
+            tracing::warn!(
+                analysis_id = %job.id,
+                error_code = error.code(),
+                "Discarded medication AI retry from expired worker lease"
+            );
+            return Ok(());
+        }
         insert_event(
             &mut tx,
             job.id,
@@ -572,16 +609,28 @@ async fn fail_or_retry(
         .await?;
         "retry_scheduled"
     } else {
-        sqlx::query(
+        let changed = sqlx::query(
             r#"UPDATE medication_ai_analyses
                SET status = 'failed', completed_at = now(), lease_until = NULL,
-                   error_code = $2, updated_at = now()
-               WHERE id = $1 AND status = 'processing'"#,
+                   lease_token = NULL, error_code = $3, updated_at = now()
+               WHERE id = $1 AND status = 'processing'
+                 AND lease_token = $2 AND lease_until > clock_timestamp()"#,
         )
         .bind(job.id)
+        .bind(job.lease_token)
         .bind(error.code())
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+        if changed != 1 {
+            tx.rollback().await?;
+            tracing::warn!(
+                analysis_id = %job.id,
+                error_code = error.code(),
+                "Discarded medication AI terminal failure from expired worker lease"
+            );
+            return Ok(());
+        }
         insert_event(&mut tx, job.id, "processing", "failed", error.code(), None).await?;
         "failed"
     };

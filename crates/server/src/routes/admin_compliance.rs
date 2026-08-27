@@ -346,7 +346,17 @@ pub(crate) async fn build_patient_export_payload(
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    .map_err(|error| {
+        tracing::error!(
+            error = %error,
+            patient_id = %patient_id,
+            "export medication evidence reviews"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build complete patient export",
+        )
+    })?;
 
     let medication_ai_analyses = sqlx::query(
         r#"SELECT id, review_id, bundle_id, status, provider_kind, provider_model,
@@ -361,7 +371,17 @@ pub(crate) async fn build_patient_export_payload(
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    .map_err(|error| {
+        tracing::error!(
+            error = %error,
+            patient_id = %patient_id,
+            "export medication AI analyses"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build complete patient export",
+        )
+    })?;
 
     let medication_ai_analysis_events = sqlx::query(
         r#"SELECT event.id, event.analysis_id, event.from_status, event.to_status,
@@ -374,7 +394,17 @@ pub(crate) async fn build_patient_export_payload(
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
-    .unwrap_or_default();
+    .map_err(|error| {
+        tracing::error!(
+            error = %error,
+            patient_id = %patient_id,
+            "export medication AI analysis events"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build complete patient export",
+        )
+    })?;
 
     let export = serde_json::json!({
         "export_type": "DSGVO Art. 15 - Right of Access",

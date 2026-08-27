@@ -134,7 +134,10 @@ const ROLES_SERVICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
-const ROLES_CONCIERGE_WORKSPACE = ["concierge"] as const satisfies readonly StaffRole[];
+const ROLES_CONCIERGE_WORKSPACE = [
+  "ceo",
+  "concierge",
+] as const satisfies readonly StaffRole[];
 
 const ROLES_TASK_MANAGER = [
   "ceo",

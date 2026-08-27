@@ -34,6 +34,7 @@ describe("first-release staff RBAC", () => {
       "/documents/document-1",
       "/files",
       "/specializations",
+      "/concierge",
       "/task-manager",
       "/services",
       "/appointments",
@@ -46,8 +47,6 @@ describe("first-release staff RBAC", () => {
     for (const path of paths) {
       expect(canAccessStaffRoute("ceo", path), path).toBe(true);
     }
-    expect(canAccessStaffRoute("ceo", "/concierge")).toBe(false);
-    expect(listStaffNavItems("ceo").map((item) => item.to)).not.toContain("/concierge");
   });
 
   it("keeps Concierge in the operational workspace only", () => {
@@ -150,7 +149,7 @@ describe("first-release staff RBAC", () => {
         "teamlead_interpreter",
         "interpreter",
       ],
-      "/concierge": ["concierge"],
+      "/concierge": ["ceo", "concierge"],
       "/company-finance": ["ceo", "billing"],
     } as const;
 

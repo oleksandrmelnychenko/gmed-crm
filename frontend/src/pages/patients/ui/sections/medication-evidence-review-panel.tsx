@@ -364,10 +364,11 @@ function CitationRefs({
   citations: Map<string, MedicationEvidenceCitation>;
   tx: Bilingual;
 }) {
-  const linkedCitations = refs.flatMap((ref) => {
+  const resolvedCitations = refs.flatMap((ref, index) => {
     const citation = citations.get(ref);
+    if (!citation) return [];
     const href = safeExternalUrl(citation?.source_url ?? null);
-    return href ? [{ ref, href, kind: citation?.kind ?? "source" }] : [];
+    return [{ ref, href, kind: citation.kind, ordinal: index + 1 }];
   });
   const linkLabel = (href: string) => {
     try {
@@ -377,37 +378,48 @@ function CitationRefs({
       return tx("Источник", "Quelle");
     }
   };
-  if (linkedCitations.length === 0) return null;
-  if (linkedCitations.length === 1) {
-    return (
+  const localLabel = (kind: string, ordinal: number) => [
+    citationKindLabel(kind, tx),
+    `${tx("Локальная ссылка", "Lokaler Nachweis")} ${ordinal}`,
+  ].join(" · ");
+  const citationBadge = ({
+    ref,
+    href,
+    kind,
+    ordinal,
+  }: (typeof resolvedCitations)[number]) => {
+    const label = href ? linkLabel(href) : localLabel(kind, ordinal);
+    const className = href
+      ? "max-w-full rounded-full bg-sky-50 px-2 py-1 text-[9px] font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100 hover:text-sky-900"
+      : "max-w-full rounded-full bg-slate-50 px-2 py-1 text-[9px] font-medium text-slate-700 ring-1 ring-slate-200";
+    return href ? (
       <a
-        href={linkedCitations[0].href}
+        key={`${ref}:${ordinal}`}
+        href={href}
         target="_blank"
         rel="noreferrer"
-        className="mt-2 inline-flex max-w-full items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-medium text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-900"
+        className={className}
       >
-        <span className="truncate">{linkLabel(linkedCitations[0].href)}</span>
+        <span className="block truncate">{label}</span>
       </a>
+    ) : (
+      <span key={`${ref}:${ordinal}`} className={className}>
+        <span className="block truncate">{label}</span>
+      </span>
     );
+  };
+  if (resolvedCitations.length === 0) return null;
+  if (resolvedCitations.length === 1) {
+    return <div className="mt-2 flex max-w-full">{citationBadge(resolvedCitations[0])}</div>;
   }
   return (
     <details className="group/sources mt-2 w-fit max-w-full">
       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full border border-border/60 bg-muted/10 px-2 py-0.5 text-[9px] font-medium text-muted-foreground marker:hidden hover:border-border hover:bg-muted/25 hover:text-foreground">
-        {tx("Источники", "Quellen")} · {linkedCitations.length}
+        {tx("Доказательства", "Nachweise")} · {resolvedCitations.length}
         <ChevronDown className="size-3 transition-transform group-open/sources:rotate-180" />
       </summary>
       <div className="mt-1.5 flex max-w-xl flex-wrap gap-1.5 rounded-lg border border-border/60 bg-muted/10 p-2">
-        {linkedCitations.map(({ ref, href }, index) => (
-          <a
-            key={ref}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="max-w-full rounded-full bg-sky-50 px-2 py-1 text-[9px] font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100 hover:text-sky-900"
-          >
-            <span className="block truncate">{linkLabel(href)} · {index + 1}</span>
-          </a>
-        ))}
+        {resolvedCitations.map(citationBadge)}
       </div>
     </details>
   );
@@ -856,6 +868,41 @@ export function resolveMedicationEvidenceIdempotencyKey(
   return current || create();
 }
 
+type SequentialPollingOptions = {
+  poll: () => Promise<void>;
+  delayMs: number;
+  setTimer?: (callback: () => void, delayMs: number) => number;
+  clearTimer?: (timer: number) => void;
+};
+
+export function startSequentialPolling({
+  poll,
+  delayMs,
+  setTimer = (callback, delay) => globalThis.setTimeout(callback, delay),
+  clearTimer = (timer) => globalThis.clearTimeout(timer),
+}: SequentialPollingOptions): () => void {
+  let active = true;
+  let timer: number | null = null;
+
+  const schedule = () => {
+    if (!active) return;
+    timer = setTimer(() => {
+      timer = null;
+      void Promise.resolve()
+        .then(poll)
+        .catch(() => undefined)
+        .finally(schedule);
+    }, delayMs);
+  };
+
+  schedule();
+  return () => {
+    active = false;
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+  };
+}
+
 export function MedicationEvidenceReviewPanel({
   patientId,
   refreshKey,
@@ -950,14 +997,10 @@ export function MedicationEvidenceReviewPanel({
       || aiAnalysis?.provider.status !== "ready"
       || (aiAnalysis?.status !== "requested" && aiAnalysis?.status !== "processing")
     ) return;
-    let active = true;
-    const timer = window.setInterval(() => {
-      if (active) void loadExistingAiAnalysis(reviewId, false);
-    }, 2_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
+    return startSequentialPolling({
+      poll: () => loadExistingAiAnalysis(reviewId, false),
+      delayMs: 2_000,
+    });
   }, [aiAnalysis?.provider.status, aiAnalysis?.status, dialogOpen, loadExistingAiAnalysis, reviewId]);
 
   const createAiDraftForReview = async (nextReviewId: string) => {

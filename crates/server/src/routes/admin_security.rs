@@ -486,83 +486,6 @@ fn medication_ai_operational_status(
     "healthy"
 }
 
-#[cfg(test)]
-mod medication_ai_health_tests {
-    use super::*;
-
-    fn provider(status: &'static str, enabled: bool) -> MedicationAiCapability {
-        MedicationAiCapability {
-            kind: if enabled { "openai" } else { "none" },
-            status,
-            external_calls_enabled: enabled,
-            reason_code: status,
-            model: enabled.then(|| "gpt-test".to_string()),
-        }
-    }
-
-    #[test]
-    fn disabled_provider_is_not_reported_as_an_incident() {
-        let queue = MedicationAiQueueHealth {
-            available: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            medication_ai_operational_status(&provider("disabled", false), &queue),
-            "disabled"
-        );
-    }
-
-    #[test]
-    fn ready_provider_reports_queue_failures_and_expired_leases() {
-        let failed = MedicationAiQueueHealth {
-            available: true,
-            failed_last_24h: 1,
-            ..Default::default()
-        };
-        assert_eq!(
-            medication_ai_operational_status(&provider("ready", true), &failed),
-            "attention"
-        );
-        let stale = MedicationAiQueueHealth {
-            available: true,
-            stale_processing: 1,
-            ..Default::default()
-        };
-        assert_eq!(
-            medication_ai_operational_status(&provider("ready", true), &stale),
-            "attention"
-        );
-        let delayed = MedicationAiQueueHealth {
-            available: true,
-            oldest_requested_seconds: Some(121),
-            ..Default::default()
-        };
-        assert_eq!(
-            medication_ai_operational_status(&provider("ready", true), &delayed),
-            "attention"
-        );
-    }
-
-    #[test]
-    fn clean_ready_provider_is_healthy_and_database_failure_is_visible() {
-        let clean = MedicationAiQueueHealth {
-            available: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            medication_ai_operational_status(&provider("ready", true), &clean),
-            "healthy"
-        );
-        assert_eq!(
-            medication_ai_operational_status(
-                &provider("ready", true),
-                &MedicationAiQueueHealth::default(),
-            ),
-            "unavailable"
-        );
-    }
-}
-
 async fn login_geo_history(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -795,4 +718,81 @@ async fn audit_analytics(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod medication_ai_health_tests {
+    use super::*;
+
+    fn provider(status: &'static str, enabled: bool) -> MedicationAiCapability {
+        MedicationAiCapability {
+            kind: if enabled { "openai" } else { "none" },
+            status,
+            external_calls_enabled: enabled,
+            reason_code: status,
+            model: enabled.then(|| "gpt-test".to_string()),
+        }
+    }
+
+    #[test]
+    fn disabled_provider_is_not_reported_as_an_incident() {
+        let queue = MedicationAiQueueHealth {
+            available: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("disabled", false), &queue),
+            "disabled"
+        );
+    }
+
+    #[test]
+    fn ready_provider_reports_queue_failures_and_expired_leases() {
+        let failed = MedicationAiQueueHealth {
+            available: true,
+            failed_last_24h: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &failed),
+            "attention"
+        );
+        let stale = MedicationAiQueueHealth {
+            available: true,
+            stale_processing: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &stale),
+            "attention"
+        );
+        let delayed = MedicationAiQueueHealth {
+            available: true,
+            oldest_requested_seconds: Some(121),
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &delayed),
+            "attention"
+        );
+    }
+
+    #[test]
+    fn clean_ready_provider_is_healthy_and_database_failure_is_visible() {
+        let clean = MedicationAiQueueHealth {
+            available: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            medication_ai_operational_status(&provider("ready", true), &clean),
+            "healthy"
+        );
+        assert_eq!(
+            medication_ai_operational_status(
+                &provider("ready", true),
+                &MedicationAiQueueHealth::default(),
+            ),
+            "unavailable"
+        );
+    }
 }

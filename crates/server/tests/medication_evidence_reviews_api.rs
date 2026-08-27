@@ -574,8 +574,18 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     sqlx::query(
         r#"UPDATE medication_ai_analyses
            SET status = 'processing', started_at = now(),
-               lease_until = now() + interval '75 seconds', attempts = 1
+               lease_until = now() + interval '75 seconds',
+               lease_token = gen_random_uuid(), attempts = 1
            WHERE id = $1"#,
+    )
+    .bind(analysis_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO medication_ai_analysis_events
+               (analysis_id, from_status, to_status, reason_code)
+           VALUES ($1, 'requested', 'processing', 'worker_claimed')"#,
     )
     .bind(analysis_id)
     .execute(&ctx.pool)
@@ -584,8 +594,18 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     sqlx::query(
         r#"UPDATE medication_ai_analyses
            SET status = 'failed', completed_at = now(), lease_until = NULL,
+               lease_token = NULL,
                error_code = 'provider_request_rejected'
            WHERE id = $1"#,
+    )
+    .bind(analysis_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO medication_ai_analysis_events
+               (analysis_id, from_status, to_status, reason_code)
+           VALUES ($1, 'processing', 'failed', 'provider_request_rejected')"#,
     )
     .bind(analysis_id)
     .execute(&ctx.pool)
@@ -603,6 +623,19 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     assert_eq!(retried["status"], "requested");
     assert!(retried["error_code"].is_null());
 
+    let duplicate_retry_event = sqlx::query(
+        r#"INSERT INTO medication_ai_analysis_events
+               (analysis_id, from_status, to_status, reason_code)
+           VALUES ($1, 'processing', 'requested', 'provider_retry_scheduled')"#,
+    )
+    .bind(analysis_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        duplicate_retry_event.is_err(),
+        "a lifecycle event must continue the recorded transition chain"
+    );
+
     let event_transitions: Vec<(Option<String>, String)> = sqlx::query_as(
         r#"SELECT from_status, to_status
            FROM medication_ai_analysis_events
@@ -616,6 +649,8 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
         event_transitions,
         vec![
             (None, "requested".to_string()),
+            (Some("requested".to_string()), "processing".to_string()),
+            (Some("processing".to_string()), "failed".to_string()),
             (Some("failed".to_string()), "requested".to_string()),
         ]
     );
@@ -623,13 +658,56 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     sqlx::query(
         r#"UPDATE medication_ai_analyses
            SET status = 'processing', started_at = now(),
-               lease_until = now() + interval '75 seconds', attempts = 1
+               lease_until = now() + interval '75 seconds',
+               lease_token = gen_random_uuid(), attempts = 1
            WHERE id = $1"#,
     )
     .bind(analysis_id)
     .execute(&ctx.pool)
     .await
     .unwrap();
+    let active_lease_token: Uuid =
+        sqlx::query_scalar("SELECT lease_token FROM medication_ai_analyses WHERE id = $1")
+            .bind(analysis_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    let stale_transition = sqlx::query(
+        r#"UPDATE medication_ai_analyses
+           SET status = 'failed', completed_at = now(), lease_until = NULL,
+               lease_token = NULL, error_code = 'provider_request_rejected'
+           WHERE id = $1 AND status = 'processing'
+             AND lease_token = $2 AND lease_until > clock_timestamp()"#,
+    )
+    .bind(analysis_id)
+    .bind(Uuid::new_v4())
+    .execute(&ctx.pool)
+    .await
+    .unwrap()
+    .rows_affected();
+    assert_eq!(
+        stale_transition, 0,
+        "a stale lease token must be fenced out"
+    );
+    let fake_ready_event = sqlx::query(
+        r#"INSERT INTO medication_ai_analysis_events
+               (analysis_id, from_status, to_status, reason_code)
+           VALUES ($1, 'processing', 'ready', 'analysis_ready')"#,
+    )
+    .bind(analysis_id)
+    .execute(&ctx.pool)
+    .await;
+    assert!(
+        fake_ready_event.is_err(),
+        "an event must not claim a state the analysis has not reached"
+    );
+    let stored_lease_token: Uuid =
+        sqlx::query_scalar("SELECT lease_token FROM medication_ai_analyses WHERE id = $1")
+            .bind(analysis_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_lease_token, active_lease_token);
     sqlx::query(
         r#"INSERT INTO medication_ai_analysis_events
                (analysis_id, from_status, to_status, reason_code)
@@ -652,6 +730,7 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     sqlx::query(
         r#"UPDATE medication_ai_analyses
            SET status = 'ready', completed_at = now(), lease_until = NULL,
+               lease_token = NULL,
                output_json = $2, output_fingerprint = $3,
                provider_response_id = 'resp_historical_test',
                provider_response_model = 'gpt-test-2026-08-27'

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "@/lib/api";
 import type {
@@ -13,7 +13,16 @@ import {
   medicationEvidenceOperationForError,
   officialSourceLabel,
   resolveMedicationEvidenceIdempotencyKey,
+  startSequentialPolling,
 } from "./medication-evidence-review-panel";
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
 
 function summary() {
   return {
@@ -328,6 +337,20 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(html).not.toContain("data:text/html");
   });
 
+  it("keeps URL-less citations visible as safe local references", () => {
+    const russian = renderToStaticMarkup(
+      <MedicationEvidenceReviewContent review={review()} language="ru" />,
+    );
+    const german = renderToStaticMarkup(
+      <MedicationEvidenceReviewContent review={review()} language="de" />,
+    );
+
+    expect(russian).toContain("Недостающие данные · Локальная ссылка 1");
+    expect(german).toContain("Fehlende Daten · Lokaler Nachweis 1");
+    expect(russian).not.toContain("citation:missing-dose");
+    expect(russian).not.toContain("patient_medication:med-1");
+  });
+
   it("does not render bundle contents when full-review read capability is absent", () => {
     const denied = review({
       permissions: { can_create_review: true, can_read_review: false },
@@ -351,5 +374,38 @@ describe("MedicationEvidenceReviewContent", () => {
     const retry = resolveMedicationEvidenceIdempotencyKey(first, () => "attempt-2");
     expect(first).toBe("attempt-1");
     expect(retry).toBe("attempt-1");
+  });
+});
+
+describe("startSequentialPolling", () => {
+  it("waits for a slow request to settle before scheduling the next poll", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstRequest = deferred<void>();
+      const poll = vi
+        .fn<() => Promise<void>>()
+        .mockImplementationOnce(() => firstRequest.promise)
+        .mockResolvedValue(undefined);
+      const stop = startSequentialPolling({ poll, delayMs: 2_000 });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(poll).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(poll).toHaveBeenCalledTimes(1);
+
+      firstRequest.resolve(undefined);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(poll).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(poll).toHaveBeenCalledTimes(2);
+
+      stop();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(poll).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
