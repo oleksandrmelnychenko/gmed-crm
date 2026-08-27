@@ -805,13 +805,13 @@ fn claim_catalog(
             format!("claim.benefit-assessment.summary.{:04}", index + 1),
             DraftSection::EvidenceSummary,
             format!(
-                "Зафиксирована запись G-BA №{} с решением «{}» от {}.",
+                "Зафиксирована запись GBA №{} с решением «{}» от {}.",
                 index + 1,
                 item.decision_id,
                 item.decision_date
             ),
             format!(
-                "Der G-BA-Eintrag Nr. {} mit dem Beschluss „{}“ vom {} wurde erfasst.",
+                "Der GBA-Eintrag Nr. {} mit dem Beschluss „{}“ vom {} wurde erfasst.",
                 index + 1,
                 item.decision_id,
                 item.decision_date
@@ -1506,6 +1506,7 @@ fn contains_forbidden_clinical_content(value: &str) -> bool {
         "resume",
         "begin",
         "start",
+        "stop",
         "take",
         "avoid",
     ];
