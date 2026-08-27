@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Timelike, Utc};
-use quick_xml::Reader;
 use quick_xml::escape::resolve_xml_entity;
 use quick_xml::events::{BytesRef, BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Client, StatusCode, Url, redirect};
 use secrecy::{ExposeSecret, SecretString};
@@ -967,7 +967,7 @@ fn xml_attributes(
             .map_err(|_| invalid("attribute name is not UTF-8"))?
             .to_string();
         let value = attribute
-            .decode_and_unescape_value(reader.decoder())
+            .decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
             .map_err(|error| invalid(&error.to_string()))?
             .into_owned();
         if value.len() > 20_000 {
@@ -1211,9 +1211,9 @@ mod tests {
 
     #[test]
     fn permanent_download_url_is_strictly_allowlisted_and_never_public() {
-        let valid = SecretString::from("https://ais.g-ba.de/download/token.xml?key=secret".into());
+        let valid = SecretString::from("https://ais.g-ba.de/download/token.xml?key=secret");
         assert!(validate_download_url(&valid).is_ok());
-        let wrong_host = SecretString::from("https://example.com/token.xml".into());
+        let wrong_host = SecretString::from("https://example.com/token.xml");
         assert!(matches!(
             validate_download_url(&wrong_host),
             Err(GbaAisConnectorError::InvalidConfiguration)
