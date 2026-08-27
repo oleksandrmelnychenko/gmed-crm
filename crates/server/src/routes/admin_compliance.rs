@@ -327,6 +327,55 @@ pub(crate) async fn build_patient_export_payload(
         .unwrap_or_default()
     };
 
+    let medication_evidence_reviews = sqlx::query(
+        r#"SELECT request.id, request.status, request.requested_by,
+                  request.requested_at, request.completed_at,
+                  bundle.id AS bundle_id, bundle.bundle_version,
+                  bundle.intelligence_fingerprint, bundle.evidence_snapshot,
+                  bundle.created_at AS bundle_created_at,
+                  draft.id AS draft_id, draft.status AS draft_status,
+                  draft.evidence_summary, draft.verification_questions,
+                  draft.limitations, draft.citation_refs,
+                  draft.created_at AS draft_created_at
+           FROM medication_evidence_review_requests request
+           JOIN medication_evidence_bundles bundle ON bundle.id = request.bundle_id
+           LEFT JOIN medication_evidence_review_drafts draft ON draft.request_id = request.id
+           WHERE request.patient_id = $1
+           ORDER BY request.requested_at DESC, request.id DESC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let medication_ai_analyses = sqlx::query(
+        r#"SELECT id, review_id, bundle_id, status, provider_kind, provider_model,
+                  input_schema_version, prompt_version, input_fingerprint,
+                  requested_by, requested_at, started_at, completed_at,
+                  output_json, output_fingerprint, provider_response_id,
+                  provider_response_model, error_code, updated_at
+           FROM medication_ai_analyses
+           WHERE patient_id = $1
+           ORDER BY requested_at DESC, id DESC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let medication_ai_analysis_events = sqlx::query(
+        r#"SELECT event.id, event.analysis_id, event.from_status, event.to_status,
+                  event.reason_code, event.actor_id, event.created_at
+           FROM medication_ai_analysis_events event
+           JOIN medication_ai_analyses analysis ON analysis.id = event.analysis_id
+           WHERE analysis.patient_id = $1
+           ORDER BY event.created_at, event.id"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
     let export = serde_json::json!({
         "export_type": "DSGVO Art. 15 - Right of Access",
         "exported_at": chrono::Utc::now(),
@@ -511,6 +560,59 @@ pub(crate) async fn build_patient_export_payload(
                 "redaction_reason": row.try_get::<Option<String>, _>("redaction_reason").unwrap_or_default(),
             })
         }).collect::<Vec<_>>(),
+        "medication_evidence_reviews": medication_evidence_reviews.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
+            "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "bundle": {
+                "id": row.try_get::<Uuid, _>("bundle_id").unwrap_or_else(|_| Uuid::nil()),
+                "version": row.try_get::<String, _>("bundle_version").unwrap_or_default(),
+                "intelligence_fingerprint": row.try_get::<String, _>("intelligence_fingerprint").unwrap_or_default(),
+                "evidence_snapshot": row.try_get::<serde_json::Value, _>("evidence_snapshot").unwrap_or_else(|_| serde_json::json!({})),
+                "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("bundle_created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            },
+            "draft": row.try_get::<Option<Uuid>, _>("draft_id").unwrap_or_default().map(|draft_id| serde_json::json!({
+                "id": draft_id,
+                "status": row.try_get::<Option<String>, _>("draft_status").unwrap_or_default(),
+                "evidence_summary": row.try_get::<Option<serde_json::Value>, _>("evidence_summary").unwrap_or_default(),
+                "verification_questions": row.try_get::<Option<serde_json::Value>, _>("verification_questions").unwrap_or_default(),
+                "limitations": row.try_get::<Option<serde_json::Value>, _>("limitations").unwrap_or_default(),
+                "citation_refs": row.try_get::<Option<serde_json::Value>, _>("citation_refs").unwrap_or_default(),
+                "created_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("draft_created_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            })),
+        })).collect::<Vec<_>>(),
+        "medication_ai_analyses": medication_ai_analyses.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "review_id": row.try_get::<Uuid, _>("review_id").unwrap_or_else(|_| Uuid::nil()),
+            "bundle_id": row.try_get::<Uuid, _>("bundle_id").unwrap_or_else(|_| Uuid::nil()),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "provider_kind": row.try_get::<String, _>("provider_kind").unwrap_or_default(),
+            "provider_model": row.try_get::<String, _>("provider_model").unwrap_or_default(),
+            "input_schema_version": row.try_get::<String, _>("input_schema_version").unwrap_or_default(),
+            "prompt_version": row.try_get::<String, _>("prompt_version").unwrap_or_default(),
+            "input_fingerprint": row.try_get::<String, _>("input_fingerprint").unwrap_or_default(),
+            "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
+            "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            "started_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("started_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "output": row.try_get::<Option<serde_json::Value>, _>("output_json").unwrap_or_default(),
+            "output_fingerprint": row.try_get::<Option<String>, _>("output_fingerprint").unwrap_or_default(),
+            "provider_response_id": row.try_get::<Option<String>, _>("provider_response_id").unwrap_or_default(),
+            "provider_response_model": row.try_get::<Option<String>, _>("provider_response_model").unwrap_or_default(),
+            "error_code": row.try_get::<Option<String>, _>("error_code").unwrap_or_default(),
+            "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        })).collect::<Vec<_>>(),
+        "medication_ai_analysis_events": medication_ai_analysis_events.into_iter().map(|row| serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+            "analysis_id": row.try_get::<Uuid, _>("analysis_id").unwrap_or_else(|_| Uuid::nil()),
+            "from_status": row.try_get::<Option<String>, _>("from_status").unwrap_or_default(),
+            "to_status": row.try_get::<String, _>("to_status").unwrap_or_default(),
+            "reason_code": row.try_get::<String, _>("reason_code").unwrap_or_default(),
+            "actor_id": row.try_get::<Option<Uuid>, _>("actor_id").unwrap_or_default(),
+            "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        })).collect::<Vec<_>>(),
     });
 
     state.audit_sender.try_send(audit::domain_event(

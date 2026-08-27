@@ -2,6 +2,7 @@ import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileSignature, Fol
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
+import { AiMark } from "@/components/ui/ai-mark";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -26,11 +27,12 @@ export function PatientWorkspaceNav() {
   const [searchParams] = useSearchParams();
   const id = routeId ?? searchParams.get("patient") ?? undefined;
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
+  const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canViewContracts = canViewPatientContractsSurface(user?.role);
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
@@ -41,6 +43,7 @@ export function PatientWorkspaceNav() {
     ? normalizePatientDetailTab(searchParams.get("tab"), {
         canViewOperationalSurface,
         canViewClinical,
+        canUseMedicationAi,
         canViewDocuments,
         canViewContracts,
         canViewInvoices,
@@ -49,6 +52,7 @@ export function PatientWorkspaceNav() {
       ? normalizePatientDetailTab(contextualTab, {
           canViewOperationalSurface,
           canViewClinical,
+          canUseMedicationAi,
           canViewDocuments,
           canViewContracts,
           canViewInvoices,
@@ -66,6 +70,13 @@ export function PatientWorkspaceNav() {
           key: "clinical",
           label: l("patients_diagnoses_medications"),
           icon: Stethoscope,
+        }
+      : null,
+    canUseMedicationAi
+      ? {
+          key: "medication-ai",
+          label: lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов",
+          icon: AiMark,
         }
       : null,
     canViewOperationalSurface

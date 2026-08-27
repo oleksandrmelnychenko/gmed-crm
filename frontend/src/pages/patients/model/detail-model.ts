@@ -96,6 +96,7 @@ type PatientTabAccess = {
   canViewContracts: boolean;
   canViewInvoices: boolean;
   canViewClinical?: boolean;
+  canUseMedicationAi?: boolean;
 };
 
 type PatientTimelineFilters = {
@@ -279,6 +280,9 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
     return "profile";
   }
   if (requestedTab === "clinical" && !access.canViewClinical) {
+    return "profile";
+  }
+  if (requestedTab === "medication-ai" && !access.canUseMedicationAi) {
     return "profile";
   }
   if (requestedTab === "documents" && !access.canViewDocuments) {

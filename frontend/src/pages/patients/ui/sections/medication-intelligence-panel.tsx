@@ -29,6 +29,7 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { cn } from "@/lib/utils";
 
+import { officialSourceLabel } from "../../data/official-medication-source-label";
 import {
   MedicationIdentityAction,
   MedicationIdentityWorkflow,
@@ -83,6 +84,32 @@ function severityLabel(severity: MedicationIntelligenceSeverity, tx: Bilingual) 
   if (severity === "high") return tx("Высокий приоритет", "Hohe Priorität");
   if (severity === "warning") return tx("Предупреждения", "Warnhinweise");
   return tx("Информация", "Informationen");
+}
+
+function medicationStatusLabel(status: string, tx: Bilingual) {
+  if (status === "aktiv" || status === "active") return tx("Активный", "Aktiv");
+  if (status === "pausiert" || status === "paused") return tx("Приостановлен", "Pausiert");
+  if (status === "abgesetzt" || status === "discontinued") return tx("Отменён", "Abgesetzt");
+  if (status === "geplant" || status === "planned") return tx("Запланирован", "Geplant");
+  return tx("Статус не определён", "Status nicht zugeordnet");
+}
+
+function sourceKindLabel(kind: string, tx: Bilingual) {
+  const labels: Record<string, [string, string]> = {
+    medicinal_product_registry_api: ["Реестр лекарств (API)", "Arzneimittelregister (API)"],
+    german_medicinal_product_registry: ["Реестр лекарств Германии", "Deutsches Arzneimittelregister"],
+    safety_alerts_rss: ["Предупреждения безопасности (RSS)", "Sicherheitshinweise (RSS)"],
+    shortage_registry: ["Реестр дефицита", "Lieferengpassregister"],
+    safety_information: ["Информация о безопасности", "Sicherheitsinformationen"],
+    benefit_assessment_xml: ["Оценка дополнительной пользы (XML)", "Nutzenbewertung (XML)"],
+    clinical_guidelines: ["Клинические рекомендации", "Leitlinien"],
+    national_care_guidelines: ["Национальные рекомендации", "Nationale VersorgungsLeitlinien"],
+    medication_plan_standard: ["Стандарт плана медикации", "Medikationsplan-Standard"],
+  };
+  const label = labels[kind];
+  return label
+    ? tx(label[0], label[1])
+    : tx("Официальный источник", "Amtliche Quelle");
 }
 
 function sourceProvenanceLabel(source: MedicationIntelligenceSource, tx: Bilingual) {
@@ -274,7 +301,7 @@ function OfficialSafetyAlertFinding({
         ) : null}
         {source ? (
           <span>
-            {tx("Источник", "Quelle")}: <span className="font-medium text-foreground">{source.label || source.authority}</span>
+            {tx("Источник", "Quelle")}: <span className="font-medium text-foreground">{officialSourceLabel(source, lang)}</span>
           </span>
         ) : (
           <span className="text-amber-700">
@@ -357,7 +384,7 @@ function FindingsSection({
                 const medications = finding.medication_ids
                   .map((id) => medicationNames.get(id))
                   .filter((name): name is string => Boolean(name));
-                const evidence = source ? [source.label || source.authority] : [];
+                const evidence = source ? [officialSourceLabel(source, lang)] : [];
                 return (
                   <article key={finding.id} className="grid gap-2 px-3.5 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(11rem,0.35fr)]">
                     <div className="min-w-0">
@@ -434,8 +461,25 @@ function MedicationsTable({
               <td className="px-3.5 py-2.5">
                 <p className="text-[13px] font-medium text-foreground">{medication.name || "—"}</p>
                 {medication.status ? (
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">{medication.status}</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {medicationStatusLabel(medication.status, tx)}
+                  </p>
                 ) : null}
+              </td>
+              <td className="px-3.5 py-2.5 text-xs text-foreground">{medication.substance ?? "—"}</td>
+              <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{medication.atc_code ?? "—"}</td>
+              <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{medication.pzn ?? "—"}</td>
+              <td className="px-3.5 py-2.5 text-xs text-muted-foreground">{medication.country_code ?? "—"}</td>
+              <td className="px-3.5 py-2.5">
+                <MedicationIdentityAction
+                  compact
+                  medication={medication}
+                  permissions={data.identity_permissions}
+                  language={lang}
+                  onIdentify={onIdentifyMedication
+                    ? () => onIdentifyMedication(medication.id)
+                    : undefined}
+                />
               </td>
               <td className="px-3.5 py-2.5">
                 {onOpenBenefitEvidence && (medication.pzn || medication.atc_code) ? (
@@ -452,21 +496,6 @@ function MedicationsTable({
                 ) : (
                   <span className="text-xs text-muted-foreground">—</span>
                 )}
-              </td>
-              <td className="px-3.5 py-2.5 text-xs text-foreground">{medication.substance ?? "—"}</td>
-              <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{medication.atc_code ?? "—"}</td>
-              <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{medication.pzn ?? "—"}</td>
-              <td className="px-3.5 py-2.5 text-xs text-muted-foreground">{medication.country_code ?? "—"}</td>
-              <td className="px-3.5 py-2.5">
-                <MedicationIdentityAction
-                  compact
-                  medication={medication}
-                  permissions={data.identity_permissions}
-                  language={lang}
-                  onIdentify={onIdentifyMedication
-                    ? () => onIdentifyMedication(medication.id)
-                    : undefined}
-                />
               </td>
             </tr>
           ))}
@@ -496,7 +525,14 @@ function MissingDataSection({
             {lang === "de" ? item.label_de : item.label_ru}
           </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {lang === "de" ? item.reason_de : item.reason_ru}
+            {item.code === "medication_identity"
+              ? tx(
+                "Нужно подтвердить соответствие препарата либо проверить код ATC/PZN.",
+                "Erforderlich ist eine bestätigte Arzneimittelzuordnung oder ein geprüfter ATC-/PZN-Code.",
+              )
+              : lang === "de"
+                ? item.reason_de
+                : item.reason_ru}
           </p>
         </div>
       ))}
@@ -557,7 +593,7 @@ function SourcesSection({
     <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5 marker:hidden">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-foreground/70" />
+          <span className="size-2 shrink-0 rounded-full bg-orange-500" />
           <span className="text-[13px] font-semibold text-foreground">
             {tx("Официальные открытые источники", "Offizielle offene Quellen")}
           </span>
@@ -604,15 +640,15 @@ function SourcesSection({
                         rel="noreferrer"
                         className="break-words text-xs font-semibold text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground"
                       >
-                        {source.label || source.authority}
+                        {officialSourceLabel(source, lang)}
                       </a>
                     ) : (
                       <p className="break-words text-xs font-semibold text-foreground">
-                        {source.label || source.authority}
+                        {officialSourceLabel(source, lang)}
                       </p>
                     )}
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      {[source.authority, source.kind].filter(Boolean).join(" · ")}
+                      {[source.authority, sourceKindLabel(source.kind, tx)].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5">
@@ -676,10 +712,9 @@ function SourcesSection({
                       {tx("Последнее обновление завершилось ошибкой.", "Die letzte Aktualisierung ist fehlgeschlagen.")}
                     </p>
                     {source.last_error ? (
-                      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-rose-700/80">
-                        <span>{sourceErrorLabel(source.last_error, tx)}</span>
-                        <code className="font-mono text-[9px] text-rose-700/70">{source.last_error}</code>
-                      </div>
+                      <p className="mt-0.5 text-rose-700/80">
+                        {sourceErrorLabel(source.last_error, tx)}
+                      </p>
                     ) : null}
                     {lastAttemptAt ? (
                       <p className="mt-0.5 text-rose-700/80">
@@ -710,7 +745,7 @@ function SectionCard({
     <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full bg-foreground/70" />
+          <span className="size-2 shrink-0 rounded-full bg-orange-500" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold text-foreground">{title}</h3>
         </div>
         {typeof count === "number" ? (
@@ -768,87 +803,83 @@ export function MedicationIntelligencePanelContent({
   );
 
   return (
-    <section className="space-y-3" aria-label={tx("Проверка медикации", "Medikationsprüfung")}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <section
+      className="overflow-hidden rounded-lg border border-border/70 bg-white"
+      aria-label={tx("Проверка медикации", "Medikationsprüfung")}
+    >
+      <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3.5 py-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <AiMark className="size-4 text-foreground" />
-            <h2 className="text-sm font-semibold tracking-tight text-foreground">
+            <h2 className="text-[13px] font-semibold text-foreground">
               {tx("Интеллектуальная проверка медикации", "Intelligente Medikationsprüfung")}
             </h2>
-            <Badge variant="outline" className="h-5 rounded-full px-2 text-[10px]">
-              {tx("Только открытые источники", "Nur offene Quellen")}
-            </Badge>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {tx(
-              "Сопоставление лекарств и проверяемые сигналы для медицинского специалиста.",
-              "Arzneimittelabgleich und prüfbare Hinweise für medizinisches Fachpersonal.",
-            )}
-          </p>
         </div>
         {generatedAt ? (
           <p className="shrink-0 text-[10px] text-muted-foreground">
             {tx("Сформировано", "Erstellt")}: {generatedAt}
           </p>
         ) : null}
+      </header>
+
+      <div className="space-y-3 p-3.5">
+        <Disclaimer data={data} lang={lang} />
+
+        {loading ? (
+          <div role="status" aria-live="polite" className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+            {tx("Загружаем проверку медикации…", "Medikationsprüfung wird geladen…")}
+          </div>
+        ) : error ? (
+          <div role="alert" className="flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
+            <span>{error}</span>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="h-8 shrink-0 rounded-md border border-rose-300 bg-white px-3 text-xs font-medium text-rose-800 hover:bg-rose-100"
+              >
+                {tx("Повторить", "Erneut versuchen")}
+              </button>
+            ) : null}
+          </div>
+        ) : !data ? (
+          <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
+            {tx("Проверка медикации пока недоступна.", "Die Medikationsprüfung ist noch nicht verfügbar.")}
+          </div>
+        ) : (
+          <>
+            <SummaryGrid data={data} tx={tx} />
+            {isEmpty ? (
+              <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
+                {tx(
+                  "Нет данных для проверки. Сначала добавьте актуальную медикацию пациента.",
+                  "Keine Daten für die Prüfung. Erfassen Sie zuerst die aktuelle Medikation des Patienten.",
+                )}
+              </div>
+            ) : (
+              <>
+                <SectionCard title={tx("Проверяемые сигналы", "Prüfhinweise")} count={data.findings.length}>
+                  <FindingsSection data={data} lang={lang} tx={tx} />
+                </SectionCard>
+                <SectionCard title={tx("Идентификация медикации", "Identität der Medikation")} count={data.medications.length}>
+                  <MedicationsTable
+                    data={data}
+                    tx={tx}
+                    lang={lang}
+                    onIdentifyMedication={onIdentifyMedication}
+                    onOpenBenefitEvidence={onOpenBenefitEvidence}
+                  />
+                </SectionCard>
+                <SectionCard title={tx("Недостающие данные", "Fehlende Daten")} count={data.missing_data.length}>
+                  <MissingDataSection data={data} lang={lang} tx={tx} />
+                </SectionCard>
+              </>
+            )}
+            <SourcesSection data={data} lang={lang} tx={tx} />
+          </>
+        )}
       </div>
-
-      <Disclaimer data={data} lang={lang} />
-
-      {loading ? (
-        <div role="status" aria-live="polite" className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
-          {tx("Загружаем проверку медикации…", "Medikationsprüfung wird geladen…")}
-        </div>
-      ) : error ? (
-        <div role="alert" className="flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
-          <span>{error}</span>
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="h-8 shrink-0 rounded-md border border-rose-300 bg-white px-3 text-xs font-medium text-rose-800 hover:bg-rose-100"
-            >
-              {tx("Повторить", "Erneut versuchen")}
-            </button>
-          ) : null}
-        </div>
-      ) : !data ? (
-        <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
-          {tx("Проверка медикации пока недоступна.", "Die Medikationsprüfung ist noch nicht verfügbar.")}
-        </div>
-      ) : (
-        <>
-          <SummaryGrid data={data} tx={tx} />
-          {isEmpty ? (
-            <div className="rounded-lg border border-dashed border-border/70 bg-white px-4 py-8 text-center text-xs leading-relaxed text-muted-foreground">
-              {tx(
-                "Нет данных для проверки. Сначала добавьте актуальную медикацию пациента.",
-                "Keine Daten für die Prüfung. Erfassen Sie zuerst die aktuelle Medikation des Patienten.",
-              )}
-            </div>
-          ) : (
-            <>
-              <SectionCard title={tx("Проверяемые сигналы", "Prüfhinweise")} count={data.findings.length}>
-                <FindingsSection data={data} lang={lang} tx={tx} />
-              </SectionCard>
-              <SectionCard title={tx("Идентификация медикации", "Identität der Medikation")} count={data.medications.length}>
-                <MedicationsTable
-                  data={data}
-                  tx={tx}
-                  lang={lang}
-                  onIdentifyMedication={onIdentifyMedication}
-                  onOpenBenefitEvidence={onOpenBenefitEvidence}
-                />
-              </SectionCard>
-              <SectionCard title={tx("Недостающие данные", "Fehlende Daten")} count={data.missing_data.length}>
-                <MissingDataSection data={data} lang={lang} tx={tx} />
-              </SectionCard>
-            </>
-          )}
-          <SourcesSection data={data} lang={lang} tx={tx} />
-        </>
-      )}
     </section>
   );
 }

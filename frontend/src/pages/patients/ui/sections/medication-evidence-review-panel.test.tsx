@@ -11,6 +11,7 @@ import {
   MedicationEvidenceReviewContent,
   MedicationEvidenceReviewPanelContent,
   medicationEvidenceOperationForError,
+  officialSourceLabel,
   resolveMedicationEvidenceIdempotencyKey,
 } from "./medication-evidence-review-panel";
 
@@ -84,7 +85,7 @@ function review(overrides: Partial<MedicationEvidenceReview> = {}): MedicationEv
         title_de: "Prüfbarer Warnhinweis",
         medication_ids: ["med-1"],
         evidence_refs: ["opaque:item"],
-        source_id: "bfarm",
+        source_id: "bfarm_rote_hand",
         published_at: "2026-08-25T08:00:00Z",
         source_url: "https://www.bfarm.de/alert",
         substances: ["Apixaban"],
@@ -97,8 +98,8 @@ function review(overrides: Partial<MedicationEvidenceReview> = {}): MedicationEv
         citation_ref: "citation:missing-dose",
       }],
       sources: [{
-        id: "bfarm",
-        label: "BfArM",
+        id: "bfarm_rote_hand",
+        label: "Rote-Hand-Briefe und RSS",
         authority: "BfArM",
         kind: "rss",
         url: "https://www.bfarm.de/",
@@ -112,7 +113,7 @@ function review(overrides: Partial<MedicationEvidenceReview> = {}): MedicationEv
         {
           id: "citation:finding-1",
           kind: "finding",
-          source_id: "bfarm",
+          source_id: "bfarm_rote_hand",
           source_url: "https://www.bfarm.de/alert",
           evidence_refs: ["opaque:item"],
         },
@@ -215,10 +216,10 @@ describe("MedicationEvidenceReviewPanelContent", () => {
       />,
     );
 
-    expect(allowed).toContain("Evidenzpaket erstellen");
-    expect(allowed).toContain("Paket öffnen");
-    expect(denied).not.toContain("Evidenzpaket erstellen");
-    expect(denied).not.toContain("Paket öffnen");
+    expect(allowed).toContain("KI-Analyse erstellen");
+    expect(allowed).toContain("Ergebnis öffnen");
+    expect(denied).not.toContain("KI-Analyse erstellen");
+    expect(denied).not.toContain("Ergebnis öffnen");
   });
 
   it("renders an explicit stale fingerprint recovery state", () => {
@@ -252,7 +253,15 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(russian).toContain("Ограничения");
     expect(russian).toContain("Зафиксирован проверяемый сигнал");
     expect(russian).toContain('href="https://www.bfarm.de/alert"');
-    expect(russian).toContain("citation:finding-1");
+    expect(russian).toContain("Источник · bfarm.de");
+    expect(russian).toContain("Открыть источник");
+    expect(russian).not.toContain("citation:finding-1");
+    expect(russian).not.toContain("citation:missing-dose");
+    expect(russian).not.toContain("benefit_assessment:gba:decision-1:group-a");
+    expect(russian).toContain("Письма Rote-Hand и RSS");
+    expect(russian).toContain("Сигнал · BfArM");
+    expect(russian).toContain("Актуален");
+    expect(russian).not.toContain("medication-evidence-v1");
     expect(russian).toContain("Дополнительная польза");
     expect(russian).toContain("Gruppe A");
     expect(russian).toContain("Точное совпадение PZN/ATC");
@@ -260,8 +269,45 @@ describe("MedicationEvidenceReviewContent", () => {
     expect(german).toContain("Evidenzzusammenfassung");
     expect(german).toContain("Prüffragen");
     expect(german).toContain("Ein prüfbarer Hinweis wurde erfasst");
+    expect(german).toContain("Rote-Hand-Briefe und RSS");
+    expect(german).toContain("Hinweis · BfArM");
+    expect(german).toContain("Aktuell");
     expect(german).not.toContain("Зафиксирован проверяемый сигнал");
     expect(russian).not.toMatch(/confidence|дозировк.*измен|Одобрить|Freigeben/);
+    expect(russian).toContain("bg-orange-500");
+    expect(russian).toContain("bg-sky-50");
+    expect(russian).toContain("bg-emerald-50");
+    expect(russian).toContain("bg-amber-50");
+    expect(russian).toContain("bg-rose-50/50");
+  });
+
+  it("replaces internal medication relation keys with user-facing text", () => {
+    const technical = review();
+    technical.bundle.missing_data[0] = {
+      code: "medication_identity",
+      reason_ru: "Нужен подтверждённый medication_drug_match либо проверенный ATC/PZN.",
+      reason_de: "Bestätigter medication_drug_match erforderlich.",
+      citation_ref: "missing-data:technical-key",
+    };
+    technical.draft.verification_questions[0] = {
+      text_ru: "Требуется проверить: Нужен подтверждённый medication_drug_match либо проверенный ATC/PZN.",
+      text_de: "Bestätigter medication_drug_match erforderlich.",
+      citation_refs: ["missing-data:technical-key"],
+    };
+
+    const html = renderToStaticMarkup(
+      <MedicationEvidenceReviewContent review={technical} language="ru" />,
+    );
+
+    expect(html).toContain("Нужно подтвердить соответствие препарата");
+    expect(html).not.toContain("medication_drug_match");
+    expect(html).not.toContain("missing-data:technical-key");
+  });
+
+  it("localizes registered official source labels", () => {
+    const source = review().bundle.sources[0];
+    expect(officialSourceLabel(source, "ru")).toBe("Письма Rote-Hand и RSS");
+    expect(officialSourceLabel(source, "de")).toBe("Rote-Hand-Briefe und RSS");
   });
 
   it("never turns an unsafe citation URL into a link", () => {

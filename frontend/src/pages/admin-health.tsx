@@ -125,7 +125,7 @@ type HealthDetailPanel = "database" | "access" | "data" | "ai";
 
 type AiHealthCopy = ReturnType<typeof aiHealthCopy>;
 
-function aiHealthCopy(lang: "ru" | "de") {
+export function aiHealthCopy(lang: "ru" | "de") {
   return lang === "de"
     ? {
         section: "KI-Betrieb",
@@ -223,11 +223,11 @@ function aiHealthCopy(lang: "ru" | "de") {
       };
 }
 
-function aiStatusLabel(status: string, copy: AiHealthCopy) {
-  return copy.statuses[status as keyof typeof copy.statuses] ?? status;
+export function aiStatusLabel(status: string, copy: AiHealthCopy) {
+  return copy.statuses[status as keyof typeof copy.statuses] ?? copy.statuses.unavailable;
 }
 
-function aiReasonLabel(reason: string, copy: AiHealthCopy) {
+export function aiReasonLabel(reason: string, copy: AiHealthCopy) {
   return copy.reasons[reason as keyof typeof copy.reasons] ?? copy.statuses.unavailable;
 }
 

@@ -105,9 +105,7 @@ import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
-import { MedicationEvidenceReviewPanel } from "./medication-evidence-review-panel";
 import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
-import { MedicationIntelligencePanel } from "./medication-intelligence-panel";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
   collectAttachedClinicalSpecializations,
@@ -2664,13 +2662,6 @@ export function PatientClinicalTab({
     () => groupMedicationImportHistory(medications, medicationImportHistory),
     [medicationImportHistory, medications],
   );
-  const medicationIntelligenceRefreshKey = useMemo(
-    () => medications
-      .map((item) => [item.id, item.status, item.on_hold, item.wirkstoff, item.handelsname].join(":"))
-      .join("|"),
-    [medications],
-  );
-
   async function loadMoreMedicationHistory() {
     if (medicationHistoryLoadingMore || medicationImportHistory.length >= medicationHistoryTotal) return;
     setMedicationHistoryLoadingMore(true);
@@ -3907,14 +3898,6 @@ export function PatientClinicalTab({
           if (!medicationHoldBusy) setMedicationHoldEditor(null);
         }}
         onSubmit={() => void submitMedicationHoldEditor()}
-      />
-      <MedicationIntelligencePanel
-        patientId={patientId}
-        refreshKey={`${version}:${medicationIntelligenceRefreshKey}`}
-      />
-      <MedicationEvidenceReviewPanel
-        patientId={patientId}
-        refreshKey={`${version}:${medicationIntelligenceRefreshKey}`}
       />
       <MedicationHistoryTree
         series={medicationHistorySeries}

@@ -557,10 +557,10 @@ fn analyze(
             code: "medication_identity",
             label_ru: format!("Идентификация: {}", medication.name),
             label_de: format!("Identifikation: {}", medication.name),
-            reason_ru: "Нужен подтверждённый medication_drug_match либо проверенный ATC/PZN."
+            reason_ru: "Нужно подтвердить соответствие препарата либо проверить код ATC/PZN."
                 .to_string(),
             reason_de:
-                "Erforderlich ist ein bestätigter medication_drug_match oder ein geprüfter ATC/PZN."
+                "Erforderlich ist eine bestätigte Arzneimittelzuordnung oder ein geprüfter ATC-/PZN-Code."
                     .to_string(),
         });
     }

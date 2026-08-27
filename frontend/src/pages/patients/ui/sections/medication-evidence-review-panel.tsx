@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiRequestError } from "@/lib/api";
 import {
   createMedicationEvidenceReview,
@@ -29,6 +30,11 @@ import {
 import { useLang, type Lang } from "@/lib/i18n";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
+
+import { officialSourceLabel } from "../../data/official-medication-source-label";
+
+export { officialSourceLabel } from "../../data/official-medication-source-label";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -57,6 +63,7 @@ type MedicationEvidenceReviewContentProps = {
   loading?: boolean;
   error?: string | null;
   language?: Lang;
+  showOverview?: boolean;
   onRetry?: () => void;
 };
 
@@ -73,6 +80,18 @@ function formatTimestamp(value: string, lang: Lang) {
   }).format(new Date(timestamp));
 }
 
+function formatEvidenceDate(value: string, lang: Lang) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const timestamp = Date.parse(`${value}T00:00:00Z`);
+  if (Number.isNaN(timestamp)) return value;
+  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(timestamp));
+}
+
 function safeExternalUrl(value: string | null) {
   if (!value) return null;
   try {
@@ -83,8 +102,52 @@ function safeExternalUrl(value: string | null) {
   }
 }
 
+function citationKindLabel(kind: string, tx: Bilingual) {
+  if (kind === "finding") return tx("Сигнал", "Hinweis");
+  if (kind === "missing_data") return tx("Недостающие данные", "Fehlende Daten");
+  if (kind === "source") return tx("Источник", "Quelle");
+  if (kind === "benefit_assessment") return tx("Оценка G-BA", "G-BA-Bewertung");
+  return tx("Доказательство", "Evidenz");
+}
+
+function sourceHealthLabel(health: string, tx: Bilingual) {
+  if (health === "fresh") return tx("Актуален", "Aktuell");
+  if (health === "stale") return tx("Требует обновления", "Aktualisierung erforderlich");
+  if (health === "error") return tx("Ошибка источника", "Quellenfehler");
+  if (health === "never") return tx("Снимок отсутствует", "Kein Snapshot");
+  return tx("Состояние неизвестно", "Status unbekannt");
+}
+
+function evidenceText(value: string, lang: Lang) {
+  const medicationMatchLabel = lang === "de"
+    ? "bestätigte Arzneimittelzuordnung"
+    : "подтверждённое соответствие препарата";
+  return value
+    .replace(
+      "Нужен подтверждённый medication_drug_match либо проверенный ATC/PZN.",
+      "Нужно подтвердить соответствие препарата либо проверить код ATC/PZN.",
+    )
+    .replace(
+      "Bestätigter medication_drug_match erforderlich.",
+      "Erforderlich ist eine bestätigte Arzneimittelzuordnung oder ein geprüfter ATC-/PZN-Code.",
+    )
+    .replaceAll("medication_drug_match", medicationMatchLabel);
+}
+
+function missingDataReason(
+  missing: MedicationEvidenceReview["bundle"]["missing_data"][number],
+  lang: Lang,
+) {
+  if (missing.code === "medication_identity") {
+    return lang === "de"
+      ? "Erforderlich ist eine bestätigte Arzneimittelzuordnung oder ein geprüfter ATC-/PZN-Code."
+      : "Нужно подтвердить соответствие препарата либо проверить код ATC/PZN.";
+  }
+  return evidenceText(lang === "de" ? missing.reason_de : missing.reason_ru, lang);
+}
+
 function reviewStatusLabel(status: MedicationEvidenceReviewStatus, tx: Bilingual) {
-  if (status === "draft_ready") return tx("Пакет готов", "Paket bereit");
+  if (status === "draft_ready") return tx("Доказательства готовы", "Evidenz bereit");
   if (status === "failed") return tx("Не удалось сформировать", "Erstellung fehlgeschlagen");
   if (status === "superseded") return tx("Есть более новая версия", "Neuere Version vorhanden");
   return tx("Формируется", "Wird erstellt");
@@ -99,28 +162,53 @@ function reviewStatusDot(status: MedicationEvidenceReviewStatus) {
 
 function SummaryStrip({ summary, tx }: { summary: MedicationEvidenceSummary; tx: Bilingual }) {
   const items = [
-    [tx("Медикаменты", "Medikamente"), summary.active_medications],
-    [tx("Идентифицированы", "Identifiziert"), summary.identified_medications],
-    [tx("Не определены", "Nicht zugeordnet"), summary.unresolved_medications],
-    [tx("Сигналы", "Hinweise"), summary.findings_total],
-    [tx("Высокий приоритет", "Hohe Priorität"), summary.high_priority_findings],
-    [tx("Не хватает данных", "Fehlende Daten"), summary.missing_data_total],
-    [tx("Оценки G-BA", "G-BA-Bewertungen"), summary.benefit_assessments_total],
+    {
+      label: tx("Медикаменты", "Medikamente"),
+      value: summary.active_medications,
+      chipClass: "border-sky-200 bg-sky-50",
+      labelClass: "text-sky-700",
+      valueClass: "text-sky-950",
+    },
+    {
+      label: tx("Идентифицированы", "Identifiziert"),
+      value: summary.identified_medications,
+      chipClass: summary.identified_medications > 0
+        ? "border-emerald-200 bg-emerald-50"
+        : "border-emerald-100 bg-emerald-50/50",
+      labelClass: "text-emerald-700",
+      valueClass: "text-emerald-950",
+    },
+    {
+      label: tx("Требуют проверки", "Zu prüfen"),
+      value: summary.unresolved_medications,
+      chipClass: summary.unresolved_medications > 0
+        ? "border-amber-200 bg-amber-50"
+        : "border-amber-100 bg-amber-50/50",
+      labelClass: "text-amber-700",
+      valueClass: "text-amber-950",
+    },
+    {
+      label: tx("Высокий приоритет", "Hohe Priorität"),
+      value: summary.high_priority_findings,
+      chipClass: summary.high_priority_findings > 0
+        ? "border-rose-200 bg-rose-50"
+        : "border-rose-100 bg-rose-50/50",
+      labelClass: "text-rose-700",
+      valueClass: "text-rose-950",
+    },
   ] as const;
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border/60 bg-white grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
-      {items.map(([label, value], index) => (
+    <div className="flex flex-wrap gap-2">
+      {items.map(({ label, value, chipClass, labelClass, valueClass }) => (
         <div
           key={label}
           className={cn(
-            "min-w-0 border-border/50 px-3 py-2",
-            index > 0 && "border-l",
-            index > 1 && "border-t sm:border-t-0",
-            index > 2 && "sm:border-t xl:border-t-0",
+            "inline-flex min-w-0 items-center gap-2 rounded-full border px-2.5 py-1.5",
+            chipClass,
           )}
         >
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
-          <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-foreground">{value}</p>
+          <span className={cn("text-[10px] font-medium", labelClass)}>{label}</span>
+          <span className={cn("font-mono text-[11px] font-semibold tabular-nums", valueClass)}>{value}</span>
         </div>
       ))}
     </div>
@@ -171,7 +259,7 @@ export function MedicationEvidenceReviewPanelContent({
       <div className="space-y-3 p-3.5">
         {loading ? (
           <div role="status" className="py-7 text-center text-xs text-muted-foreground">
-            {tx("Загружаем доступность пакета…", "Paketverfügbarkeit wird geladen…")}
+            {tx("Загружаем данные анализа…", "Analysedaten werden geladen…")}
           </div>
         ) : error ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
@@ -184,18 +272,16 @@ export function MedicationEvidenceReviewPanelContent({
           </div>
         ) : !preview ? (
           <div className="py-7 text-center text-xs text-muted-foreground">
-            {tx("Предпросмотр пакета недоступен.", "Die Paketvorschau ist nicht verfügbar.")}
+            {tx("Предварительные данные анализа недоступны.", "Die Analysevorschau ist nicht verfügbar.")}
           </div>
         ) : (
           <>
-            <SummaryStrip summary={preview.summary} tx={tx} />
-
             {operation === "stale" ? (
               <div role="alert" className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
                 <span>
                   {tx(
-                    "Данные о медикаментах изменились. Обновите предпросмотр и сформируйте пакет из актуальных данных.",
-                    "Die Medikationsdaten haben sich geändert. Aktualisieren Sie die Vorschau und erstellen Sie das Paket aus den aktuellen Daten.",
+                    "Данные о медикаментах изменились. Обновите их перед повторным анализом.",
+                    "Die Medikationsdaten haben sich geändert. Aktualisieren Sie sie vor der erneuten Analyse.",
                   )}
                 </span>
                 {onRefreshStale ? (
@@ -206,7 +292,7 @@ export function MedicationEvidenceReviewPanelContent({
               </div>
             ) : operation === "error" ? (
               <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
-                <span>{operationError || tx("Не удалось сформировать пакет.", "Das Paket konnte nicht erstellt werden.")}</span>
+                <span>{operationError || tx("Не удалось подготовить AI-анализ.", "Die KI-Analyse konnte nicht vorbereitet werden.")}</span>
                 {onRetryCreate ? (
                   <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" onClick={onRetryCreate}>
                     {tx("Повторить", "Erneut versuchen")}
@@ -223,13 +309,13 @@ export function MedicationEvidenceReviewPanelContent({
                       <span className={cn("size-1.5 rounded-full", reviewStatusDot(preview.latest_review.status))} />
                       {reviewStatusLabel(preview.latest_review.status, tx)}
                     </p>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    <p className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
                       {latestCreatedAt || preview.latest_review.id}
                     </p>
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    {tx("Пакеты доказательств ещё не создавались.", "Es wurden noch keine Evidenzpakete erstellt.")}
+                    {tx("AI-анализ ещё не запускался.", "Die KI-Analyse wurde noch nicht gestartet.")}
                   </p>
                 )}
               </div>
@@ -243,7 +329,7 @@ export function MedicationEvidenceReviewPanelContent({
                     onClick={() => onViewLatest(preview.latest_review!.id)}
                   >
                     <AiMark className="size-3.5" />
-                    {tx("Открыть пакет", "Paket öffnen")}
+                    {tx("Открыть результат", "Ergebnis öffnen")}
                   </Button>
                 ) : null}
                 {preview.permissions.can_create_review && onCreate ? (
@@ -256,8 +342,8 @@ export function MedicationEvidenceReviewPanelContent({
                   >
                     <AiMark className="size-3.5" />
                     {operation === "creating"
-                      ? tx("Формируем…", "Wird erstellt…")
-                      : tx("Создать пакет доказательств", "Evidenzpaket erstellen")}
+                      ? tx("Подготавливаем анализ…", "Analyse wird vorbereitet…")
+                      : tx("Сформировать AI-анализ", "KI-Analyse erstellen")}
                   </Button>
                 ) : null}
               </div>
@@ -278,29 +364,52 @@ function CitationRefs({
   citations: Map<string, MedicationEvidenceCitation>;
   tx: Bilingual;
 }) {
-  if (refs.length === 0) return null;
+  const linkedCitations = refs.flatMap((ref) => {
+    const citation = citations.get(ref);
+    const href = safeExternalUrl(citation?.source_url ?? null);
+    return href ? [{ ref, href, kind: citation?.kind ?? "source" }] : [];
+  });
+  const linkLabel = (href: string) => {
+    try {
+      const hostname = new URL(href).hostname.replace(/^www\./, "");
+      return `${tx("Источник", "Quelle")} · ${hostname}`;
+    } catch {
+      return tx("Источник", "Quelle");
+    }
+  };
+  if (linkedCitations.length === 0) return null;
+  if (linkedCitations.length === 1) {
+    return (
+      <a
+        href={linkedCitations[0].href}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-2 inline-flex max-w-full items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-medium text-sky-700 hover:border-sky-300 hover:bg-sky-100 hover:text-sky-900"
+      >
+        <span className="truncate">{linkLabel(linkedCitations[0].href)}</span>
+      </a>
+    );
+  }
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {refs.map((ref) => {
-        const citation = citations.get(ref);
-        const href = safeExternalUrl(citation?.source_url ?? null);
-        return href ? (
+    <details className="group/sources mt-2 w-fit max-w-full">
+      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full border border-border/60 bg-muted/10 px-2 py-0.5 text-[9px] font-medium text-muted-foreground marker:hidden hover:border-border hover:bg-muted/25 hover:text-foreground">
+        {tx("Источники", "Quellen")} · {linkedCitations.length}
+        <ChevronDown className="size-3 transition-transform group-open/sources:rotate-180" />
+      </summary>
+      <div className="mt-1.5 flex max-w-xl flex-wrap gap-1.5 rounded-lg border border-border/60 bg-muted/10 p-2">
+        {linkedCitations.map(({ ref, href }, index) => (
           <a
             key={ref}
             href={href}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-border/70 bg-white px-2 py-0.5 font-mono text-[9px] text-muted-foreground underline decoration-border underline-offset-2 hover:text-foreground"
+            className="max-w-full rounded-full bg-sky-50 px-2 py-1 text-[9px] font-medium text-sky-700 ring-1 ring-sky-200 hover:bg-sky-100 hover:text-sky-900"
           >
-            {tx("Источник", "Quelle")} · {ref}
+            <span className="block truncate">{linkLabel(href)} · {index + 1}</span>
           </a>
-        ) : (
-          <span key={ref} className="rounded-full border border-border/70 bg-white px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
-            {ref}
-          </span>
-        );
-      })}
-    </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -311,6 +420,8 @@ function DraftGroup({
   lang,
   emptyText,
   ai = false,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   title: string;
   items: MedicationEvidenceDraftItem[];
@@ -318,15 +429,20 @@ function DraftGroup({
   lang: Lang;
   emptyText: string;
   ai?: boolean;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
-  return (
-    <section className="overflow-hidden rounded-lg border border-border/70 bg-white">
-      <header className="flex items-center gap-2 border-b border-border/60 bg-muted/15 px-3 py-2.5">
-        {ai ? <AiMark className="size-3.5 text-foreground" /> : <span className="size-1.5 rounded-full bg-foreground/70" />}
+  const header = (
+    <div className="flex items-center gap-2 bg-muted/15 px-3 py-2.5">
+        {ai ? <AiMark className="size-3.5 text-orange-500" /> : <span className="size-1.5 rounded-full bg-orange-500" />}
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{items.length}</span>
-      </header>
+        {collapsible ? <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open/draft:rotate-180" /> : null}
+    </div>
+  );
+  const content = (
+    <div className="border-t border-border/50">
       {items.length === 0 ? (
         <p className="px-3 py-5 text-center text-xs text-muted-foreground">{emptyText}</p>
       ) : (
@@ -334,15 +450,24 @@ function DraftGroup({
           {items.map((item, index) => (
             <li key={`${index}:${item.citation_refs.join(":")}`} className="px-3 py-2.5">
               <p className="break-words text-xs leading-relaxed text-foreground">
-                {lang === "de" ? item.text_de : item.text_ru}
+                {evidenceText(lang === "de" ? item.text_de : item.text_ru, lang)}
               </p>
               <CitationRefs refs={item.citation_refs} citations={citations} tx={tx} />
             </li>
           ))}
         </ol>
       )}
-    </section>
+    </div>
   );
+  if (collapsible) {
+    return (
+      <details open={defaultOpen || undefined} className="group/draft overflow-hidden rounded-lg border border-border/70 bg-white">
+        <summary className="cursor-pointer list-none marker:hidden">{header}</summary>
+        {content}
+      </details>
+    );
+  }
+  return <section className="overflow-hidden rounded-lg border border-border/70 bg-white">{header}{content}</section>;
 }
 
 function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceReview; lang: Lang; tx: Bilingual }) {
@@ -358,7 +483,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-foreground/70" />
+        <span className="size-1.5 rounded-full bg-orange-500" />
         <span className="text-xs font-semibold text-foreground">{tx("Снимок доказательств", "Evidenz-Snapshot")}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">
           {review.bundle.findings.length + review.bundle.missing_data.length + review.bundle.benefit_assessments.length}
@@ -377,7 +502,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
         {review.bundle.missing_data.map((missing) => (
           <div key={missing.citation_ref} className="border-b border-border/50 px-3 py-2.5 last:border-b-0">
             <p className="text-xs text-muted-foreground">
-              {lang === "de" ? missing.reason_de : missing.reason_ru}
+              {missingDataReason(missing, lang)}
             </p>
             <CitationRefs refs={[missing.citation_ref].filter(Boolean)} citations={citations} tx={tx} />
           </div>
@@ -397,7 +522,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
                 </p>
               </div>
               <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
-                {assessment.decision_date || "—"}
+                {assessment.decision_date ? formatEvidenceDate(assessment.decision_date, lang) : "—"}
               </span>
             </div>
             <CitationRefs refs={[assessment.citation_ref].filter(Boolean)} citations={citations} tx={tx} />
@@ -431,7 +556,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
   return (
     <details className="overflow-hidden rounded-lg border border-border/70 bg-white">
       <summary className="flex cursor-pointer list-none items-center gap-2 bg-muted/15 px-3 py-2.5 marker:hidden">
-        <span className="size-1.5 rounded-full bg-foreground/70" />
+        <span className="size-1.5 rounded-full bg-orange-500" />
         <span className="text-xs font-semibold text-foreground">{tx("Цитаты и источники", "Zitate und Quellen")}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">{review.bundle.citations.length}</span>
       </summary>
@@ -443,9 +568,13 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
           return (
             <div key={citation.id} className="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <p className="break-all font-mono text-[10px] text-foreground">{citation.id}</p>
+                <p className="break-words text-xs font-medium text-foreground">
+                  {source ? officialSourceLabel(source, lang) : citationKindLabel(citation.kind, tx)}
+                </p>
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  {[citation.kind, source?.label, source?.authority].filter(Boolean).join(" · ")}
+                  {[citationKindLabel(citation.kind, tx), source?.authority]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
               </div>
               {href ? (
@@ -458,7 +587,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
         })}
         {review.bundle.citations.length === 0 ? (
           <p className="px-3 py-5 text-center text-xs text-muted-foreground">
-            {tx("Цитаты в пакет не включены.", "Das Paket enthält keine Zitate.")}
+            {tx("Источники в результат не включены.", "Das Ergebnis enthält keine Quellen.")}
           </p>
         ) : null}
       </div>
@@ -468,7 +597,11 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
             const fetched = source.last_successful_snapshot?.fetched_at
               ? formatTimestamp(source.last_successful_snapshot.fetched_at, lang)
               : null;
-            return [source.label || source.authority, source.health, fetched].filter(Boolean).join(" · ");
+            return [
+              officialSourceLabel(source, lang),
+              sourceHealthLabel(source.health, tx),
+              fetched,
+            ].filter(Boolean).join(" · ");
           }).join("; ")}
         </div>
       ) : null}
@@ -481,6 +614,7 @@ export function MedicationEvidenceReviewContent({
   loading = false,
   error = null,
   language,
+  showOverview = true,
   onRetry,
 }: MedicationEvidenceReviewContentProps) {
   const { lang: activeLanguage } = useLang();
@@ -492,7 +626,7 @@ export function MedicationEvidenceReviewContent({
   );
 
   if (loading) {
-    return <div role="status" className="py-10 text-center text-xs text-muted-foreground">{tx("Загружаем пакет…", "Paket wird geladen…")}</div>;
+    return <div role="status" className="py-10 text-center text-xs text-muted-foreground">{tx("Загружаем результат анализа…", "Analyseergebnis wird geladen…")}</div>;
   }
   if (error) {
     return (
@@ -503,28 +637,32 @@ export function MedicationEvidenceReviewContent({
     );
   }
   if (!review) {
-    return <div className="py-10 text-center text-xs text-muted-foreground">{tx("Пакет недоступен.", "Das Paket ist nicht verfügbar.")}</div>;
+    return <div className="py-10 text-center text-xs text-muted-foreground">{tx("Результат анализа недоступен.", "Das Analyseergebnis ist nicht verfügbar.")}</div>;
   }
   if (!review.permissions.can_read_review) {
     return (
       <div className="rounded-lg border border-border/70 bg-white px-4 py-8 text-center text-xs text-muted-foreground">
-        {tx("У вас нет доступа к просмотру этого пакета.", "Sie haben keinen Zugriff auf dieses Paket.")}
+        {tx("У вас нет доступа к результату анализа.", "Sie haben keinen Zugriff auf dieses Analyseergebnis.")}
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
-          <span className={cn("size-1.5 rounded-full", reviewStatusDot(review.review.status))} />
-          {reviewStatusLabel(review.review.status, tx)}
-        </span>
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {review.bundle.version} · {formatTimestamp(review.review.created_at, lang) || review.review.id}
-        </span>
-      </div>
-      <SummaryStrip summary={review.bundle.summary} tx={tx} />
+      {showOverview ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <span className={cn("size-1.5 rounded-full", reviewStatusDot(review.review.status))} />
+              {reviewStatusLabel(review.review.status, tx)}
+            </span>
+            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+              {formatTimestamp(review.review.created_at, lang) || review.review.id}
+            </span>
+          </div>
+          <SummaryStrip summary={review.bundle.summary} tx={tx} />
+        </>
+      ) : null}
 
       <DraftGroup
         title={tx("Сводка доказательств", "Evidenzzusammenfassung")}
@@ -532,6 +670,7 @@ export function MedicationEvidenceReviewContent({
         citations={citations}
         lang={lang}
         emptyText={tx("Сводка не сформирована.", "Keine Zusammenfassung vorhanden.")}
+        collapsible
       />
       <DraftGroup
         title={tx("Вопросы для проверки", "Prüffragen")}
@@ -539,6 +678,8 @@ export function MedicationEvidenceReviewContent({
         citations={citations}
         lang={lang}
         emptyText={tx("Вопросы для проверки отсутствуют.", "Keine Prüffragen vorhanden.")}
+        collapsible
+        defaultOpen={false}
       />
       <DraftGroup
         title={tx("Ограничения", "Einschränkungen")}
@@ -546,6 +687,8 @@ export function MedicationEvidenceReviewContent({
         citations={citations}
         lang={lang}
         emptyText={tx("Ограничения не перечислены.", "Keine Einschränkungen aufgeführt.")}
+        collapsible
+        defaultOpen={false}
       />
       <EvidenceSnapshot review={review} lang={lang} tx={tx} />
       <ProvenanceDetails review={review} lang={lang} tx={tx} />
@@ -605,17 +748,8 @@ function MedicationAiAnalysisSection({
   const displayProvider = analysis?.provider ?? provider;
   const ready = displayProvider.status === "ready" && displayProvider.external_calls_enabled;
   return (
-    <section
-      className="overflow-hidden rounded-lg border border-border/70 bg-white"
-      aria-label={tx("AI-черновик доказательств", "KI-Evidenzentwurf")}
-    >
-      <header className="flex flex-col gap-2 border-b border-border/60 bg-muted/15 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2">
-          <AiMark className="size-4 text-foreground" />
-          <h3 className="text-xs font-semibold text-foreground">{tx("AI-черновик", "KI-Entwurf")}</h3>
-        </div>
-      </header>
-      <div className="space-y-3 p-3">
+    <section aria-label={tx("AI-результат", "KI-Ergebnis")}>
+      <div className="space-y-2.5">
         {!ready && analysis?.status !== "ready" ? (
           <p className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/10 px-3 py-3 text-xs text-muted-foreground">
             <AiMark className="mt-0.5 size-3.5 text-foreground" />
@@ -639,19 +773,19 @@ function MedicationAiAnalysisSection({
             </p>
             <Button type="button" size="sm" className="min-h-11 shrink-0 rounded-lg sm:min-h-8" disabled={loading} onClick={onCreate}>
               <AiMark className="size-3.5" />
-              {loading ? tx("Ставим в очередь…", "Wird eingereiht…") : tx("Создать AI-черновик", "KI-Entwurf erstellen")}
+              {loading ? tx("Ставим в очередь…", "Wird eingereiht…") : tx("Сформировать AI-результат", "KI-Ergebnis erstellen")}
             </Button>
           </div>
         ) : analysis.status === "requested" || analysis.status === "processing" ? (
           <div role="status" className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-3 text-xs text-muted-foreground">
             <AiMark className="size-4 animate-pulse text-foreground" />
             {analysis.status === "processing"
-              ? tx("AI обрабатывает обезличенный пакет…", "Die KI verarbeitet das de-identifizierte Paket…")
-              : tx("AI-черновик ожидает обработки…", "Der KI-Entwurf wartet auf Verarbeitung…")}
+              ? tx("AI обрабатывает обезличенные доказательства…", "Die KI verarbeitet die de-identifizierte Evidenz…")
+              : tx("AI-анализ ожидает обработки…", "Die KI-Analyse wartet auf Verarbeitung…")}
           </div>
         ) : analysis.status === "failed" ? (
           <div role="alert" className="flex flex-col gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-xs text-rose-800 sm:flex-row sm:items-center sm:justify-between">
-            <span className="flex items-start gap-2"><AiMark className="mt-0.5 size-3.5" />{tx("AI-черновик не прошёл безопасную обработку. Локальный пакет не изменён.", "Der KI-Entwurf konnte nicht sicher verarbeitet werden. Das lokale Paket blieb unverändert.")}</span>
+            <span className="flex items-start gap-2"><AiMark className="mt-0.5 size-3.5" />{tx("AI-анализ не прошёл безопасную обработку. Доказательства сохранены без изменений.", "Die KI-Analyse konnte nicht sicher verarbeitet werden. Die Evidenz blieb unverändert.")}</span>
             <Button type="button" size="sm" variant="outline" className="min-h-11 bg-white sm:min-h-8" disabled={loading} onClick={onRetry}>
               <AiMark className="size-3.5" />
               {tx("Повторить", "Erneut versuchen")}
@@ -659,7 +793,7 @@ function MedicationAiAnalysisSection({
           </div>
         ) : analysis.draft ? (
           <>
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-amber-950">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-[10px] leading-relaxed text-amber-950">
               <AiMark className="mt-0.5 size-3.5" />
               <span>
                 {tx(
@@ -668,9 +802,39 @@ function MedicationAiAnalysisSection({
                 )}
               </span>
             </div>
-            <DraftGroup ai title={tx("AI-сводка доказательств", "KI-Evidenzzusammenfassung")} items={analysis.draft.evidence_summary} citations={citations} lang={lang} emptyText={tx("AI-сводка пуста.", "Die KI-Zusammenfassung ist leer.")} />
-            <DraftGroup ai title={tx("AI-вопросы для проверки", "KI-Prüffragen")} items={analysis.draft.verification_questions} citations={citations} lang={lang} emptyText={tx("AI-вопросов нет.", "Keine KI-Prüffragen vorhanden.")} />
-            <DraftGroup ai title={tx("AI-ограничения", "KI-Einschränkungen")} items={analysis.draft.limitations} citations={citations} lang={lang} emptyText={tx("AI-ограничения не перечислены.", "Keine KI-Einschränkungen aufgeführt.")} />
+            <div className="grid items-start gap-2.5 lg:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]">
+              <DraftGroup
+                ai
+                collapsible
+                title={tx("Краткий вывод", "Kurzfazit")}
+                items={analysis.draft.evidence_summary}
+                citations={citations}
+                lang={lang}
+                emptyText={tx("AI-сводка пуста.", "Die KI-Zusammenfassung ist leer.")}
+              />
+              <div className="space-y-2.5">
+                <DraftGroup
+                  ai
+                  collapsible
+                  defaultOpen={false}
+                  title={tx("Что проверить", "Was ist zu prüfen")}
+                  items={analysis.draft.verification_questions}
+                  citations={citations}
+                  lang={lang}
+                  emptyText={tx("AI-вопросов нет.", "Keine KI-Prüffragen vorhanden.")}
+                />
+                <DraftGroup
+                  ai
+                  collapsible
+                  defaultOpen={false}
+                  title={tx("Ограничения", "Einschränkungen")}
+                  items={analysis.draft.limitations}
+                  citations={citations}
+                  lang={lang}
+                  emptyText={tx("AI-ограничения не перечислены.", "Keine KI-Einschränkungen aufgeführt.")}
+                />
+              </div>
+            </div>
           </>
         ) : null}
       </div>
@@ -708,6 +872,7 @@ export function MedicationEvidenceReviewPanel({
   const [operation, setOperation] = useState<"idle" | "creating" | "stale" | "error">("idle");
   const [operationError, setOperationError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogTab, setDialogTab] = useState<"ai" | "evidence">("ai");
   const [review, setReview] = useState<MedicationEvidenceReview | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -739,6 +904,7 @@ export function MedicationEvidenceReviewPanel({
   useEffect(() => {
     requestEpochRef.current += 1;
     setDialogOpen(false);
+    setDialogTab("ai");
     setReview(null);
     setReviewId(null);
     setReviewError(null);
@@ -770,7 +936,7 @@ export function MedicationEvidenceReviewPanel({
       if (loadError instanceof ApiRequestError && loadError.status === 404) {
         setAiAnalysis(null);
       } else {
-        setAiError(lang === "de" ? "Der KI-Status konnte nicht geladen werden." : "Не удалось загрузить статус AI-черновика.");
+        setAiError(lang === "de" ? "Der KI-Status konnte nicht geladen werden." : "Не удалось загрузить статус AI-анализа.");
       }
     } finally {
       if (epoch === aiRequestEpochRef.current) setAiLoading(false);
@@ -793,6 +959,28 @@ export function MedicationEvidenceReviewPanel({
       window.clearInterval(timer);
     };
   }, [aiAnalysis?.provider.status, aiAnalysis?.status, dialogOpen, loadExistingAiAnalysis, reviewId]);
+
+  const createAiDraftForReview = async (nextReviewId: string) => {
+    const epoch = ++aiRequestEpochRef.current;
+    const idempotencyKey = aiIdempotencyKeyRef.current
+      || (typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `medication-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    aiIdempotencyKeyRef.current = idempotencyKey;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const created = await createMedicationAiAnalysis(patientId, nextReviewId, idempotencyKey);
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiAnalysis(created);
+      aiIdempotencyKeyRef.current = null;
+    } catch {
+      if (epoch !== aiRequestEpochRef.current) return;
+      setAiError(lang === "de" ? "Die KI-Analyse konnte nicht angefordert werden." : "Не удалось запустить AI-анализ.");
+    } finally {
+      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
+    }
+  };
 
   const createReview = async (fingerprint: string) => {
     const epoch = ++requestEpochRef.current;
@@ -817,6 +1005,10 @@ export function MedicationEvidenceReviewPanel({
         setDialogOpen(true);
         setAiAnalysis(null);
         setAiError(null);
+        const aiProvider = currentPreview.data?.ai_provider;
+        if (aiProvider?.status === "ready" && aiProvider.external_calls_enabled) {
+          void createAiDraftForReview(created.review.id);
+        }
       }
       setReloadToken((token) => token + 1);
     } catch (createError) {
@@ -829,8 +1021,8 @@ export function MedicationEvidenceReviewPanel({
       } else {
         setOperationError(
           lang === "de"
-            ? "Das Evidenzpaket konnte nicht erstellt werden."
-            : "Не удалось создать пакет доказательств.",
+            ? "Die KI-Analyse konnte nicht vorbereitet werden."
+            : "Не удалось подготовить AI-анализ.",
         );
       }
     }
@@ -844,6 +1036,7 @@ export function MedicationEvidenceReviewPanel({
     setReviewLoading(true);
     setAiAnalysis(null);
     setAiError(null);
+    setDialogTab("ai");
     setDialogOpen(true);
     try {
       const loaded = await fetchMedicationEvidenceReview(patientId, nextReviewId);
@@ -856,33 +1049,15 @@ export function MedicationEvidenceReviewPanel({
       setReviewLoading(false);
       setReviewError(
         lang === "de"
-          ? "Das Evidenzpaket konnte nicht geladen werden."
-          : "Не удалось загрузить пакет доказательств.",
+          ? "Das Analyseergebnis konnte nicht geladen werden."
+          : "Не удалось загрузить результат анализа.",
       );
     }
   };
 
   const createAiDraft = async () => {
     if (!reviewId) return;
-    const epoch = ++aiRequestEpochRef.current;
-    const idempotencyKey = aiIdempotencyKeyRef.current
-      || (typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `medication-ai-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    aiIdempotencyKeyRef.current = idempotencyKey;
-    setAiLoading(true);
-    setAiError(null);
-    try {
-      const created = await createMedicationAiAnalysis(patientId, reviewId, idempotencyKey);
-      if (epoch !== aiRequestEpochRef.current) return;
-      setAiAnalysis(created);
-      aiIdempotencyKeyRef.current = null;
-    } catch {
-      if (epoch !== aiRequestEpochRef.current) return;
-      setAiError(lang === "de" ? "Der KI-Entwurf konnte nicht angefordert werden." : "Не удалось запросить AI-черновик.");
-    } finally {
-      if (epoch === aiRequestEpochRef.current) setAiLoading(false);
-    }
+    await createAiDraftForReview(reviewId);
   };
 
   const retryAiDraft = async () => {
@@ -900,10 +1075,10 @@ export function MedicationEvidenceReviewPanel({
         setAiAnalysis(null);
         aiIdempotencyKeyRef.current = null;
         setAiError(lang === "de"
-          ? "Die KI-Konfiguration wurde geändert. Erstellen Sie einen neuen KI-Entwurf."
-          : "Конфигурация AI изменилась. Создайте новый AI-черновик.");
+          ? "Die KI-Konfiguration wurde geändert. Starten Sie die KI-Analyse erneut."
+          : "Конфигурация AI изменилась. Запустите AI-анализ повторно.");
       } else {
-        setAiError(lang === "de" ? "Der KI-Entwurf konnte nicht erneut gestartet werden." : "Не удалось повторно запустить AI-черновик.");
+        setAiError(lang === "de" ? "Die KI-Analyse konnte nicht erneut gestartet werden." : "Не удалось повторно запустить AI-анализ.");
       }
     } finally {
       if (epoch === aiRequestEpochRef.current) setAiLoading(false);
@@ -925,8 +1100,8 @@ export function MedicationEvidenceReviewPanel({
         loading={currentPreview.loading}
         error={currentPreview.error
           ? lang === "de"
-            ? "Die Paketvorschau konnte nicht geladen werden."
-            : "Не удалось загрузить предпросмотр пакета."
+            ? "Die Analysevorschau konnte nicht geladen werden."
+            : "Не удалось загрузить предварительные данные анализа."
           : null}
         operation={operation}
         operationError={operationError}
@@ -954,43 +1129,99 @@ export function MedicationEvidenceReviewPanel({
           setReviewError(null);
         }}
       >
-        <DialogContent className="sm:max-w-5xl">
-          <DialogHeader className="border-b border-border/60 pb-3">
-            <DialogTitle className="flex items-center gap-2">
-              <AiMark className="size-4" />
-              {lang === "de" ? "KI-Evidenzprüfung" : "AI-анализ доказательств"}
-            </DialogTitle>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-h-[min(88dvh,760px)] sm:max-w-5xl">
+          <DialogHeader className="border-b border-border/60 px-4 py-3.5 pr-12">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <AiMark className="size-4" />
+                {lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов"}
+              </DialogTitle>
+              {review ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-foreground">
+                    <span className={cn("size-1.5 rounded-full", reviewStatusDot(review.review.status))} />
+                    {reviewStatusLabel(review.review.status, (ru, de) => (lang === "de" ? de : ru))}
+                  </span>
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-medium text-sky-700">
+                    {formatTimestamp(review.review.created_at, lang) || review.review.id}
+                  </span>
+                </div>
+              ) : null}
+            </div>
             <DialogDescription className="sr-only">
               {lang === "de"
-                ? "Evidenzpaket und optionaler KI-Entwurf."
-                : "Пакет доказательств и дополнительный AI-черновик."}
+                ? "Quellen, Evidenz und KI-Ergebnis."
+                : "Источники, доказательства и AI-результат."}
             </DialogDescription>
           </DialogHeader>
-          <MedicationEvidenceReviewContent
-            review={review}
-            loading={reviewLoading}
-            error={reviewError}
-            language={lang}
-            onRetry={reviewId ? () => void openReview(reviewId) : undefined}
-          />
-          {review ? (
-            <MedicationAiAnalysisSection
-              review={review}
-              provider={currentPreview.data?.ai_provider ?? {
-                kind: "none",
-                status: "not_configured",
-                external_calls_enabled: false,
-                reason_code: "external_provider_not_configured",
-                model: null,
-              }}
-              analysis={aiAnalysis}
-              loading={aiLoading}
-              error={aiError}
-              lang={lang}
-              onCreate={() => void createAiDraft()}
-              onRetry={() => void retryAiDraft()}
-            />
-          ) : null}
+          <Tabs
+            value={dialogTab}
+            onValueChange={(value) => setDialogTab(value as "ai" | "evidence")}
+            className="min-h-0 max-h-[calc(100dvh-5rem)] gap-0 overflow-hidden sm:max-h-[calc(88dvh-4rem)]"
+          >
+            <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/10 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <TabsList className="h-8" aria-label={lang === "de" ? "Analysebereiche" : "Разделы анализа"}>
+                <TabsTrigger
+                  value="ai"
+                  className="px-3 text-xs data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none"
+                >
+                  <AiMark className="size-3.5" />
+                  {lang === "de" ? "KI-Ergebnis" : "AI-результат"}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="evidence"
+                  className="px-3 text-xs data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none"
+                >
+                  {lang === "de" ? "Evidenzpaket" : "Доказательства"}
+                </TabsTrigger>
+              </TabsList>
+              {review ? (
+                <SummaryStrip
+                  summary={review.bundle.summary}
+                  tx={(ru, de) => (lang === "de" ? de : ru)}
+                />
+              ) : null}
+            </div>
+            <TabsContent value="ai" className="min-h-0 overflow-y-auto p-4">
+              {review ? (
+                <MedicationAiAnalysisSection
+                  review={review}
+                  provider={currentPreview.data?.ai_provider ?? {
+                    kind: "none",
+                    status: "not_configured",
+                    external_calls_enabled: false,
+                    reason_code: "external_provider_not_configured",
+                    model: null,
+                  }}
+                  analysis={aiAnalysis}
+                  loading={aiLoading}
+                  error={aiError}
+                  lang={lang}
+                  onCreate={() => void createAiDraft()}
+                  onRetry={() => void retryAiDraft()}
+                />
+              ) : (
+                <MedicationEvidenceReviewContent
+                  review={review}
+                  loading={reviewLoading}
+                  error={reviewError}
+                  language={lang}
+                  showOverview={false}
+                  onRetry={reviewId ? () => void openReview(reviewId) : undefined}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="evidence" className="min-h-0 overflow-y-auto p-4">
+              <MedicationEvidenceReviewContent
+                review={review}
+                loading={reviewLoading}
+                error={reviewError}
+                language={lang}
+                showOverview={false}
+                onRetry={reviewId ? () => void openReview(reviewId) : undefined}
+              />
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </>

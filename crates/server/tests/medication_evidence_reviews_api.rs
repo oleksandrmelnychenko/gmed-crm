@@ -549,7 +549,7 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
         Method::POST,
         &ai_path,
         &ceo,
-        Some(json!({"idempotency_key": ai_key})),
+        Some(json!({"idempotency_key": ai_key.clone()})),
     )
     .await;
     assert_eq!(created_status, StatusCode::ACCEPTED, "{created}");
@@ -684,6 +684,39 @@ async fn enabled_ai_job_is_auditable_idempotent_and_manually_retryable_without_c
     assert_eq!(
         historical["draft"]["limitations"].as_array().unwrap().len(),
         1
+    );
+
+    let export_path = format!("/api/v1/admin/compliance/patient/{patient_id}/export");
+    let (export_status, export) =
+        json_request(&ctx.app, Method::GET, &export_path, &ceo, None).await;
+    assert_eq!(export_status, StatusCode::OK, "{export}");
+    let exported_reviews = export["medication_evidence_reviews"]
+        .as_array()
+        .expect("evidence reviews in Art. 15 export");
+    let exported_analyses = export["medication_ai_analyses"]
+        .as_array()
+        .expect("AI analyses in Art. 15 export");
+    let exported_events = export["medication_ai_analysis_events"]
+        .as_array()
+        .expect("AI lifecycle events in Art. 15 export");
+    assert!(
+        exported_reviews
+            .iter()
+            .any(|item| item["id"] == json!(review_id))
+    );
+    assert!(exported_analyses.iter().any(|item| {
+        item["id"] == json!(analysis_id)
+            && item["status"] == "ready"
+            && item["output"]["limitations"].as_array().is_some()
+    }));
+    assert!(
+        exported_events.iter().any(|item| {
+            item["analysis_id"] == json!(analysis_id) && item["to_status"] == "ready"
+        })
+    );
+    assert!(
+        !export.to_string().contains(&ai_key),
+        "idempotency keys are operational secrets and must not be exported"
     );
 }
 

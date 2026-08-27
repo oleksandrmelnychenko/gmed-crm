@@ -460,11 +460,31 @@ describe("normalizePatientDetailTab", () => {
       normalizePatientDetailTab("cases", {
         canViewOperationalSurface: true,
         canViewClinical: true,
+        canUseMedicationAi: true,
         canViewDocuments: true,
         canViewContracts: true,
         canViewInvoices: true,
       }),
     ).toBe("clinical");
+  });
+
+  it("keeps the medication AI screen CEO-gated", () => {
+    const access = {
+      canViewOperationalSurface: true,
+      canViewClinical: true,
+      canViewDocuments: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+    };
+
+    expect(normalizePatientDetailTab("medication-ai", {
+      ...access,
+      canUseMedicationAi: true,
+    })).toBe("medication-ai");
+    expect(normalizePatientDetailTab("medication-ai", {
+      ...access,
+      canUseMedicationAi: false,
+    })).toBe("profile");
   });
 
   it("redirects forbidden patient-detail tabs back to profile", () => {

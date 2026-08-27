@@ -1160,6 +1160,7 @@ function usePatientDetailPageContent() {
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
+  const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
   const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user?.role);
   const canManageDocuments =
@@ -1256,6 +1257,12 @@ function usePatientDetailPageContent() {
       ? {
           key: "clinical",
           label: l("patients_diagnoses_medications"),
+        }
+      : null,
+    canUseMedicationAi
+      ? {
+          key: "medication-ai",
+          label: lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов",
         }
       : null,
     canViewOperationalSurface
@@ -1658,6 +1665,7 @@ function usePatientDetailPageContent() {
     const normalizedTab = normalizePatientDetailTab(requestedTab, {
       canViewOperationalSurface,
       canViewClinical,
+      canUseMedicationAi,
       canViewDocuments,
       canViewContracts,
       canViewInvoices,
@@ -1681,6 +1689,7 @@ function usePatientDetailPageContent() {
     applyActiveTab,
     canViewContracts,
     canViewClinical,
+    canUseMedicationAi,
     canViewDocuments,
     canViewInvoices,
     canViewOperationalSurface,
@@ -2071,6 +2080,7 @@ function usePatientDetailPageContent() {
         canOpenComplianceWorkspace={canOpenComplianceWorkspace}
         canOpenDocumentsWorkspace={canOpenDocumentsWorkspace}
         canPrintPatientLabel={canPrintPatientLabel}
+        canUseMedicationAi={canUseMedicationAi}
         canViewClinical={canViewClinical}
         canViewContracts={canViewContracts}
         canViewDocuments={canViewDocuments}

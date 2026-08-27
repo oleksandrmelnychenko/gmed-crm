@@ -131,6 +131,7 @@ describe("MedicationIdentityAction", () => {
     );
 
     expect(allowed).toContain("Идентифицировать");
+    expect(allowed).toContain("bg-primary");
     expect(denied).not.toContain("Identifizieren</button>");
     expect(denied).toContain("für diese Rolle nicht verfügbar");
   });

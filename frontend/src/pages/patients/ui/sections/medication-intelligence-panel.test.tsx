@@ -125,9 +125,31 @@ describe("MedicationIntelligencePanelContent", () => {
     expect(html).toContain("B01AF02");
     expect(html).toContain("Функция почек");
     expect(html).toContain("BfArM Arzneimittelinformationen");
+    expect(html).toContain("Активный");
+    expect(html).not.toContain(">active<");
     expect(html.indexOf("Возможное дублирование вещества")).toBeLessThan(
       html.indexOf("Не удалось идентифицировать препарат"),
     );
+  });
+
+  it("never exposes the internal medication identity relation name", () => {
+    const html = renderToStaticMarkup(
+      <MedicationIntelligencePanelContent
+        data={response({
+          missing_data: [{
+            code: "medication_identity",
+            label_ru: "Идентификация препарата",
+            label_de: "Arzneimittelidentifikation",
+            reason_ru: "Нужен подтверждённый medication_drug_match либо проверенный ATC/PZN.",
+            reason_de: "Bestätigter medication_drug_match erforderlich.",
+          }],
+        })}
+        language="ru"
+      />,
+    );
+
+    expect(html).toContain("Нужно подтвердить соответствие препарата");
+    expect(html).not.toContain("medication_drug_match");
   });
 
   it("offers identity review only when the server capability permits it", () => {
@@ -317,7 +339,7 @@ describe("MedicationIntelligencePanelContent", () => {
     expect(html).toContain("Опубликовано");
     expect(html).toContain("184");
     expect(html).toContain("Источник не ответил вовремя");
-    expect(html).toContain("upstream_timeout");
+    expect(html).not.toContain("upstream_timeout");
     expect(html).toContain("Последняя попытка");
     expect(html).toContain("Коннектор запланирован");
     expect(html).toContain("локальный снимок отсутствует");
@@ -359,9 +381,9 @@ describe("MedicationIntelligencePanelContent", () => {
     );
 
     expect(german).toContain("Der Quellen-Feed konnte nicht validiert werden");
-    expect(german).toContain("invalid_feed");
+    expect(german).not.toContain("invalid_feed");
     expect(fallback).toContain("Техническая причина не классифицирована");
-    expect(fallback).toContain("future_error_code");
+    expect(fallback).not.toContain("future_error_code");
   });
 
   it("renders a sourced official safety alert without turning it into a treatment directive", () => {

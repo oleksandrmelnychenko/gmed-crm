@@ -66,6 +66,7 @@ const loadPatientRelationsTab = () => import("../sections/patient-relations-tab"
 const loadPatientOrdersTab = () => import("../sections/patient-orders-tab");
 const loadPatientAppointmentsTab = () => import("../sections/patient-appointments-tab");
 const loadPatientClinicalTab = () => import("../sections/patient-clinical-tab");
+const loadPatientMedicationAiTab = () => import("../sections/patient-medication-ai-tab");
 const loadPatientDocumentsTab = () => import("../sections/patient-documents-tab");
 const loadPatientContractsTab = () => import("../sections/patient-contracts-tab");
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
@@ -101,6 +102,11 @@ const LazyPatientAppointmentsTab = lazy(async () => {
 const LazyPatientClinicalTab = lazy(async () => {
   const mod = await loadPatientClinicalTab();
   return { default: mod.PatientClinicalTab };
+});
+
+const LazyPatientMedicationAiTab = lazy(async () => {
+  const mod = await loadPatientMedicationAiTab();
+  return { default: mod.PatientMedicationAiTab };
 });
 
 const LazyPatientDocumentsTab = lazy(async () => {
@@ -152,6 +158,9 @@ function preloadPatientWorkspaceTab(tab: string) {
       break;
     case "clinical":
       void loadPatientClinicalTab();
+      break;
+    case "medication-ai":
+      void loadPatientMedicationAiTab();
       break;
     case "documents":
       void loadPatientDocumentsTab();
@@ -231,6 +240,7 @@ type PatientDetailWorkspaceContentProps = {
   canOpenComplianceWorkspace: boolean;
   canOpenDocumentsWorkspace: boolean;
   canPrintPatientLabel: boolean;
+  canUseMedicationAi: boolean;
   canViewClinical: boolean;
   canViewContracts: boolean;
   canViewDocuments: boolean;
@@ -398,6 +408,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canOpenComplianceWorkspace,
     canOpenDocumentsWorkspace,
     canPrintPatientLabel,
+    canUseMedicationAi,
     canViewClinical,
     canViewContracts,
     canViewDocuments,
@@ -906,6 +917,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               documentImportOpen={clinicalDocumentImportOpen}
               onDocumentImportOpenChange={setClinicalDocumentImportOpen}
             />
+          ) : null}
+
+          {activeTab === "medication-ai" && canUseMedicationAi && id ? (
+            <LazyPatientMedicationAiTab patientId={id} />
           ) : null}
 
           {activeTab === "documents" ? (

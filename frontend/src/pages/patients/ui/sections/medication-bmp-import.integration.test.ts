@@ -11,13 +11,16 @@ function source(relativePath: string): string {
 }
 
 describe("BMP import medication-plan integration", () => {
-  it("mounts the action in the patient medication header and refreshes both intelligence panels", () => {
+  it("keeps BMP import in the medication header and AI panels on their dedicated screen", () => {
     const clinical = source("patient-clinical-tab.tsx");
+    const medicationAi = source("patient-medication-ai-tab.tsx");
 
     expect(clinical).toContain("<MedicationBmpImportAction");
     expect(clinical).toMatch(/onImported=\{\(\) => setVersion\(\(current\) => current \+ 1\)\}/);
-    expect(clinical).toMatch(/<MedicationIntelligencePanel[\s\S]*?refreshKey=\{`\$\{version\}:/);
-    expect(clinical).toMatch(/<MedicationEvidenceReviewPanel[\s\S]*?refreshKey=\{`\$\{version\}:/);
+    expect(clinical).not.toContain("<MedicationIntelligencePanel");
+    expect(clinical).not.toContain("<MedicationEvidenceReviewPanel");
+    expect(medicationAi).toContain("<MedicationIntelligencePanel");
+    expect(medicationAi).toContain("<MedicationEvidenceReviewPanel");
   });
 
   it("mounts the same workflow in case workspace and refreshes independently after confirm", () => {

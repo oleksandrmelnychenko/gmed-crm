@@ -168,7 +168,6 @@ export function MedicationIdentityAction({
           <Button
             type="button"
             size="sm"
-            variant="outline"
             className="min-h-9 rounded-lg px-2.5 text-[11px] sm:min-h-8"
             disabled={busy}
             onClick={onIdentify}
@@ -193,7 +192,6 @@ export function MedicationIdentityAction({
         <Button
           type="button"
           size="sm"
-          variant="outline"
           className="min-h-11 rounded-lg px-3 text-xs sm:min-h-8"
           disabled={busy}
           onClick={onIdentify}
