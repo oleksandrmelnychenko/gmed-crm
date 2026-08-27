@@ -2145,3 +2145,213 @@ async fn concurrent_checklist_toggle_with_same_request_id_replays_as_two_success
     .unwrap();
     assert_eq!(event_count, 1);
 }
+
+#[tokio::test]
+async fn assigned_concierge_task_grants_non_clinical_patient_access_only() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("patient-scope-{tag}")).await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("visible-{tag}")).await;
+    let unrelated_patient_id =
+        seed_patient(&ctx.pool, ctx.admin_id, &format!("hidden-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &tag).await;
+    let service_id = seed_service(
+        &ctx.pool,
+        patient_id,
+        provider_id,
+        concierge_id,
+        ctx.admin_id,
+        "Hotel coordination",
+    )
+    .await;
+
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_city = 'Berlin',
+               passport_number = 'SAFE-PASSPORT',
+               clinical_warnings = 'MEDICAL-WARNING-MUST-NOT-LEAK',
+               notes = 'INTERNAL-NOTE-MUST-NOT-LEAK',
+               intake_profile = '{"medical_note":"MUST-NOT-LEAK"}'::jsonb,
+               lead_snapshot = '{"diagnosis":"MUST-NOT-LEAK"}'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, denied) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Arrange the hotel",
+            "assigned_to": concierge_id,
+            "concierge_service_id": service_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+
+    let (status, patients) =
+        json_request(&ctx.app, "GET", "/api/v1/patients", &concierge_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{patients}");
+    let patients = patients.as_array().expect("patient list");
+    assert!(
+        patients
+            .iter()
+            .any(|item| item["id"] == patient_id.to_string())
+    );
+    assert!(
+        !patients
+            .iter()
+            .any(|item| item["id"] == unrelated_patient_id.to_string())
+    );
+
+    let (status, patient) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{patient}");
+    assert_eq!(patient["address_city"], "Berlin");
+    assert_eq!(patient["passport_number"], "SAFE-PASSPORT");
+    for forbidden_field in [
+        "clinical_warnings",
+        "notes",
+        "intake_profile",
+        "lead_snapshot",
+        "source_lead_id",
+    ] {
+        assert!(
+            patient.get(forbidden_field).is_none(),
+            "Concierge response leaked {forbidden_field}: {patient}"
+        );
+    }
+
+    let (status, clinical) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{clinical}");
+
+    for restricted_path in [
+        "cases",
+        "orders",
+        "appointments",
+        "document-alerts",
+        "timeline",
+    ] {
+        let (status, response) = json_request(
+            &ctx.app,
+            "GET",
+            &format!("/api/v1/patients/{patient_id}/{restricted_path}"),
+            &concierge_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "Concierge unexpectedly accessed {restricted_path}: {response}"
+        );
+    }
+
+    let non_medical_document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, version_root_document_id,
+                version_number, uploaded_by
+           ) VALUES (
+                $1, $2, 'Hotel confirmation', 'hotel-confirmation.pdf', 'other', 'general',
+                'active', 'released_internal', false, $1, 1, $3
+           )"#,
+    )
+    .bind(non_medical_document_id)
+    .bind(patient_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let medical_document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, version_root_document_id,
+                version_number, uploaded_by
+           ) VALUES (
+                $1, $2, 'Medical report', 'medical-report.pdf', 'report', 'medical',
+                'active', 'released_internal', true, $1, 1, $3
+           )"#,
+    )
+    .bind(medical_document_id)
+    .bind(patient_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, documents) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/documents"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{documents}");
+    let documents = documents.as_array().expect("document list");
+    assert!(
+        documents
+            .iter()
+            .any(|item| item["id"] == non_medical_document_id.to_string())
+    );
+    assert!(
+        !documents
+            .iter()
+            .any(|item| item["id"] == medical_document_id.to_string())
+    );
+
+    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
+        .bind(task_id)
+        .bind(ctx.admin_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (status, denied_after_archive) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_after_archive}");
+}

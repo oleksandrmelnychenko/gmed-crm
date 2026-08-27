@@ -679,6 +679,9 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
     .into_iter()
     .enumerate()
     {
+        let without_order = paid_by == "agency" && !delivered;
+        let mapped_order_id = (!without_order).then_some(order_id);
+        let mapped_order_leistung_id = (!without_order).then_some(order_leistung_id);
         let receipt_tag = format!("{tag}-{index}-{paid_by}-{delivered}");
         let (status, created) = submit_fixture_expense(
             &context.app,
@@ -701,8 +704,8 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             &finance,
             Some(json!({
                 "request_id": post_request_id,
-                "order_id": order_id,
-                "order_leistung_id": order_leistung_id,
+                "order_id": mapped_order_id,
+                "order_leistung_id": mapped_order_leistung_id,
                 "financial_account_id": if paid_by == "agency" { Some(account_id) } else { None },
                 "paid_on": if paid_by == "agency" { Some(paid_on) } else { None },
                 "payment_method": "bank_transfer",
@@ -733,7 +736,8 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         let external_invoice_id =
             Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
         let external = sqlx::query(
-            r#"SELECT invoice_date, paid_at::date AS paid_on, paid_by,
+            r#"SELECT order_id, source_concierge_expense_id,
+                      invoice_date, paid_at::date AS paid_on, paid_by,
                       service_delivered, patient_receivable_gross,
                       provider_liability_gross
                FROM external_invoices WHERE id = $1"#,
@@ -742,6 +746,16 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         .fetch_one(&context.pool)
         .await
         .unwrap();
+        assert_eq!(
+            external.try_get::<Option<Uuid>, _>("order_id").unwrap(),
+            mapped_order_id,
+        );
+        assert_eq!(
+            external
+                .try_get::<Option<Uuid>, _>("source_concierge_expense_id")
+                .unwrap(),
+            Some(expense_id),
+        );
         assert_eq!(
             external
                 .try_get::<chrono::NaiveDate, _>("invoice_date")
@@ -787,6 +801,16 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         if paid_by == "agency" {
             assert_eq!(payment_count, 1);
             assert_eq!(accounting_gross, Decimal::new(119, 0));
+            let accounting_order_id: Option<Uuid> = sqlx::query_scalar(
+                r#"SELECT order_id FROM accounting_entries
+                   WHERE source_external_invoice_id = $1
+                     AND entry_kind = 'external_invoice_payment'"#,
+            )
+            .bind(external_invoice_id)
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+            assert_eq!(accounting_order_id, mapped_order_id);
             assert_eq!(
                 external
                     .try_get::<Option<chrono::NaiveDate>, _>("paid_on")
@@ -824,8 +848,8 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             &finance,
             Some(json!({
                 "request_id": post_request_id,
-                "order_id": order_id,
-                "order_leistung_id": order_leistung_id,
+                "order_id": mapped_order_id,
+                "order_leistung_id": mapped_order_leistung_id,
                 "financial_account_id": if paid_by == "agency" { Some(account_id) } else { None },
                 "paid_on": if paid_by == "agency" { Some(paid_on) } else { None },
                 "payment_method": "bank_transfer",
@@ -835,6 +859,35 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         .await;
         assert_eq!(status, StatusCode::OK, "{replay}");
         assert_eq!(replay["idempotent_replay"], true);
+
+        if without_order {
+            let (status, reversed) = json_request(
+                &context.app,
+                "POST",
+                &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/reverse"),
+                &finance,
+                Some(json!({
+                    "request_id": Uuid::new_v4(),
+                    "reason": "Orderless expense lifecycle regression",
+                    "reversed_on": Utc::now().date_naive(),
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{reversed}");
+            assert_eq!(reversed["item"]["status"], "reversed");
+
+            let order_ids = sqlx::query_scalar::<_, Option<Uuid>>(
+                r#"SELECT order_id
+                   FROM accounting_entries
+                   WHERE source_external_invoice_id = $1
+                   ORDER BY created_at"#,
+            )
+            .bind(external_invoice_id)
+            .fetch_all(&context.pool)
+            .await
+            .unwrap();
+            assert_eq!(order_ids, vec![None, None]);
+        }
 
         if paid_by == "unpaid" && !delivered {
             let (status, delivered_later) = json_request(

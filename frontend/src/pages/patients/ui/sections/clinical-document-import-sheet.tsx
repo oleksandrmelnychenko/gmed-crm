@@ -2900,7 +2900,6 @@ export function ClinicalDocumentImportSheet({
                               className={cn(
                                 "rounded-xl border px-4 py-4 transition-all",
                                 targetCardTone[candidate.target],
-                                !candidateSelected && candidate.target !== "medication" && "opacity-60",
                               )}
                               onClick={() => setActiveCandidateId(candidate.id)}
                             >
@@ -3052,7 +3051,7 @@ export function ClinicalDocumentImportSheet({
                                                 id={inputId}
                                                 value={typeof candidate.normalized[field] === "string" ? candidate.normalized[field] as string : ""}
                                                 disabled={snapshotReadOnly || !candidate.selected}
-                                                className="h-10 min-w-0 flex-1 bg-white"
+                                                className="h-10 min-w-0 flex-1 bg-white disabled:text-foreground disabled:opacity-100"
                                                 onFocus={() => setActiveCandidateId(candidate.id)}
                                                 onChange={(event) => {
                                                   const nextNormalized = { ...candidate.normalized, [field]: event.target.value };
@@ -3080,7 +3079,7 @@ export function ClinicalDocumentImportSheet({
                                         <Input
                                           value={typeof candidate.normalized.laboratory_name === "string" ? candidate.normalized.laboratory_name : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white"
+                                          className="h-10 bg-white disabled:text-foreground disabled:opacity-100"
                                           maxLength={160}
                                           placeholder={tx("Например: SYNLAB Berlin", "Zum Beispiel: SYNLAB Berlin")}
                                           onFocus={() => setActiveCandidateId(candidate.id)}
@@ -3096,7 +3095,7 @@ export function ClinicalDocumentImportSheet({
                                           type="date"
                                           value={typeof candidate.normalized.measured_on === "string" ? candidate.normalized.measured_on : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white"
+                                          className="h-10 bg-white !text-foreground !opacity-100 [&_.MuiPickersInputBase-sectionContent]:!text-foreground [&_.MuiPickersInputBase-sectionsContainer]:!text-foreground [&_.MuiPickersSectionList-section]:!text-foreground"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, measured_on: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -3108,7 +3107,7 @@ export function ClinicalDocumentImportSheet({
                                         <Input
                                           value={typeof candidate.normalized.panel === "string" ? candidate.normalized.panel : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 bg-white"
+                                          className="h-10 bg-white disabled:text-foreground disabled:opacity-100"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, panel: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -3120,7 +3119,7 @@ export function ClinicalDocumentImportSheet({
                                         <select
                                           value={typeof candidate.normalized.abnormal_flag === "string" ? candidate.normalized.abnormal_flag : "unknown"}
                                           disabled={snapshotReadOnly || !candidate.selected}
-                                          className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+                                          className="h-10 w-full rounded-md border border-input bg-white px-3 text-sm disabled:text-foreground disabled:opacity-100"
                                           onChange={(event) => {
                                             const nextNormalized = { ...candidate.normalized, abnormal_flag: event.target.value };
                                             patchCandidate(candidate.id, { normalized: nextNormalized });
@@ -3141,7 +3140,7 @@ export function ClinicalDocumentImportSheet({
                                           value={typeof candidate.normalized.interpretation_note === "string" ? candidate.normalized.interpretation_note : ""}
                                           disabled={snapshotReadOnly || !candidate.selected}
                                           maxLength={4000}
-                                          className="min-h-20 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm leading-5 outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-default disabled:opacity-100"
+                                          className="min-h-20 w-full resize-y rounded-md border border-input bg-white px-3 py-2 text-sm leading-5 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-default disabled:text-foreground disabled:opacity-100"
                                           placeholder={tx(
                                             "Пороговые значения, группы риска и пояснения лаборатории",
                                             "Grenzwerte, Risikogruppen und Laborhinweise",

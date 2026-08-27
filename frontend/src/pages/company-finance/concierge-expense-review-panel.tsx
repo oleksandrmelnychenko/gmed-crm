@@ -120,7 +120,7 @@ const textByLanguage = {
     incomplete: (loaded: number, total: number) =>
       `Загружено ${loaded} из ${total} расходов. Проведение, отклонение и отмена заблокированы до полного обновления.`,
     detailTitle: "Проверка расхода",
-    detailDescription: "Сверьте чек, назначение заказа и финансовые последствия до проведения.",
+    detailDescription: "Сверьте чек и финансовые последствия до проведения.",
     postedDetailTitle: "Проведенный расход",
     postedDetailDescription: "Расход отражён в финансовом учёте. Проверьте документ, назначение и историю операции.",
     rejectedDetailTitle: "Отклоненный расход",
@@ -146,8 +146,9 @@ const textByLanguage = {
     no: "Нет",
     mapping: "Назначение в заказе",
     order: "Заказ",
+    orderOptional: "Необязательно",
+    noOrder: "Без привязки к заказу",
     orderService: "Позиция заказа",
-    selectOrder: "Выберите заказ",
     noOrderService: "Без конкретной позиции",
     lockedMapping: "Назначение было указано при передаче и не может быть заменено.",
     agencyPayment: "Оплата GMED",
@@ -196,7 +197,6 @@ const textByLanguage = {
     rejectedSuccess: "Расход отклонен.",
     reversedSuccess: "Проведение расхода отменено, балансы пересчитаны.",
     validation: {
-      order_required: "Выберите заказ.",
       order_invalid: "Выбранный заказ недоступен или имеет другую валюту.",
       order_locked: "Нельзя заменить заказ, указанный при передаче чека.",
       order_service_invalid: "Выбранная позиция заказа недоступна для этого поставщика.",
@@ -236,7 +236,7 @@ const textByLanguage = {
     incomplete: (loaded: number, total: number) =>
       `${loaded} von ${total} Auslagen wurden geladen. Buchen, Ablehnen und Stornieren bleiben bis zur vollständigen Aktualisierung gesperrt.`,
     detailTitle: "Auslage prüfen",
-    detailDescription: "Beleg, Auftragszuordnung und finanzielle Auswirkungen vor der Buchung abgleichen.",
+    detailDescription: "Beleg und finanzielle Auswirkungen vor der Buchung abgleichen.",
     postedDetailTitle: "Gebuchte Auslage",
     postedDetailDescription: "Die Auslage wurde verbucht. Dokument, Zuordnung und Vorgangshistorie prüfen.",
     rejectedDetailTitle: "Abgelehnte Auslage",
@@ -262,8 +262,9 @@ const textByLanguage = {
     no: "Nein",
     mapping: "Auftragszuordnung",
     order: "Auftrag",
+    orderOptional: "Optional",
+    noOrder: "Ohne Auftragszuordnung",
     orderService: "Auftragsposition",
-    selectOrder: "Auftrag auswählen",
     noOrderService: "Ohne konkrete Position",
     lockedMapping: "Die beim Einreichen angegebene Zuordnung kann nicht ersetzt werden.",
     agencyPayment: "GMED-Zahlung",
@@ -312,7 +313,6 @@ const textByLanguage = {
     rejectedSuccess: "Die Auslage wurde abgelehnt.",
     reversedSuccess: "Die Auslagenbuchung wurde storniert und die Salden wurden neu berechnet.",
     validation: {
-      order_required: "Bitte einen Auftrag auswählen.",
       order_invalid: "Der Auftrag ist nicht verfügbar oder hat eine andere Währung.",
       order_locked: "Der beim Einreichen angegebene Auftrag kann nicht ersetzt werden.",
       order_service_invalid: "Die Auftragsposition ist für diesen Anbieter nicht verfügbar.",
@@ -1055,14 +1055,17 @@ export function ConciergeExpenseReviewPanel({
                           {(selected.order_id || selected.order_leistung_id) ? <p className="mt-1 text-xs text-muted-foreground">{text.lockedMapping}</p> : null}
                           <div className="mt-3 space-y-3">
                             <label className="block text-xs font-medium">
-                              {text.order} <span className="text-destructive">*</span>
+                              <span className="flex items-center justify-between gap-2">
+                                <span>{text.order}</span>
+                                {!selected.order_id ? <span className="font-normal text-muted-foreground">{text.orderOptional}</span> : null}
+                              </span>
                               <select
                                 className={cn(shellSelectClassName, "mt-1 h-9 w-full min-w-0 rounded-md bg-field text-xs")}
                                 value={form.orderId}
                                 disabled={Boolean(selected.order_id) || mutationBusy !== null}
                                 onChange={(event) => setForm((current) => ({ ...current, orderId: event.target.value, orderLeistungId: "" }))}
                               >
-                                <option value="">{text.selectOrder}</option>
+                                <option value="">{text.noOrder}</option>
                                 {availableOrders.map((order) => <option key={order.id} value={order.id}>{order.order_number} · {order.currency}</option>)}
                               </select>
                             </label>

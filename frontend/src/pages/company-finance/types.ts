@@ -381,7 +381,7 @@ export type CompanyConciergeExpensePaymentMethod =
 
 export type CompanyConciergeExpensePostPayload = {
   request_id: string;
-  order_id: string;
+  order_id: string | null;
   order_leistung_id: string | null;
   financial_account_id: string | null;
   paid_on: string | null;

@@ -2032,6 +2032,34 @@ async fn list_patients(
         auth.role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
     );
+    let restrict_to_assigned_patients = access::requires_patient_assignment(auth.role);
+    let assigned_patient_ids = if restrict_to_assigned_patients {
+        let mut patient_ids = access::load_active_patient_assignment_set(&state.db, auth.user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, user_id = %auth.user_id, "Failed to load patient access scope");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate patient access",
+                )
+            })?;
+        if auth.role == Role::Concierge {
+            patient_ids.extend(
+                access::load_active_concierge_task_patient_access_set(&state.db, auth.user_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(error = %e, user_id = %auth.user_id, "Failed to load Concierge task patient scope");
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to validate patient access",
+                        )
+                    })?,
+            );
+        }
+        patient_ids.into_iter().collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let lifecycle = query
         .lifecycle
         .as_deref()
@@ -2224,6 +2252,7 @@ async fn list_patients(
                       AND ol.doctor_id = $4
                 )
              )
+             AND ($7::boolean = false OR p.id = ANY($8::uuid[]))
            ORDER BY p.created_at DESC
            LIMIT 100"#,
     )
@@ -2233,6 +2262,8 @@ async fn list_patients(
     .bind(doctor_id)
     .bind(lifecycle)
     .bind(include_financial_balance)
+    .bind(restrict_to_assigned_patients)
+    .bind(&assigned_patient_ids)
     .fetch_all(&state.db)
     .await;
 
@@ -2247,12 +2278,6 @@ async fn list_patients(
                         "Failed to decode patient",
                     )
                 })?;
-
-                if access::requires_patient_assignment(auth.role)
-                    && !has_patient_access(&state, &auth, patient_id).await?
-                {
-                    continue;
-                }
 
                 patients.push(build_patient_summary_json(
                     &auth,
@@ -6448,7 +6473,6 @@ async fn list_patient_cases(
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -6501,7 +6525,6 @@ async fn list_patient_orders(
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -6560,7 +6583,6 @@ async fn list_patient_appointments(
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -6618,6 +6640,7 @@ async fn list_patient_documents(
         Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    let hide_medical_documents = auth.role == Role::Concierge;
 
     let rows = sqlx::query(
         r#"SELECT d.id,
@@ -6651,9 +6674,11 @@ async fn list_patient_documents(
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
+             AND ($2::boolean = false OR COALESCE(d.is_medical, false) = false)
            ORDER BY d.created_at DESC"#,
     )
     .bind(patient_uuid)
+    .bind(hide_medical_documents)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -7404,7 +7429,6 @@ async fn get_patient_document_alerts(
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
     let summary = load_patient_document_alerts_summary(&state, patient_uuid).await?;
@@ -8112,7 +8136,6 @@ async fn get_patient_timeline(
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -9528,10 +9551,20 @@ async fn has_patient_access(
         return Ok(true);
     }
 
-    access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+    let has_assignment = access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate patient assignment");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate patient access")
+        })?;
+    if has_assignment || auth.role != Role::Concierge {
+        return Ok(has_assignment);
+    }
+
+    access::has_active_concierge_task_patient_access(&state.db, patient_id, auth.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate Concierge task patient access");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate patient access")
         })
 }
@@ -9772,7 +9805,9 @@ fn build_patient_detail_json(
             Value::String(patient.updated_at.to_rfc3339()),
         );
 
-        if auth.role.has_full_access() || auth.role == Role::PatientManager {
+        if auth.role.has_full_access()
+            || matches!(auth.role, Role::PatientManager | Role::Concierge)
+        {
             insert_optional_string(map, "address_street", patient.address_street);
             insert_optional_string(map, "address_city", patient.address_city);
             insert_optional_string(map, "address_zip", patient.address_zip);
@@ -9822,17 +9857,19 @@ fn build_patient_detail_json(
                 "emergency_contact_relation",
                 patient.emergency_contact_relation,
             );
-            map.insert("intake_profile".to_string(), patient.intake_profile);
-            map.insert(
-                "source_lead_id".to_string(),
-                patient
-                    .source_lead_id
-                    .map(|value| Value::String(value.to_string()))
-                    .unwrap_or(Value::Null),
-            );
-            map.insert("lead_snapshot".to_string(), patient.lead_snapshot);
             map.insert("legal_status".to_string(), patient.legal_status);
-            insert_optional_string(map, "notes", patient.notes);
+            if auth.role != Role::Concierge {
+                map.insert("intake_profile".to_string(), patient.intake_profile);
+                map.insert(
+                    "source_lead_id".to_string(),
+                    patient
+                        .source_lead_id
+                        .map(|value| Value::String(value.to_string()))
+                        .unwrap_or(Value::Null),
+                );
+                map.insert("lead_snapshot".to_string(), patient.lead_snapshot);
+                insert_optional_string(map, "notes", patient.notes);
+            }
             insert_insurance_fields(
                 map,
                 auth,
@@ -10101,6 +10138,10 @@ fn insert_clinical_warnings_field(
     policies: &HashMap<String, FieldPolicy>,
     clinical_warnings: Option<String>,
 ) {
+    if !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin) {
+        return;
+    }
+
     match field_access(policies, "vitals", auth.role.has_full_access()) {
         Some(FieldAccess::Visible) => {
             insert_optional_string(data, "clinical_warnings", clinical_warnings)

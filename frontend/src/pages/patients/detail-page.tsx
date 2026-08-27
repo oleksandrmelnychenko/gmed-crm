@@ -45,10 +45,11 @@ import {
 import {
   buildPatientLabelPrintHtml,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientCareHistorySurface,
+  canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
   canViewPatientInvoicesSurface,
-  canViewPatientClinicalProfile,
   canViewPatientOperationalSurface,
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
   normalizePatientDetailTab,
@@ -1159,6 +1160,7 @@ function usePatientDetailPageContent() {
   const canCreateTasks = user?.role === "ceo" || user?.role === "concierge" || user?.role === "billing";
   const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
+  const canViewCareHistory = canViewPatientCareHistorySurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
   const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
@@ -1230,6 +1232,7 @@ function usePatientDetailPageContent() {
     workflowChecklist,
   } = usePatientDetailTabData({
     activeTab,
+    canViewCareHistory,
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
@@ -1271,13 +1274,13 @@ function usePatientDetailPageContent() {
           label: t.patients_relations,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "orders",
           label: t.orders_title,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "appointments",
           label: t.appointments_title,
@@ -1313,7 +1316,7 @@ function usePatientDetailPageContent() {
           label: t.patients_assign_owner,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "timeline",
           label: t.patients_timeline,
@@ -1664,6 +1667,7 @@ function usePatientDetailPageContent() {
     const requestedTab = searchParams.get("tab");
     const normalizedTab = normalizePatientDetailTab(requestedTab, {
       canViewOperationalSurface,
+      canViewCareHistory,
       canViewClinical,
       canUseMedicationAi,
       canViewDocuments,
@@ -1687,6 +1691,7 @@ function usePatientDetailPageContent() {
   }, [
     activeTab,
     applyActiveTab,
+    canViewCareHistory,
     canViewContracts,
     canViewClinical,
     canUseMedicationAi,

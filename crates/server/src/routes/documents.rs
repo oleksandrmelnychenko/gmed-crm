@@ -10196,10 +10196,26 @@ async fn load_assignment_set(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate document access")
     })?;
 
-    Ok(rows
+    let mut patient_ids = rows
         .into_iter()
         .filter_map(|row| row.try_get::<Uuid, _>("patient_id").ok())
-        .collect())
+        .collect::<HashSet<_>>();
+
+    if auth.role == Role::Concierge {
+        patient_ids.extend(
+            access::load_active_concierge_task_patient_access_set(&state.db, auth.user_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, user_id = %auth.user_id, "load Concierge task patient scope for documents");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate document access",
+                    )
+                })?,
+        );
+    }
+
+    Ok(patient_ids)
 }
 
 async fn require_generated_document_patient_access(

@@ -117,6 +117,7 @@ const ROLES_PATIENTS = [
   "billing",
   "teamlead_interpreter",
   "interpreter",
+  "concierge",
   "it_admin",
 ] as const satisfies readonly StaffRole[];
 

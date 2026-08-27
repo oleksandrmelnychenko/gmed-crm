@@ -92,6 +92,7 @@ type PatientTimelineNavigationAccess = {
 
 type PatientTabAccess = {
   canViewOperationalSurface: boolean;
+  canViewCareHistory?: boolean;
   canViewDocuments: boolean;
   canViewContracts: boolean;
   canViewInvoices: boolean;
@@ -199,6 +200,15 @@ const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
 ]);
 
 const PATIENT_INVOICE_SURFACE_ROLES = PATIENT_CONTRACT_SURFACE_ROLES;
+const PATIENT_CARE_HISTORY_SURFACE_ROLES = new Set([
+  "ceo",
+  "patient_manager",
+  "billing",
+  "teamlead_interpreter",
+  "interpreter",
+  "it_admin",
+]);
+const PATIENT_CARE_HISTORY_TAB_KEYS = new Set(["orders", "appointments", "timeline"]);
 const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "relations",
   "orders",
@@ -271,10 +281,20 @@ export function canViewPatientInvoicesSurface(role?: string) {
   return PATIENT_INVOICE_SURFACE_ROLES.has(role ?? "");
 }
 
+export function canViewPatientCareHistorySurface(role?: string) {
+  return PATIENT_CARE_HISTORY_SURFACE_ROLES.has(role ?? "");
+}
+
 export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {
   const requestedTab = (tab ?? "profile").trim() || "profile";
   if (requestedTab === "cases") {
     return access.canViewClinical ? "clinical" : "profile";
+  }
+  if (
+    PATIENT_CARE_HISTORY_TAB_KEYS.has(requestedTab) &&
+    !(access.canViewCareHistory ?? access.canViewOperationalSurface)
+  ) {
+    return "profile";
   }
   if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
     return "profile";

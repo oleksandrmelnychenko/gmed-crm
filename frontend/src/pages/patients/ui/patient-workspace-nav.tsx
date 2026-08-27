@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
@@ -31,6 +32,7 @@ export function PatientWorkspaceNav() {
   const l = (key: string) => t.uiText[key] ?? key;
 
   const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
+  const canViewCareHistory = canViewPatientCareHistorySurface(user?.role);
   const canViewClinical = canViewPatientClinicalProfile(user?.role);
   const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
@@ -41,7 +43,8 @@ export function PatientWorkspaceNav() {
     : searchParams.get("tab");
   const currentTab = routeId
     ? normalizePatientDetailTab(searchParams.get("tab"), {
-        canViewOperationalSurface,
+      canViewOperationalSurface,
+      canViewCareHistory,
         canViewClinical,
         canUseMedicationAi,
         canViewDocuments,
@@ -51,6 +54,7 @@ export function PatientWorkspaceNav() {
     : id
       ? normalizePatientDetailTab(contextualTab, {
           canViewOperationalSurface,
+          canViewCareHistory,
           canViewClinical,
           canUseMedicationAi,
           canViewDocuments,
@@ -86,14 +90,14 @@ export function PatientWorkspaceNav() {
           icon: UsersRound,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "orders",
           label: l("patients_orders"),
           icon: ClipboardList,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "appointments",
           label: l("patients_appointments"),
@@ -135,7 +139,7 @@ export function PatientWorkspaceNav() {
           icon: ShieldCheck,
         }
       : null,
-    canViewOperationalSurface
+    canViewCareHistory
       ? {
           key: "timeline",
           label: t.patients_timeline,

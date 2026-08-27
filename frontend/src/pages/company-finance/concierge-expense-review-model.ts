@@ -20,7 +20,6 @@ export type ExpensePostForm = {
 };
 
 export type ExpensePostValidationError =
-  | "order_required"
   | "order_invalid"
   | "order_locked"
   | "order_service_invalid"
@@ -91,8 +90,7 @@ export function validateExpensePostForm(
 ): ExpensePostValidationError[] {
   const errors: ExpensePostValidationError[] = [];
   const order = eligibleExpenseOrders(expense, context).find((candidate) => candidate.id === form.orderId);
-  if (!form.orderId) errors.push("order_required");
-  else if (!order) errors.push("order_invalid");
+  if (form.orderId && !order) errors.push("order_invalid");
   if (expense.order_id && form.orderId !== expense.order_id) errors.push("order_locked");
 
   const orderService = eligibleExpenseOrderServices(expense, context, form.orderId)
@@ -139,7 +137,7 @@ export function buildExpensePostPayload(
   const agency = expense.paid_by === "agency";
   return {
     request_id: requestId,
-    order_id: form.orderId,
+    order_id: form.orderId || null,
     order_leistung_id: form.orderLeistungId || null,
     financial_account_id: agency ? form.financialAccountId || null : null,
     paid_on: agency ? form.paidOn || null : null,

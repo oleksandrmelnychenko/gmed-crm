@@ -165,6 +165,26 @@ describe("Concierge expense finance review model", () => {
     });
   });
 
+  it("allows finance to post a Concierge expense without assigning an order", () => {
+    const form = {
+      orderId: "",
+      orderLeistungId: "",
+      financialAccountId: "account-1",
+      paidOn: "2026-08-19",
+      paymentMethod: "bank_transfer" as const,
+      paymentReference: "BANK-OPTIONAL-ORDER",
+    };
+
+    expect(validateExpensePostForm(expense(), context, [account], form, "2026-08-20"))
+      .toEqual([]);
+    expect(buildExpensePostPayload(expense(), form, "request-orderless"))
+      .toMatchObject({
+        request_id: "request-orderless",
+        order_id: null,
+        order_leistung_id: null,
+      });
+  });
+
   it("reuses request ids only for an identical retry payload", () => {
     const registry = new Map();
     let counter = 0;

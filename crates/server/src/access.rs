@@ -110,6 +110,57 @@ pub async fn load_active_patient_assignment_set(
         .collect())
 }
 
+pub async fn has_active_concierge_task_patient_access(
+    pool: &DbPool,
+    patient_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT EXISTS(
+            SELECT 1
+            FROM tasks task
+            LEFT JOIN concierge_services service
+              ON service.id = task.concierge_service_id
+            WHERE task.task_scope = 'concierge_operational'
+              AND task.assigned_to = $2
+              AND COALESCE(task.patient_id, service.patient_id) = $1
+              AND task.deleted_at IS NULL
+              AND task.archived_at IS NULL
+        )"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+
+    row.try_get(0)
+}
+
+pub async fn load_active_concierge_task_patient_access_set(
+    pool: &DbPool,
+    user_id: Uuid,
+) -> Result<HashSet<Uuid>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT DISTINCT COALESCE(task.patient_id, service.patient_id) AS patient_id
+           FROM tasks task
+           LEFT JOIN concierge_services service
+             ON service.id = task.concierge_service_id
+           WHERE task.task_scope = 'concierge_operational'
+             AND task.assigned_to = $1
+             AND COALESCE(task.patient_id, service.patient_id) IS NOT NULL
+             AND task.deleted_at IS NULL
+             AND task.archived_at IS NULL"#,
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.try_get::<Uuid, _>("patient_id").ok())
+        .collect())
+}
+
 pub fn mask_email(value: &str) -> String {
     let mut parts = value.split('@');
     let local = parts.next().unwrap_or_default();

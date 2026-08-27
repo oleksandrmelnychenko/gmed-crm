@@ -99,7 +99,7 @@ struct PreparedReceipt {
 #[derive(Deserialize)]
 struct PostExpenseRequest {
     request_id: Uuid,
-    order_id: Uuid,
+    order_id: Option<Uuid>,
     order_leistung_id: Option<Uuid>,
     financial_account_id: Option<Uuid>,
     paid_on: Option<NaiveDate>,
@@ -1872,7 +1872,7 @@ async fn post_expense(
     }
     if expense
         .submitted_order_id
-        .is_some_and(|value| value != body.order_id)
+        .is_some_and(|value| Some(value) != body.order_id)
         || expense
             .submitted_order_leistung_id
             .is_some_and(|value| Some(value) != body.order_leistung_id)
@@ -1882,39 +1882,49 @@ async fn post_expense(
             "Finance mapping cannot replace an order mapping captured with the receipt",
         );
     }
-    let order = match sqlx::query(
-        r#"SELECT patient_id, UPPER(currency) AS currency, status
-           FROM orders WHERE id = $1 FOR UPDATE"#,
-    )
-    .bind(body.order_id)
-    .fetch_optional(&mut *transaction)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Order not found"),
-        Err(error) => {
-            tracing::error!(error = %error, order_id = %body.order_id, "load finance-mapped expense order");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
+    if let Some(order_id) = body.order_id {
+        let order = match sqlx::query(
+            r#"SELECT patient_id, UPPER(currency) AS currency, status
+               FROM orders WHERE id = $1 FOR UPDATE"#,
+        )
+        .bind(order_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Order not found"),
+            Err(error) => {
+                tracing::error!(error = %error, order_id = %order_id, "load finance-mapped expense order");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
+            }
+        };
+        if order.try_get::<Uuid, _>("patient_id").ok() != Some(expense.patient_id)
+            || order.try_get::<String, _>("currency").unwrap_or_default() != expense.currency
+            || order.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order must be active, belong to the same patient, and match the expense currency",
+            );
         }
-    };
-    if order.try_get::<Uuid, _>("patient_id").ok() != Some(expense.patient_id)
-        || order.try_get::<String, _>("currency").unwrap_or_default() != expense.currency
-        || order.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
-    {
+    } else if body.order_leistung_id.is_some() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Order must be active, belong to the same patient, and match the expense currency",
+            "Order service cannot be selected without an order",
         );
     }
 
     let line_provider_id = if let Some(order_leistung_id) = body.order_leistung_id {
+        let order_id = body
+            .order_id
+            .expect("order presence validated for selected order service");
         let row = match sqlx::query(
             r#"SELECT provider_id FROM order_leistungen
                WHERE id = $1 AND order_id = $2 AND UPPER(currency) = $3
                FOR UPDATE"#,
         )
         .bind(order_leistung_id)
-        .bind(body.order_id)
+        .bind(order_id)
         .bind(&expense.currency)
         .fetch_optional(&mut *transaction)
         .await
@@ -2061,16 +2071,18 @@ async fn post_expense(
     if let Err(error) = sqlx::query(
         r#"INSERT INTO external_invoices (
                id, order_id, patient_id, provider_id, order_leistung_id,
+               source_concierge_expense_id,
                external_invoice_number, invoice_date,
                amount_net, amount_vat, amount_gross, currency,
                status, paid_by, service_delivered, received_at, paid_at,
                notes, created_by
            ) VALUES (
                $1, $2, $3, $4, $5,
-               $6, $7,
-               $8, $9, $10, $11,
-               $12, $13, $14, now(), $15::date + TIME '12:00',
-               $16, $17
+               $6,
+               $7, $8,
+               $9, $10, $11, $12,
+               $13, $14, $15, now(), $16::date + TIME '12:00',
+               $17, $18
            )"#,
     )
     .bind(external_invoice_id)
@@ -2078,6 +2090,7 @@ async fn post_expense(
     .bind(expense.patient_id)
     .bind(provider_id)
     .bind(body.order_leistung_id)
+    .bind(expense.id)
     .bind(&external_invoice_number)
     .bind(expense.expense_date)
     .bind(expense.amount_net)
@@ -2103,10 +2116,7 @@ async fn post_expense(
     .await
     {
         tracing::warn!(error = %error, expense_id = %expense_id, "insert canonical external invoice for Concierge expense");
-        return err(
-            StatusCode::CONFLICT,
-            "Expense could not be posted to the selected order",
-        );
+        return err(StatusCode::CONFLICT, "Expense could not be posted");
     }
 
     let mut provider_payment_transaction_id = None;
@@ -2817,7 +2827,11 @@ async fn reverse_expense(
         )
         .bind(external_invoice_id)
         .bind(reversal_id)
-        .bind(external.try_get::<Uuid, _>("order_id").unwrap_or_default())
+        .bind(
+            external
+                .try_get::<Option<Uuid>, _>("order_id")
+                .unwrap_or_default(),
+        )
         .bind(
             external
                 .try_get::<Uuid, _>("patient_id")

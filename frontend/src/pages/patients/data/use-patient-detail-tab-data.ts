@@ -25,6 +25,7 @@ import type {
 
 type UsePatientDetailTabDataArgs = {
   activeTab: string;
+  canViewCareHistory: boolean;
   canViewContracts: boolean;
   canViewDocuments: boolean;
   canViewInvoices: boolean;
@@ -139,6 +140,7 @@ function patientDetailTabDataReducer(
 
 export function usePatientDetailTabData({
   activeTab,
+  canViewCareHistory,
   canViewContracts,
   canViewDocuments,
   canViewInvoices,
@@ -165,12 +167,10 @@ export function usePatientDetailTabData({
     (activeTab === "documents" && !canViewDocuments) ||
     (activeTab === "contracts" && !canViewContracts) ||
     (activeTab === "invoices" && !canViewInvoices) ||
-    ((activeTab === "relations" ||
-      activeTab === "orders" ||
-      activeTab === "appointments" ||
-      activeTab === "workflow" ||
-      activeTab === "timeline") &&
-      !canViewOperationalSurface)
+    ((activeTab === "relations" || activeTab === "workflow") &&
+      !canViewOperationalSurface) ||
+    ((activeTab === "orders" || activeTab === "appointments" || activeTab === "timeline") &&
+      !canViewCareHistory)
       ? ""
       : [
           id,
@@ -231,12 +231,18 @@ export function usePatientDetailTabData({
             break;
           }
           case "documents": {
-            const [documents, orders, appointments, documentAlerts] = await Promise.all([
-              apiFetch<DocumentItem[]>(`/patients/${id}/documents`, { signal }),
-              apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal }).catch(() => []),
-              apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal }).catch(() => []),
-              apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`, { signal }).catch(() => null),
-            ]);
+            const documents = await apiFetch<DocumentItem[]>(`/patients/${id}/documents`, { signal });
+            const [orders, appointments, documentAlerts]: [
+              OrderItem[],
+              AppointmentItem[],
+              DocumentAlerts | null,
+            ] = canViewCareHistory
+              ? await Promise.all([
+                  apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal }).catch(() => []),
+                  apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal }).catch(() => []),
+                  apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`, { signal }).catch(() => null),
+                ])
+              : [[], [], null];
             if (signal.aborted) return;
             startTransition(() => {
               dispatchTabData({
@@ -427,6 +433,7 @@ export function usePatientDetailTabData({
     };
   }, [
     activeTab,
+    canViewCareHistory,
     deferredTimelineSearch,
     id,
     requestKey,

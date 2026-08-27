@@ -54,3 +54,80 @@ Fixes applied:
 - [P3] Validate the same dialog on a physical narrow Android viewport during the later mobile QA pass.
 
 final result: passed
+
+---
+
+# Design QA — Readable disabled OCR laboratory fields
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-d37cd9ec-4ab9-423a-aab9-f1e40955fdb5.png` (1507 × 649 px).
+- Implementation screenshot: `C:/Users/oleks/Developer/gmed/design-qa-clinical-import-disabled-viewport.png` (1652 × 1272 px).
+- Route: `http://127.0.0.1:5173/patients/ef0131a4-8f84-458a-a7c0-5de552a0a2e4?tab=clinical`.
+- Viewport: 1652 × 1272 CSS px, device pixel ratio 1.5; browser capture is 1652 × 1272 px.
+- State: OCR import review open, Hämoglobin laboratory candidate unchecked and its editor controls disabled.
+
+## Full-view and focused comparison
+
+The source shows the entire unchecked laboratory card faded, including the parameter name and populated values. The implementation keeps the disabled controls and muted field backgrounds, but removes card-level opacity and renders populated values in the normal foreground color. The Hämoglobin name, result, unit, date, group, and status remain readable while the checkbox continues to communicate exclusion. The full browser capture is sufficiently sharp to inspect the affected field typography; no additional focused crop is needed.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing GMED family, weights, sizes, and uppercase field labels are unchanged; disabled values now use the same readable foreground tone as enabled values.
+- Spacing and layout rhythm: field grid, card padding, gaps, radii, and editor height are unchanged.
+- Colors and visual tokens: only disabled-value contrast changed. Muted backgrounds and placeholder styling remain, while populated disabled values use `text-foreground` at full opacity.
+- Image and asset fidelity: this form contains no raster assets; existing controls and icons are unchanged.
+- Copy and content: no labels, values, OCR metadata, or actions were changed.
+
+## Comparison history
+
+### Pass 1 — blocked
+
+- [P1] The whole unchecked card used reduced opacity, making the parameter name and populated values difficult to read.
+- [P2] The disabled MUI date field retained its own gray text color after the card opacity was removed.
+
+Fixes applied:
+
+- Removed card-level opacity for unchecked non-medication candidates.
+- Kept the controls disabled while forcing populated input, select, textarea, and date-section text to the normal foreground color at full opacity.
+
+### Pass 2 — passed
+
+- Browser inspection confirmed `Hämoglobin` remains disabled with computed opacity `1`, card opacity `1`, and foreground color `oklch(0.17 0 0)`.
+- Disabled date sections resolve to the same foreground color.
+- Checkbox selection still toggles the disabled state correctly.
+- No browser console errors were recorded.
+
+## Follow-up polish
+
+- No P0/P1/P2 issues remain for this requested state.
+
+final result: passed
+
+---
+
+# Design QA — Optional order for Concierge expense review
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-c272d7e1-62b2-45dd-a6a7-6e2547924c5b.png`
+- Implementation screenshot: `C:/Users/oleks/Developer/gmed/design-qa-artifacts/concierge-expense-optional-order-after.png`
+- Route: `http://127.0.0.1:5173/company-finance?tab=concierge-expenses`
+- State: the same pending Alexandra Grau / The Alpina Gstaad expense with no submitted order.
+
+## Comparison
+
+- The order field remains available, but its required marker is removed and `Необязательно` is shown in the label row.
+- The order-required warning no longer renders when the empty option is selected.
+- `Подтвердить и провести` is enabled with no order selected; choosing an order still enables the dependent order-position selector.
+- The header copy no longer describes order assignment as a mandatory review step.
+- Existing modal spacing, type scale, borders, controls, financial summary, rejection flow, and history layout remain unchanged.
+
+## Verification
+
+- DOM inspection confirmed the empty order selection, optional label, absent warning, and enabled approval action.
+- The source and implementation captures were reviewed together. No clipped controls, overlap, layout shift, or actionable P0/P1/P2 visual issue remains.
+- Targeted component tests: 5 passed.
+- TypeScript project check and targeted ESLint check passed.
+
+final result: passed
