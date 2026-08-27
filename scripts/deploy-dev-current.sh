@@ -140,6 +140,7 @@ ROLLBACK_OVERRIDE="$DEPLOY_DIR/docker-compose.rollback-$STAMP.yml"
 tag_running_image() {
   local container="$1"
   local tag="$2"
+  local fallback_image="$3"
   local image_id
   image_id="$(docker inspect --format '{{.Image}}' "$container")"
   if docker image inspect "$image_id" >/dev/null 2>&1; then
@@ -149,13 +150,20 @@ tag_running_image() {
     # image object while its old container is still running. Preserve that
     # exact running filesystem as the rollback image instead of aborting the
     # deployment before staging starts.
-    docker commit "$container" "$tag" >/dev/null
+    if ! docker commit "$container" "$tag" >/dev/null 2>&1; then
+      # Some BuildKit/Garbage Collection combinations can also remove a
+      # content layer referenced by the live container. Fall back to the
+      # latest successfully built Compose image, which is still a bootable
+      # rollback target and leaves the running service untouched.
+      docker image inspect "$fallback_image" >/dev/null
+      docker image tag "$fallback_image" "$tag"
+    fi
   fi
 }
 
-tag_running_image gmed-crm-backend-1 "gmed-dev-rollback-backend:$STAMP"
-tag_running_image gmed-crm-frontend-1 "gmed-dev-rollback-frontend:$STAMP"
-tag_running_image gmed-crm-clinical-document-parser-1 "gmed-dev-rollback-parser:$STAMP"
+tag_running_image gmed-crm-backend-1 "gmed-dev-rollback-backend:$STAMP" gmed-crm-backend
+tag_running_image gmed-crm-frontend-1 "gmed-dev-rollback-frontend:$STAMP" gmed-crm-frontend
+tag_running_image gmed-crm-clinical-document-parser-1 "gmed-dev-rollback-parser:$STAMP" gmed-crm-clinical-document-parser
 {
   printf 'services:\n'
   printf '  backend:\n    image: gmed-dev-rollback-backend:%s\n' "$STAMP"
