@@ -46,7 +46,7 @@ async fn events_ws(
 async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64) {
     let mut auth = match authenticate_websocket(&mut socket, &state).await {
         Ok(auth) => auth,
-        Err(()) => return,
+        Err(_) => return,
     };
     let mut receiver = state.realtime_events.subscribe();
     let mut authorization_check = tokio::time::interval(std::time::Duration::from_secs(15));

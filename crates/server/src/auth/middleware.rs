@@ -232,29 +232,33 @@ struct WebSocketAuthMessage {
     token: String,
 }
 
-pub async fn authenticate_websocket(
+#[derive(Debug)]
+pub(crate) struct WebSocketAuthError;
+
+pub(crate) async fn authenticate_websocket(
     socket: &mut WebSocket,
     state: &AppState,
-) -> Result<AuthUser, ()> {
+) -> Result<AuthUser, WebSocketAuthError> {
     let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.recv())
         .await
-        .map_err(|_| ())?
-        .ok_or(())?
-        .map_err(|_| ())?;
+        .map_err(|_| WebSocketAuthError)?
+        .ok_or(WebSocketAuthError)?
+        .map_err(|_| WebSocketAuthError)?;
     let WsMessage::Text(text) = message else {
-        return Err(());
+        return Err(WebSocketAuthError);
     };
     if text.len() > 8192 {
-        return Err(());
+        return Err(WebSocketAuthError);
     }
-    let payload: WebSocketAuthMessage = serde_json::from_str(&text).map_err(|_| ())?;
+    let payload: WebSocketAuthMessage =
+        serde_json::from_str(&text).map_err(|_| WebSocketAuthError)?;
     let token = payload.token.trim();
     if payload.kind != "auth" || token.is_empty() || token.len() > 4096 {
-        return Err(());
+        return Err(WebSocketAuthError);
     }
     auth_user_from_access_token(state, token)
         .await
-        .map_err(|_| ())
+        .map_err(|_| WebSocketAuthError)
 }
 
 fn is_empty_workspace_role(role: Role) -> bool {

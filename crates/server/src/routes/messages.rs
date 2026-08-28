@@ -76,7 +76,7 @@ async fn messages_ws(
 async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
     let mut auth = match authenticate_websocket(&mut socket, &state).await {
         Ok(auth) => auth,
-        Err(()) => return,
+        Err(_) => return,
     };
     if ensure_chat_workspace_role(&auth).is_err() {
         return;
