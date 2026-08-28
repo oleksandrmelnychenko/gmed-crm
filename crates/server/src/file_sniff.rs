@@ -5,6 +5,34 @@ fn extension_from_name(file_name: Option<&str>) -> Option<String> {
         .filter(|ext| !ext.is_empty())
 }
 
+fn is_active_document_type(mime_type: Option<&str>, extension: Option<&str>, bytes: &[u8]) -> bool {
+    let mime = mime_type.unwrap_or_default().trim().to_ascii_lowercase();
+    if matches!(
+        mime.split(';').next().unwrap_or_default(),
+        "text/html"
+            | "application/xhtml+xml"
+            | "image/svg+xml"
+            | "application/xml"
+            | "text/xml"
+            | "application/xslt+xml"
+    ) || matches!(
+        extension,
+        Some("html" | "htm" | "xhtml" | "svg" | "xml" | "xsl" | "xslt")
+    ) {
+        return true;
+    }
+
+    let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]);
+    let normalized = prefix
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .to_ascii_lowercase();
+    normalized.starts_with("<!doctype html")
+        || normalized.starts_with("<html")
+        || normalized.starts_with("<svg")
+        || normalized.starts_with("<?xml")
+}
+
 fn sniff_magic_kind(bytes: &[u8]) -> Option<&'static str> {
     if bytes.len() >= 5 && &bytes[..5] == b"%PDF-" {
         return Some("pdf");
@@ -123,12 +151,30 @@ fn canonical_mime_for_kind(
     .to_string()
 }
 
+fn canonical_passive_mime(declared_mime: Option<&str>) -> Option<String> {
+    let mime = declared_mime
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        mime.as_str(),
+        "text/plain" | "text/csv" | "application/json"
+    )
+    .then_some(mime)
+}
+
 pub fn validate_upload_magic_bytes(
     file_name: Option<&str>,
     declared_mime: Option<&str>,
     bytes: &[u8],
 ) -> Result<Option<String>, &'static str> {
     let extension = extension_from_name(file_name);
+    if is_active_document_type(declared_mime, extension.as_deref(), bytes) {
+        return Err("Active HTML, SVG, and XML document formats are not accepted");
+    }
     let expected_kind = expected_binary_kind(declared_mime, extension.as_deref());
     let detected_kind = sniff_magic_kind(bytes);
 
@@ -144,6 +190,66 @@ pub fn validate_upload_magic_bytes(
             extension.as_deref(),
             declared_mime,
         ))),
-        _ => Ok(None),
+        _ => Ok(Some(
+            canonical_passive_mime(declared_mime)
+                .unwrap_or_else(|| "application/octet-stream".to_string()),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_upload_magic_bytes;
+
+    #[test]
+    fn rejects_active_content_by_mime_extension_and_content() {
+        for (name, mime, bytes) in [
+            (Some("note.txt"), Some("text/html"), b"hello".as_slice()),
+            (
+                Some("image.svg"),
+                Some("application/octet-stream"),
+                b"data".as_slice(),
+            ),
+            (
+                Some("note.txt"),
+                Some("text/plain"),
+                b"<svg onload='alert(1)'>".as_slice(),
+            ),
+            (
+                Some("note.bin"),
+                None,
+                b"  <!doctype html><script>alert(1)</script>".as_slice(),
+            ),
+        ] {
+            assert!(validate_upload_magic_bytes(name, mime, bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn canonicalizes_unknown_content_as_binary() {
+        assert_eq!(
+            validate_upload_magic_bytes(
+                Some("notes.unknown"),
+                Some("application/x-unknown"),
+                b"plain notes"
+            ),
+            Ok(Some("application/octet-stream".to_string()))
+        );
+    }
+
+    #[test]
+    fn preserves_passive_text_types() {
+        assert_eq!(
+            validate_upload_magic_bytes(Some("notes.txt"), Some("text/plain"), b"plain notes"),
+            Ok(Some("text/plain".to_string()))
+        );
+    }
+
+    #[test]
+    fn preserves_supported_binary_preview_types() {
+        assert_eq!(
+            validate_upload_magic_bytes(Some("scan.pdf"), Some("application/pdf"), b"%PDF-1.7"),
+            Ok(Some("application/pdf".to_string()))
+        );
     }
 }

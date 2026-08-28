@@ -12,6 +12,7 @@ pub struct TokenSettings {
     pub refresh_token_days: i64,
     pub max_sessions_per_user: i64,
     pub session_idle_days: i64,
+    pub password_expire_days: i64,
 }
 
 impl Default for TokenSettings {
@@ -21,6 +22,7 @@ impl Default for TokenSettings {
             refresh_token_days: 30,
             max_sessions_per_user: 10,
             session_idle_days: 7,
+            password_expire_days: 90,
         }
     }
 }
@@ -74,6 +76,7 @@ pub async fn load_from_db(pool: &PgPool) -> Result<TokenSettings, sqlx::Error> {
         refresh_token_days: get_i64(pool, "refresh_token_days", 30).await,
         max_sessions_per_user: get_i64(pool, "max_sessions_per_user", 10).await,
         session_idle_days: get_i64(pool, "session_idle_days", 7).await,
+        password_expire_days: get_i64(pool, "password_expire_days", 90).await,
     })
 }
 
@@ -184,6 +187,9 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
         .parse()
         .map_err(|_| UpdateError::InvalidValue("Must be a positive integer".into()))?;
 
+    if key == "password_expire_days" && parsed == 0 {
+        return Ok(Value::from(0));
+    }
     if parsed < 1 {
         return Err(UpdateError::InvalidValue("Value must be at least 1".into()));
     }
@@ -207,6 +213,11 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
         "session_idle_days" if parsed > 365 => {
             return Err(UpdateError::InvalidValue(
                 "Session idle timeout cannot exceed 365 days".into(),
+            ));
+        }
+        "password_expire_days" if parsed > 3650 => {
+            return Err(UpdateError::InvalidValue(
+                "Password expiration cannot exceed 3650 days".into(),
             ));
         }
         _ => {}
@@ -408,7 +419,9 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
 
 #[cfg(test)]
 mod tests {
-    use super::{UpdateError, validate_optional_website_setting};
+    use super::{
+        UpdateError, validate_optional_website_setting, validate_positive_integer_setting,
+    };
     use serde_json::Value;
 
     #[test]
@@ -437,5 +450,21 @@ mod tests {
                 Err(UpdateError::InvalidValue(_))
             ));
         }
+    }
+
+    #[test]
+    fn password_expiration_accepts_documented_zero_and_rejects_out_of_range_values() {
+        assert_eq!(
+            validate_positive_integer_setting("password_expire_days", "0").unwrap(),
+            Value::from(0)
+        );
+        assert!(matches!(
+            validate_positive_integer_setting("password_expire_days", "3651"),
+            Err(UpdateError::InvalidValue(_))
+        ));
+        assert!(matches!(
+            validate_positive_integer_setting("refresh_token_days", "0"),
+            Err(UpdateError::InvalidValue(_))
+        ));
     }
 }

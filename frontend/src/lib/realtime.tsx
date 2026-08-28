@@ -5,11 +5,7 @@ import {
   type ReactNode,
 } from "react";
 
-import {
-  buildApiWebSocketUrl,
-  clearApiCache,
-  getAccessToken,
-} from "@/lib/api";
+import { clearApiCache, getAccessToken, openAuthenticatedApiWebSocket } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export type RealtimeEvent = {
@@ -247,10 +243,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      socket = new WebSocket(buildApiWebSocketUrl("/events/ws", {
-        token,
+      socket = openAuthenticatedApiWebSocket("/events/ws", token, {
         last_seq: lastSeq > 0 ? lastSeq : undefined,
-      }));
+      });
       socket.onopen = () => {
         attempt = 0;
         dispatchConnectionSnapshot("connected", attempt, userId);

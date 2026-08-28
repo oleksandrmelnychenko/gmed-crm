@@ -125,6 +125,7 @@ const TOKEN_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "refresh_token_days", labelKey: "settings_refresh_token_days", inputType: "number", min: 1 },
   { key: "max_sessions_per_user", labelKey: "settings_max_sessions", inputType: "number", min: 1 },
   { key: "session_idle_days", labelKey: "settings_idle_days", inputType: "number", min: 1 },
+  { key: "password_expire_days", labelKey: "settings_password_expire_days", inputType: "number", min: 0 },
 ];
 
 const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [

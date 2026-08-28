@@ -115,6 +115,7 @@ INSERT INTO users (
   locked_until,
   password_history,
   password_changed_at,
+  password_reset_required,
   updated_at
 )
 VALUES (
@@ -129,6 +130,7 @@ VALUES (
   NULL,
   '[]'::jsonb,
   now(),
+  false,
   now()
 )
 ON CONFLICT (email) DO UPDATE SET
@@ -142,6 +144,7 @@ ON CONFLICT (email) DO UPDATE SET
   locked_until = NULL,
   password_history = '[]'::jsonb,
   password_changed_at = now(),
+  password_reset_required = false,
   updated_at = now();
 
 DO $$
@@ -237,6 +240,7 @@ SET
   locked_until = NULL,
   password_history = '[]'::jsonb,
   password_changed_at = now(),
+  password_reset_required = false,
   updated_at = now()
 WHERE email = :'admin_email';
 
@@ -251,6 +255,7 @@ BEGIN
       WHERE email = current_setting('gmed.sanitize.admin_email')
         AND role = 'ceo'
         AND is_active = true
+        AND password_reset_required = false
     )
   INTO total_users, expected_admins
   FROM users;

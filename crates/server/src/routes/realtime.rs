@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::access;
-use crate::auth::middleware::{AuthUser, auth_user_from_access_token};
+use crate::auth::middleware::{AuthUser, authenticate_websocket, revalidate_auth_user};
 use crate::realtime::RealtimeEvent;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -28,7 +28,6 @@ pub fn public_router() -> Router<AppState> {
 
 #[derive(Deserialize)]
 struct EventsSocketQuery {
-    token: String,
     #[serde(default)]
     last_seq: Option<i64>,
 }
@@ -38,19 +37,25 @@ async fn events_ws(
     State(state): State<AppState>,
     Query(query): Query<EventsSocketQuery>,
 ) -> axum::response::Response {
-    let auth = match auth_user_from_access_token(&state, query.token.trim()).await {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-
     let last_seq = query.last_seq.unwrap_or_default().max(0);
 
-    ws.on_upgrade(move |socket| handle_events_ws(socket, state, auth, last_seq))
+    ws.on_upgrade(move |socket| handle_events_ws(socket, state, last_seq))
         .into_response()
 }
 
-async fn handle_events_ws(mut socket: WebSocket, state: AppState, auth: AuthUser, last_seq: i64) {
+async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64) {
+    let mut auth = match authenticate_websocket(&mut socket, &state).await {
+        Ok(auth) => auth,
+        Err(()) => return,
+    };
     let mut receiver = state.realtime_events.subscribe();
+    let mut authorization_check = tokio::time::interval(std::time::Duration::from_secs(15));
+    authorization_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let expires_in = (auth.access_token_expires_at - chrono::Utc::now())
+        .to_std()
+        .unwrap_or_default();
+    let expiry_check = tokio::time::sleep(expires_in);
+    tokio::pin!(expiry_check);
     let mut cursor_seq = last_seq;
 
     let connected = serde_json::json!({
@@ -62,28 +67,52 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, auth: AuthUser
         },
         "occurred_at": chrono::Utc::now().to_rfc3339(),
     });
-    if socket
-        .send(WsMessage::Text(connected.to_string().into()))
-        .await
-        .is_err()
+    if !send_text_before_expiry(
+        &mut socket,
+        connected.to_string(),
+        auth.access_token_expires_at,
+    )
+    .await
     {
         return;
     }
 
-    if !replay_events_after(&mut socket, &state, &auth, &mut cursor_seq).await {
+    if !replay_events_after(&mut socket, &state, &mut auth, &mut cursor_seq).await {
         return;
     }
 
     loop {
-        let event = match receiver.recv().await {
+        let received = tokio::select! {
+            _ = &mut expiry_check => break,
+            _ = authorization_check.tick() => {
+                match revalidate_auth_user(&state, &auth).await {
+                    Ok(current) => {
+                        auth = current;
+                        continue;
+                    }
+                    Err(_) => break,
+                }
+            }
+            received = receiver.recv() => received,
+        };
+        let event = match received {
             Ok(event) => event,
             Err(broadcast::error::RecvError::Lagged(_)) => {
-                if !replay_events_after(&mut socket, &state, &auth, &mut cursor_seq).await {
+                auth = match revalidate_auth_user(&state, &auth).await {
+                    Ok(current) => current,
+                    Err(_) => break,
+                };
+                if !replay_events_after(&mut socket, &state, &mut auth, &mut cursor_seq).await {
                     break;
                 }
                 continue;
             }
             Err(broadcast::error::RecvError::Closed) => break,
+        };
+
+        auth = match revalidate_auth_user(&state, &auth).await {
+            Ok(current) => current,
+            Err(_) => break,
         };
 
         if let Some(seq) = event.seq {
@@ -95,7 +124,7 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, auth: AuthUser
 
         match can_receive_event(&state, &auth, &event).await {
             Ok(true) => {
-                if !send_event(&mut socket, &event).await {
+                if !send_event(&mut socket, &event, auth.access_token_expires_at).await {
                     break;
                 }
             }
@@ -116,12 +145,16 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, auth: AuthUser
 async fn replay_events_after(
     socket: &mut WebSocket,
     state: &AppState,
-    auth: &AuthUser,
+    auth: &mut AuthUser,
     cursor_seq: &mut i64,
 ) -> bool {
     let mut scanned = 0usize;
 
     loop {
+        *auth = match revalidate_auth_user(state, auth).await {
+            Ok(current) => current,
+            Err(_) => return false,
+        };
         if scanned >= REPLAY_TOTAL_LIMIT {
             return send_resync_required(socket, auth, Some(*cursor_seq)).await;
         }
@@ -150,13 +183,17 @@ async fn replay_events_after(
         scanned += batch_len;
 
         for event in events {
+            *auth = match revalidate_auth_user(state, auth).await {
+                Ok(current) => current,
+                Err(_) => return false,
+            };
             if let Some(seq) = event.seq {
                 *cursor_seq = (*cursor_seq).max(seq);
             }
 
             match can_receive_event(state, auth, &event).await {
                 Ok(true) => {
-                    if !send_event(socket, &event).await {
+                    if !send_event(socket, &event, auth.access_token_expires_at).await {
                         return false;
                     }
                 }
@@ -179,11 +216,33 @@ async fn replay_events_after(
     }
 }
 
-async fn send_event(socket: &mut WebSocket, event: &RealtimeEvent) -> bool {
+async fn send_event(
+    socket: &mut WebSocket,
+    event: &RealtimeEvent,
+    expires_at: chrono::DateTime<chrono::Utc>,
+) -> bool {
     let Ok(payload) = serde_json::to_string(event) else {
         return true;
     };
-    socket.send(WsMessage::Text(payload.into())).await.is_ok()
+    send_text_before_expiry(socket, payload, expires_at).await
+}
+
+async fn send_text_before_expiry(
+    socket: &mut WebSocket,
+    payload: String,
+    expires_at: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    let now = chrono::Utc::now();
+    if expires_at <= now {
+        return false;
+    }
+    let Ok(remaining) = (expires_at - now).to_std() else {
+        return false;
+    };
+    tokio::select! {
+        _ = tokio::time::sleep(remaining) => false,
+        result = socket.send(WsMessage::Text(payload.into())) => result.is_ok(),
+    }
 }
 
 async fn send_resync_required(
@@ -201,10 +260,7 @@ async fn send_resync_required(
         },
         "occurred_at": chrono::Utc::now().to_rfc3339(),
     });
-    socket
-        .send(WsMessage::Text(resync.to_string().into()))
-        .await
-        .is_ok()
+    send_text_before_expiry(socket, resync.to_string(), auth.access_token_expires_at).await
 }
 
 #[allow(clippy::result_large_err)]

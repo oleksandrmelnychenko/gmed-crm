@@ -156,6 +156,20 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
         return Err(format!("run migrations for {database_name}: {error}"));
     }
 
+    // The production hardening migration disables all historical demo
+    // credentials. Integration suites explicitly opt the isolated fixture
+    // identities back in; production startup never executes this test-only seam.
+    sqlx::query(
+        "UPDATE users
+         SET is_active = true, password_reset_required = false,
+             password_changed_at = now(), updated_at = now()
+         WHERE email = 'admin@gmed.de'
+            OR id::text LIKE 'a0000000-0000-0000-0000-%'",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|error| format!("activate test admin in {database_name}: {error}"))?;
+
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
         .bind("admin@gmed.de")
         .fetch_one(&pool)

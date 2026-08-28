@@ -5428,6 +5428,7 @@ function StaffDocumentsPage({
               <iframe
                 title={documentPreview.title || t.documents_preview}
                 src={documentPreview.url}
+                sandbox=""
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : null}

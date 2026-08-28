@@ -650,6 +650,7 @@ export const ru = {
   settings_refresh_token_days: "Время жизни refresh-токена (дни)",
   settings_max_sessions: "Макс. сессий на пользователя",
   settings_idle_days: "Отзыв сессии после дней неактивности",
+  settings_password_expire_days: "Срок действия пароля в днях (0 = отключено)",
   settings_agency_profile: "Профиль агентства для документов",
   settings_agency_name: "Название агентства",
   settings_agency_care_of: "Ответственное лицо / подписант",

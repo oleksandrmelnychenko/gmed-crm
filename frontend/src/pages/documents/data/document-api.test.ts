@@ -58,6 +58,19 @@ describe("document preview API", () => {
     expect(previewBlob?.type).toBe("application/pdf");
   });
 
+  it("neutralizes legacy active content before creating a preview URL", async () => {
+    apiFetchFileMock.mockResolvedValue({
+      blob: new Blob(["<svg onload='alert(1)'></svg>"], { type: "image/svg+xml" }),
+      contentType: "image/svg+xml",
+    });
+
+    const preview = await createDocumentPreviewObjectUrl("legacy-active-document");
+
+    expect(preview.contentType).toBe("text/plain;charset=utf-8");
+    expect(previewBlob?.type).toBe("text/plain;charset=utf-8");
+    expect(await previewBlob?.text()).toContain("<svg");
+  });
+
   it("revokes inline preview URLs when the viewer closes", () => {
     revokeDocumentPreviewObjectUrl("blob:inline-preview");
 

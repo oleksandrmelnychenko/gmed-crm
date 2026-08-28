@@ -32,6 +32,8 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        clamav \
+        clamav-freshclam \
         curl \
         openssl \
         tesseract-ocr \
@@ -39,6 +41,7 @@ RUN apt-get update \
         tesseract-ocr-eng \
         tesseract-ocr-rus \
         tesseract-ocr-ukr \
+    && freshclam --quiet \
     && rm -rf /var/lib/apt/lists/* \
     && addgroup --system gmed \
     && adduser --system --ingroup gmed --home /app gmed

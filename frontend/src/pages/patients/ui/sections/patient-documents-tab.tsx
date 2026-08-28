@@ -770,11 +770,7 @@ export function PatientDocumentsTab({
               <iframe
                 title={documentPreview.title || t.documents_preview}
                 src={documentPreview.url}
-                sandbox={
-                  documentPreview.contentType?.startsWith("text/html")
-                    ? ""
-                    : undefined
-                }
+                sandbox=""
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : documentPreview?.url ? (

@@ -197,7 +197,7 @@ export function ClinicalRecordSource({
               <iframe
                 title={preview.title}
                 src={preview.url}
-                sandbox={preview.contentType?.startsWith("text/html") ? "" : undefined}
+                sandbox=""
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : preview?.url ? (

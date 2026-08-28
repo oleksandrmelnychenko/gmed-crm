@@ -1,9 +1,9 @@
 import {
   apiFetch,
   apiFetchFile,
-  buildApiWebSocketUrl,
   clearApiCache,
   getAccessToken,
+  openAuthenticatedApiWebSocket,
 } from "@/lib/api";
 
 import type { Conversation, Message, UserItem } from "../model/types";
@@ -73,5 +73,5 @@ export async function downloadMessageAttachmentBytes(fileKey: string) {
 export function openMessagesSocket() {
   const token = getAccessToken();
   if (!token) return null;
-  return new WebSocket(buildApiWebSocketUrl("/messages/ws", { token }));
+  return openAuthenticatedApiWebSocket("/messages/ws", token);
 }

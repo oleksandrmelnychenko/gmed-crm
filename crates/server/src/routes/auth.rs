@@ -45,6 +45,19 @@ struct LoginRequest {
     device_info: Option<serde_json::Value>,
 }
 
+#[derive(sqlx::FromRow)]
+struct LoginUserRow {
+    id: Uuid,
+    password_hash: String,
+    role: String,
+    is_active: bool,
+    mfa_required: bool,
+    failed_login_attempts: i32,
+    locked_until: Option<chrono::DateTime<chrono::Utc>>,
+    password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
+    password_reset_required: bool,
+}
+
 #[derive(Deserialize)]
 struct RefreshRequest {
     refresh_token: String,
@@ -149,10 +162,12 @@ async fn login(
         }
     }
 
-    let user = match sqlx::query!(
-        "SELECT id, password_hash, role, is_active, mfa_required, failed_login_attempts, locked_until FROM users WHERE email = $1",
-        body.email
+    let user = match sqlx::query_as::<_, LoginUserRow>(
+        "SELECT id, password_hash, role, is_active, mfa_required, failed_login_attempts, locked_until,
+                password_changed_at, password_reset_required
+         FROM users WHERE email = $1",
     )
+    .bind(&body.email)
     .fetch_optional(&state.db)
     .await
     {
@@ -336,6 +351,25 @@ async fn login(
         );
     }
 
+    let settings = state.settings.get().await;
+    let password_expired = settings.password_expire_days > 0
+        && user.password_changed_at.is_none_or(|changed_at| {
+            changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
+        });
+    if user.password_reset_required || password_expired {
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "password_change_required", "expired": password_expired }),
+        ));
+        return err(
+            StatusCode::FORBIDDEN,
+            "password_change_required",
+            "Password must be reset by an administrator before sign-in",
+        );
+    }
+
     let _ = sqlx::query!(
         "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
         user.id
@@ -393,12 +427,12 @@ async fn login(
         }
     }
 
-    let settings = state.settings.get().await;
     let pair = match tokens::create_session(
         &state.db,
         state.jwt_secret(),
         user.id,
         &user.role,
+        user.password_changed_at,
         None,
         ip.as_deref(),
         ua.as_deref(),
@@ -407,6 +441,13 @@ async fn login(
     .await
     {
         Ok(p) => p,
+        Err(tokens::TokenError::FamilyRevoked) => {
+            return err(
+                StatusCode::FORBIDDEN,
+                "account_restricted",
+                "Account state changed before the session could be created",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, "Failed to create session");
             return err(
@@ -630,59 +671,152 @@ async fn check_pending(
     State(state): State<AppState>,
     Path(pending_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    let row = sqlx::query!(
-        r#"SELECT pl.status AS "status!", pl.user_id, u.role
+    let settings = state.settings.get().await;
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, "begin pending login redemption");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed");
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT pl.status, pl.user_id, pl.ip_address, pl.user_agent, pl.created_at,
+                  pl.expires_at, pl.consumed_at,
+                  u.role, u.is_active, u.password_reset_required, u.password_changed_at
            FROM pending_logins pl
            JOIN users u ON u.id = pl.user_id
-           WHERE pl.id = $1"#,
-        pending_id
+           WHERE pl.id = $1
+           FOR UPDATE OF pl, u"#,
     )
-    .fetch_optional(&state.db)
-    .await;
+    .bind(pending_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "Pending login not found",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, "check pending login");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed");
+        }
+    };
 
-    match row {
-        Ok(Some(r)) if r.status == "approved" => {
-            let settings = state.settings.get().await;
-            match tokens::create_session(
-                &state.db,
-                state.jwt_secret(),
-                r.user_id,
-                &r.role,
-                None,
-                None,
-                None,
-                &settings,
-            )
-            .await
-            {
-                Ok(pair) => Json(serde_json::json!({
-                    "status": "approved",
-                    "access_token": pair.access_token,
-                    "refresh_token": pair.refresh_token,
-                    "token_type": "Bearer",
-                    "expires_in": pair.expires_in,
-                }))
-                .into_response(),
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to create session after MFA approval");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed")
-                }
-            }
-        }
-        Ok(Some(r)) if r.status == "rejected" => {
-            Json(serde_json::json!({ "status": "rejected" })).into_response()
-        }
-        Ok(Some(_)) => Json(serde_json::json!({ "status": "pending" })).into_response(),
-        Ok(None) => err(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "Pending login not found",
-        ),
-        Err(e) => {
-            tracing::error!(error = %e, "check pending");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed")
-        }
+    let status: String = row.try_get("status").unwrap_or_default();
+    let expires_at: chrono::DateTime<chrono::Utc> = match row.try_get("expires_at") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed"),
+    };
+    let consumed_at: Option<chrono::DateTime<chrono::Utc>> =
+        row.try_get("consumed_at").unwrap_or_default();
+    if status == "rejected" || status == "expired" {
+        return Json(serde_json::json!({ "status": "rejected" })).into_response();
     }
+    if expires_at <= chrono::Utc::now() {
+        let _ = sqlx::query(
+            "UPDATE pending_logins SET status = 'expired', resolved_at = COALESCE(resolved_at, now())
+             WHERE id = $1 AND status IN ('pending', 'approved') AND consumed_at IS NULL",
+        )
+        .bind(pending_id)
+        .execute(&mut *tx)
+        .await;
+        let _ = tx.commit().await;
+        return Json(serde_json::json!({ "status": "rejected" })).into_response();
+    }
+    if status != "approved" {
+        return Json(serde_json::json!({ "status": "pending" })).into_response();
+    }
+    let is_active: bool = row.try_get("is_active").unwrap_or(false);
+    let password_reset_required: bool = row.try_get("password_reset_required").unwrap_or(true);
+    let password_changed_at: Option<chrono::DateTime<chrono::Utc>> =
+        row.try_get("password_changed_at").unwrap_or_default();
+    let pending_created_at: chrono::DateTime<chrono::Utc> = match row.try_get("created_at") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed"),
+    };
+    let password_expired = settings.password_expire_days > 0
+        && password_changed_at.is_none_or(|changed_at| {
+            changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
+        });
+    let credentials_changed =
+        password_changed_at.is_none_or(|changed_at| changed_at > pending_created_at);
+
+    if consumed_at.is_some()
+        || expires_at <= chrono::Utc::now()
+        || !is_active
+        || password_reset_required
+        || password_expired
+        || credentials_changed
+    {
+        let _ = sqlx::query(
+            "UPDATE pending_logins
+             SET status = CASE WHEN expires_at <= now() THEN 'expired' ELSE 'rejected' END,
+                 resolved_at = COALESCE(resolved_at, now())
+             WHERE id = $1 AND consumed_at IS NULL",
+        )
+        .bind(pending_id)
+        .execute(&mut *tx)
+        .await;
+        let _ = tx.commit().await;
+        return Json(serde_json::json!({ "status": "rejected" })).into_response();
+    }
+
+    let user_id: Uuid = match row.try_get("user_id") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed"),
+    };
+    let role: String = row.try_get("role").unwrap_or_default();
+    let ip_address: Option<String> = row.try_get("ip_address").unwrap_or_default();
+    let user_agent: Option<String> = row.try_get("user_agent").unwrap_or_default();
+    let pair = match tokens::create_session_in_transaction(
+        &mut tx,
+        state.jwt_secret(),
+        user_id,
+        &role,
+        None,
+        ip_address.as_deref(),
+        user_agent.as_deref(),
+        &settings,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(error) => {
+            tracing::error!(%error, "create session after MFA approval");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed");
+        }
+    };
+    let consumed = sqlx::query(
+        "UPDATE pending_logins SET consumed_at = now()
+         WHERE id = $1 AND status = 'approved' AND consumed_at IS NULL AND expires_at > now()",
+    )
+    .bind(pending_id)
+    .execute(&mut *tx)
+    .await;
+    if !matches!(consumed, Ok(ref result) if result.rows_affected() == 1) {
+        return err(
+            StatusCode::CONFLICT,
+            "already_consumed",
+            "Pending login already consumed",
+        );
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, "commit pending login redemption");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed");
+    }
+
+    Json(serde_json::json!({
+        "status": "approved",
+        "access_token": pair.access_token,
+        "refresh_token": pair.refresh_token,
+        "token_type": "Bearer",
+        "expires_in": pair.expires_in,
+    }))
+    .into_response()
 }
 
 fn err(status: StatusCode, error: &str, message: &str) -> axum::response::Response {

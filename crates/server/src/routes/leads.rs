@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
+use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::documents::{NewStoredDocument, persist_document_file};
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -22,6 +24,29 @@ use gmed_domain::role::Role;
 const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 512 * 1024;
 const MAX_ATTACHMENTS: usize = 20;
+
+async fn validate_lead_attachment(
+    file_name: &str,
+    content_type: Option<&str>,
+    data: &[u8],
+) -> Result<String, axum::response::Response> {
+    let canonical_mime = validate_upload_magic_bytes(Some(file_name), content_type, data)
+        .map_err(|message| err(StatusCode::UNPROCESSABLE_ENTITY, message))?
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+
+    match scan_upload_bytes(Some(file_name), data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(file_name, "lead attachment malware scan skipped");
+        }
+        Err(error) => {
+            tracing::warn!(file_name, error = %error, "lead attachment rejected by malware scan");
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, &error));
+        }
+    }
+
+    Ok(canonical_mime)
+}
 
 // ----------------------------------------------------------------------------
 // Router
@@ -2945,6 +2970,9 @@ async fn import_lead_attachments_internal(
         let content_type: Option<String> = attachment.try_get("content_type").unwrap_or_default();
         let data: Vec<u8> = attachment.try_get("data").unwrap_or_default();
 
+        let canonical_mime =
+            validate_lead_attachment(&file_name, content_type.as_deref(), &data).await?;
+
         let document_exists =
             sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM documents WHERE id = $1)")
                 .bind(attachment_id)
@@ -2953,10 +2981,6 @@ async fn import_lead_attachments_internal(
                 .unwrap_or(false);
 
         if !document_exists {
-            let mime_type = content_type
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or("application/octet-stream");
             let input = NewStoredDocument {
                 document_id: Some(attachment_id),
                 document_number: None,
@@ -2971,7 +2995,7 @@ async fn import_lead_attachments_internal(
                 status: "active",
                 visibility: "internal",
                 is_medical: true,
-                mime_type,
+                mime_type: &canonical_mime,
                 klinik: None,
                 ursprung: Some("questionnaire"),
                 notes: Some("Imported from the client questionnaire"),
@@ -5300,10 +5324,24 @@ async fn ingest_lead_intake(
         return resp;
     }
 
-    let parsed = match parse_multipart(multipart).await {
+    let mut parsed = match parse_multipart(multipart).await {
         Ok(p) => p,
         Err(resp) => return resp,
     };
+
+    for file in &mut parsed.files {
+        let canonical_mime = match validate_lead_attachment(
+            &file.file_name,
+            file.content_type.as_deref(),
+            &file.data,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        file.content_type = Some(canonical_mime);
+    }
 
     let payload = &parsed.bundle["payload"];
     let first_name = str_opt(&payload["firstName"]).unwrap_or_default();

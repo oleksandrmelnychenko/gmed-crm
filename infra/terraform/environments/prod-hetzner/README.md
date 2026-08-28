@@ -135,13 +135,15 @@ The script:
    (`/etc/cron.d/gmed-backup`, daily 02:30 UTC), and the external
    Healthchecks.io `/health` ping cron if `HEALTHCHECKS_PING_URL` is
    set.
-6. `docker compose up -d` with digest-pinned GHCR images.
-7. If `PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true` and
-   `/etc/gmed/prod-db-sanitized` does not exist, waits for migrations,
-   stops public app services, removes business/demo rows, and leaves
-   only `PROD_ADMIN_EMAIL`. The sanitizer also records
+6. If `PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=true` and
+   `/etc/gmed/prod-db-sanitized` does not exist, keeps public app services
+   stopped, runs migrations in a temporary non-published backend container,
+   removes business/demo rows, and leaves only `PROD_ADMIN_EMAIL`. The
+   sanitizer also records
    key `prod_db_sanitized_at` in `system_settings`, so a restored PROD
    database is protected even if the host marker file is missing.
+7. Starts the full stack with digest-pinned GHCR images only after any
+   required sanitization has completed.
 8. Creates / rotates the read-only `postgres_exporter` role via
    `scripts/ensure-prod-metrics-user.sh`.
 9. Prunes dangling images older than 24h.

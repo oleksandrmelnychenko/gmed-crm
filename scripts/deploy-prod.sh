@@ -354,6 +354,39 @@ compose_up_or_diagnose() {
   return "$compose_rc"
 }
 
+run_migrations_without_public_listener() {
+  local migration_cid=""
+  local status=""
+
+  "${compose_cmd[@]}" up -d postgres
+  wait_for_compose_service_healthy postgres
+
+  # `compose run` does not publish the backend service ports. The temporary
+  # container therefore runs embedded migrations and reaches health without
+  # exposing the application before the production sanitizer has completed.
+  migration_cid="$("${compose_cmd[@]}" run -d --no-deps backend)"
+  for attempt in {1..120}; do
+    status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$migration_cid" 2>/dev/null || true)"
+    if [[ "$status" == "healthy" ]]; then
+      docker rm -f "$migration_cid" >/dev/null
+      return 0
+    fi
+    if [[ "$status" == "exited" || "$status" == "dead" ]]; then
+      echo "ERROR: temporary migration backend exited before becoming healthy." >&2
+      docker logs --tail=100 "$migration_cid" || true
+      docker rm -f "$migration_cid" >/dev/null 2>&1 || true
+      return 1
+    fi
+    if [[ "$attempt" -eq 120 ]]; then
+      echo "ERROR: temporary migration backend did not become healthy." >&2
+      docker logs --tail=100 "$migration_cid" || true
+      docker rm -f "$migration_cid" >/dev/null 2>&1 || true
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 verify_sanitized_production_database() {
   local counts=""
   local users admins patients leads cases orders invoices documents appointments tasks
@@ -399,29 +432,27 @@ SQL
   echo "Production DB verified: users=1 active_ceo=1 patients=0 leads=0 cases=0 orders=0 invoices=0 documents=0 appointments=0 tasks=0"
 }
 
-# Bring (or keep) services up. No --build: PROD pulls cosign-verified
-# images, never builds them locally. The ghcr override is layered LAST
-# so its `image:` directives win over any inherited `build:` block.
-compose_up_or_diagnose
-
+sanitized_this_run=false
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
-  sanitized_this_run=false
   sanitizer_marker="${PROD_EMPTY_DATABASE_MARKER:-/etc/gmed/prod-db-sanitized}"
   if [[ ! -e "$sanitizer_marker" || "${PROD_EMPTY_DATABASE_FORCE:-false}" == "true" ]]; then
-    # The backend healthcheck only passes after DB migrations have run.
-    # Stop public app services while the one-time data wipe executes.
-    wait_for_compose_service_healthy backend
+    # A forced rerun may happen while an older stack is live. Remove every
+    # public/application listener before the internal migration container.
     "${compose_cmd[@]}" stop caddy frontend backend clinical-document-parser
+    run_migrations_without_public_listener
     bash "$REPO_DIR/scripts/sanitize-prod-db.sh"
-    compose_up_or_diagnose
     sanitized_this_run=true
   else
     echo "Production DB sanitizer marker exists ($sanitizer_marker); data sanitizer skipped."
   fi
+fi
 
-  if [[ "$sanitized_this_run" == "true" ]]; then
-    verify_sanitized_production_database
-  fi
+# Bring (or keep) services up only after any first-deploy sanitization. No
+# --build: production pulls cosign-verified images and never builds locally.
+compose_up_or_diagnose
+
+if [[ "$sanitized_this_run" == "true" ]]; then
+  verify_sanitized_production_database
 fi
 
 if [[ -x "$REPO_DIR/scripts/ensure-prod-metrics-user.sh" ]]; then

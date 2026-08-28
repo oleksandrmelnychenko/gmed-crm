@@ -184,15 +184,30 @@ async fn force_password_reset(
         return e;
     }
 
-    // The literal `'2000-01-01'` is a sentinel recognised by the login flow
-    // as an expired password: any password_changed_at far enough in the past
-    // triggers a forced password change on the user's next sign-in.
-    let _ = sqlx::query!(
-        "UPDATE users SET password_changed_at = '2000-01-01'::timestamptz WHERE id = $1",
-        user_id
+    let result = sqlx::query(
+        "UPDATE users SET password_reset_required = true, updated_at = now() WHERE id = $1",
     )
+    .bind(user_id)
     .execute(&state.db)
     .await;
+
+    match result {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "User not found"),
+        Err(error) => {
+            tracing::error!(%error, target = %user_id, "Failed to force password reset");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+
+    let _ = sqlx::query(
+        "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+         WHERE user_id = $1 AND status IN ('pending', 'approved')",
+    )
+    .bind(user_id)
+    .execute(&state.db)
+    .await;
+    crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset_required").await;
 
     state.audit_sender.try_send(audit::domain_event(
         "force_password_reset",
@@ -309,8 +324,8 @@ async fn system_health(
             .fetch_one(&state.db)
             .await
             .unwrap_or(0);
-    let pending_logins = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "c!" FROM pending_logins WHERE status = 'pending'"#
+    let pending_logins = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM pending_logins WHERE status = 'pending' AND expires_at > now()",
     )
     .fetch_one(&state.db)
     .await

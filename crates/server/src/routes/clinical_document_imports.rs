@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::documents::{is_iso_country_code, read_document_storage_bytes};
 use crate::routes::patients::{
@@ -2221,6 +2222,16 @@ async fn create_import(
         validate_clinical_import_file(original_filename.as_deref(), mime_type.as_deref(), &data)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
+    match scan_upload_bytes(original_filename.as_deref(), &data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(document_id = %body.document_id, "clinical import malware scan skipped");
+        }
+        Err(error) => {
+            tracing::warn!(document_id = %body.document_id, %error, "clinical import rejected by malware scan");
+            return err(StatusCode::UNPROCESSABLE_ENTITY, &error);
+        }
     }
 
     let row = match sqlx::query(

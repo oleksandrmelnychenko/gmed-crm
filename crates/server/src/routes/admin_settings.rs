@@ -546,13 +546,13 @@ async fn list_pending_logins(
         return e;
     }
 
-    match sqlx::query!(
-        r#"SELECT pl.id, pl.user_id, u.name AS "user_name!", u.email AS "user_email!", u.role AS "role!",
+    match sqlx::query(
+        r#"SELECT pl.id, pl.user_id, u.name AS user_name, u.email AS user_email, u.role,
                   pl.ip_address, pl.user_agent, pl.device_info, pl.created_at
            FROM pending_logins pl
            JOIN users u ON u.id = pl.user_id
-           WHERE pl.status = 'pending'
-           ORDER BY pl.created_at DESC"#
+           WHERE pl.status = 'pending' AND pl.expires_at > now()
+           ORDER BY pl.created_at DESC"#,
     )
     .fetch_all(&state.db)
     .await
@@ -562,15 +562,15 @@ async fn list_pending_logins(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "id": r.id,
-                        "user_id": r.user_id,
-                        "user_name": r.user_name,
-                        "user_email": r.user_email,
-                        "role": r.role,
-                        "ip_address": r.ip_address,
-                        "user_agent": r.user_agent,
-                        "device_info": r.device_info,
-                        "created_at": r.created_at,
+                        "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "user_id": r.try_get::<Uuid, _>("user_id").unwrap_or_default(),
+                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
+                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "role": r.try_get::<String, _>("role").unwrap_or_default(),
+                        "ip_address": r.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
+                        "user_agent": r.try_get::<Option<String>, _>("user_agent").unwrap_or_default(),
+                        "device_info": r.try_get::<Option<serde_json::Value>, _>("device_info").unwrap_or_default(),
+                        "created_at": r.try_get::<DateTime<Utc>, _>("created_at").ok(),
                     })
                 })
                 .collect();
@@ -592,10 +592,17 @@ async fn approve_pending(
         return e;
     }
 
-    match sqlx::query!(
-        "UPDATE pending_logins SET status = 'approved', approved_by = $2, resolved_at = now() WHERE id = $1 AND status = 'pending'",
-        pending_id, auth.user_id
-    ).execute(&state.db).await {
+    match sqlx::query(
+        "UPDATE pending_logins pl SET status = 'approved', approved_by = $2, resolved_at = now()
+         FROM users u
+         WHERE pl.id = $1 AND pl.user_id = u.id AND pl.status = 'pending'
+           AND pl.expires_at > now() AND u.is_active AND NOT u.password_reset_required",
+    )
+    .bind(pending_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
+    {
         Ok(r) if r.rows_affected() > 0 => {
             state.audit_sender.try_send(audit::domain_event(
                 "mfa_approve",
@@ -616,7 +623,10 @@ async fn approve_pending(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Pending login not found or already resolved"),
+        Ok(_) => err(
+            StatusCode::NOT_FOUND,
+            "Pending login not found or already resolved",
+        ),
         Err(e) => {
             tracing::error!(error = %e, "approve pending");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")

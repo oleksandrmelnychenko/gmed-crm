@@ -128,6 +128,7 @@ async fn logout_blacklists_current_access_token_and_revokes_family_refresh() {
         TEST_SECRET,
         user_id,
         "patient_manager",
+        None,
         Some("device-a"),
         Some("127.0.0.1"),
         Some("integration-test"),
@@ -197,6 +198,7 @@ async fn logout_all_revokes_other_session_access_tokens_too() {
         TEST_SECRET,
         user_id,
         "patient_manager",
+        None,
         Some("device-a"),
         Some("127.0.0.1"),
         Some("integration-test-a"),
@@ -209,6 +211,7 @@ async fn logout_all_revokes_other_session_access_tokens_too() {
         TEST_SECRET,
         user_id,
         "patient_manager",
+        None,
         Some("device-b"),
         Some("127.0.0.2"),
         Some("integration-test-b"),
@@ -572,6 +575,60 @@ async fn refresh_rotates_refresh_token_and_old_refresh_triggers_theft() {
 }
 
 #[tokio::test]
+async fn concurrent_refresh_claims_only_one_child_and_revokes_the_family() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let user_id = seed_user(&pool, "auth_sessions_concurrent_refresh", "patient_manager").await;
+    let session = tokens::create_session(
+        &pool,
+        TEST_SECRET,
+        user_id,
+        "patient_manager",
+        None,
+        None,
+        None,
+        None,
+        &TokenSettings::default(),
+    )
+    .await
+    .unwrap();
+    let refresh = session.refresh_token;
+    let left_body = json!({ "refresh_token": refresh.clone() });
+    let right_body = json!({ "refresh_token": refresh });
+
+    let (left, right) = tokio::join!(
+        json_request(&app, "POST", "/api/v1/auth/refresh", None, Some(left_body)),
+        json_request(&app, "POST", "/api/v1/auth/refresh", None, Some(right_body)),
+    );
+    let responses = [left, right];
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|(status, _)| *status == StatusCode::OK)
+            .count(),
+        1
+    );
+    assert_eq!(
+        responses
+            .iter()
+            .filter(|(status, body)| {
+                *status == StatusCode::UNAUTHORIZED && body["error"] == "token_theft_detected"
+            })
+            .count(),
+        1
+    );
+    let active_families: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM token_families WHERE user_id = $1 AND NOT is_revoked",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_families, 0);
+}
+
+#[tokio::test]
 async fn refresh_rejects_unknown_token() {
     let Some((app, _pool)) = test_context().await else {
         return;
@@ -605,6 +662,208 @@ async fn refresh_validation_rejects_empty_token() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"], "validation_error");
+}
+
+#[tokio::test]
+async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_is_replaced() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-force-reset-{tag}@example.com");
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "original-password-1!",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let (status, login) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "original-password-1!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let refresh = login["refresh_token"].as_str().unwrap().to_string();
+    let access = bearer(login["access_token"].as_str().unwrap());
+
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@gmed.de'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let admin = ceo_admin_bearer(admin_id);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{user_id}/force-password-reset"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, refresh_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/refresh",
+        None,
+        Some(json!({ "refresh_token": refresh })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(refresh_body["error"], "session_revoked");
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/auth/sessions", Some(&access), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "unauthorized");
+    let (status, blocked) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "original-password-1!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(blocked["error"], "password_change_required");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{user_id}/reset-password"),
+        Some(&admin),
+        Some(json!({ "new_password": "Replacement-password-2!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "Replacement-password-2!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn expired_password_cannot_start_a_new_session() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-expired-password-{tag}@example.com");
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "expired-password-1!",
+        true,
+        false,
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE users SET password_changed_at = now() - interval '91 days' WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "expired-password-1!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], "password_change_required");
+}
+
+#[tokio::test]
+async fn stale_role_access_token_is_rejected_after_the_database_role_changes() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let user_id = seed_user(&pool, "auth-stale-role", "patient_manager").await;
+    let session = tokens::create_session(
+        &pool,
+        TEST_SECRET,
+        user_id,
+        "patient_manager",
+        None,
+        None,
+        None,
+        None,
+        &TokenSettings::default(),
+    )
+    .await
+    .unwrap();
+    let auth = bearer(&session.access_token);
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/auth/sessions", Some(&auth), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    sqlx::query("UPDATE users SET role = 'sales' WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/auth/sessions", Some(&auth), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "unauthorized");
+}
+
+#[tokio::test]
+async fn session_creation_rejects_a_password_snapshot_replaced_after_verification() {
+    let Some((_app, pool)) = test_context().await else {
+        return;
+    };
+    let user_id = seed_user(&pool, "auth-password-snapshot", "patient_manager").await;
+    let observed_password_changed_at: chrono::DateTime<Utc> =
+        sqlx::query_scalar("SELECT password_changed_at FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE users SET password_changed_at = $2 + interval '1 second' WHERE id = $1")
+        .bind(user_id)
+        .bind(observed_password_changed_at)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let result = tokens::create_session(
+        &pool,
+        TEST_SECRET,
+        user_id,
+        "patient_manager",
+        Some(observed_password_changed_at),
+        None,
+        None,
+        None,
+        &TokenSettings::default(),
+    )
+    .await;
+    assert!(matches!(result, Err(tokens::TokenError::FamilyRevoked)));
+
+    let family_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM token_families WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(family_count, 0);
 }
 
 #[tokio::test]
@@ -683,6 +942,164 @@ async fn mfa_pending_login_admin_approve_yields_tokens_via_check_pending() {
         json_request(&app, "GET", "/api/v1/auth/sessions", Some(&auth), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(sessions.as_array().map_or(0, |a| a.len()), 1);
+
+    let (status, replay) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/auth/pending/{pending_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["status"], "rejected");
+    assert!(replay.get("access_token").is_none());
+
+    let family_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM token_families tf
+         JOIN pending_logins pl ON pl.user_id = tf.user_id
+         WHERE pl.id = $1",
+    )
+    .bind(Uuid::parse_str(pending_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(family_count, 1);
+}
+
+#[tokio::test]
+async fn expired_mfa_pending_login_cannot_be_approved_or_redeemed() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-mfa-expired-{tag}@example.com");
+    seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "mfa-expired-pass",
+        true,
+        true,
+        None,
+    )
+    .await;
+    let (_, login_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "mfa-expired-pass" })),
+    )
+    .await;
+    let pending_id = Uuid::parse_str(login_body["pending_id"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE pending_logins SET expires_at = now() - interval '1 second' WHERE id = $1")
+        .bind(pending_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@gmed.de'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (approve_status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/mfa/pending/{pending_id}/approve"),
+        Some(&ceo_admin_bearer(admin_id)),
+        None,
+    )
+    .await;
+    assert_eq!(approve_status, StatusCode::NOT_FOUND);
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/auth/pending/{pending_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "rejected");
+}
+
+#[tokio::test]
+async fn password_replacement_invalidates_an_approved_mfa_pending_login() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-mfa-password-replaced-{tag}@example.com");
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "mfa-old-password-1!",
+        true,
+        true,
+        None,
+    )
+    .await;
+    let (status, login_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "mfa-old-password-1!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pending_id = Uuid::parse_str(login_body["pending_id"].as_str().unwrap()).unwrap();
+
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@gmed.de'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/mfa/pending/{pending_id}/approve"),
+        Some(&ceo_admin_bearer(admin_id)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let replacement_hash =
+        password::hash_password("mfa-replacement-password-2!").expect("replacement hash");
+    sqlx::query(
+        "UPDATE users u
+         SET password_hash = $2, password_changed_at = pl.created_at + interval '1 second'
+         FROM pending_logins pl
+         WHERE u.id = $1 AND pl.id = $3",
+    )
+    .bind(user_id)
+    .bind(replacement_hash)
+    .bind(pending_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/auth/pending/{pending_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "rejected");
+    assert!(body.get("access_token").is_none());
+
+    let family_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM token_families WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(family_count, 0);
 }
 
 #[tokio::test]

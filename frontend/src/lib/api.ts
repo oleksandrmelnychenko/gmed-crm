@@ -602,10 +602,27 @@ export function buildApiWebSocketUrl(
   path: string,
   params?: Record<string, string | number | boolean | null | undefined>,
 ) {
+  if (params && Object.keys(params).some((key) => /^(?:access_)?token$/i.test(key))) {
+    throw new Error("Bearer tokens must not be placed in WebSocket URLs");
+  }
   const url = new URL(normalizeApiPath(path), resolveApiBaseOrigin());
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   applySearchParams(url, params);
   return url.toString();
+}
+
+export function openAuthenticatedApiWebSocket(
+  path: string,
+  token: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) {
+  const socket = new WebSocket(buildApiWebSocketUrl(path, params));
+  socket.addEventListener(
+    "open",
+    () => socket.send(JSON.stringify({ type: "auth", token })),
+    { once: true },
+  );
+  return socket;
 }
 
 export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {

@@ -439,6 +439,7 @@ async fn update_user(
     let new_name = body.name.as_deref().unwrap_or(&current.name);
     let new_role = body.role.as_deref().unwrap_or(&current.role);
     let new_email = body.email.as_deref().unwrap_or(&current.email);
+    let role_changed = new_role != current.role.as_str();
 
     match sqlx::query!(
         "UPDATE users SET name = $2, role = $3, email = $4 WHERE id = $1
@@ -452,6 +453,17 @@ async fn update_user(
     .await
     {
         Ok(r) => {
+            if role_changed {
+                let _ = sqlx::query(
+                    "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+                     WHERE user_id = $1 AND status IN ('pending', 'approved')",
+                )
+                .bind(user_id)
+                .execute(&state.db)
+                .await;
+                crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_role_changed")
+                    .await;
+            }
             state.audit_sender.try_send(audit::domain_diff_event(
                 "update_user",
                 Some(auth.user_id),
@@ -687,6 +699,7 @@ async fn reset_password(
                                   || jsonb_build_array(password_hash),
                password_hash = $2,
                password_changed_at = now(),
+               password_reset_required = false,
                failed_login_attempts = 0,
                locked_until = NULL,
                updated_at = now()
@@ -699,6 +712,13 @@ async fn reset_password(
 
     match result {
         Ok(r) if r.rows_affected() > 0 => {
+            let _ = sqlx::query(
+                "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+                 WHERE user_id = $1 AND status IN ('pending', 'approved')",
+            )
+            .bind(user_id)
+            .execute(&state.db)
+            .await;
             crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
             state.audit_sender.try_send(audit::domain_event(
                 "reset_password",

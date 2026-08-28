@@ -545,6 +545,7 @@ export interface Translations
   settings_refresh_token_days: string;
   settings_max_sessions: string;
   settings_idle_days: string;
+  settings_password_expire_days: string;
   settings_agency_profile: string;
   settings_agency_name: string;
   settings_agency_care_of: string;

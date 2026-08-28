@@ -86,12 +86,21 @@ async function fetchDocumentBlob(id: string, noStore = false) {
   );
 }
 
-function writePreviewWindow(previewWindow: Window | null, html?: string) {
-  if (!previewWindow || !html) return false;
-  previewWindow.document.open();
-  previewWindow.document.write(html);
-  previewWindow.document.close();
-  return true;
+function isActivePreviewType(contentType: string) {
+  const mime = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  return (
+    mime === "text/html" ||
+    mime === "application/xhtml+xml" ||
+    mime === "image/svg+xml" ||
+    mime === "application/xml" ||
+    mime === "text/xml" ||
+    mime === "application/xslt+xml"
+  );
+}
+
+async function safePreviewBlob(blob: Blob, contentType: string) {
+  if (!isActivePreviewType(contentType)) return blob;
+  return new Blob([await blob.text()], { type: "text/plain;charset=utf-8" });
 }
 
 function openBlobPreviewWindow(previewWindow: Window | null, blob: Blob) {
@@ -144,20 +153,10 @@ export async function openDocumentPreview(
   previewWindow?: Window | null,
 ) {
   const { blob, contentType } = await fetchDocumentBlob(id, true);
-  if (contentType.startsWith("text/html")) {
-    const html = await blob.text();
-    const opened = writePreviewWindow(
-      previewWindow ?? window.open("", "_blank", "noopener,noreferrer"),
-      html,
-    );
-    if (!opened) {
-      if (previewWindow) previewWindow.close();
-      throw new Error(popupBlockedMessage);
-    }
-    return;
-  }
-
-  const opened = openBlobPreviewWindow(previewWindow ?? null, blob);
+  const opened = openBlobPreviewWindow(
+    previewWindow ?? null,
+    await safePreviewBlob(blob, contentType),
+  );
   if (!opened) {
     if (previewWindow) previewWindow.close();
     throw new Error(popupBlockedMessage);
@@ -168,12 +167,10 @@ export async function createDocumentPreviewObjectUrl(
   id: string,
 ): Promise<DocumentPreviewObjectUrl> {
   const { blob, contentType } = await fetchDocumentBlob(id, true);
-  const previewBlob = contentType.startsWith("text/html")
-    ? new Blob([await blob.text()], { type: contentType || "text/html" })
-    : blob;
+  const previewBlob = await safePreviewBlob(blob, contentType);
 
   return {
-    contentType,
+    contentType: previewBlob.type || "application/octet-stream",
     url: URL.createObjectURL(previewBlob),
   };
 }

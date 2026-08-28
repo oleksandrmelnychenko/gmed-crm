@@ -1551,7 +1551,7 @@ async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 (SELECT COUNT(*)::bigint FROM users WHERE is_active = true) AS active_users,
                 (SELECT COUNT(*)::bigint FROM users
                  WHERE locked_until IS NOT NULL AND locked_until > now()) AS locked_accounts,
-                (SELECT COUNT(*)::bigint FROM pending_logins WHERE status = 'pending') AS pending_logins,
+                (SELECT COUNT(*)::bigint FROM pending_logins WHERE status = 'pending' AND expires_at > now()) AS pending_logins,
                 (SELECT COUNT(DISTINCT user_id)::bigint
                  FROM token_families
                  WHERE is_revoked = false) AS active_sessions,

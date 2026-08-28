@@ -6296,6 +6296,7 @@ async fn activate_patient_portal_account(
                                       || jsonb_build_array(password_hash),
                    password_hash = $4,
                    password_changed_at = now(),
+                   password_reset_required = false,
                    failed_login_attempts = 0,
                    locked_until = NULL,
                    is_active = true,
@@ -6348,6 +6349,21 @@ async fn activate_patient_portal_account(
                 "Failed to activate patient account",
             )
         })?;
+
+    sqlx::query(
+        "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+         WHERE user_id = $1 AND status IN ('pending', 'approved')",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "reject pending logins during portal activation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to activate patient account",
+        )
+    })?;
 
     tx.commit().await.map_err(|error| {
         tracing::error!(%error, patient_id = %patient_uuid, user_id = %user_id, "commit patient portal activation");

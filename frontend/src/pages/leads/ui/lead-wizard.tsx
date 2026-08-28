@@ -6700,6 +6700,7 @@ ${serviceCommentLines.join("\n")}`
               <iframe
                 title={documentPreview.title}
                 src={documentPreview.url}
+                sandbox=""
                 className="h-full min-h-[32rem] w-full border border-border bg-white"
               />
             ) : null}

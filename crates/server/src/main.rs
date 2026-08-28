@@ -12,6 +12,11 @@ async fn main() {
 
     let cfg = config::Config::from_env();
 
+    if let Err(error) = gmed_server::file_scan::ensure_upload_scanner_ready() {
+        tracing::error!(%error, "Required upload malware scanner is unavailable");
+        std::process::exit(1);
+    }
+
     let pool = match gmed_db::create_pool(&cfg.database_url).await {
         Ok(p) => p,
         Err(e) => {

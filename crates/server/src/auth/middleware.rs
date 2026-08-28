@@ -1,11 +1,15 @@
 use axum::{
     Json,
-    extract::{Request, State},
+    extract::{
+        Request, State,
+        ws::{Message as WsMessage, WebSocket},
+    },
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -141,29 +145,6 @@ pub async fn auth_user_from_access_token(
         return Err(unauthorized());
     };
 
-    match blacklist::is_revoked(&state.db, data.claims.jti).await {
-        Ok(true) => {
-            tracing::info!(jti = %data.claims.jti, user_id = %data.claims.sub, "Rejected revoked access token");
-            return Err(unauthorized());
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to check token revocation — denying request");
-            return Err(unauthorized());
-        }
-        Ok(false) => {}
-    }
-    match blacklist::is_family_revoked(&state.db, data.claims.fam).await {
-        Ok(true) => {
-            tracing::info!(family_id = %data.claims.fam, user_id = %data.claims.sub, "Rejected token from revoked family");
-            return Err(unauthorized());
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to check family revocation — denying request");
-            return Err(unauthorized());
-        }
-        Ok(false) => {}
-    }
-
     let Some(access_token_expires_at) = DateTime::<Utc>::from_timestamp(data.claims.exp, 0) else {
         tracing::warn!(
             user_id = %data.claims.sub,
@@ -174,13 +155,106 @@ pub async fn auth_user_from_access_token(
         return Err(unauthorized());
     };
 
-    Ok(AuthUser {
-        user_id: data.claims.sub,
-        role,
-        family_id: data.claims.fam,
-        access_token_jti: data.claims.jti,
-        access_token_expires_at,
-    })
+    revalidate_auth_user(
+        state,
+        &AuthUser {
+            user_id: data.claims.sub,
+            role,
+            family_id: data.claims.fam,
+            access_token_jti: data.claims.jti,
+            access_token_expires_at,
+        },
+    )
+    .await
+}
+
+#[allow(clippy::result_large_err)]
+pub async fn revalidate_auth_user(state: &AppState, auth: &AuthUser) -> Result<AuthUser, Response> {
+    if auth.access_token_expires_at <= Utc::now() {
+        return Err(unauthorized());
+    }
+    match blacklist::is_revoked(&state.db, auth.access_token_jti).await {
+        Ok(false) => {}
+        Ok(true) | Err(_) => return Err(unauthorized()),
+    }
+    match blacklist::is_family_revoked(&state.db, auth.family_id).await {
+        Ok(false) => {}
+        Ok(true) | Err(_) => return Err(unauthorized()),
+    }
+
+    let row = sqlx::query(
+        "SELECT role, is_active, password_reset_required, password_changed_at
+         FROM users WHERE id = $1",
+    )
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, user_id = %auth.user_id, "revalidate authenticated user");
+        unauthorized()
+    })?;
+    let Some(row) = row else {
+        return Err(unauthorized());
+    };
+    use sqlx::Row as _;
+    if !row.try_get::<bool, _>("is_active").unwrap_or(false)
+        || row
+            .try_get::<bool, _>("password_reset_required")
+            .unwrap_or(true)
+    {
+        return Err(unauthorized());
+    }
+    let settings = state.settings.get().await;
+    let password_changed_at: Option<DateTime<Utc>> =
+        row.try_get("password_changed_at").unwrap_or_default();
+    if settings.password_expire_days > 0
+        && password_changed_at.is_none_or(|changed_at| {
+            changed_at + chrono::Duration::days(settings.password_expire_days) <= Utc::now()
+        })
+    {
+        return Err(unauthorized());
+    }
+    let role_name: String = row.try_get("role").unwrap_or_default();
+    let Some(role) = parse_role(&role_name) else {
+        return Err(unauthorized());
+    };
+    if role != auth.role {
+        return Err(unauthorized());
+    }
+
+    Ok(auth.clone())
+}
+
+#[derive(Deserialize)]
+struct WebSocketAuthMessage {
+    #[serde(rename = "type")]
+    kind: String,
+    token: String,
+}
+
+pub async fn authenticate_websocket(
+    socket: &mut WebSocket,
+    state: &AppState,
+) -> Result<AuthUser, ()> {
+    let message = tokio::time::timeout(std::time::Duration::from_secs(5), socket.recv())
+        .await
+        .map_err(|_| ())?
+        .ok_or(())?
+        .map_err(|_| ())?;
+    let WsMessage::Text(text) = message else {
+        return Err(());
+    };
+    if text.len() > 8192 {
+        return Err(());
+    }
+    let payload: WebSocketAuthMessage = serde_json::from_str(&text).map_err(|_| ())?;
+    let token = payload.token.trim();
+    if payload.kind != "auth" || token.is_empty() || token.len() > 4096 {
+        return Err(());
+    }
+    auth_user_from_access_token(state, token)
+        .await
+        .map_err(|_| ())
 }
 
 fn is_empty_workspace_role(role: Role) -> bool {

@@ -70,8 +70,11 @@ describe("API URL builders", () => {
     ).toBe(
       "/api/v1/stats/reports/export?section=provider_costs&include_archived=false",
     );
-    expect(buildApiWebSocketUrl("/messages/ws", { token: "abc123" })).toBe(
-      "ws://app.local:4173/api/v1/messages/ws?token=abc123",
+    expect(buildApiWebSocketUrl("/messages/ws", { last_seq: 42 })).toBe(
+      "ws://app.local:4173/api/v1/messages/ws?last_seq=42",
+    );
+    expect(() => buildApiWebSocketUrl("/messages/ws", { token: "abc123" })).toThrow(
+      "Bearer tokens must not be placed in WebSocket URLs",
     );
   });
 
@@ -84,9 +87,43 @@ describe("API URL builders", () => {
     expect(buildApiUrl("/documents/123/download")).toBe(
       "https://api.example.com/api/v1/documents/123/download",
     );
-    expect(buildApiWebSocketUrl("/messages/ws", { token: "abc123" })).toBe(
-      "wss://api.example.com/api/v1/messages/ws?token=abc123",
+    expect(buildApiWebSocketUrl("/messages/ws")).toBe(
+      "wss://api.example.com/api/v1/messages/ws",
     );
+  });
+
+  it("authenticates WebSockets in the first frame without putting the token in the URL", async () => {
+    setWindowOrigin("https://app.local");
+    const sockets: Array<{
+      url: string;
+      sent: string[];
+      open: (() => void) | null;
+    }> = [];
+    class FakeWebSocket {
+      url: string;
+      sent: string[] = [];
+      open: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+      }
+      addEventListener(type: string, listener: () => void) {
+        if (type === "open") this.open = listener;
+      }
+      send(value: string) {
+        this.sent.push(value);
+      }
+    }
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const { openAuthenticatedApiWebSocket } = await loadApiModule();
+
+    openAuthenticatedApiWebSocket("/events/ws", "secret-jwt", { last_seq: 7 });
+    expect(sockets[0]?.url).toBe("wss://app.local/api/v1/events/ws?last_seq=7");
+    expect(sockets[0]?.url).not.toContain("secret-jwt");
+    sockets[0]?.open?.();
+    expect(sockets[0]?.sent).toEqual([
+      JSON.stringify({ type: "auth", token: "secret-jwt" }),
+    ]);
   });
 });
 

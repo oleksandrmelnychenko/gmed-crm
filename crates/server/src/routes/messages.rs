@@ -18,8 +18,7 @@ use uuid::Uuid;
 
 use crate::access::has_active_patient_assignment;
 use crate::audit;
-use crate::auth::middleware::AuthUser;
-use crate::auth::{blacklist, jwt};
+use crate::auth::middleware::{AuthUser, authenticate_websocket, revalidate_auth_user};
 use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::me::resolve_self_patient_id;
@@ -66,94 +65,61 @@ pub fn router() -> Router<AppState> {
         .route("/messages/file/{file_key}", get(download_file))
 }
 
-#[derive(Deserialize)]
-struct MessageSocketQuery {
-    token: String,
-}
-
-#[allow(clippy::result_large_err)]
-async fn auth_user_from_socket_token(
-    state: &AppState,
-    token: &str,
-) -> Result<AuthUser, axum::response::Response> {
-    let Ok(data) = jwt::verify_access_token(state.jwt_secret(), token) else {
-        return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token"));
-    };
-
-    let role = match data.claims.role.as_str() {
-        "ceo" => Role::Ceo,
-        "ceo_assistant" => Role::CeoAssistant,
-        "patient_manager" => Role::PatientManager,
-        "teamlead_interpreter" => Role::TeamleadInterpreter,
-        "interpreter" => Role::Interpreter,
-        "concierge" => Role::Concierge,
-        "billing" => Role::Billing,
-        "sales" => Role::Sales,
-        "it_admin" => Role::ItAdmin,
-        "patient" => Role::Patient,
-        _ => {
-            return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token"));
-        }
-    };
-
-    match blacklist::is_revoked(&state.db, data.claims.jti).await {
-        Ok(true) => return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token")),
-        Err(e) => {
-            tracing::error!(error = %e, jti = %data.claims.jti, "check websocket token revocation");
-            return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token"));
-        }
-        Ok(false) => {}
-    }
-    match blacklist::is_family_revoked(&state.db, data.claims.fam).await {
-        Ok(true) => return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token")),
-        Err(e) => {
-            tracing::error!(error = %e, family_id = %data.claims.fam, "check websocket token family revocation");
-            return Err(err(StatusCode::UNAUTHORIZED, "Invalid or expired token"));
-        }
-        Ok(false) => {}
-    }
-
-    Ok(AuthUser {
-        user_id: data.claims.sub,
-        role,
-        family_id: data.claims.fam,
-        access_token_jti: data.claims.jti,
-        access_token_expires_at: chrono::DateTime::<chrono::Utc>::from_timestamp(
-            data.claims.exp,
-            0,
-        )
-        .unwrap_or_else(chrono::Utc::now),
-    })
-}
-
 async fn messages_ws(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-    Query(query): Query<MessageSocketQuery>,
 ) -> axum::response::Response {
-    let auth = match auth_user_from_socket_token(&state, query.token.trim()).await {
-        Ok(value) => value,
-        Err(resp) => return resp,
-    };
-    if let Err(resp) = ensure_chat_workspace_role(&auth) {
-        return resp;
-    }
-
-    ws.on_upgrade(move |socket| handle_messages_ws(socket, state, auth.user_id))
+    ws.on_upgrade(move |socket| handle_messages_ws(socket, state))
         .into_response()
 }
 
-async fn handle_messages_ws(mut socket: WebSocket, state: AppState, user_id: Uuid) {
+async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
+    let mut auth = match authenticate_websocket(&mut socket, &state).await {
+        Ok(auth) => auth,
+        Err(()) => return,
+    };
+    if ensure_chat_workspace_role(&auth).is_err() {
+        return;
+    }
     let mut receiver = state.message_events.subscribe();
-    let user_id_string = user_id.to_string();
+    let mut authorization_check = tokio::time::interval(std::time::Duration::from_secs(15));
+    authorization_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let expires_in = (auth.access_token_expires_at - chrono::Utc::now())
+        .to_std()
+        .unwrap_or_default();
+    let expiry_check = tokio::time::sleep(expires_in);
+    tokio::pin!(expiry_check);
+    let user_id_string = auth.user_id.to_string();
 
-    while let Ok(event) = receiver.recv().await {
+    loop {
+        let received = tokio::select! {
+            _ = &mut expiry_check => break,
+            _ = authorization_check.tick() => {
+                match revalidate_auth_user(&state, &auth).await {
+                    Ok(current) if ensure_chat_workspace_role(&current).is_ok() => {
+                        auth = current;
+                        continue;
+                    }
+                    _ => break,
+                }
+            }
+            received = receiver.recv() => received,
+        };
+        let event = match received {
+            Ok(event) => event,
+            Err(_) => break,
+        };
         let Some(target_user_id) = event.get("user_id").and_then(Value::as_str) else {
             continue;
         };
         if target_user_id != user_id_string {
             continue;
         }
+
+        auth = match revalidate_auth_user(&state, &auth).await {
+            Ok(current) if ensure_chat_workspace_role(&current).is_ok() => current,
+            _ => break,
+        };
 
         if socket
             .send(WsMessage::Text(event.to_string().into()))
