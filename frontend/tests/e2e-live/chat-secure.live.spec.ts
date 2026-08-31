@@ -12,6 +12,10 @@ const MINIMAL_PDF = Buffer.from(
   "utf8",
 );
 
+type DownloadProbeWindow = Window & {
+  __gmedCapturedDownload?: Blob;
+};
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -294,11 +298,42 @@ test.describe("secure chat live workflows", () => {
         "patient-secure-note.pdf",
       );
 
-      const [download] = await Promise.all([
-        conciergePage.waitForEvent("download"),
-        conciergePage.getByRole("button", { name: /patient-secure-note\.pdf/i }).click(),
-      ]);
-      expect(download.suggestedFilename()).toBe("patient-secure-note.pdf");
+      await conciergePage.evaluate(() => {
+        const probeWindow = window as DownloadProbeWindow;
+        const createObjectUrl = URL.createObjectURL.bind(URL);
+        URL.createObjectURL = (blob: Blob) => {
+          probeWindow.__gmedCapturedDownload = blob;
+          return createObjectUrl(blob);
+        };
+      });
+      const attachmentDownloadResponse = conciergePage.waitForResponse(
+        (nextResponse) =>
+          nextResponse.request().method() === "GET" &&
+          nextResponse.url().includes("/api/v1/messages/file/"),
+        { timeout: 15_000 },
+      );
+      await conciergePage
+        .getByRole("button", { name: /patient-secure-note\.pdf/i })
+        .click();
+      expect((await attachmentDownloadResponse).ok()).toBeTruthy();
+      await expect
+        .poll(
+          () =>
+            conciergePage.evaluate(async () => {
+              const blob = (window as DownloadProbeWindow)
+                .__gmedCapturedDownload;
+              if (!blob) return null;
+              return {
+                type: blob.type,
+                bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+              };
+            }),
+          { timeout: 15_000 },
+        )
+        .toEqual({
+          type: "application/pdf",
+          bytes: Array.from(MINIMAL_PDF),
+        });
 
       const deleteResponsePromise = patientPage.waitForResponse(
         (nextResponse) =>

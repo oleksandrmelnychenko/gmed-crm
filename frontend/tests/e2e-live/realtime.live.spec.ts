@@ -111,17 +111,20 @@ test.describe("realtime live propagation", () => {
   }) => {
     const scenario = await bootstrapFullSmokeScenario(request);
     const password = scenario.credentials.password;
-    const actor = scenario.credentials.pm;
+    const creator = scenario.credentials.ceo;
+    const operationsObserver = scenario.credentials.concierge;
 
     await setGermanLanguage(page);
-    await loginViaApi(page, request, actor.email, password);
+    await loginViaApi(page, request, creator.email, password);
 
     const mutatorContext = await browser.newContext();
     const mutatorPage = await mutatorContext.newPage();
+    const operationsContext = await browser.newContext();
+    const operationsPage = await operationsContext.newPage();
 
     try {
       await setGermanLanguage(mutatorPage);
-      await loginViaApi(mutatorPage, request, actor.email, password);
+      await loginViaApi(mutatorPage, request, creator.email, password);
       await waitForRealtime(page);
       await waitForRealtime(mutatorPage);
 
@@ -168,12 +171,22 @@ test.describe("realtime live propagation", () => {
       });
       await expect(page.getByText(lastName).first()).toBeVisible();
 
-      await page.goto(`/appointments?patient=${scenario.patient.id}`);
+      // The release workspace deliberately keeps patient-manager accounts on
+      // the task-only surface. Observe patient creation as CEO, then use the
+      // assigned concierge for patient-scoped appointment and task events.
+      await setGermanLanguage(operationsPage);
+      await loginViaApi(
+        operationsPage,
+        request,
+        operationsObserver.email,
+        password,
+      );
+      await operationsPage.goto(`/appointments?patient=${scenario.patient.id}`);
       await expect(
-        page.getByRole("heading", { level: 1, name: "Termine" }),
+        operationsPage.getByRole("heading", { level: 1, name: "Termine" }),
       ).toBeVisible();
-      await waitForRealtime(page);
-      await expect(page.getByText(appointmentTitle)).toHaveCount(0);
+      await waitForRealtime(operationsPage);
+      await expect(operationsPage.getByText(appointmentTitle)).toHaveCount(0);
 
       await browserApiPost(mutatorPage, "/appointments", {
         patient_id: scenario.patient.id,
@@ -198,20 +211,24 @@ test.describe("realtime live propagation", () => {
         recurrence_until: null,
       });
 
-      await expect(page.getByText(appointmentTitle).first()).toBeVisible({
+      await expect(operationsPage.getByText(appointmentTitle).first()).toBeVisible({
         timeout: 30_000,
       });
 
-      await page.goto("/");
+      await operationsPage.goto("/");
       await expect(
-        page.getByRole("heading", { name: /Guten|Hello|Willkommen/i }).first(),
+        operationsPage
+          .getByRole("heading", { name: /Guten|Hello|Willkommen/i })
+          .first(),
       ).toBeVisible();
-      await expect(page.getByText(taskTitle)).toHaveCount(0);
-      const taskPanel = page.locator("div").filter({
-        has: page.getByRole("heading", { name: /Meine Aufgaben|My tasks|Мои задачи/i }),
+      await expect(operationsPage.getByText(taskTitle)).toHaveCount(0);
+      const taskPanel = operationsPage.locator("div").filter({
+        has: operationsPage.getByRole("heading", {
+          name: /Meine Aufgaben|My tasks|Мои задачи/i,
+        }),
       }).first();
       const tasksBefore = await browserApiGet<TaskListItem[]>(
-        page,
+        operationsPage,
         "/tasks?mine_only=true",
       );
       const expectedOpenTasksCount =
@@ -221,7 +238,7 @@ test.describe("realtime live propagation", () => {
       await browserApiPost(mutatorPage, "/tasks", {
         title: taskTitle,
         description: "Created in another browser context for dashboard realtime.",
-        assigned_to: actor.user_id,
+        assigned_to: operationsObserver.user_id,
         patient_id: scenario.patient.id,
         order_id: null,
         appointment_id: null,
@@ -229,7 +246,7 @@ test.describe("realtime live propagation", () => {
         priority: "urgent",
       });
 
-      await expect(page.getByText(taskTitle).first()).toBeVisible({
+      await expect(operationsPage.getByText(taskTitle).first()).toBeVisible({
         timeout: 30_000,
       });
       await expect(
@@ -238,6 +255,7 @@ test.describe("realtime live propagation", () => {
         }).first(),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
+      await operationsContext.close();
       await mutatorContext.close();
     }
   });
