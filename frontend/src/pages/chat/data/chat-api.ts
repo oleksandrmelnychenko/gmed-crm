@@ -19,12 +19,46 @@ export type SentMessageReceipt = {
   duplicate?: boolean;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseSentMessageReceipt(value: unknown): SentMessageReceipt {
+  if (
+    !isRecord(value) ||
+    value.ok !== true ||
+    typeof value.id !== "string" ||
+    !value.id ||
+    typeof value.created_at !== "string" ||
+    !value.created_at ||
+    Number.isNaN(Date.parse(value.created_at)) ||
+    (value.expires_at !== undefined &&
+      value.expires_at !== null &&
+      (typeof value.expires_at !== "string" || Number.isNaN(Date.parse(value.expires_at)))) ||
+    (value.client_message_id !== undefined &&
+      value.client_message_id !== null &&
+      typeof value.client_message_id !== "string") ||
+    (value.duplicate !== undefined && typeof value.duplicate !== "boolean")
+  ) {
+    throw new Error("Invalid message delivery receipt");
+  }
+  return value as SentMessageReceipt;
+}
+
 export function fetchConversations() {
   return apiFetch<Conversation[]>("/messages/conversations");
 }
 
-export function fetchPeerMessages(peerId: string) {
-  return apiFetch<Message[]>(`/messages/${peerId}?limit=100`);
+export function fetchPeerMessages(
+  peerId: string,
+  before?: Pick<Message, "created_at" | "id">,
+) {
+  const params = new URLSearchParams({ limit: "100" });
+  if (before) {
+    params.set("before_created_at", before.created_at);
+    params.set("before_id", before.id);
+  }
+  return apiFetch<Message[]>(`/messages/${peerId}?${params.toString()}`);
 }
 
 export function markPeerMessagesRead(peerId: string) {
@@ -44,18 +78,20 @@ export function fetchAllowedPeers(searchTerm: string) {
   return apiFetch<UserItem[]>(query);
 }
 
-export function sendPeerMessage(peerId: string, payload: JsonPayload) {
-  return apiFetch<SentMessageReceipt>(`/messages/${peerId}`, {
+export async function sendPeerMessage(peerId: string, payload: JsonPayload) {
+  const receipt = await apiFetch<unknown>(`/messages/${peerId}`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  return parseSentMessageReceipt(receipt);
 }
 
 export async function uploadPeerAttachment(peerId: string, formData: FormData) {
-  const receipt = await apiFetch<SentMessageReceipt>(`/messages/${peerId}/upload`, {
+  const rawReceipt = await apiFetch<unknown>(`/messages/${peerId}/upload`, {
     method: "POST",
     body: formData,
   });
+  const receipt = parseSentMessageReceipt(rawReceipt);
   clearApiCache();
   return receipt;
 }

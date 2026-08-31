@@ -252,6 +252,21 @@ async function installSecureChatApiMocks(
       });
     }
 
+    if (
+      path === "/messages/e2e-key" &&
+      route.request().method() === "GET"
+    ) {
+      return json(route, {
+        id: "key-me",
+        user_id: myId,
+        fingerprint: myKey.fingerprint,
+        algorithm: myKey.algorithm,
+        public_key: myKey.publicKey,
+        is_active: true,
+        created_at: myKey.createdAt,
+      });
+    }
+
     if (path === `/messages/e2e-key/${peerId}`) {
       if (options?.peerHasKey === false) {
         return json(route, { message: "Not found" }, 404);
@@ -317,6 +332,7 @@ async function installSecureChatApiMocks(
         e2e_salt?: string;
         sender_key_fingerprint?: string;
         recipient_key_fingerprint?: string;
+        client_message_id?: string;
       };
       messages = [
         ...messages,
@@ -345,7 +361,23 @@ async function installSecureChatApiMocks(
           attachment_e2e_salt: null,
         },
       ];
-      return json(route, { ok: true });
+      const sent = messages[messages.length - 1]!;
+      return json(route, {
+        ok: true,
+        id: sent.id,
+        created_at: sent.created_at,
+        client_message_id: payload.client_message_id ?? null,
+        duplicate: false,
+      });
+    }
+
+    if (
+      path.startsWith(`/messages/${peerId}/`) &&
+      route.request().method() === "DELETE"
+    ) {
+      const messageId = path.slice(`/messages/${peerId}/`.length);
+      messages = messages.filter((message) => message.id !== messageId);
+      return json(route, { ok: true, id: messageId });
     }
 
     if (
@@ -390,7 +422,15 @@ async function installSecureChatApiMocks(
             multipart.fields.attachment_e2e_salt ?? null,
         },
       ];
-      return json(route, { ok: true, attachment_key: attachmentKey });
+      const sent = messages[messages.length - 1]!;
+      return json(route, {
+        ok: true,
+        id: sent.id,
+        created_at: sent.created_at,
+        client_message_id: multipart.fields.client_message_id ?? null,
+        duplicate: false,
+        attachment_key: attachmentKey,
+      });
     }
 
     if (path === `/messages/file/${attachmentKey}`) {
@@ -406,7 +446,7 @@ async function installSecureChatApiMocks(
 }
 
 test.describe("chat secure flows", () => {
-  test("staff can send the first text before the peer creates an E2E key", async ({ page }) => {
+  test("staff cannot downgrade to plaintext before the peer creates an E2E key", async ({ page }) => {
     const [myKey, peerKey] = await Promise.all([
       generateLocalMessageKey(),
       generateLocalMessageKey(),
@@ -422,17 +462,9 @@ test.describe("chat secure flows", () => {
 
     await page.goto("/chat");
     await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
-    await expect(page.getByText(/geschützten Serverkanal|защищённый серверный канал/i)).toBeVisible();
-
-    const sendRequest = page.waitForRequest((request) => {
-      if (request.method() !== "POST" || !request.url().endsWith("/api/v1/messages/00000000-0000-0000-0000-000000000777")) return false;
-      return JSON.parse(request.postData() ?? "{}").message === "First protected hello";
-    });
+    await expect(page.getByText(/Geschützter Kanal|Защищенный канал/i)).toBeVisible();
     await page.getByPlaceholder(/Nachricht eingeben/i).fill("First protected hello");
-    await page.locator("form button[type='submit']").click();
-    await sendRequest;
-
-    await expect(page.getByText("First protected hello")).toBeVisible();
+    await expect(page.locator("form button[type='submit']")).toBeDisabled();
   });
 
   test("staff can send a secure text message in browser E2E", async ({
@@ -444,6 +476,19 @@ test.describe("chat secure flows", () => {
     ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey);
+    let activePeerKeyRequests = 0;
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        request.method() === "GET" &&
+        url.pathname.endsWith(
+          "/api/v1/messages/e2e-key/00000000-0000-0000-0000-000000000777",
+        ) &&
+        !url.search
+      ) {
+        activePeerKeyRequests += 1;
+      }
+    });
 
     await page.goto("/login");
     await page.locator("#email").fill("admin@gmed.de");
@@ -460,6 +505,82 @@ test.describe("chat secure flows", () => {
     await page.locator("form button[type='submit']").click();
 
     await expect(page.getByText("Secure browser hello")).toBeVisible();
+    expect(activePeerKeyRequests).toBeGreaterThanOrEqual(2);
+
+    const deleteRequest = page.waitForRequest((request) =>
+      request.method() === "DELETE" &&
+      request.url().includes("/api/v1/messages/00000000-0000-0000-0000-000000000777/"),
+    );
+    await page.getByRole("button", { name: /Nachricht löschen|Удалить сообщение/i }).click();
+    await page.getByRole("button", { name: /Löschen|Удалить/i }).last().click();
+    await deleteRequest;
+    await expect(page.getByText("Secure browser hello")).toHaveCount(0);
+  });
+
+  test("chat reconnects after a websocket disconnect", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(),
+      generateLocalMessageKey(),
+    ]);
+
+    await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.addInitScript(() => {
+      let connectionCount = 0;
+      class TestWebSocket extends EventTarget {
+        onopen: ((event: Event) => void) | null = null;
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onerror: ((event: Event) => void) | null = null;
+        onclose: ((event: CloseEvent) => void) | null = null;
+
+        constructor(url: string | URL) {
+          super();
+          void url;
+          connectionCount += 1;
+          const currentConnection = connectionCount;
+          window.setTimeout(() => {
+            const event = new Event("open");
+            this.dispatchEvent(event);
+            this.onopen?.(event);
+            if (currentConnection === 1) {
+              window.setTimeout(() => this.close(), 100);
+            }
+          }, 10);
+        }
+
+        send(data: string) {
+          void data;
+        }
+
+        close() {
+          const event = new CloseEvent("close");
+          this.dispatchEvent(event);
+          this.onclose?.(event);
+        }
+      }
+
+      Object.defineProperty(window, "WebSocket", { value: TestWebSocket });
+      Object.defineProperty(window, "__chatSocketConnectionCount", {
+        get: () => connectionCount,
+      });
+    });
+
+    await page.goto("/login");
+    await page.locator("#email").fill("admin@gmed.de");
+    await page.locator("#password").fill("admin123");
+    await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
+    await page.waitForURL(/\/$/, { timeout: 15_000 });
+    await page.goto("/chat");
+    await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { __chatSocketConnectionCount?: number })
+            .__chatSocketConnectionCount ?? 0,
+        ),
+      )
+      .toBeGreaterThanOrEqual(2);
+    await expect(page.getByText(/Verbunden|В сети/i)).toBeVisible({ timeout: 5_000 });
   });
 
   test("staff can send a secure attachment in browser E2E", async ({
@@ -638,7 +759,7 @@ test.describe("chat secure flows", () => {
     await pickerSearch.fill("Assigned");
     await assignedSearchRequest;
     await expect(
-      picker.getByRole("button", { name: /Assigned Care Manager/i }),
+      picker.getByRole("option", { name: /Assigned Care Manager/i }),
     ).toBeVisible();
 
     const hiddenSearchRequest = page.waitForRequest((request) =>
@@ -648,7 +769,7 @@ test.describe("chat secure flows", () => {
     await pickerSearch.fill("Billing");
     await hiddenSearchRequest;
     await expect(
-      picker.getByRole("button", { name: /Assigned Care Manager/i }),
+      picker.getByRole("option", { name: /Assigned Care Manager/i }),
     ).toHaveCount(0);
     await expect(picker.getByText(hiddenPeerName)).toHaveCount(0);
   });

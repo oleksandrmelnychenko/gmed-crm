@@ -3,11 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { apiFetchMock } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(
     async (
-      _path: string,
+      path: string,
       init?: {
         body?: string;
       },
     ) => {
+      if (path === "/messages/e2e-key" && !init?.body) {
+        throw new Error("404 not found");
+      }
       const body = JSON.parse(init?.body ?? "{}") as {
         algorithm: string;
         public_key: string;
@@ -26,7 +29,7 @@ const { apiFetchMock } = vi.hoisted(() => ({
 
       return {
         id: crypto.randomUUID(),
-        user_id: crypto.randomUUID(),
+        user_id: path.includes("peer-user") ? "peer-user" : "owner-user",
         fingerprint,
         algorithm: body.algorithm,
         public_key: body.public_key,
@@ -46,13 +49,12 @@ import {
   decryptAttachmentFromPeer,
   encryptAttachmentForPeer,
   ensureServerMessageKey,
-  exportKeyRingBackup,
-  importKeyRingBackup,
+  fetchPeerMessageKey,
+  getLocalMessageKey,
+  PeerMessageKeyChangedError,
   type MessageKeyEnvelope,
   type MessageKeyRecord,
 } from "@/lib/chat-e2e";
-
-const STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
 
 function installLocalStorageMock() {
   const store = new Map<string, string>();
@@ -87,6 +89,13 @@ async function makeKeyRecord(seed: Uint8Array): Promise<{
   );
   const publicKey = new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
   const privateKeyJwk = (await crypto.subtle.exportKey("jwk", keyPair.privateKey)) as JsonWebKey;
+  const privateKey = await crypto.subtle.importKey(
+    "jwk",
+    privateKeyJwk,
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"],
+  );
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", publicKey),
   );
@@ -98,10 +107,11 @@ async function makeKeyRecord(seed: Uint8Array): Promise<{
 
   return {
     local: {
+      ownerUserId: `owner-${seed[0] ?? 0}`,
       algorithm: CHAT_E2E_ALGORITHM,
       fingerprint,
       publicKey: publicKeyBase64,
-      privateKeyJwk,
+      privateKey,
       createdAt,
     },
     envelope: {
@@ -125,19 +135,18 @@ beforeEach(() => {
 describe("secure chat server key setup", () => {
   it("deduplicates concurrent first-run key registration", async () => {
     const [first, second] = await Promise.all([
-      ensureServerMessageKey(),
-      ensureServerMessageKey(),
+      ensureServerMessageKey("owner-user"),
+      ensureServerMessageKey("owner-user"),
     ]);
 
     expect(first.fingerprint).toBe(second.fingerprint);
-    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body)),
+    ).toHaveLength(1);
 
-    const ring = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as {
-      activeFingerprint?: string;
-      keys?: Record<string, MessageKeyRecord>;
-    };
-    expect(ring.activeFingerprint).toBe(first.fingerprint);
-    expect(Object.keys(ring.keys ?? {})).toEqual([first.fingerprint]);
+    expect(first.privateKey.extractable).toBe(false);
+    expect(await getLocalMessageKey("owner-user", first.fingerprint)).toBeTruthy();
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBeNull();
   });
 });
 
@@ -172,37 +181,50 @@ describe("chat E2E attachments", () => {
   });
 });
 
-describe("secure chat key backups", () => {
-  it("exports and restores the local keyring with a passphrase", async () => {
-    const [first, second] = await Promise.all([
-      makeKeyRecord(new Uint8Array([3])),
-      makeKeyRecord(new Uint8Array([4])),
+describe("secure chat account isolation", () => {
+  it("does not expose one account's device key through another account", async () => {
+    const ownerKey = await ensureServerMessageKey("owner-user");
+    expect(await getLocalMessageKey("different-user", ownerKey.fingerprint)).toBeNull();
+  });
+});
+
+describe("secure chat peer identity confirmation", () => {
+  it("does not pin a third key when the confirmed candidate changed in flight", async () => {
+    const [first, second, third] = await Promise.all([
+      makeKeyRecord(new Uint8Array([11])),
+      makeKeyRecord(new Uint8Array([12])),
+      makeKeyRecord(new Uint8Array([13])),
     ]);
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        activeFingerprint: second.local.fingerprint,
-        keys: {
-          [first.local.fingerprint]: first.local,
-          [second.local.fingerprint]: second.local,
-        },
-      }),
+    first.envelope.user_id = "peer-user";
+    second.envelope.user_id = "peer-user";
+    third.envelope.user_id = "peer-user";
+
+    apiFetchMock.mockResolvedValueOnce(first.envelope);
+    await expect(fetchPeerMessageKey("owner-user", "peer-user")).resolves.toEqual(
+      first.envelope,
     );
 
-    const backup = await exportKeyRingBackup("passphrase-123");
-    localStorage.clear();
-
-    const restored = await importKeyRingBackup(backup, "passphrase-123");
-    expect(restored.importedKeys).toBe(2);
-    expect(restored.activeFingerprint).toBe(second.local.fingerprint);
-
-    const ring = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as {
-      activeFingerprint?: string;
-      keys?: Record<string, MessageKeyRecord>;
-    };
-    expect(ring.activeFingerprint).toBe(second.local.fingerprint);
-    expect(Object.keys(ring.keys ?? {})).toEqual(
-      expect.arrayContaining([first.local.fingerprint, second.local.fingerprint]),
+    apiFetchMock.mockResolvedValueOnce(second.envelope);
+    await expect(fetchPeerMessageKey("owner-user", "peer-user")).rejects.toBeInstanceOf(
+      PeerMessageKeyChangedError,
     );
+
+    apiFetchMock.mockResolvedValueOnce(third.envelope);
+    await expect(
+      fetchPeerMessageKey(
+        "owner-user",
+        "peer-user",
+        null,
+        second.envelope.fingerprint,
+      ),
+    ).rejects.toMatchObject({
+      candidate: third.envelope,
+    });
+
+    apiFetchMock.mockResolvedValueOnce(third.envelope);
+    await expect(fetchPeerMessageKey("owner-user", "peer-user")).rejects.toMatchObject({
+      previousFingerprint: first.envelope.fingerprint,
+      candidate: third.envelope,
+    });
   });
 });

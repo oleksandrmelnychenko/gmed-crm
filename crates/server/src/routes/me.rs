@@ -689,6 +689,80 @@ pub(crate) async fn resolve_linked_patient_id(
         return Ok(Some(patient_id));
     }
 
+    // Serialize the first-run fallback per user, then re-check every predicate
+    // inside the same transaction. A concurrent explicit revocation must win
+    // over email matching and must never be silently reactivated.
+    let mut tx = state.db.begin().await.map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "begin first patient email link");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate linked patient",
+        )
+    })?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 4))")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "lock first patient email link");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate linked patient",
+            )
+        })?;
+
+    let active_rows = sqlx::query(
+        r#"SELECT patient_id
+           FROM patient_assignments
+           WHERE user_id = $1
+             AND revoked_at IS NULL
+           ORDER BY assigned_at DESC
+           LIMIT 2"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "recheck self patient id");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate linked patient",
+        )
+    })?;
+    if active_rows.len() > 1 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Patient account is linked to multiple patient records",
+        ));
+    }
+    if let Some(row) = active_rows.first() {
+        let patient_id = row.try_get::<Uuid, _>("patient_id").map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "decode rechecked patient assignment");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate linked patient",
+            )
+        })?;
+        return Ok(Some(patient_id));
+    }
+
+    let has_assignment_history = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM patient_assignments WHERE user_id = $1)",
+    )
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "check patient assignment history");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate linked patient",
+        )
+    })?;
+    if has_assignment_history {
+        return Ok(None);
+    }
+
     let email_rows = sqlx::query(
         r#"SELECT p.id AS patient_id
            FROM users u
@@ -703,7 +777,7 @@ pub(crate) async fn resolve_linked_patient_id(
           LIMIT 2"#,
     )
     .bind(user_id)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, user_id = %user_id, "resolve self patient id via email");
@@ -732,27 +806,60 @@ pub(crate) async fn resolve_linked_patient_id(
         )
     })?;
 
-    if !patient_id.is_nil()
-        && let Err(error) = sqlx::query(
-            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-               VALUES ($1, $2, $2)
-               ON CONFLICT (patient_id, user_id)
-               DO UPDATE SET revoked_at = NULL, assigned_by = $2, assigned_at = now()"#,
-        )
-        .bind(patient_id)
-        .bind(user_id)
-        .execute(&state.db)
-        .await
-    {
-        tracing::warn!(
-            error = %error,
-            user_id = %user_id,
-            patient_id = %patient_id,
-            "failed to restore self patient assignment from email link"
-        );
+    if patient_id.is_nil() {
+        return Ok(None);
     }
 
-    Ok(Some(patient_id))
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $2)
+           ON CONFLICT (patient_id, user_id) DO NOTHING
+           RETURNING patient_id"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, patient_id = %patient_id, "create first patient email link");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate linked patient",
+        )
+    })?;
+
+    // A concurrent explicit assignment/revocation may have won the conflict.
+    // Only an active row is accepted; a revoked conflict remains revoked.
+    let confirmed = if inserted.is_some() {
+        Some(patient_id)
+    } else {
+        sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT patient_id
+           FROM patient_assignments
+           WHERE user_id = $1
+             AND patient_id = $2
+             AND revoked_at IS NULL"#,
+        )
+        .bind(user_id)
+        .bind(patient_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, patient_id = %patient_id, "confirm patient email link");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate linked patient",
+            )
+        })?
+    };
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, patient_id = %patient_id, "commit first patient email link");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate linked patient",
+        )
+    })?;
+    Ok(confirmed)
 }
 
 pub(crate) async fn resolve_self_patient_id(

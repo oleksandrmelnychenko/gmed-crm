@@ -30,7 +30,7 @@
 //! enums (outcome / reason / role) are fine; anything user-controlled
 //! (email, IP, free text) belongs in the audit log, not in a metric.
 
-use metrics::{Unit, describe_counter, describe_histogram};
+use metrics::{Unit, describe_counter, describe_gauge, describe_histogram};
 
 // --- Names ----------------------------------------------------------------
 //
@@ -72,6 +72,28 @@ pub const MEDICATION_AI_FENCED_ATTEMPTS_TOTAL: &str = "gmed_medication_ai_fenced
 pub const MEDICATION_AI_PROVIDER_DURATION_SECONDS: &str =
     "gmed_medication_ai_provider_duration_seconds";
 
+/// Gauge: active upgraded chat and general-realtime WebSocket transports,
+/// including sockets waiting for their bounded first authentication frame.
+pub const CHAT_WEBSOCKET_CONNECTIONS: &str = "gmed_chat_websocket_connections";
+
+/// Counter: WebSocket admissions rejected by a bounded quota reason.
+pub const CHAT_WEBSOCKET_REJECTIONS_TOTAL: &str = "gmed_chat_websocket_rejections_total";
+
+/// Histogram: persisted events inspected by a realtime replay request.
+pub const CHAT_REALTIME_REPLAY_EVENTS: &str = "gmed_chat_realtime_replay_events";
+
+/// Counter: chat payloads removed by the expiry lifecycle sweeper.
+pub const CHAT_LIFECYCLE_PURGED_TOTAL: &str = "gmed_chat_lifecycle_purged_total";
+
+/// Gauge: age in seconds of the oldest expired payload still awaiting purge.
+pub const CHAT_PURGE_LAG_SECONDS: &str = "gmed_chat_purge_lag_seconds";
+
+/// Gauge: logical bytes currently charged to visible chat attachments.
+pub const CHAT_ATTACHMENT_STORAGE_BYTES: &str = "gmed_chat_attachment_storage_bytes";
+
+/// Counter: chat messages accepted, labelled by payload kind and E2E status.
+pub const CHAT_MESSAGES_ACCEPTED_TOTAL: &str = "gmed_chat_messages_accepted_total";
+
 // --- Descriptions ---------------------------------------------------------
 
 /// Register `# HELP` text for every metric defined in this module.
@@ -102,5 +124,40 @@ pub fn describe_all() {
         MEDICATION_AI_PROVIDER_DURATION_SECONDS,
         Unit::Seconds,
         "Duration of one external Medication Evidence AI provider attempt, labelled only by success or error."
+    );
+    describe_gauge!(
+        CHAT_WEBSOCKET_CONNECTIONS,
+        Unit::Count,
+        "Current number of upgraded chat and realtime WebSocket transports, including pre-authentication handshakes."
+    );
+    describe_counter!(
+        CHAT_WEBSOCKET_REJECTIONS_TOTAL,
+        Unit::Count,
+        "WebSocket connections rejected by the bounded global or per-user admission quota."
+    );
+    describe_histogram!(
+        CHAT_REALTIME_REPLAY_EVENTS,
+        Unit::Count,
+        "Persisted realtime events inspected per replay attempt before delivery filtering or resync."
+    );
+    describe_counter!(
+        CHAT_LIFECYCLE_PURGED_TOTAL,
+        Unit::Count,
+        "Expired chat payloads removed by foreground or scheduled lifecycle cleanup."
+    );
+    describe_gauge!(
+        CHAT_PURGE_LAG_SECONDS,
+        Unit::Seconds,
+        "Age of the oldest expired chat payload still awaiting scheduled lifecycle cleanup."
+    );
+    describe_gauge!(
+        CHAT_ATTACHMENT_STORAGE_BYTES,
+        Unit::Bytes,
+        "Logical bytes charged to active, non-redacted chat attachments."
+    );
+    describe_counter!(
+        CHAT_MESSAGES_ACCEPTED_TOTAL,
+        Unit::Count,
+        "Accepted chat messages, labelled only by text or attachment kind and E2E status."
     );
 }

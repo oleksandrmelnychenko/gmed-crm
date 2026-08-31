@@ -89,13 +89,15 @@ function AppointmentHandoffSectionContent({
       peer: peer.id,
       name: peer.name,
       role: peer.role,
-      draft: appointmentText("appointments_handoff_chat_draft", {
+    });
+    const chatDraft = appointmentText("appointments_handoff_chat_draft", {
         patientPid: detail.patient_pid,
         title: detail.title,
         slot: slotLabel(detail),
-      }),
     });
-    staffGo(`/chat?${params.toString()}`);
+    staffGo(`/chat?${params.toString()}`, {
+      state: { chatDraft, chatDraftPeerId: peer.id },
+    });
   }
 
   const stakeholderColumns = useMemo<ColumnDef<HandoffStakeholder>[]>(

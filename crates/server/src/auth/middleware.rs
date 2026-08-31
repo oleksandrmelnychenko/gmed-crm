@@ -114,8 +114,7 @@ async fn require_auth_with_workspace_policy(
     };
 
     if enforce_release_workspace_roles
-        && is_empty_workspace_role(auth_user.role)
-        && !is_empty_workspace_allowed_path(auth_user.role, req.uri().path())
+        && !release_workspace_allows_path(auth_user.role, req.uri().path())
     {
         tracing::warn!(
             role = %auth_user.role,
@@ -265,6 +264,25 @@ fn is_empty_workspace_role(role: Role) -> bool {
     role != Role::Patient && !role.is_release_staff_role()
 }
 
+/// Shared production workspace decision used by HTTP and WebSocket transports.
+/// Public WebSocket routes authenticate after upgrade, so their handlers must
+/// call this after authentication and after periodic revalidation.
+pub(crate) fn release_workspace_allows_path(role: Role, path: &str) -> bool {
+    !is_empty_workspace_role(role) || is_empty_workspace_allowed_path(role, path)
+}
+
+/// Empty-workspace task roles retain only the realtime event classes matching
+/// their narrow operational HTTP surface. Direct user/role targeting must not
+/// grant them unrelated patient, finance, chat, or administrative events.
+pub(crate) fn release_workspace_allows_realtime_event(role: Role, event_type: &str) -> bool {
+    if !is_empty_workspace_role(role) {
+        return true;
+    }
+    is_task_manager_workspace_role(role)
+        && (event_type.starts_with("notification.")
+            || event_type.starts_with("concierge_operational_item."))
+}
+
 fn is_empty_workspace_allowed_path(role: Role, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
     let session_path = matches!(
@@ -277,7 +295,8 @@ fn is_empty_workspace_allowed_path(role: Role, path: &str) -> bool {
     if !is_task_manager_workspace_role(role) {
         return false;
     }
-    path == "/concierge-operational-items"
+    path == "/events/ws"
+        || path == "/concierge-operational-items"
         || path.starts_with("/concierge-operational-items/")
         || path == "/concierge-operational-attachments"
         || path == "/notifications"
@@ -502,6 +521,45 @@ mod tests {
         assert!(!is_empty_workspace_allowed_path(
             Role::PatientManager,
             "/api/v1/patients"
+        ));
+    }
+
+    #[test]
+    fn release_workspace_transport_policy_matches_http_boundaries() {
+        for role in [Role::Ceo, Role::Concierge, Role::Billing, Role::Patient] {
+            assert!(release_workspace_allows_path(role, "/messages/ws"));
+            assert!(release_workspace_allows_path(role, "/events/ws"));
+            assert!(release_workspace_allows_realtime_event(
+                role,
+                "patient.updated"
+            ));
+        }
+
+        for role in [Role::CeoAssistant, Role::PatientManager, Role::Interpreter] {
+            assert!(!release_workspace_allows_path(role, "/messages/ws"));
+            assert!(release_workspace_allows_path(role, "/events/ws"));
+            assert!(!release_workspace_allows_realtime_event(
+                role,
+                "patient.updated"
+            ));
+            assert!(release_workspace_allows_realtime_event(
+                role,
+                "notification.created"
+            ));
+            assert!(release_workspace_allows_realtime_event(
+                role,
+                "concierge_operational_item.updated"
+            ));
+        }
+
+        assert!(!release_workspace_allows_path(
+            Role::ItAdmin,
+            "/messages/ws"
+        ));
+        assert!(!release_workspace_allows_path(Role::ItAdmin, "/events/ws"));
+        assert!(!release_workspace_allows_realtime_event(
+            Role::ItAdmin,
+            "admin_security.updated"
         ));
     }
 }

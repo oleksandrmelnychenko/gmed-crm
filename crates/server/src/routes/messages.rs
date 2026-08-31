@@ -2,7 +2,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{
-        Extension, Multipart, Path, Query, State, WebSocketUpgrade,
+        DefaultBodyLimit, Extension, Multipart, Path, Query, State, WebSocketUpgrade,
         ws::{Message as WsMessage, WebSocket},
     },
     http::StatusCode,
@@ -18,7 +18,9 @@ use uuid::Uuid;
 
 use crate::access::has_active_patient_assignment;
 use crate::audit;
-use crate::auth::middleware::{AuthUser, authenticate_websocket, revalidate_auth_user};
+use crate::auth::middleware::{
+    AuthUser, authenticate_websocket, release_workspace_allows_path, revalidate_auth_user,
+};
 use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::me::resolve_self_patient_id;
@@ -26,6 +28,15 @@ use crate::state::AppState;
 use gmed_domain::role::Role;
 
 const MAX_FILE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
+const MAX_ENCRYPTED_FILE_SIZE: usize = MAX_FILE_SIZE + 32;
+const AES_GCM_TAG_SIZE: usize = 16;
+const E2E_NONCE_SIZE: usize = 12;
+const E2E_SALT_SIZE: usize = 16;
+const MAX_MESSAGE_PUBLIC_KEY_SIZE: usize = 512;
+const MAX_ATTACHMENT_FILENAME_BYTES: usize = 255;
+const MAX_ATTACHMENT_MIME_BYTES: usize = 255;
+const MAX_CHAT_ATTACHMENT_BYTES_PER_USER: i64 = 500 * 1024 * 1024;
+const MAX_CHAT_ATTACHMENT_BYTES_GLOBAL: i64 = 20 * 1024 * 1024 * 1024;
 const MAX_MESSAGE_CHARS: usize = 10_000;
 const MAX_ENCRYPTED_MESSAGE_SIZE: usize = 64 * 1024;
 const MIN_MESSAGE_EXPIRY_SECONDS: i64 = 60;
@@ -42,7 +53,12 @@ pub fn public_router() -> Router<AppState> {
 }
 
 pub fn router() -> Router<AppState> {
+    let upload_routes = Router::new()
+        .route("/messages/{user_id}/upload", post(upload_file))
+        .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024));
+
     Router::new()
+        .merge(upload_routes)
         .route(
             "/messages/e2e-key",
             get(get_my_e2e_key).post(upsert_my_e2e_key),
@@ -59,7 +75,6 @@ pub fn router() -> Router<AppState> {
             "/messages/{user_id}/{message_id}",
             axum::routing::delete(delete_message),
         )
-        .route("/messages/{user_id}/upload", post(upload_file))
         .route("/messages/{user_id}/read", post(mark_conversation_read))
         .route("/messages/unread-total", get(unread_total))
         .route("/messages/file/{file_key}", get(download_file))
@@ -74,13 +89,24 @@ async fn messages_ws(
 }
 
 async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
+    let Some(mut connection_permit) = state.websocket_connections.try_acquire_handshake() else {
+        tracing::warn!("chat websocket global handshake quota exceeded");
+        return;
+    };
     let mut auth = match authenticate_websocket(&mut socket, &state).await {
         Ok(auth) => auth,
         Err(_) => return,
     };
-    if ensure_chat_workspace_role(&auth).is_err() {
+    if !release_workspace_allows_path(auth.role, "/messages/ws")
+        || ensure_chat_workspace_role(&auth).is_err()
+    {
         return;
     }
+    if !connection_permit.try_bind_user(auth.user_id) {
+        tracing::warn!(user_id = %auth.user_id, "chat websocket connection quota exceeded");
+        return;
+    }
+    let _connection_permit = connection_permit;
     let mut receiver = state.message_events.subscribe();
     let mut authorization_check = tokio::time::interval(std::time::Duration::from_secs(15));
     authorization_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -96,7 +122,9 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
             _ = &mut expiry_check => break,
             _ = authorization_check.tick() => {
                 match revalidate_auth_user(&state, &auth).await {
-                    Ok(current) if ensure_chat_workspace_role(&current).is_ok() => {
+                    Ok(current)
+                        if release_workspace_allows_path(current.role, "/messages/ws")
+                            && ensure_chat_workspace_role(&current).is_ok() => {
                         auth = current;
                         continue;
                     }
@@ -117,7 +145,12 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
         }
 
         auth = match revalidate_auth_user(&state, &auth).await {
-            Ok(current) if ensure_chat_workspace_role(&current).is_ok() => current,
+            Ok(current)
+                if release_workspace_allows_path(current.role, "/messages/ws")
+                    && ensure_chat_workspace_role(&current).is_ok() =>
+            {
+                current
+            }
             _ => break,
         };
 
@@ -162,25 +195,12 @@ struct UpsertMessageKeyRequest {
     public_key: String,
 }
 
-fn truncate_notification_text(value: &str, max_chars: usize) -> String {
-    let trimmed = value.trim();
-    let mut out = String::new();
-    for (idx, ch) in trimmed.chars().enumerate() {
-        if idx >= max_chars {
-            out.push_str("...");
-            return out;
-        }
-        out.push(ch);
-    }
-    out
-}
-
 async fn create_message_notification(
     state: &AppState,
+    source_message_id: Uuid,
     from_user: Uuid,
     to_user: Uuid,
-    message: Option<&str>,
-    attachment_filename: Option<&str>,
+    is_attachment: bool,
 ) {
     let sender_name = sqlx::query_scalar::<_, String>(
         "SELECT COALESCE(NULLIF(name, ''), email, 'Care team') FROM users WHERE id = $1",
@@ -192,31 +212,26 @@ async fn create_message_notification(
     .flatten()
     .unwrap_or_else(|| "Care team".to_string());
 
-    let kind = if attachment_filename.is_some() {
+    let kind = if is_attachment {
         "direct_message_attachment"
     } else {
         "direct_message"
     };
-    let title = if attachment_filename.is_some() {
+    let title = if is_attachment {
         format!("New file from {sender_name}")
     } else {
         format!("New message from {sender_name}")
     };
-    let body = match (
-        message.map(str::trim).filter(|value| !value.is_empty()),
-        attachment_filename,
-    ) {
-        (Some(message), Some(filename)) => {
-            format!("{} [{filename}]", truncate_notification_text(message, 120))
-        }
-        (Some(message), None) => truncate_notification_text(message, 140),
-        (None, Some(filename)) => format!("Attachment: {filename}"),
-        (None, None) => "Open chat".to_string(),
-    };
+    // Notification infrastructure is intentionally content-free. Message text,
+    // captions, and filenames follow the message lifecycle and must not be
+    // copied into a second plaintext store.
+    let body = "Open chat";
 
     match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           VALUES ($1, $2, $3, $4, 'message_peer', $5)
+        r#"INSERT INTO user_notifications (
+               user_id, kind, title, body, entity_type, entity_id, source_message_id
+           )
+           VALUES ($1, $2, $3, $4, 'message_peer', $5, $6)
            RETURNING id"#,
     )
     .bind(to_user)
@@ -224,6 +239,7 @@ async fn create_message_notification(
     .bind(title)
     .bind(body)
     .bind(from_user)
+    .bind(source_message_id)
     .fetch_one(&state.db)
     .await
     {
@@ -243,6 +259,22 @@ async fn create_message_notification(
     }
 }
 
+async fn delete_message_notifications(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    message_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE source_message_id = $1
+             AND entity_type = 'message_peer'
+             AND kind IN ('direct_message', 'direct_message_attachment')"#,
+    )
+    .bind(message_id)
+    .execute(&mut **tx)
+    .await
+    .map(|result| result.rows_affected())
+}
+
 async fn write_message_peer_audit(
     state: &AppState,
     actor_user_id: Uuid,
@@ -259,11 +291,14 @@ async fn write_message_peer_audit(
     ));
 }
 
-async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
+/// Deletes a bounded batch of expired chat payloads and their derivative
+/// notifications/files. `user_id = None` is used by the scheduled global
+/// sweeper; foreground reads pass a user id for low-latency cleanup.
+pub async fn purge_expired_messages_batch(state: &AppState, user_id: Option<Uuid>) -> u64 {
     let rows = match sqlx::query(
         r#"SELECT id, from_user, to_user, attachment_key
              FROM direct_messages
-            WHERE (from_user = $1 OR to_user = $1)
+            WHERE ($1::uuid IS NULL OR from_user = $1 OR to_user = $1)
               AND deleted_at IS NULL
               AND expires_at IS NOT NULL
               AND expires_at <= now()
@@ -276,11 +311,12 @@ async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
     {
         Ok(rows) => rows,
         Err(error) => {
-            tracing::warn!(error = %error, user_id = %user_id, "load expired direct messages");
-            return;
+            tracing::warn!(error = %error, user_id = ?user_id, "load expired direct messages");
+            return 0;
         }
     };
 
+    let mut purged = 0_u64;
     for row in rows {
         let message_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
         let from_user = row
@@ -294,6 +330,13 @@ async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
             .ok()
             .flatten();
 
+        let mut tx = match state.db.begin().await {
+            Ok(tx) => tx,
+            Err(error) => {
+                tracing::warn!(error = %error, message_id = %message_id, "begin expired direct message purge");
+                continue;
+            }
+        };
         let updated = sqlx::query(
             r#"UPDATE direct_messages
                   SET deleted_at = now(),
@@ -320,11 +363,20 @@ async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
                   AND deleted_at IS NULL"#,
         )
         .bind(message_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await;
 
         match updated {
             Ok(result) if result.rows_affected() > 0 => {
+                if let Err(error) = delete_message_notifications(&mut tx, message_id).await {
+                    tracing::warn!(error = %error, message_id = %message_id, "delete expired chat message notifications");
+                    continue;
+                }
+                if let Err(error) = tx.commit().await {
+                    tracing::warn!(error = %error, message_id = %message_id, "commit expired direct message purge");
+                    continue;
+                }
+                purged += result.rows_affected();
                 if let Some(file_key) =
                     attachment_key.filter(|value| sanitize_filename(value) == *value)
                 {
@@ -356,6 +408,265 @@ async fn purge_expired_messages_for_user(state: &AppState, user_id: Uuid) {
             }
         }
     }
+    if purged > 0 {
+        metrics::counter!(crate::business_metrics::CHAT_LIFECYCLE_PURGED_TOTAL).increment(purged);
+    }
+    if user_id.is_none() {
+        match sqlx::query_scalar::<_, f64>(
+            r#"SELECT COALESCE(
+                   EXTRACT(EPOCH FROM (now() - min(expires_at))),
+                   0
+               )::double precision
+               FROM direct_messages
+               WHERE expires_at <= now()
+                 AND deleted_at IS NULL"#,
+        )
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(lag_seconds) => {
+                metrics::gauge!(crate::business_metrics::CHAT_PURGE_LAG_SECONDS)
+                    .set(lag_seconds.max(0.0));
+            }
+            Err(error) => tracing::warn!(error = %error, "measure chat expiry purge lag"),
+        }
+    }
+    purged
+}
+
+/// Encrypts a bounded batch of pre-nonce attachment files in place by writing
+/// a new object, atomically switching the database reference, and only then
+/// removing the legacy object. Downloads fail closed while a row is still in
+/// the legacy state.
+pub async fn migrate_legacy_chat_attachments_batch(state: &AppState) -> (u64, u64) {
+    let rows = match sqlx::query(
+        r#"SELECT id, attachment_key
+           FROM direct_messages
+           WHERE attachment_key IS NOT NULL
+             AND attachment_nonce IS NULL
+             AND attachment_e2e_algorithm IS NULL
+             AND deleted_at IS NULL
+           ORDER BY created_at
+           LIMIT 25"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error, "load legacy chat attachments for migration");
+            return (0, 1);
+        }
+    };
+
+    let mut migrated = 0_u64;
+    let mut errors = 0_u64;
+    let upload_dir = std::path::Path::new(UPLOAD_DIR);
+    if let Err(error) = tokio::fs::create_dir_all(upload_dir).await {
+        tracing::warn!(error = %error, "create legacy chat migration directory");
+        return (0, 1);
+    }
+    for row in rows {
+        let message_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        let Some(old_key) = row
+            .try_get::<Option<String>, _>("attachment_key")
+            .ok()
+            .flatten()
+            .filter(|value| sanitize_filename(value) == *value)
+        else {
+            errors += 1;
+            continue;
+        };
+        let old_path = upload_dir.join(&old_key);
+        let plaintext = match tokio::fs::read(&old_path).await {
+            Ok(value) => value,
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, message_id = %message_id, "read legacy chat attachment");
+                continue;
+            }
+        };
+        let (ciphertext, nonce, key_id) = match state.message_keys.encrypt(&plaintext) {
+            Ok(value) => value,
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, message_id = %message_id, "encrypt legacy chat attachment");
+                continue;
+            }
+        };
+        let extension = std::path::Path::new(&old_key)
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| value.len() <= 16)
+            .map(|value| format!(".{value}"))
+            .unwrap_or_default();
+        let new_key = format!("{}_migrated{extension}", Uuid::new_v4());
+        let new_path = upload_dir.join(&new_key);
+        if let Err(error) = tokio::fs::write(&new_path, ciphertext).await {
+            errors += 1;
+            tracing::warn!(error = %error, message_id = %message_id, "write migrated chat attachment");
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            if let Err(error) =
+                tokio::fs::set_permissions(&new_path, std::fs::Permissions::from_mode(0o600)).await
+            {
+                errors += 1;
+                tracing::warn!(error = %error, message_id = %message_id, "restrict migrated chat attachment permissions");
+                let _ = tokio::fs::remove_file(&new_path).await;
+                continue;
+            }
+        }
+
+        let updated = sqlx::query(
+            r#"UPDATE direct_messages
+               SET attachment_key = $2,
+                   attachment_nonce = $3,
+                   encryption_key_id = $4
+               WHERE id = $1
+                 AND attachment_key = $5
+                 AND attachment_nonce IS NULL
+                 AND attachment_e2e_algorithm IS NULL"#,
+        )
+        .bind(message_id)
+        .bind(&new_key)
+        .bind(&nonce)
+        .bind(&key_id)
+        .bind(&old_key)
+        .execute(&state.db)
+        .await;
+        match updated {
+            Ok(result) if result.rows_affected() == 1 => {
+                migrated += 1;
+                if let Err(error) = tokio::fs::remove_file(&old_path).await
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(error = %error, message_id = %message_id, "remove migrated legacy chat attachment");
+                }
+            }
+            Ok(_) => {
+                let _ = tokio::fs::remove_file(&new_path).await;
+            }
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, message_id = %message_id, "persist migrated chat attachment");
+                let _ = tokio::fs::remove_file(&new_path).await;
+            }
+        }
+    }
+    (migrated, errors)
+}
+
+/// Removes a bounded batch of old files that are no longer referenced by any
+/// chat row. A one-hour grace period prevents racing an upload whose file has
+/// been written but whose database transaction has not committed yet.
+pub async fn reconcile_orphan_chat_attachments_batch(state: &AppState) -> (u64, u64) {
+    const MAX_FILES_PER_SWEEP: usize = 100;
+    const ORPHAN_GRACE_SECONDS: u64 = 60 * 60;
+
+    let upload_dir = std::path::Path::new(UPLOAD_DIR);
+    let mut entries = match tokio::fs::read_dir(upload_dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (0, 0),
+        Err(error) => {
+            tracing::warn!(error = %error, "open chat attachment directory for reconciliation");
+            return (0, 1);
+        }
+    };
+    let mut scanned = 0_usize;
+    let mut deleted = 0_u64;
+    let mut errors = 0_u64;
+
+    while scanned < MAX_FILES_PER_SWEEP {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, "read chat attachment directory entry");
+                break;
+            }
+        };
+        let metadata = match entry.metadata().await {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Ok(_) => continue,
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, path = %entry.path().display(), "read chat attachment metadata");
+                continue;
+            }
+        };
+        scanned += 1;
+        let is_old_enough = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age.as_secs() >= ORPHAN_GRACE_SECONDS);
+        if !is_old_enough {
+            continue;
+        }
+        let Some(file_key) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if sanitize_filename(&file_key) != file_key {
+            continue;
+        }
+        let referenced = match sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM direct_messages WHERE attachment_key = $1)",
+        )
+        .bind(&file_key)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, file_key = %file_key, "check orphan chat attachment reference");
+                continue;
+            }
+        };
+        if referenced {
+            continue;
+        }
+        match tokio::fs::remove_file(entry.path()).await {
+            Ok(()) => deleted += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                errors += 1;
+                tracing::warn!(error = %error, file_key = %file_key, "remove orphan chat attachment");
+            }
+        }
+    }
+
+    match sqlx::query_scalar::<_, i64>(
+        r#"SELECT COALESCE(sum(attachment_size), 0)::bigint
+           FROM direct_messages
+           WHERE attachment_key IS NOT NULL"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(used_bytes) => {
+            metrics::gauge!(crate::business_metrics::CHAT_ATTACHMENT_STORAGE_BYTES)
+                .set(used_bytes as f64);
+            if used_bytes >= MAX_CHAT_ATTACHMENT_BYTES_GLOBAL * 4 / 5 {
+                tracing::warn!(
+                    used_bytes,
+                    capacity_bytes = MAX_CHAT_ATTACHMENT_BYTES_GLOBAL,
+                    "chat attachment storage is above 80 percent capacity"
+                );
+            }
+        }
+        Err(error) => {
+            errors += 1;
+            tracing::warn!(error = %error, "measure reconciled chat attachment storage");
+        }
+    }
+
+    (deleted, errors)
 }
 
 async fn list_allowed_peers(
@@ -393,6 +704,31 @@ fn decode_base64_message_field(
     BASE64
         .decode(value.trim())
         .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, field))
+}
+
+#[allow(clippy::result_large_err)]
+fn decode_fixed_base64_message_field(
+    value: &str,
+    field: &str,
+    expected_size: usize,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let value = value.trim();
+    let max_encoded_size = expected_size.div_ceil(3) * 4;
+    if value.len() > max_encoded_size {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, field));
+    }
+    let bytes = decode_base64_message_field(value, field)?;
+    if bytes.len() != expected_size {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, field));
+    }
+    Ok(bytes)
+}
+
+fn is_valid_message_key_fingerprint(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 async fn load_message_key_row(
@@ -528,8 +864,12 @@ async fn upsert_my_e2e_key(
             "Invalid message key algorithm",
         );
     }
-    let public_key = match decode_base64_message_field(&body.public_key, "Invalid public_key") {
-        Ok(value) if !value.is_empty() => value,
+    let encoded_public_key = body.public_key.trim();
+    if encoded_public_key.len() > MAX_MESSAGE_PUBLIC_KEY_SIZE.div_ceil(3) * 4 {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid public_key");
+    }
+    let public_key = match decode_base64_message_field(encoded_public_key, "Invalid public_key") {
+        Ok(value) if !value.is_empty() && value.len() <= MAX_MESSAGE_PUBLIC_KEY_SIZE => value,
         Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid public_key"),
         Err(resp) => return resp,
     };
@@ -555,6 +895,44 @@ async fn upsert_my_e2e_key(
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to save message key",
+        );
+    }
+
+    // Fingerprints remain globally unique so one public key cannot silently
+    // represent two accounts. Lock the fingerprint across users, then reject a
+    // cross-owner collision before changing either account's active-key state.
+    if let Err(e) = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 1))")
+        .bind(&fingerprint)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(error = %e, user_id = %auth.user_id, fingerprint = %fingerprint, "lock message key fingerprint");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save message key",
+        );
+    }
+
+    let existing_owner = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT user_id FROM user_message_keys WHERE fingerprint = $1",
+    )
+    .bind(&fingerprint)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, fingerprint = %fingerprint, "load message key fingerprint owner");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save message key",
+            );
+        }
+    };
+    if existing_owner.is_some_and(|owner| owner != auth.user_id) {
+        return err(
+            StatusCode::CONFLICT,
+            "Message key is already registered to another account",
         );
     }
 
@@ -586,6 +964,7 @@ async fn upsert_my_e2e_key(
                public_key = EXCLUDED.public_key,
                is_active = true,
                revoked_at = NULL
+           WHERE user_message_keys.user_id = EXCLUDED.user_id
            RETURNING id, user_id, fingerprint, algorithm, public_key, is_active, created_at"#,
     )
     .bind(auth.user_id)
@@ -601,6 +980,17 @@ async fn upsert_my_e2e_key(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save message key");
         }
     };
+
+    let row_owner = row
+        .try_get::<Uuid, _>("user_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    if row_owner != auth.user_id {
+        tracing::error!(user_id = %auth.user_id, row_owner = %row_owner, fingerprint = %fingerprint, "message key owner mismatch after upsert");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save message key",
+        );
+    }
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, user_id = %auth.user_id, "commit message key upsert");
@@ -620,7 +1010,7 @@ async fn list_conversations(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
-    purge_expired_messages_for_user(&state, auth.user_id).await;
+    purge_expired_messages_batch(&state, Some(auth.user_id)).await;
     match sqlx::query(
         r#"WITH latest AS (
             SELECT DISTINCT ON (peer)
@@ -751,6 +1141,8 @@ async fn list_conversations(
 #[derive(Deserialize)]
 struct PaginationQuery {
     limit: Option<i64>,
+    before_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    before_id: Option<Uuid>,
 }
 
 async fn get_conversation(
@@ -763,10 +1155,16 @@ async fn get_conversation(
         return resp;
     }
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    if q.before_created_at.is_some() != q.before_id.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Both before_created_at and before_id are required",
+        );
+    }
     if let Err(resp) = ensure_message_peer_access(&state, &auth, user_id).await {
         return resp;
     }
-    purge_expired_messages_for_user(&state, auth.user_id).await;
+    purge_expired_messages_batch(&state, Some(auth.user_id)).await;
 
     match sqlx::query(
         r#"SELECT id, from_user, to_user, message, message_ciphertext, message_nonce, encryption_key_id,
@@ -778,11 +1176,18 @@ async fn get_conversation(
            FROM direct_messages
            WHERE ((from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1))
              AND deleted_at IS NULL
+             AND redacted_at IS NULL
              AND (expires_at IS NULL OR expires_at > now())
-           ORDER BY created_at DESC LIMIT $3"#,
+             AND (
+                 $3::timestamptz IS NULL
+                 OR (created_at, id) < ($3, $4)
+             )
+           ORDER BY created_at DESC, id DESC LIMIT $5"#,
     )
     .bind(auth.user_id)
     .bind(user_id)
+    .bind(&q.before_created_at)
+    .bind(&q.before_id)
     .bind(limit)
     .fetch_all(&state.db)
     .await
@@ -863,6 +1268,8 @@ async fn get_conversation(
                 user_id,
                 json!({
                     "limit": limit,
+                    "before_created_at": q.before_created_at,
+                    "before_id": q.before_id,
                     "returned_count": data.len(),
                     "attachment_count": attachment_count,
                     "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
@@ -1009,6 +1416,14 @@ async fn send_message(
                 "Invalid recipient_key_fingerprint",
             );
         };
+        if !is_valid_message_key_fingerprint(sender_key_fingerprint)
+            || !is_valid_message_key_fingerprint(recipient_key_fingerprint)
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid message key fingerprint",
+            );
+        }
 
         let ciphertext = match body.e2e_ciphertext.as_deref() {
             Some(value) => match decode_base64_message_field(value, "Invalid e2e_ciphertext") {
@@ -1024,19 +1439,22 @@ async fn send_message(
             None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext"),
         };
         let nonce = match body.e2e_nonce.as_deref() {
-            Some(value) => match decode_base64_message_field(value, "Invalid e2e_nonce") {
-                Ok(bytes) if bytes.len() == 12 => bytes,
-                Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
-                Err(resp) => return resp,
-            },
+            Some(value) => {
+                match decode_fixed_base64_message_field(value, "Invalid e2e_nonce", E2E_NONCE_SIZE)
+                {
+                    Ok(bytes) => bytes,
+                    Err(resp) => return resp,
+                }
+            }
             None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
         };
         let salt = match body.e2e_salt.as_deref() {
-            Some(value) => match decode_base64_message_field(value, "Invalid e2e_salt") {
-                Ok(bytes) if !bytes.is_empty() => bytes,
-                Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
-                Err(resp) => return resp,
-            },
+            Some(value) => {
+                match decode_fixed_base64_message_field(value, "Invalid e2e_salt", E2E_SALT_SIZE) {
+                    Ok(bytes) => bytes,
+                    Err(resp) => return resp,
+                }
+            }
             None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
         };
 
@@ -1050,12 +1468,12 @@ async fn send_message(
             }
             Err(resp) => return resp,
         }
-        match load_message_key_row(&state, user_id, Some(recipient_key_fingerprint)).await {
+        match load_active_message_key_row(&state, user_id, recipient_key_fingerprint).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Recipient message key not found",
+                    "Recipient message key is not active",
                 );
             }
             Err(resp) => return resp,
@@ -1115,14 +1533,13 @@ async fn send_message(
                 )
                 .await;
                 if inserted {
-                    create_message_notification(
-                        &state,
-                        auth.user_id,
-                        user_id,
-                        Some("[Encrypted message]"),
-                        None,
+                    metrics::counter!(
+                        crate::business_metrics::CHAT_MESSAGES_ACCEPTED_TOTAL,
+                        "kind" => "text",
+                        "e2e" => "true"
                     )
-                    .await;
+                    .increment(1);
+                    create_message_notification(&state, id, auth.user_id, user_id, false).await;
                     publish_message_event(
                         &state,
                         auth.user_id,
@@ -1160,6 +1577,19 @@ async fn send_message(
         }
         if trimmed_message.chars().count() > MAX_MESSAGE_CHARS {
             return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+        }
+
+        for participant_id in [auth.user_id, user_id] {
+            match load_message_key_row(&state, participant_id, None).await {
+                Ok(Some(_)) => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "End-to-end encryption is required for this conversation",
+                    );
+                }
+                Ok(None) => {}
+                Err(resp) => return resp,
+            }
         }
 
         let (ciphertext, nonce, key_id) = match state.message_keys.encrypt_str(&trimmed_message) {
@@ -1213,14 +1643,13 @@ async fn send_message(
                 )
                 .await;
                 if inserted {
-                    create_message_notification(
-                        &state,
-                        auth.user_id,
-                        user_id,
-                        Some(trimmed_message.as_str()),
-                        None,
+                    metrics::counter!(
+                        crate::business_metrics::CHAT_MESSAGES_ACCEPTED_TOTAL,
+                        "kind" => "text",
+                        "e2e" => "false"
                     )
-                    .await;
+                    .increment(1);
+                    create_message_notification(&state, id, auth.user_id, user_id, false).await;
                     publish_message_event(
                         &state,
                         auth.user_id,
@@ -1267,6 +1696,16 @@ async fn delete_message(
         return resp;
     }
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "begin direct message deletion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete message",
+            );
+        }
+    };
     let row = match sqlx::query(
         r#"WITH target AS (
                SELECT id, attachment_key
@@ -1310,7 +1749,7 @@ async fn delete_message(
     .bind(auth.user_id)
     .bind(user_id)
     .bind(message_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(row)) => row,
@@ -1328,6 +1767,21 @@ async fn delete_message(
             );
         }
     };
+
+    if let Err(error) = delete_message_notifications(&mut tx, message_id).await {
+        tracing::error!(error = %error, message_id = %message_id, "delete direct message notifications");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete message",
+        );
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, message_id = %message_id, "commit direct message deletion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete message",
+        );
+    }
 
     if let Some(file_key) = row
         .try_get::<Option<String>, _>("attachment_key")
@@ -1411,7 +1865,7 @@ async fn upload_file(
                 }
                 match field.bytes().await {
                     Ok(bytes) => {
-                        if bytes.len() > MAX_FILE_SIZE {
+                        if bytes.len() > MAX_ENCRYPTED_FILE_SIZE {
                             return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 20MB)");
                         }
                         file_data = Some(bytes.to_vec());
@@ -1523,6 +1977,18 @@ async fn upload_file(
         Some(d) if !d.is_empty() => d,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
+    if file_name.as_bytes().len() > MAX_ATTACHMENT_FILENAME_BYTES {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Attachment filename is too long",
+        );
+    }
+    if mime_type.as_bytes().len() > MAX_ATTACHMENT_MIME_BYTES {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Attachment MIME type is too long",
+        );
+    }
     if message_text
         .as_deref()
         .is_some_and(|value| value.chars().count() > MAX_MESSAGE_CHARS)
@@ -1624,6 +2090,12 @@ async fn upload_file(
                 "Mixed plaintext and E2E payloads are not allowed",
             );
         }
+        if !is_allowed_e2e_attachment_filename(&file_name) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Encrypted attachment type is not allowed",
+            );
+        }
 
         let Some(attachment_algorithm) = attachment_e2e_algorithm
             .as_deref()
@@ -1661,16 +2133,21 @@ async fn upload_file(
                 "Invalid recipient_key_fingerprint",
             );
         };
+        if !is_valid_message_key_fingerprint(sender_fingerprint)
+            || !is_valid_message_key_fingerprint(recipient_fingerprint)
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid message key fingerprint",
+            );
+        }
         let attachment_nonce_bytes = match attachment_e2e_nonce.as_deref() {
-            Some(value) => match decode_base64_message_field(value, "Invalid attachment_e2e_nonce")
-            {
-                Ok(bytes) if bytes.len() == 12 => bytes,
-                Ok(_) => {
-                    return err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "Invalid attachment_e2e_nonce",
-                    );
-                }
+            Some(value) => match decode_fixed_base64_message_field(
+                value,
+                "Invalid attachment_e2e_nonce",
+                E2E_NONCE_SIZE,
+            ) {
+                Ok(bytes) => bytes,
                 Err(resp) => return resp,
             },
             None => {
@@ -1681,18 +2158,14 @@ async fn upload_file(
             }
         };
         let attachment_salt_bytes = match attachment_e2e_salt.as_deref() {
-            Some(value) => {
-                match decode_base64_message_field(value, "Invalid attachment_e2e_salt") {
-                    Ok(bytes) if !bytes.is_empty() => bytes,
-                    Ok(_) => {
-                        return err(
-                            StatusCode::UNPROCESSABLE_ENTITY,
-                            "Invalid attachment_e2e_salt",
-                        );
-                    }
-                    Err(resp) => return resp,
-                }
-            }
+            Some(value) => match decode_fixed_base64_message_field(
+                value,
+                "Invalid attachment_e2e_salt",
+                E2E_SALT_SIZE,
+            ) {
+                Ok(bytes) => bytes,
+                Err(resp) => return resp,
+            },
             None => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -1711,12 +2184,12 @@ async fn upload_file(
             }
             Err(resp) => return resp,
         }
-        match load_message_key_row(&state, user_id, Some(recipient_fingerprint)).await {
+        match load_active_message_key_row(&state, user_id, recipient_fingerprint).await {
             Ok(Some(_)) => {}
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Recipient message key not found",
+                    "Recipient message key is not active",
                 );
             }
             Err(resp) => return resp,
@@ -1749,17 +2222,23 @@ async fn upload_file(
                 None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_ciphertext"),
             };
             let caption_nonce = match e2e_nonce.as_deref() {
-                Some(value) => match decode_base64_message_field(value, "Invalid e2e_nonce") {
-                    Ok(bytes) if bytes.len() == 12 => bytes,
-                    Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
+                Some(value) => match decode_fixed_base64_message_field(
+                    value,
+                    "Invalid e2e_nonce",
+                    E2E_NONCE_SIZE,
+                ) {
+                    Ok(bytes) => bytes,
                     Err(resp) => return resp,
                 },
                 None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_nonce"),
             };
             let caption_salt = match e2e_salt.as_deref() {
-                Some(value) => match decode_base64_message_field(value, "Invalid e2e_salt") {
-                    Ok(bytes) if !bytes.is_empty() => bytes,
-                    Ok(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
+                Some(value) => match decode_fixed_base64_message_field(
+                    value,
+                    "Invalid e2e_salt",
+                    E2E_SALT_SIZE,
+                ) {
+                    Ok(bytes) => bytes,
                     Err(resp) => return resp,
                 },
                 None => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid e2e_salt"),
@@ -1781,6 +2260,19 @@ async fn upload_file(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "E2E caption requires an E2E attachment envelope",
             );
+        }
+
+        for participant_id in [auth.user_id, user_id] {
+            match load_message_key_row(&state, participant_id, None).await {
+                Ok(Some(_)) => {
+                    return err(
+                        StatusCode::CONFLICT,
+                        "End-to-end encryption is required for this conversation",
+                    );
+                }
+                Ok(None) => {}
+                Err(resp) => return resp,
+            }
         }
 
         match validate_upload_magic_bytes(Some(&file_name), Some(mime_type.as_str()), &data) {
@@ -1829,8 +2321,103 @@ async fn upload_file(
         }
     }
 
-    let file_size = attachment_plaintext_size.unwrap_or(data.len() as i64);
+    let file_size = if has_attachment_e2e {
+        let Some(plaintext_size) = attachment_plaintext_size else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Missing attachment_plaintext_size",
+            );
+        };
+        let expected_ciphertext_size = match usize::try_from(plaintext_size)
+            .ok()
+            .and_then(|value| value.checked_add(AES_GCM_TAG_SIZE))
+        {
+            Some(value) => value,
+            None => return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 20MB)"),
+        };
+        if expected_ciphertext_size != data.len() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Encrypted attachment size does not match plaintext size",
+            );
+        }
+        plaintext_size
+    } else {
+        data.len() as i64
+    };
+    if file_size > MAX_FILE_SIZE as i64 || data.len() > MAX_ENCRYPTED_FILE_SIZE {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 20MB)");
+    }
     let file_key = format!("{}_{}", Uuid::new_v4(), sanitize_filename(&file_name));
+
+    // Serialize quota decisions globally and per uploader so concurrent
+    // multipart requests cannot all observe the same remaining capacity.
+    let mut storage_tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, "begin chat attachment storage transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+        }
+    };
+    if let Err(error) = sqlx::query("SELECT pg_advisory_xact_lock(824_202_608_31)")
+        .execute(&mut *storage_tx)
+        .await
+    {
+        tracing::error!(error = %error, "lock global chat attachment quota");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+    }
+    if let Err(error) = sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 2))")
+        .bind(auth.user_id)
+        .execute(&mut *storage_tx)
+        .await
+    {
+        tracing::error!(error = %error, user_id = %auth.user_id, "lock user chat attachment quota");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+    }
+    let user_used = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COALESCE(sum(attachment_size), 0)::bigint
+           FROM direct_messages
+           WHERE from_user = $1
+             AND attachment_key IS NOT NULL"#,
+    )
+    .bind(auth.user_id)
+    .fetch_one(&mut *storage_tx)
+    .await;
+    let global_used = sqlx::query_scalar::<_, i64>(
+        r#"SELECT COALESCE(sum(attachment_size), 0)::bigint
+           FROM direct_messages
+           WHERE attachment_key IS NOT NULL"#,
+    )
+    .fetch_one(&mut *storage_tx)
+    .await;
+    let (user_used, global_used) = match (user_used, global_used) {
+        (Ok(user_used), Ok(global_used)) => (user_used, global_used),
+        (user_result, global_result) => {
+            tracing::error!(user_error = ?user_result.err(), global_error = ?global_result.err(), "measure chat attachment quota");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+        }
+    };
+    metrics::gauge!(crate::business_metrics::CHAT_ATTACHMENT_STORAGE_BYTES).set(global_used as f64);
+    if user_used.saturating_add(file_size) > MAX_CHAT_ATTACHMENT_BYTES_PER_USER {
+        return err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "Chat attachment quota exceeded",
+        );
+    }
+    if global_used.saturating_add(file_size) > MAX_CHAT_ATTACHMENT_BYTES_GLOBAL {
+        return err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "Chat storage capacity exceeded",
+        );
+    }
+    let projected_global_used = global_used.saturating_add(file_size);
+    if projected_global_used >= MAX_CHAT_ATTACHMENT_BYTES_GLOBAL * 4 / 5 {
+        tracing::warn!(
+            used_bytes = projected_global_used,
+            capacity_bytes = MAX_CHAT_ATTACHMENT_BYTES_GLOBAL,
+            "chat attachment storage is above 80 percent capacity"
+        );
+    }
 
     // Ensure upload directory exists
     let dir = std::path::Path::new(UPLOAD_DIR);
@@ -1861,7 +2448,7 @@ async fn upload_file(
     // Insert message row with encrypted attachment metadata. Legacy
     // attachments use `attachment_nonce`; E2E attachments keep the encrypted
     // payload opaque and store only the client envelope metadata.
-    match sqlx::query(
+    let inserted_row = sqlx::query(
         r#"INSERT INTO direct_messages (
                from_user, to_user,
                message_ciphertext, message_nonce,
@@ -1897,57 +2484,64 @@ async fn upload_file(
     .bind(stored_encryption_key_id.as_deref())
     .bind(client_message_id)
     .bind(expires_at)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => {
-            let id: Uuid = row.try_get("id").unwrap_or_else(|_| Uuid::nil());
-            let created_at: chrono::DateTime<chrono::Utc> =
-                row.try_get("created_at").unwrap_or_else(|_| chrono::Utc::now());
-            write_message_peer_audit(
-                &state,
-                auth.user_id,
-                "upload_message_attachment",
-                user_id,
-                json!({
-                    "message_id": id,
-                    "attachment_filename": file_name.as_str(),
-                    "attachment_mime": mime_type.as_str(),
-                    "attachment_size": file_size,
-                    "has_message_text": message_text.is_some() || msg_e2e_ciphertext.is_some(),
-                    "is_e2e_attachment": has_attachment_e2e,
-                    "has_e2e_caption": msg_e2e_ciphertext.is_some(),
-                    "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
-                }),
-            )
-            .await;
-            create_message_notification(
-                &state,
-                auth.user_id,
-                user_id,
-                if has_attachment_e2e { None } else { message_text.as_deref() },
-                Some(&file_name),
-            )
-            .await;
-            publish_message_event(&state, auth.user_id, user_id, "message_created", Some(id));
-            publish_message_event(&state, user_id, auth.user_id, "message_created", Some(id));
-            Json(serde_json::json!({
-                "ok": true, "id": id, "created_at": created_at.to_rfc3339(),
-                "expires_at": expires_at.map(|value| value.to_rfc3339()),
-                "client_message_id": client_message_id,
-                "duplicate": false,
-                "attachment_key": file_key, "attachment_filename": file_name,
-                "attachment_mime": mime_type, "attachment_size": file_size,
-                "attachment_is_e2e": has_attachment_e2e,
-            }))
-            .into_response()
-        }
+    .fetch_one(&mut *storage_tx)
+    .await;
+    let row = match inserted_row {
+        Ok(row) => row,
         Err(e) => {
             tracing::error!(error = %e, "insert message with attachment");
-            // Clean up file on DB failure
             let _ = tokio::fs::remove_file(&path).await;
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    };
+    if let Err(error) = storage_tx.commit().await {
+        tracing::error!(error = %error, "commit message with attachment");
+        let _ = tokio::fs::remove_file(&path).await;
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    metrics::gauge!(crate::business_metrics::CHAT_ATTACHMENT_STORAGE_BYTES)
+        .set(projected_global_used as f64);
+    metrics::counter!(
+        crate::business_metrics::CHAT_MESSAGES_ACCEPTED_TOTAL,
+        "kind" => "attachment",
+        "e2e" => if has_attachment_e2e { "true" } else { "false" }
+    )
+    .increment(1);
+
+    {
+        let id: Uuid = row.try_get("id").unwrap_or_else(|_| Uuid::nil());
+        let created_at: chrono::DateTime<chrono::Utc> = row
+            .try_get("created_at")
+            .unwrap_or_else(|_| chrono::Utc::now());
+        write_message_peer_audit(
+            &state,
+            auth.user_id,
+            "upload_message_attachment",
+            user_id,
+            json!({
+                "message_id": id,
+                "attachment_mime": mime_type.as_str(),
+                "attachment_size": file_size,
+                "has_message_text": message_text.is_some() || msg_e2e_ciphertext.is_some(),
+                "is_e2e_attachment": has_attachment_e2e,
+                "has_e2e_caption": msg_e2e_ciphertext.is_some(),
+                "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
+            }),
+        )
+        .await;
+        create_message_notification(&state, id, auth.user_id, user_id, true).await;
+        publish_message_event(&state, auth.user_id, user_id, "message_created", Some(id));
+        publish_message_event(&state, user_id, auth.user_id, "message_created", Some(id));
+        Json(serde_json::json!({
+            "ok": true, "id": id, "created_at": created_at.to_rfc3339(),
+            "expires_at": expires_at.map(|value| value.to_rfc3339()),
+            "client_message_id": client_message_id,
+            "duplicate": false,
+            "attachment_key": file_key, "attachment_filename": file_name,
+            "attachment_mime": mime_type, "attachment_size": file_size,
+            "attachment_is_e2e": has_attachment_e2e,
+        }))
+        .into_response()
     }
 }
 
@@ -2048,7 +2642,13 @@ async fn download_file(
                     );
                 }
             },
-            None => raw_bytes,
+            None => {
+                tracing::warn!(message_id = %message_id, file_key = %file_key, "blocked legacy plaintext chat attachment download");
+                return err(
+                    StatusCode::GONE,
+                    "Attachment is being migrated to secure storage",
+                );
+            }
         }
     };
 
@@ -2061,7 +2661,6 @@ async fn download_file(
         peer_id,
         json!({
             "message_id": message_id,
-            "attachment_filename": filename.as_str(),
             "attachment_mime": mime.as_str(),
             "attachment_size": attachment_size,
             "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
@@ -2102,6 +2701,13 @@ async fn mark_conversation_read(
         return resp;
     }
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, peer_id = %user_id, "begin mark conversation read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let (marked_read_count, last_read_at) = match sqlx::query(
         "UPDATE direct_messages
          SET is_read = true,
@@ -2115,7 +2721,7 @@ async fn mark_conversation_read(
     )
     .bind(auth.user_id)
     .bind(user_id)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *tx)
     .await
     {
         Ok(rows) => {
@@ -2132,10 +2738,10 @@ async fn mark_conversation_read(
         }
         Err(e) => {
             tracing::error!(error = %e, user_id = %auth.user_id, peer_id = %user_id, "mark conversation read");
-            (0, None)
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let notifications_marked_read = sqlx::query(
+    let notifications_marked_read = match sqlx::query(
         "UPDATE user_notifications
          SET is_read = true
          WHERE user_id = $1
@@ -2146,13 +2752,19 @@ async fn mark_conversation_read(
     )
     .bind(auth.user_id)
     .bind(user_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
-    .map(|result| result.rows_affected())
-    .unwrap_or_else(|error| {
-        tracing::warn!(error = %error, user_id = %auth.user_id, peer_id = %user_id, "mark message notifications read");
-        0
-    });
+    {
+        Ok(result) => result.rows_affected(),
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, peer_id = %user_id, "mark message notifications read");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, user_id = %auth.user_id, peer_id = %user_id, "commit mark conversation read");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if marked_read_count > 0 || notifications_marked_read > 0 {
         crate::realtime::publish_notification_event(
             &state,
@@ -2280,7 +2892,7 @@ async fn unread_total(
     if let Err(resp) = ensure_chat_workspace_role(&auth) {
         return resp;
     }
-    purge_expired_messages_for_user(&state, auth.user_id).await;
+    purge_expired_messages_batch(&state, Some(auth.user_id)).await;
     let count = sqlx::query_scalar::<_, i64>(
         r#"SELECT count(*) AS "c!"
              FROM direct_messages
@@ -2314,6 +2926,33 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+fn is_allowed_e2e_attachment_filename(name: &str) -> bool {
+    let extension = std::path::Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase);
+    matches!(
+        extension.as_deref(),
+        Some(
+            "pdf"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "heic"
+                | "heif"
+                | "txt"
+                | "csv"
+                | "doc"
+                | "docx"
+                | "xls"
+                | "xlsx"
+                | "dcm"
+        )
+    )
 }
 
 fn parse_role_name(value: &str) -> Option<Role> {
@@ -2656,4 +3295,44 @@ fn rows_to_peer_json(rows: Vec<sqlx::postgres::PgRow>) -> Vec<serde_json::Value>
     }
 
     peers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_base64_fields_require_the_exact_decoded_size() {
+        let exact_nonce = BASE64.encode([0_u8; E2E_NONCE_SIZE]);
+        let short_nonce = BASE64.encode([0_u8; E2E_NONCE_SIZE - 1]);
+        let oversized_nonce = BASE64.encode([0_u8; E2E_NONCE_SIZE + 1]);
+
+        assert!(
+            decode_fixed_base64_message_field(&exact_nonce, "Invalid e2e_nonce", E2E_NONCE_SIZE,)
+                .is_ok()
+        );
+        assert!(
+            decode_fixed_base64_message_field(&short_nonce, "Invalid e2e_nonce", E2E_NONCE_SIZE,)
+                .is_err()
+        );
+        assert!(
+            decode_fixed_base64_message_field(
+                &oversized_nonce,
+                "Invalid e2e_nonce",
+                E2E_NONCE_SIZE,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn message_key_fingerprints_are_canonical_sha256_hex() {
+        assert!(is_valid_message_key_fingerprint(&"a".repeat(64)));
+        assert!(is_valid_message_key_fingerprint(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
+        assert!(!is_valid_message_key_fingerprint(&"A".repeat(64)));
+        assert!(!is_valid_message_key_fingerprint(&"a".repeat(63)));
+        assert!(!is_valid_message_key_fingerprint(&"g".repeat(64)));
+    }
 }

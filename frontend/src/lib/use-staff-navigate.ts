@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, type NavigateOptions } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
 import {
@@ -19,10 +19,14 @@ export function useStaffNavigate() {
   const staffRole = user?.role ?? "";
 
   const staffGo = useCallback(
-    (href: string) => {
-      navigate(staffHrefIfAllowed(staffRole, href));
+    (href: string, options?: NavigateOptions) => {
+      const state =
+        options?.state && typeof options.state === "object"
+          ? { ...options.state, __gmedNavigationUserId: user?.id ?? null }
+          : options?.state;
+      navigate(staffHrefIfAllowed(staffRole, href), { ...options, state });
     },
-    [navigate, staffRole],
+    [navigate, staffRole, user?.id],
   );
 
   const staffTo = useCallback(

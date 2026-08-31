@@ -91,6 +91,7 @@ async fn seed_full_smoke(state: &AppState) -> Result<serde_json::Value, String> 
     assign_patient(state, patient.id, pm.id, pm.id).await?;
     assign_patient(state, patient.id, assistant.id, pm.id).await?;
     assign_patient(state, patient.id, interpreter.id, pm.id).await?;
+    assign_patient(state, patient.id, concierge.id, pm.id).await?;
     assign_patient(state, patient.id, patient_user.id, pm.id).await?;
 
     let contract = create_contract(state, patient.id, pm.id, &tag).await?;

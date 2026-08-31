@@ -5,15 +5,21 @@ export const CHAT_E2E_ALGORITHM = "p256-hkdf-aes256gcm-v1";
 export const CHAT_E2E_PREVIEW = uiText("chat_e2e_preview");
 export const CHAT_E2E_UNAVAILABLE = uiText("chat_e2e_unavailable");
 
-const STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
+const LEGACY_STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
+const PEER_PIN_STORAGE_PREFIX = "gmed_chat_e2e_peer_pins_v1:";
+const KEY_DATABASE_NAME = "gmed-chat-e2e-v2";
+const KEY_DATABASE_VERSION = 1;
+const KEY_STORE = "message-keys";
+const META_STORE = "key-meta";
 const HKDF_INFO = new TextEncoder().encode("gmed-chat-e2e-v1");
-let ensureServerMessageKeyPromise: Promise<MessageKeyRecord> | null = null;
+const ensureServerMessageKeyPromises = new Map<string, Promise<MessageKeyRecord>>();
 
 export interface MessageKeyRecord {
+  ownerUserId: string;
   algorithm: string;
   fingerprint: string;
   publicKey: string;
-  privateKeyJwk: JsonWebKey;
+  privateKey: CryptoKey;
   createdAt: string;
 }
 
@@ -46,50 +52,106 @@ export interface E2EAttachmentEnvelope {
   recipient_key_fingerprint?: string | null;
 }
 
-export interface KeyRingBackupEnvelope {
-  version: 1;
-  algorithm: "pbkdf2-sha256-aes256gcm";
-  iterations: number;
-  salt: string;
-  iv: string;
-  ciphertext: string;
-  exported_at: string;
-}
-
-type MessageKeyRing = {
+type StoredKeyMeta = {
+  ownerUserId: string;
   activeFingerprint: string | null;
-  keys: Record<string, MessageKeyRecord>;
 };
 
-const KEYRING_BACKUP_ITERATIONS = 250_000;
+type LegacyMessageKeyRecord = Omit<MessageKeyRecord, "ownerUserId" | "privateKey"> & {
+  privateKeyJwk: JsonWebKey;
+};
 
-function emptyKeyRing(): MessageKeyRing {
-  return {
-    activeFingerprint: null,
-    keys: {},
-  };
+type LegacyMessageKeyRing = {
+  activeFingerprint: string | null;
+  keys: Record<string, LegacyMessageKeyRecord>;
+};
+
+const memoryKeys = new Map<string, MessageKeyRecord>();
+const memoryMeta = new Map<string, StoredKeyMeta>();
+
+function keyId(ownerUserId: string, fingerprint: string) {
+  return `${ownerUserId}:${fingerprint}`;
 }
 
-function readKeyRing(): MessageKeyRing {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return emptyKeyRing();
-    const parsed = JSON.parse(raw) as MessageKeyRing;
-    if (!parsed || typeof parsed !== "object" || !parsed.keys) {
-      return emptyKeyRing();
+function requestResult<T>(request: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Secure key storage failed"));
+  });
+}
+
+function transactionComplete(transaction: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Secure key storage failed"));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error("Secure key storage aborted"));
+  });
+}
+
+async function openKeyDatabase(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return null;
+  const request = indexedDB.open(KEY_DATABASE_NAME, KEY_DATABASE_VERSION);
+  request.onupgradeneeded = () => {
+    const database = request.result;
+    if (!database.objectStoreNames.contains(KEY_STORE)) {
+      database.createObjectStore(KEY_STORE, { keyPath: ["ownerUserId", "fingerprint"] });
     }
-    return {
-      activeFingerprint:
-        typeof parsed.activeFingerprint === "string" ? parsed.activeFingerprint : null,
-      keys: parsed.keys,
-    };
-  } catch {
-    return emptyKeyRing();
+    if (!database.objectStoreNames.contains(META_STORE)) {
+      database.createObjectStore(META_STORE, { keyPath: "ownerUserId" });
+    }
+  };
+  return requestResult(request);
+}
+
+async function getStoredKey(ownerUserId: string, fingerprint: string) {
+  const database = await openKeyDatabase();
+  if (!database) return memoryKeys.get(keyId(ownerUserId, fingerprint)) ?? null;
+  try {
+    const transaction = database.transaction(KEY_STORE, "readonly");
+    const result = await requestResult(
+      transaction.objectStore(KEY_STORE).get([ownerUserId, fingerprint]),
+    );
+    return (result as MessageKeyRecord | undefined) ?? null;
+  } finally {
+    database.close();
   }
 }
 
-function writeKeyRing(ring: MessageKeyRing) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ring));
+async function getStoredMeta(ownerUserId: string) {
+  const database = await openKeyDatabase();
+  if (!database) return memoryMeta.get(ownerUserId) ?? null;
+  try {
+    const transaction = database.transaction(META_STORE, "readonly");
+    const result = await requestResult(transaction.objectStore(META_STORE).get(ownerUserId));
+    return (result as StoredKeyMeta | undefined) ?? null;
+  } finally {
+    database.close();
+  }
+}
+
+async function storeMessageKey(record: MessageKeyRecord, makeActive: boolean) {
+  const database = await openKeyDatabase();
+  const meta: StoredKeyMeta = {
+    ownerUserId: record.ownerUserId,
+    activeFingerprint: makeActive
+      ? record.fingerprint
+      : (await getStoredMeta(record.ownerUserId))?.activeFingerprint ?? null,
+  };
+  if (!database) {
+    memoryKeys.set(keyId(record.ownerUserId, record.fingerprint), record);
+    memoryMeta.set(record.ownerUserId, meta);
+    return;
+  }
+  try {
+    const transaction = database.transaction([KEY_STORE, META_STORE], "readwrite");
+    transaction.objectStore(KEY_STORE).put(record);
+    transaction.objectStore(META_STORE).put(meta);
+    await transactionComplete(transaction);
+  } finally {
+    database.close();
+  }
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -122,7 +184,7 @@ async function fingerprintPublicKey(publicKeyBytes: Uint8Array) {
   return bytesToHex(new Uint8Array(digest));
 }
 
-async function generateLocalMessageKey(): Promise<MessageKeyRecord> {
+async function generateLocalMessageKey(ownerUserId: string): Promise<MessageKeyRecord> {
   const keyPair = await crypto.subtle.generateKey(
     {
       name: "ECDH",
@@ -138,13 +200,15 @@ async function generateLocalMessageKey(): Promise<MessageKeyRecord> {
     "jwk",
     keyPair.privateKey,
   )) as JsonWebKey;
+  const privateKey = await importPrivateKey(privateKeyJwk);
   const fingerprint = await fingerprintPublicKey(publicKeyBytes);
 
   return {
+    ownerUserId,
     algorithm: CHAT_E2E_ALGORITHM,
     fingerprint,
     publicKey: bytesToBase64(publicKeyBytes),
-    privateKeyJwk,
+    privateKey,
     createdAt: new Date().toISOString(),
   };
 }
@@ -176,15 +240,12 @@ async function importPublicKey(publicKeyBase64: string) {
 }
 
 async function deriveMessageKey(
-  privateKeyJwk: JsonWebKey,
+  privateKey: CryptoKey,
   peerPublicKeyBase64: string,
   salt: Uint8Array,
   usage: KeyUsage,
 ) {
-  const [privateKey, peerPublicKey] = await Promise.all([
-    importPrivateKey(privateKeyJwk),
-    importPublicKey(peerPublicKeyBase64),
-  ]);
+  const peerPublicKey = await importPublicKey(peerPublicKeyBase64);
   const sharedBits = await crypto.subtle.deriveBits(
     {
       name: "ECDH",
@@ -230,7 +291,7 @@ async function decryptEnvelopeBytes(
   const nonce = base64ToBytes(nonceBase64);
   const ciphertext = base64ToBytes(ciphertextBase64);
   const aesKey = await deriveMessageKey(
-    myKey.privateKeyJwk,
+    myKey.privateKey,
     peerKey.public_key,
     salt,
     "decrypt",
@@ -246,50 +307,113 @@ async function decryptEnvelopeBytes(
   return new Uint8Array(plaintext);
 }
 
-async function deriveBackupKey(
-  passphrase: string,
-  salt: Uint8Array,
-  usage: KeyUsage,
-) {
-  const baseKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(passphrase),
-    "PBKDF2",
-    false,
-    ["deriveKey"],
-  );
-
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: toBufferSource(salt),
-      iterations: KEYRING_BACKUP_ITERATIONS,
-    },
-    baseKey,
-    {
-      name: "AES-GCM",
-      length: 256,
-    },
-    false,
-    [usage],
-  );
+function isNotFoundError(error: unknown) {
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes("not found") || message.includes("404");
 }
 
-async function ensureServerMessageKeyOnce(): Promise<MessageKeyRecord> {
-  let ring = readKeyRing();
-  let active =
-    (ring.activeFingerprint && ring.keys[ring.activeFingerprint]) || null;
-  if (!active) {
-    active = await generateLocalMessageKey();
-    ring = {
-      activeFingerprint: active.fingerprint,
-      keys: {
-        ...ring.keys,
-        [active.fingerprint]: active,
-      },
+async function validateMessageKeyEnvelope(
+  envelope: MessageKeyEnvelope,
+  expectedUserId: string,
+  requireActive: boolean,
+) {
+  if (
+    !envelope ||
+    envelope.user_id !== expectedUserId ||
+    envelope.algorithm !== CHAT_E2E_ALGORITHM ||
+    typeof envelope.public_key !== "string" ||
+    typeof envelope.fingerprint !== "string" ||
+    (requireActive && envelope.is_active !== true)
+  ) {
+    throw new Error("Invalid server message key identity");
+  }
+  const computedFingerprint = await fingerprintPublicKey(
+    base64ToBytes(envelope.public_key),
+  );
+  if (computedFingerprint !== envelope.fingerprint) {
+    throw new Error("Server message key fingerprint mismatch");
+  }
+  return envelope;
+}
+
+async function fetchMyServerMessageKey(ownerUserId: string) {
+  try {
+    const envelope = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key");
+    return await validateMessageKeyEnvelope(envelope, ownerUserId, true);
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+async function migrateLegacyMessageKey(
+  ownerUserId: string,
+  serverKey: MessageKeyEnvelope | null,
+) {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw || !serverKey) return null;
+
+  try {
+    const ring = JSON.parse(raw) as LegacyMessageKeyRing;
+    const legacy = ring.keys?.[serverKey.fingerprint];
+    if (
+      !legacy ||
+      legacy.fingerprint !== serverKey.fingerprint ||
+      legacy.publicKey !== serverKey.public_key ||
+      legacy.algorithm !== CHAT_E2E_ALGORITHM
+    ) {
+      return null;
+    }
+    const computedFingerprint = await fingerprintPublicKey(
+      base64ToBytes(legacy.publicKey),
+    );
+    if (computedFingerprint !== legacy.fingerprint) return null;
+    const migrated: MessageKeyRecord = {
+      ownerUserId,
+      algorithm: legacy.algorithm,
+      fingerprint: legacy.fingerprint,
+      publicKey: legacy.publicKey,
+      privateKey: await importPrivateKey(legacy.privateKeyJwk),
+      createdAt: legacy.createdAt,
     };
-    writeKeyRing(ring);
+    await storeMessageKey(migrated, true);
+    return migrated;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureServerMessageKeyOnce(ownerUserId: string): Promise<MessageKeyRecord> {
+  if (!ownerUserId) throw new Error("Authenticated user is required for secure chat");
+
+  const serverExisting = await fetchMyServerMessageKey(ownerUserId);
+  const meta = await getStoredMeta(ownerUserId);
+  let active = meta?.activeFingerprint
+    ? await getStoredKey(ownerUserId, meta.activeFingerprint)
+    : null;
+  if (!active && serverExisting) {
+    active = await getStoredKey(ownerUserId, serverExisting.fingerprint);
+  }
+  if (!active) {
+    active = await migrateLegacyMessageKey(ownerUserId, serverExisting);
+  } else {
+    // Plaintext v1 material must not survive once a user-bound key is available.
+    try {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+      // Storage may be disabled; the secure IndexedDB key remains authoritative.
+    }
+  }
+  if (!active) {
+    active = await generateLocalMessageKey(ownerUserId);
+    await storeMessageKey(active, true);
   }
 
   const serverKey = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key", {
@@ -299,46 +423,106 @@ async function ensureServerMessageKeyOnce(): Promise<MessageKeyRecord> {
       public_key: active.publicKey,
     }),
   });
-
-  if (serverKey.fingerprint !== active.fingerprint) {
-    throw new Error("Server message key fingerprint mismatch");
+  await validateMessageKeyEnvelope(serverKey, ownerUserId, true);
+  if (
+    serverKey.fingerprint !== active.fingerprint ||
+    serverKey.public_key !== active.publicKey
+  ) {
+    throw new Error("Server message key does not match this device");
   }
-
+  await storeMessageKey(active, true);
   return active;
 }
 
-export async function ensureServerMessageKey(): Promise<MessageKeyRecord> {
-  if (ensureServerMessageKeyPromise) return ensureServerMessageKeyPromise;
+export async function ensureServerMessageKey(ownerUserId: string) {
+  const pending = ensureServerMessageKeyPromises.get(ownerUserId);
+  if (pending) return pending;
 
-  ensureServerMessageKeyPromise = ensureServerMessageKeyOnce();
+  const promise = ensureServerMessageKeyOnce(ownerUserId);
+  ensureServerMessageKeyPromises.set(ownerUserId, promise);
   try {
-    return await ensureServerMessageKeyPromise;
+    return await promise;
   } finally {
-    ensureServerMessageKeyPromise = null;
+    ensureServerMessageKeyPromises.delete(ownerUserId);
   }
 }
 
-export function getLocalMessageKey(fingerprint?: string | null) {
-  const ring = readKeyRing();
-  if (!fingerprint) {
-    return ring.activeFingerprint ? ring.keys[ring.activeFingerprint] ?? null : null;
+export async function getLocalMessageKey(
+  ownerUserId: string,
+  fingerprint?: string | null,
+) {
+  if (!ownerUserId) return null;
+  if (fingerprint) return getStoredKey(ownerUserId, fingerprint);
+  const meta = await getStoredMeta(ownerUserId);
+  return meta?.activeFingerprint
+    ? getStoredKey(ownerUserId, meta.activeFingerprint)
+    : null;
+}
+
+type PeerPins = Record<string, string>;
+
+function readPeerPins(ownerUserId: string): PeerPins {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(`${PEER_PIN_STORAGE_PREFIX}${ownerUserId}`) ?? "{}",
+    ) as unknown;
+    return value && typeof value === "object" ? (value as PeerPins) : {};
+  } catch {
+    return {};
   }
-  return ring.keys[fingerprint] ?? null;
+}
+
+function writePeerPin(ownerUserId: string, peerUserId: string, fingerprint: string) {
+  const pins = readPeerPins(ownerUserId);
+  localStorage.setItem(
+    `${PEER_PIN_STORAGE_PREFIX}${ownerUserId}`,
+    JSON.stringify({ ...pins, [peerUserId]: fingerprint }),
+  );
+}
+
+export class PeerMessageKeyChangedError extends Error {
+  readonly previousFingerprint: string;
+  readonly candidate: MessageKeyEnvelope;
+
+  constructor(
+    previousFingerprint: string,
+    candidate: MessageKeyEnvelope,
+  ) {
+    super("Peer secure-chat identity changed");
+    this.name = "PeerMessageKeyChangedError";
+    this.previousFingerprint = previousFingerprint;
+    this.candidate = candidate;
+  }
 }
 
 export async function fetchPeerMessageKey(
-  userId: string,
+  ownerUserId: string,
+  peerUserId: string,
   fingerprint?: string | null,
+  expectedChangedFingerprint?: string | null,
 ): Promise<MessageKeyEnvelope | null> {
   const query = fingerprint ? `?fingerprint=${encodeURIComponent(fingerprint)}` : "";
   try {
-    return await apiFetch<MessageKeyEnvelope>(`/messages/e2e-key/${userId}${query}`);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-    if (message.includes("not found") || message.includes("404")) {
-      return null;
+    const raw = await apiFetch<MessageKeyEnvelope>(
+      `/messages/e2e-key/${peerUserId}${query}`,
+    );
+    const envelope = await validateMessageKeyEnvelope(raw, peerUserId, !fingerprint);
+    if (!fingerprint) {
+      const previous = readPeerPins(ownerUserId)[peerUserId];
+      const expected = expectedChangedFingerprint?.trim();
+      if (expected && envelope.fingerprint !== expected) {
+        throw new PeerMessageKeyChangedError(previous ?? expected, envelope);
+      }
+      if (previous && previous !== envelope.fingerprint && !expected) {
+        throw new PeerMessageKeyChangedError(previous, envelope);
+      }
+      if (!previous || expected === envelope.fingerprint) {
+        writePeerPin(ownerUserId, peerUserId, envelope.fingerprint);
+      }
     }
+    return envelope;
+  } catch (error) {
+    if (isNotFoundError(error)) return null;
     throw error;
   }
 }
@@ -351,7 +535,7 @@ export async function encryptMessageForPeer(
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const aesKey = await deriveMessageKey(
-    senderKey.privateKeyJwk,
+    senderKey.privateKey,
     recipientKey.public_key,
     salt,
     "encrypt",
@@ -385,7 +569,7 @@ export async function encryptAttachmentForPeer(
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const aesKey = await deriveMessageKey(
-    senderKey.privateKeyJwk,
+    senderKey.privateKey,
     recipientKey.public_key,
     salt,
     "encrypt",
@@ -465,116 +649,4 @@ export async function decryptAttachmentFromPeer(
     peerKey,
   );
   return plaintext;
-}
-
-export async function exportKeyRingBackup(passphrase: string) {
-  const trimmedPassphrase = passphrase.trim();
-  if (!trimmedPassphrase) {
-    throw new Error(uiText("chat_e2e_backup_passphrase_required"));
-  }
-
-  const ring = readKeyRing();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveBackupKey(trimmedPassphrase, salt, "encrypt");
-  const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv,
-      },
-      key,
-      new TextEncoder().encode(JSON.stringify(ring)),
-    ),
-  );
-
-  return JSON.stringify(
-    {
-      version: 1,
-      algorithm: "pbkdf2-sha256-aes256gcm",
-      iterations: KEYRING_BACKUP_ITERATIONS,
-      salt: bytesToBase64(salt),
-      iv: bytesToBase64(iv),
-      ciphertext: bytesToBase64(ciphertext),
-      exported_at: new Date().toISOString(),
-    } satisfies KeyRingBackupEnvelope,
-    null,
-    2,
-  );
-}
-
-export async function importKeyRingBackup(
-  serializedBackup: string,
-  passphrase: string,
-) {
-  const trimmedPassphrase = passphrase.trim();
-  if (!trimmedPassphrase) {
-    throw new Error(uiText("chat_e2e_backup_passphrase_required"));
-  }
-
-  let backup: KeyRingBackupEnvelope;
-  try {
-    backup = JSON.parse(serializedBackup) as KeyRingBackupEnvelope;
-  } catch {
-    throw new Error(uiText("chat_e2e_invalid_backup_file"));
-  }
-
-  if (
-    backup.version !== 1 ||
-    backup.algorithm !== "pbkdf2-sha256-aes256gcm" ||
-    !backup.salt ||
-    !backup.iv ||
-    !backup.ciphertext
-  ) {
-    throw new Error(uiText("chat_e2e_invalid_backup_file"));
-  }
-
-  const salt = base64ToBytes(backup.salt);
-  const iv = base64ToBytes(backup.iv);
-  const ciphertext = base64ToBytes(backup.ciphertext);
-  const key = await deriveBackupKey(trimmedPassphrase, salt, "decrypt");
-  let decrypted: Uint8Array;
-  try {
-    decrypted = new Uint8Array(
-      await crypto.subtle.decrypt(
-        {
-          name: "AES-GCM",
-          iv,
-        },
-        key,
-        ciphertext,
-      ),
-    );
-  } catch {
-    throw new Error(uiText("chat_e2e_invalid_backup_passphrase"));
-  }
-
-  let imported: MessageKeyRing;
-  try {
-    imported = JSON.parse(new TextDecoder().decode(decrypted)) as MessageKeyRing;
-  } catch {
-    throw new Error(uiText("chat_e2e_invalid_backup_file"));
-  }
-
-  if (!imported || typeof imported !== "object" || !imported.keys) {
-    throw new Error(uiText("chat_e2e_invalid_backup_file"));
-  }
-
-  const current = readKeyRing();
-  const merged: MessageKeyRing = {
-    activeFingerprint:
-      imported.activeFingerprint && imported.keys[imported.activeFingerprint]
-        ? imported.activeFingerprint
-        : current.activeFingerprint,
-    keys: {
-      ...current.keys,
-      ...imported.keys,
-    },
-  };
-  writeKeyRing(merged);
-
-  return {
-    importedKeys: Object.keys(imported.keys).length,
-    activeFingerprint: merged.activeFingerprint,
-  };
 }

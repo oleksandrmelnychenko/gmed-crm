@@ -14,7 +14,10 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::access;
-use crate::auth::middleware::{AuthUser, authenticate_websocket, revalidate_auth_user};
+use crate::auth::middleware::{
+    AuthUser, authenticate_websocket, release_workspace_allows_path,
+    release_workspace_allows_realtime_event, revalidate_auth_user,
+};
 use crate::realtime::RealtimeEvent;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -44,10 +47,22 @@ async fn events_ws(
 }
 
 async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64) {
+    let Some(mut connection_permit) = state.websocket_connections.try_acquire_handshake() else {
+        tracing::warn!("realtime websocket global handshake quota exceeded");
+        return;
+    };
     let mut auth = match authenticate_websocket(&mut socket, &state).await {
         Ok(auth) => auth,
         Err(_) => return,
     };
+    if !release_workspace_allows_path(auth.role, "/events/ws") {
+        return;
+    }
+    if !connection_permit.try_bind_user(auth.user_id) {
+        tracing::warn!(user_id = %auth.user_id, "realtime websocket connection quota exceeded");
+        return;
+    }
+    let _connection_permit = connection_permit;
     let mut receiver = state.realtime_events.subscribe();
     let mut authorization_check = tokio::time::interval(std::time::Duration::from_secs(15));
     authorization_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -86,11 +101,11 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64)
             _ = &mut expiry_check => break,
             _ = authorization_check.tick() => {
                 match revalidate_auth_user(&state, &auth).await {
-                    Ok(current) => {
+                    Ok(current) if release_workspace_allows_path(current.role, "/events/ws") => {
                         auth = current;
                         continue;
                     }
-                    Err(_) => break,
+                    _ => break,
                 }
             }
             received = receiver.recv() => received,
@@ -99,8 +114,11 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64)
             Ok(event) => event,
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 auth = match revalidate_auth_user(&state, &auth).await {
-                    Ok(current) => current,
+                    Ok(current) if release_workspace_allows_path(current.role, "/events/ws") => {
+                        current
+                    }
                     Err(_) => break,
+                    _ => break,
                 };
                 if !replay_events_after(&mut socket, &state, &mut auth, &mut cursor_seq).await {
                     break;
@@ -111,8 +129,8 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64)
         };
 
         auth = match revalidate_auth_user(&state, &auth).await {
-            Ok(current) => current,
-            Err(_) => break,
+            Ok(current) if release_workspace_allows_path(current.role, "/events/ws") => current,
+            _ => break,
         };
 
         if let Some(seq) = event.seq {
@@ -152,10 +170,14 @@ async fn replay_events_after(
 
     loop {
         *auth = match revalidate_auth_user(state, auth).await {
-            Ok(current) => current,
-            Err(_) => return false,
+            Ok(current) if release_workspace_allows_path(current.role, "/events/ws") => current,
+            _ => {
+                record_replay_events(scanned);
+                return false;
+            }
         };
         if scanned >= REPLAY_TOTAL_LIMIT {
+            record_replay_events(scanned);
             return send_resync_required(socket, auth, Some(*cursor_seq)).await;
         }
 
@@ -171,11 +193,13 @@ async fn replay_events_after(
                         cursor_seq = *cursor_seq,
                         "failed to replay realtime events"
                     );
+                    record_replay_events(scanned);
                     return send_resync_required(socket, auth, Some(*cursor_seq)).await;
                 }
             };
 
         if events.is_empty() {
+            record_replay_events(scanned);
             return true;
         }
 
@@ -183,10 +207,6 @@ async fn replay_events_after(
         scanned += batch_len;
 
         for event in events {
-            *auth = match revalidate_auth_user(state, auth).await {
-                Ok(current) => current,
-                Err(_) => return false,
-            };
             if let Some(seq) = event.seq {
                 *cursor_seq = (*cursor_seq).max(seq);
             }
@@ -194,6 +214,7 @@ async fn replay_events_after(
             match can_receive_event(state, auth, &event).await {
                 Ok(true) => {
                     if !send_event(socket, &event, auth.access_token_expires_at).await {
+                        record_replay_events(scanned);
                         return false;
                     }
                 }
@@ -211,9 +232,15 @@ async fn replay_events_after(
         }
 
         if batch_len < limit as usize {
+            record_replay_events(scanned);
             return true;
         }
     }
+}
+
+fn record_replay_events(scanned: usize) {
+    metrics::histogram!(crate::business_metrics::CHAT_REALTIME_REPLAY_EVENTS)
+        .record(scanned as f64);
 }
 
 async fn send_event(
@@ -269,15 +296,24 @@ async fn can_receive_event(
     auth: &AuthUser,
     event: &RealtimeEvent,
 ) -> Result<bool, axum::response::Response> {
-    if event.target_user_ids.contains(&auth.user_id) {
-        return Ok(true);
+    if !release_workspace_allows_realtime_event(auth.role, &event.event_type) {
+        return Ok(false);
     }
 
-    let Some(role_name) = access::role_db_name(auth.role) else {
-        return Ok(false);
-    };
-    if event.role_names.iter().any(|role| role == role_name) {
-        return Ok(true);
+    // Patient-scoped persisted events must always be checked against current
+    // access. A historical direct target or role target must not resurrect an
+    // event after an assignment has been revoked.
+    if !requires_current_entity_authorization(event) {
+        if event.target_user_ids.contains(&auth.user_id) {
+            return Ok(true);
+        }
+
+        let Some(role_name) = access::role_db_name(auth.role) else {
+            return Ok(false);
+        };
+        if event.role_names.iter().any(|role| role == role_name) {
+            return Ok(true);
+        }
     }
 
     match event.entity_type.as_str() {
@@ -340,6 +376,28 @@ async fn can_receive_event(
     }
 }
 
+fn requires_current_entity_authorization(event: &RealtimeEvent) -> bool {
+    matches!(
+        event.entity_type.as_str(),
+        "patient"
+            | "appointment"
+            | "appointment_request"
+            | "concierge_service"
+            | "document"
+            | "invoice"
+            | "privacy_request"
+            | "feedback"
+            | "task"
+            | "workflow_checklist_item"
+            | "appointment_checklist"
+            | "reminder"
+            | "order"
+            | "framework_contract"
+            | "quote"
+            | "case"
+    )
+}
+
 async fn can_receive_patient_event(
     state: &AppState,
     auth: &AuthUser,
@@ -347,6 +405,9 @@ async fn can_receive_patient_event(
 ) -> Result<bool, axum::response::Response> {
     match auth.role {
         Role::Ceo | Role::CeoAssistant | Role::Billing => Ok(true),
+        Role::Patient => crate::routes::me::resolve_linked_patient_id(state, auth.user_id)
+            .await
+            .map(|linked_patient_id| linked_patient_id == Some(patient_id)),
         Role::PatientManager | Role::TeamleadInterpreter | Role::Interpreter | Role::Concierge => {
             access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
                 .await
@@ -364,12 +425,16 @@ async fn can_receive_appointment_event(
     auth: &AuthUser,
     appointment_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if auth.role == Role::Ceo {
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
         return Ok(true);
     }
     if !matches!(
         auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Interpreter | Role::Concierge
+        Role::Patient
+            | Role::PatientManager
+            | Role::TeamleadInterpreter
+            | Role::Interpreter
+            | Role::Concierge
     ) {
         return Ok(false);
     }
@@ -410,6 +475,10 @@ async fn can_receive_appointment_event(
             "Failed to validate event access",
         )
     })?;
+
+    if auth.role == Role::Patient {
+        return can_receive_patient_event(state, auth, patient_id).await;
+    }
 
     if access::requires_patient_assignment(auth.role) {
         access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
@@ -495,7 +564,13 @@ async fn can_receive_contract_event(
     if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
         return Ok(true);
     }
-    if auth.role != Role::PatientManager {
+    if auth.role == Role::Patient {
+        let Some(patient_id) = event.patient_id else {
+            return Ok(false);
+        };
+        return can_receive_patient_event(state, auth, patient_id).await;
+    }
+    if !matches!(auth.role, Role::Patient | Role::PatientManager) {
         return Ok(false);
     }
 
@@ -519,7 +594,7 @@ async fn can_receive_case_event(
     if auth.role == Role::Ceo {
         return Ok(true);
     }
-    if auth.role != Role::PatientManager {
+    if !matches!(auth.role, Role::Patient | Role::PatientManager) {
         return Ok(false);
     }
 
@@ -540,7 +615,7 @@ async fn can_receive_case_event(
     };
 
     let manager_id: Option<Uuid> = row.try_get("manager_id").unwrap_or_default();
-    if manager_id == Some(auth.user_id) {
+    if auth.role == Role::PatientManager && manager_id == Some(auth.user_id) {
         return Ok(true);
     }
 
@@ -551,12 +626,44 @@ async fn can_receive_case_event(
         )
     })?;
 
+    if auth.role == Role::Patient {
+        return can_receive_patient_event(state, auth, patient_id).await;
+    }
+
     access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, case_id = %event.entity_id, "check realtime case assignment");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requires_current_entity_authorization;
+    use crate::realtime::RealtimeEvent;
+    use uuid::Uuid;
+
+    #[test]
+    fn patient_scoped_replay_never_trusts_historical_targets() {
+        let user_id = Uuid::new_v4();
+        let mut event = RealtimeEvent::new("patient.updated", "patient", Uuid::new_v4());
+        event.target_user_ids.push(user_id);
+
+        assert!(requires_current_entity_authorization(&event));
+    }
+
+    #[test]
+    fn operational_targeted_replay_keeps_direct_target_routing() {
+        let mut event = RealtimeEvent::new(
+            "concierge_operational_item.updated",
+            "concierge_operational_item",
+            Uuid::new_v4(),
+        );
+        event.patient_id = Some(Uuid::new_v4());
+
+        assert!(!requires_current_entity_authorization(&event));
+    }
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

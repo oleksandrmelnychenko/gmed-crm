@@ -99,37 +99,10 @@ async function waitForConversationContent(
 async function refreshOwnChatKey(page: import("@playwright/test").Page) {
   const result = await page.evaluate(async () => {
     const token = window.localStorage.getItem("gmed_access_token");
-    const ringRaw = window.localStorage.getItem("gmed_chat_e2e_keyring_v1");
-    if (!ringRaw) {
-      return { ok: false, error: "missing local chat keyring" };
-    }
-
-    const ring = JSON.parse(ringRaw) as {
-      activeFingerprint: string | null;
-      keys: Record<
-        string,
-        {
-          algorithm: string;
-          publicKey: string;
-        }
-      >;
-    };
-    const activeFingerprint = ring.activeFingerprint;
-    if (!activeFingerprint || !ring.keys[activeFingerprint]) {
-      return { ok: false, error: "missing active chat key" };
-    }
-
-    const activeKey = ring.keys[activeFingerprint];
     const response = await fetch("/api/v1/messages/e2e-key", {
-      method: "POST",
       headers: {
-        "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({
-        algorithm: activeKey.algorithm,
-        public_key: activeKey.publicKey,
-      }),
     });
 
     return {
@@ -182,24 +155,24 @@ async function sendEncryptedTextWithRetry(
 }
 
 test.describe("secure chat live workflows", () => {
-  test("assigned patient and patient manager can exchange secure chat text and attachment", async ({
+  test("assigned patient and concierge can exchange secure chat text and attachment", async ({
     browser,
     request,
   }) => {
-    const [scenario, patientContext, pmContext] = await Promise.all([
+    const [scenario, patientContext, conciergeContext] = await Promise.all([
       bootstrapFullSmokeScenario(request),
       browser.newContext(),
       browser.newContext(),
     ]);
-    const [patientPage, pmPage] = await Promise.all([
+    const [patientPage, conciergePage] = await Promise.all([
       patientContext.newPage(),
-      pmContext.newPage(),
+      conciergeContext.newPage(),
     ]);
 
     try {
       await Promise.all([
         setGermanLanguage(patientPage),
-        setGermanLanguage(pmPage),
+        setGermanLanguage(conciergePage),
       ]);
 
       await Promise.all([
@@ -210,9 +183,9 @@ test.describe("secure chat live workflows", () => {
           scenario.credentials.password,
         ),
         loginViaApi(
-          pmPage,
+          conciergePage,
           request,
-          scenario.credentials.pm.email,
+          scenario.credentials.concierge.email,
           scenario.credentials.password,
         ),
       ]);
@@ -228,14 +201,14 @@ test.describe("secure chat live workflows", () => {
       ).toBeVisible();
       expect((await patientKeyResponse).ok()).toBeTruthy();
 
-      const pmKeyResponse = pmPage.waitForResponse(
+      const conciergeKeyResponse = conciergePage.waitForResponse(
         (nextResponse) =>
           nextResponse.url().includes("/api/v1/messages/e2e-key") &&
           nextResponse.request().method() === "POST",
       );
-      await pmPage.goto("/chat");
-      await expect(pmPage.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
-      expect((await pmKeyResponse).ok()).toBeTruthy();
+      await conciergePage.goto("/chat");
+      await expect(conciergePage.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
+      expect((await conciergeKeyResponse).ok()).toBeTruthy();
 
       await patientPage
         .getByRole("button", { name: /Neue Nachricht|Новое сообщение/i })
@@ -243,39 +216,39 @@ test.describe("secure chat live workflows", () => {
       const patientPicker = patientPage.getByTestId("chat-new-picker");
       await patientPicker
         .getByPlaceholder(/Benutzer suchen|Поиск пользователей/i)
-        .fill(scenario.credentials.pm.name);
+        .fill(scenario.credentials.concierge.name);
       await patientPicker
-        .getByRole("button", { name: new RegExp(scenario.credentials.pm.name, "i") })
+        .getByRole("button", { name: new RegExp(scenario.credentials.concierge.name, "i") })
         .click();
 
-      await pmPage
+      await conciergePage
         .getByRole("button", { name: /Neue Nachricht|Новое сообщение/i })
         .click();
-      const pmPicker = pmPage.getByTestId("chat-new-picker");
-      await pmPicker
+      const conciergePicker = conciergePage.getByTestId("chat-new-picker");
+      await conciergePicker
         .getByPlaceholder(/Benutzer suchen|Поиск пользователей/i)
         .fill(scenario.credentials.patient.name);
-      await pmPicker
+      await conciergePicker
         .getByRole("button", { name: new RegExp(scenario.credentials.patient.name, "i") })
         .click();
 
       const encryptedChatLabel = /End-to-end encrypted chat|Ende-zu-Ende verschlüsselt/i;
       await expect(patientPage.getByText(encryptedChatLabel)).toBeVisible();
-      await expect(pmPage.getByText(encryptedChatLabel)).toBeVisible();
+      await expect(conciergePage.getByText(encryptedChatLabel)).toBeVisible();
 
       await sendEncryptedTextWithRetry(
         patientPage,
-        scenario.credentials.pm.user_id,
+        scenario.credentials.concierge.user_id,
         "Patient secure update for the care team",
       );
       await expect(
         patientPage.getByText("Patient secure update for the care team"),
       ).toBeVisible();
 
-      await reopenConversation(pmPage, scenario.credentials.patient.name);
-      await refreshOwnChatKey(pmPage);
+      await reopenConversation(conciergePage, scenario.credentials.patient.name);
+      await refreshOwnChatKey(conciergePage);
       await waitForConversationContent(
-        pmPage,
+        conciergePage,
         scenario.credentials.patient.name,
         "Patient secure update for the care team",
       );
@@ -297,7 +270,7 @@ test.describe("secure chat live workflows", () => {
           nextResponse.request().method() === "POST" &&
           nextResponse
             .url()
-            .includes(`/api/v1/messages/${scenario.credentials.pm.user_id}/upload`),
+            .includes(`/api/v1/messages/${scenario.credentials.concierge.user_id}/upload`),
       );
       await patientPage.locator("form button[type='submit']").click();
       const uploadResponse = await uploadResponsePromise;
@@ -308,19 +281,44 @@ test.describe("secure chat live workflows", () => {
       await expect(patientPage.getByText("patient-secure-note.pdf")).toBeVisible();
 
       await waitForConversationContent(
-        pmPage,
+        conciergePage,
         scenario.credentials.patient.name,
         "patient-secure-note.pdf",
       );
 
       const [download] = await Promise.all([
-        pmPage.waitForEvent("download"),
-        pmPage.getByRole("button", { name: /patient-secure-note\.pdf/i }).click(),
+        conciergePage.waitForEvent("download"),
+        conciergePage.getByRole("button", { name: /patient-secure-note\.pdf/i }).click(),
       ]);
       expect(download.suggestedFilename()).toBe("patient-secure-note.pdf");
+
+      const deleteResponsePromise = patientPage.waitForResponse(
+        (nextResponse) =>
+          nextResponse.request().method() === "DELETE" &&
+          nextResponse
+            .url()
+            .includes(`/api/v1/messages/${scenario.credentials.concierge.user_id}/`),
+      );
+      await patientPage
+        .getByRole("button", { name: /Nachricht löschen|Удалить сообщение/i })
+        .first()
+        .click();
+      await patientPage
+        .getByRole("button", { name: /Löschen|Удалить/i })
+        .last()
+        .click();
+      expect((await deleteResponsePromise).ok()).toBeTruthy();
+      await expect(
+        patientPage.getByText("Patient secure update for the care team"),
+      ).toHaveCount(0);
+
+      await reopenConversation(conciergePage, scenario.credentials.patient.name);
+      await expect(
+        conciergePage.getByText("Patient secure update for the care team"),
+      ).toHaveCount(0);
     } finally {
       await patientContext.close();
-      await pmContext.close();
+      await conciergeContext.close();
     }
   });
 });

@@ -111,17 +111,17 @@ test.describe("realtime live propagation", () => {
   }) => {
     const scenario = await bootstrapFullSmokeScenario(request);
     const password = scenario.credentials.password;
-    const pm = scenario.credentials.pm;
+    const actor = scenario.credentials.ceo;
 
     await setGermanLanguage(page);
-    await loginViaApi(page, request, pm.email, password);
+    await loginViaApi(page, request, actor.email, password);
 
     const mutatorContext = await browser.newContext();
     const mutatorPage = await mutatorContext.newPage();
 
     try {
       await setGermanLanguage(mutatorPage);
-      await loginViaApi(mutatorPage, request, pm.email, password);
+      await loginViaApi(mutatorPage, request, actor.email, password);
       await waitForRealtime(page);
       await waitForRealtime(mutatorPage);
 
@@ -179,7 +179,7 @@ test.describe("realtime live propagation", () => {
         patient_id: scenario.patient.id,
         provider_id: null,
         doctor_id: null,
-        owner_user_id: pm.user_id,
+        owner_user_id: scenario.credentials.pm.user_id,
         interpreter_id: null,
         order_id: scenario.order.id,
         appointment_type: "medical",
@@ -221,7 +221,7 @@ test.describe("realtime live propagation", () => {
       await browserApiPost(mutatorPage, "/tasks", {
         title: taskTitle,
         description: "Created in another browser context for dashboard realtime.",
-        assigned_to: pm.user_id,
+        assigned_to: actor.user_id,
         patient_id: scenario.patient.id,
         order_id: null,
         appointment_id: null,

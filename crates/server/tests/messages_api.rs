@@ -1247,6 +1247,66 @@ async fn messages_ordered_by_time_desc() {
 }
 
 #[tokio::test]
+async fn message_history_uses_stable_composite_cursor_beyond_100_rows() {
+    let Some(app) = test_app().await else { return };
+    let user_a = seed_user(app.pool(), &unique_tag("messages-history-a"), "ceo").await;
+    let user_b = seed_user(app.pool(), &unique_tag("messages-history-b"), "billing").await;
+    let auth_a = auth_header_with_id("ceo", user_a);
+    let base_time = chrono::Utc::now();
+
+    for index in 0..205_i64 {
+        sqlx::query(
+            r#"INSERT INTO direct_messages (id, from_user, to_user, message, created_at)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(user_a)
+        .bind(user_b)
+        .bind(format!("history-{index}"))
+        // Deliberately share timestamps across three rows to prove the UUID
+        // tie-breaker prevents duplicates and gaps.
+        .bind(base_time - chrono::Duration::seconds(index / 3))
+        .execute(app.pool())
+        .await
+        .unwrap();
+    }
+
+    let mut cursor: Option<(String, String)> = None;
+    let mut seen = std::collections::HashSet::new();
+    let mut page_sizes = Vec::new();
+    loop {
+        let path = match cursor.as_ref() {
+            Some((created_at, id)) => format!(
+                "/api/v1/messages/{user_b}?limit=100&before_created_at={}&before_id={id}",
+                created_at.replace('+', "%2B")
+            ),
+            None => format!("/api/v1/messages/{user_b}?limit=100"),
+        };
+        let (status, body) = json_request(&app, "GET", &path, &auth_a, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let page = body.as_array().unwrap();
+        page_sizes.push(page.len());
+        for message in page {
+            assert!(
+                seen.insert(message["id"].as_str().unwrap().to_string()),
+                "cursor pages must not overlap"
+            );
+        }
+        let Some(last) = page.last() else { break };
+        cursor = Some((
+            last["created_at"].as_str().unwrap().to_string(),
+            last["id"].as_str().unwrap().to_string(),
+        ));
+        if page.len() < 100 {
+            break;
+        }
+    }
+
+    assert_eq!(page_sizes, vec![100, 100, 5]);
+    assert_eq!(seen.len(), 205);
+}
+
+#[tokio::test]
 async fn unread_count_zero_for_sender() {
     let Some(app) = test_app().await else { return };
     let user_a = seed_user(app.pool(), &unique_tag("messages-unread-a"), "ceo").await;

@@ -79,6 +79,7 @@ async fn main() {
     gmed_server::services::medication_ai_jobs::spawn_medication_ai_worker(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
+    spawn_expired_message_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
 
@@ -228,6 +229,41 @@ fn spawn_message_rewrap_sweeper(state: state::AppState) {
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = ?e, "Periodic rewrap failed"),
+            }
+        }
+    });
+}
+
+fn spawn_expired_message_sweeper(state: state::AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut orphan_sweep_ticks = 0_u8;
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            let purged =
+                gmed_server::routes::messages::purge_expired_messages_batch(&state, None).await;
+            if purged > 0 {
+                tracing::info!(purged, "Expired chat message sweep complete");
+            }
+            let (migrated, errors) =
+                gmed_server::routes::messages::migrate_legacy_chat_attachments_batch(&state).await;
+            if migrated > 0 || errors > 0 {
+                tracing::info!(
+                    migrated,
+                    errors,
+                    "Legacy chat attachment migration sweep complete"
+                );
+            }
+            orphan_sweep_ticks = orphan_sweep_ticks.wrapping_add(1);
+            if orphan_sweep_ticks >= 15 {
+                orphan_sweep_ticks = 0;
+                let (deleted, errors) =
+                    gmed_server::routes::messages::reconcile_orphan_chat_attachments_batch(&state)
+                        .await;
+                if deleted > 0 || errors > 0 {
+                    tracing::info!(deleted, errors, "Chat attachment reconciliation complete");
+                }
             }
         }
     });

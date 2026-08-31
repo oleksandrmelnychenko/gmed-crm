@@ -166,8 +166,27 @@ export interface AdminSystemTranslations {
   chat_load_failed: string;
   chat_attachment_pending: string;
   chat_attachment_too_large: string;
+  chat_attachment_type_blocked: string;
   chat_security_settings: string;
   chat_security_settings_description: string;
+  chat_security_device_bound_description: string;
+  chat_security_this_device: string;
+  chat_security_peer_device: string;
+  chat_secure_identity_changed: string;
+  chat_secure_identity_unverified: string;
+  chat_secure_trust_new_identity: string;
+  chat_message_history: string;
+  chat_search_messages: string;
+  chat_search_loaded_history: string;
+  chat_no_message_matches: string;
+  chat_load_older: string;
+  chat_connection_connecting: string;
+  chat_connection_connected: string;
+  chat_connection_reconnecting: string;
+  chat_connection_offline: string;
+  chat_secure_attachment_unscanned: string;
+  chat_composer_keyboard_hint: string;
+  chat_start_conversation: string;
   chat_secure_server_channel_label: string;
   chat_security_e2e_description: string;
   chat_security_server_description: string;
@@ -593,9 +612,32 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_attachment_pending:
     "Вложения станут доступны, когда собеседник активирует защищенный чат.",
   chat_attachment_too_large: "Файл превышает допустимый размер 20 МБ.",
+  chat_attachment_type_blocked:
+    "Этот тип файла нельзя безопасно отправить в зашифрованном чате.",
   chat_security_settings: "Безопасность чата",
   chat_security_settings_description:
     "Статус защиты переписки и резервные копии ключей этого устройства.",
+  chat_security_device_bound_description:
+    "Закрытый ключ неэкспортируемый, привязан к этой учетной записи и хранится в защищенном хранилище браузера.",
+  chat_security_this_device: "Контрольный номер этого устройства",
+  chat_security_peer_device: "Контрольный номер собеседника",
+  chat_secure_identity_changed:
+    "Ключ собеседника изменился. Отправка приостановлена до проверки контрольного номера.",
+  chat_secure_identity_unverified: "Личность собеседника не подтверждена",
+  chat_secure_trust_new_identity: "Доверять новому ключу",
+  chat_message_history: "История сообщений",
+  chat_search_messages: "Поиск в сообщениях",
+  chat_search_loaded_history: "Поиск выполняется локально в загруженной истории.",
+  chat_no_message_matches: "В загруженной истории совпадений нет.",
+  chat_load_older: "Загрузить предыдущие сообщения",
+  chat_connection_connecting: "Подключение…",
+  chat_connection_connected: "В сети",
+  chat_connection_reconnecting: "Переподключение…",
+  chat_connection_offline: "Нет соединения",
+  chat_secure_attachment_unscanned:
+    "Содержимое зашифровано на устройстве и не проверялось антивирусом.",
+  chat_composer_keyboard_hint: "Enter — отправить · Shift+Enter — новая строка",
+  chat_start_conversation: "Начать разговор",
   chat_secure_server_channel_label: "Защищенный канал",
   chat_security_e2e_description:
     "Сообщения и вложения защищены сквозным шифрованием между устройствами.",
@@ -1040,9 +1082,32 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_attachment_pending:
     "Anhänge werden verfügbar, sobald die Gegenseite den sicheren Chat aktiviert.",
   chat_attachment_too_large: "Die Datei überschreitet die zulässigen 20 MB.",
+  chat_attachment_type_blocked:
+    "Dieser Dateityp kann im verschlüsselten Chat nicht sicher gesendet werden.",
   chat_security_settings: "Chat-Sicherheit",
   chat_security_settings_description:
     "Schutzstatus der Unterhaltung und Schlüssel-Sicherungen dieses Geräts.",
+  chat_security_device_bound_description:
+    "Der private Schlüssel ist nicht exportierbar, an dieses Konto gebunden und im geschützten Browser-Speicher abgelegt.",
+  chat_security_this_device: "Prüfnummer dieses Geräts",
+  chat_security_peer_device: "Prüfnummer der Gegenseite",
+  chat_secure_identity_changed:
+    "Der Schlüssel der Gegenseite hat sich geändert. Der Versand bleibt bis zur Prüfung der Prüfnummer gesperrt.",
+  chat_secure_identity_unverified: "Identität der Gegenseite nicht bestätigt",
+  chat_secure_trust_new_identity: "Neuem Schlüssel vertrauen",
+  chat_message_history: "Nachrichtenverlauf",
+  chat_search_messages: "Nachrichten durchsuchen",
+  chat_search_loaded_history: "Die Suche bleibt lokal im geladenen Verlauf.",
+  chat_no_message_matches: "Keine Treffer im geladenen Verlauf.",
+  chat_load_older: "Ältere Nachrichten laden",
+  chat_connection_connecting: "Verbindung wird hergestellt…",
+  chat_connection_connected: "Verbunden",
+  chat_connection_reconnecting: "Verbindung wird wiederhergestellt…",
+  chat_connection_offline: "Offline",
+  chat_secure_attachment_unscanned:
+    "Der Inhalt wurde auf dem Gerät verschlüsselt und nicht auf Malware geprüft.",
+  chat_composer_keyboard_hint: "Enter sendet · Shift+Enter fügt eine Zeile ein",
+  chat_start_conversation: "Unterhaltung starten",
   chat_secure_server_channel_label: "Geschützter Kanal",
   chat_security_e2e_description:
     "Nachrichten und Anhänge sind zwischen den Geräten Ende-zu-Ende verschlüsselt.",

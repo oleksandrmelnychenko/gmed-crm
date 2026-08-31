@@ -85,6 +85,14 @@ jobs:
       - name: Test
         run: npm --prefix frontend run test
 
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Secure chat browser gate
+        working-directory: frontend
+        run: npx playwright test tests/e2e/chat-secure.spec.ts
+
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -158,6 +166,8 @@ jobs:
           -c playwright.live.config.ts
           tests/e2e-live/operations-p0.live.spec.ts
           tests/e2e-live/rbac-denied-routes.live.spec.ts
+          tests/e2e-live/chat-secure.live.spec.ts
+          tests/e2e-live/realtime.live.spec.ts
 
   clinical-document-parser:
     runs-on: ubuntu-latest

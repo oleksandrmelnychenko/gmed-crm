@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useReducer, useRef, type ChangeEvent, type FormEvent, type SetStateAction } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useReducer, useRef, type FormEvent, type SetStateAction } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 import {
   MessageSquarePlus,
   Search,
@@ -19,15 +19,14 @@ import {
 import {
   CHAT_E2E_PREVIEW,
   CHAT_E2E_UNAVAILABLE,
+  PeerMessageKeyChangedError,
   decryptAttachmentFromPeer,
   decryptMessageFromPeer,
   encryptAttachmentForPeer,
   encryptMessageForPeer,
   ensureServerMessageKey,
-  exportKeyRingBackup,
   fetchPeerMessageKey,
   getLocalMessageKey,
-  importKeyRingBackup,
   type MessageKeyEnvelope,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
@@ -42,7 +41,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { deNormalize } from "@/components/data-table/search";
@@ -52,7 +50,6 @@ import {
   fetchAllowedPeers,
   fetchConversations,
   fetchPeerMessages,
-  markAllMessagesRead,
   markPeerMessagesRead,
   openMessagesSocket,
   sendPeerMessage,
@@ -71,15 +68,21 @@ import {
 } from "./model/chat-model";
 import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
 
-type KeyDialogMode = "manage" | "export" | "import" | null;
+type KeyDialogMode = "manage" | null;
+type ChatConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
 
 const CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
+const CHAT_ATTACHMENT_ACCEPT =
+  ".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.txt,.csv,.doc,.docx,.xls,.xlsx,.dcm";
+const CHAT_ATTACHMENT_EXTENSIONS = new Set(
+  CHAT_ATTACHMENT_ACCEPT.split(",").map((value) => value.slice(1)),
+);
 const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
 
-type ImportedKeyBackup = {
-  name: string;
-  content: string;
-};
+function isAllowedChatAttachment(file: File) {
+  const extension = file.name.split(".").pop()?.toLocaleLowerCase();
+  return Boolean(extension && CHAT_ATTACHMENT_EXTENSIONS.has(extension));
+}
 
 function formatChatDay(iso: string, lang: "de" | "ru") {
   const value = new Date(iso);
@@ -111,23 +114,25 @@ type ChatPageState = {
   input: string;
   loading: boolean;
   messageLoading: boolean;
+  olderMessagesLoading: boolean;
+  hasOlderMessages: boolean;
+  connectionStatus: ChatConnectionStatus;
   sending: boolean;
   conversationError: boolean;
   messageError: boolean;
   userError: boolean;
   search: string;
+  messageSearch: string;
   showNewChat: boolean;
   allUsers: UserItem[];
   userSearch: string;
   pendingFile: File | null;
   activePeerMessageKey: MessageKeyEnvelope | null;
+  pendingPeerMessageKey: MessageKeyEnvelope | null;
+  deviceKeyFingerprint: string | null;
   secureStatus: string | null;
   attachmentBusyId: string | null;
   keyDialogMode: KeyDialogMode;
-  keyPassphrase: string;
-  keyDialogBusy: boolean;
-  keyDialogStatus: string | null;
-  importedKeyBackup: ImportedKeyBackup | null;
   messageTimerSeconds: number;
   deleteTarget: Message | null;
   deletingMessageId: string | null;
@@ -164,6 +169,7 @@ function useChatPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const secureChannelPendingStatus = t.chat_attachment_pending;
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
   const canViewChat = canAccessChat(user?.role);
@@ -180,23 +186,25 @@ function useChatPageContent() {
       input: "",
       loading: true,
       messageLoading: false,
+      olderMessagesLoading: false,
+      hasOlderMessages: false,
+      connectionStatus: "connecting",
       sending: false,
       conversationError: false,
       messageError: false,
       userError: false,
       search: "",
+      messageSearch: "",
       showNewChat: false,
       allUsers: [],
       userSearch: "",
       pendingFile: null,
       activePeerMessageKey: null,
+      pendingPeerMessageKey: null,
+      deviceKeyFingerprint: null,
       secureStatus: null,
       attachmentBusyId: null,
       keyDialogMode: null,
-      keyPassphrase: "",
-      keyDialogBusy: false,
-      keyDialogStatus: null,
-      importedKeyBackup: null,
       messageTimerSeconds: 0,
       deleteTarget: null,
       deletingMessageId: null,
@@ -212,23 +220,25 @@ function useChatPageContent() {
     input,
     loading,
     messageLoading,
+    olderMessagesLoading,
+    hasOlderMessages,
+    connectionStatus,
     sending,
     conversationError,
     messageError,
     userError,
     search,
+    messageSearch,
     showNewChat,
     allUsers,
     userSearch,
     pendingFile,
     activePeerMessageKey,
+    pendingPeerMessageKey,
+    deviceKeyFingerprint,
     secureStatus,
     attachmentBusyId,
     keyDialogMode,
-    keyPassphrase,
-    keyDialogBusy,
-    keyDialogStatus,
-    importedKeyBackup,
     messageTimerSeconds,
     deleteTarget,
     deletingMessageId,
@@ -254,6 +264,12 @@ function useChatPageContent() {
     setChatField("loading", value);
   const setMessageLoading = (value: SetStateAction<boolean>) =>
     setChatField("messageLoading", value);
+  const setOlderMessagesLoading = (value: SetStateAction<boolean>) =>
+    setChatField("olderMessagesLoading", value);
+  const setHasOlderMessages = (value: SetStateAction<boolean>) =>
+    setChatField("hasOlderMessages", value);
+  const setConnectionStatus = (value: SetStateAction<ChatConnectionStatus>) =>
+    setChatField("connectionStatus", value);
   const setSending = (value: SetStateAction<boolean>) =>
     setChatField("sending", value);
   const setConversationError = (value: SetStateAction<boolean>) =>
@@ -264,6 +280,8 @@ function useChatPageContent() {
     setChatField("userError", value);
   const setSearch = (value: SetStateAction<string>) =>
     setChatField("search", value);
+  const setMessageSearch = (value: SetStateAction<string>) =>
+    setChatField("messageSearch", value);
   const setShowNewChat = (value: SetStateAction<boolean>) =>
     setChatField("showNewChat", value);
   const setAllUsers = (value: SetStateAction<UserItem[]>) =>
@@ -274,20 +292,16 @@ function useChatPageContent() {
     setChatField("pendingFile", value);
   const setActivePeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
     setChatField("activePeerMessageKey", value);
+  const setPendingPeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
+    setChatField("pendingPeerMessageKey", value);
+  const setDeviceKeyFingerprint = (value: SetStateAction<string | null>) =>
+    setChatField("deviceKeyFingerprint", value);
   const setSecureStatus = (value: SetStateAction<string | null>) =>
     setChatField("secureStatus", value);
   const setAttachmentBusyId = (value: SetStateAction<string | null>) =>
     setChatField("attachmentBusyId", value);
   const setKeyDialogMode = (value: SetStateAction<KeyDialogMode>) =>
     setChatField("keyDialogMode", value);
-  const setKeyPassphrase = (value: SetStateAction<string>) =>
-    setChatField("keyPassphrase", value);
-  const setKeyDialogBusy = (value: SetStateAction<boolean>) =>
-    setChatField("keyDialogBusy", value);
-  const setKeyDialogStatus = (value: SetStateAction<string | null>) =>
-    setChatField("keyDialogStatus", value);
-  const setImportedKeyBackup = (value: SetStateAction<ImportedKeyBackup | null>) =>
-    setChatField("importedKeyBackup", value);
   const setMessageTimerSeconds = (value: SetStateAction<number>) =>
     setChatField("messageTimerSeconds", value);
   const setDeleteTarget = (value: SetStateAction<Message | null>) =>
@@ -297,8 +311,7 @@ function useChatPageContent() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const keyBackupInputRef = useRef<HTMLInputElement>(null);
-  const hydratedDraftRef = useRef("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const activePeerRef = useRef<string | null>(null);
   const ignoredRoutePeerRef = useRef<string | null>(null);
   const messageRequestIdRef = useRef(0);
@@ -308,6 +321,13 @@ function useChatPageContent() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    composer.style.height = `${Math.min(composer.scrollHeight, 112)}px`;
+  }, [input]);
 
   useEffect(() => {
     if (!messages.some((message) => message.expires_at)) return;
@@ -337,18 +357,21 @@ function useChatPageContent() {
 
   const loadPeerMessageKey = useCallback(
     async (peerId: string, fingerprint?: string | null) => {
-      const cacheKey = `${peerId}:${fingerprint ?? "active"}`;
-      const cached = peerMessageKeyCacheRef.current[cacheKey];
-      if (cached) return cached;
+      if (fingerprint) {
+        const cached = peerMessageKeyCacheRef.current[`${peerId}:${fingerprint}`];
+        if (cached) return cached;
+      }
 
-      const key = await fetchPeerMessageKey(peerId, fingerprint);
+      const key = await fetchPeerMessageKey(myId, peerId, fingerprint);
       if (key) {
-        peerMessageKeyCacheRef.current[cacheKey] = key;
+        // Fingerprint-addressed historical keys are immutable and safe to
+        // cache. The active key is deliberately fetched on every send so a
+        // rotation cannot be hidden by a stale in-memory entry.
         peerMessageKeyCacheRef.current[`${peerId}:${key.fingerprint}`] = key;
       }
       return key;
     },
-    [],
+    [myId],
   );
 
   const hydrateMessages = useCallback(
@@ -365,7 +388,7 @@ function useChatPageContent() {
             message.from_user === myId
               ? message.recipient_key_fingerprint
               : message.sender_key_fingerprint;
-          const localKey = getLocalMessageKey(myFingerprint);
+          const localKey = await getLocalMessageKey(myId, myFingerprint);
           if (!localKey || !peerFingerprint) {
             return {
               ...message,
@@ -400,7 +423,7 @@ function useChatPageContent() {
   );
 
   const loadMessagesForPeer = useCallback(
-    async (peerId: string, markRead = false) => {
+    async (peerId: string, markRead = false, preserveHistory = false) => {
       if (!canViewChat) {
         setMessages([]);
         return;
@@ -417,7 +440,12 @@ function useChatPageContent() {
         ) {
           return;
         }
-        setMessages(hydrated);
+        setMessages((current) => {
+          if (!preserveHistory) return hydrated;
+          const incomingIds = new Set(hydrated.map((message) => message.id));
+          return [...hydrated, ...current.filter((message) => !incomingIds.has(message.id))];
+        });
+        setHasOlderMessages((current) => (preserveHistory ? current : msgs.length === 100));
         if (markRead) {
           await markPeerMessagesRead(peerId);
         }
@@ -441,14 +469,34 @@ function useChatPageContent() {
     [canViewChat, hydrateMessages],
   );
 
+  const loadOlderMessages = useCallback(async () => {
+    if (!activePeer || olderMessagesLoading || !hasOlderMessages) return;
+    const oldest = messages[messages.length - 1];
+    if (!oldest || oldest.id.startsWith("local-")) return;
+
+    setOlderMessagesLoading(true);
+    try {
+      const raw = await fetchPeerMessages(activePeer, oldest);
+      const hydrated = await hydrateMessages(activePeer, raw);
+      if (activePeerRef.current !== activePeer) return;
+      setMessages((current) => {
+        const currentIds = new Set(current.map((message) => message.id));
+        return [...current, ...hydrated.filter((message) => !currentIds.has(message.id))];
+      });
+      setHasOlderMessages(raw.length === 100);
+    } catch {
+      setMessageError(true);
+    } finally {
+      if (activePeerRef.current === activePeer) setOlderMessagesLoading(false);
+    }
+  }, [activePeer, hasOlderMessages, hydrateMessages, messages, olderMessagesLoading]);
+
   useEffect(() => {
     if (!canViewChat) {
       void loadConversations();
       return;
     }
-    void markAllMessagesRead()
-      .then(loadConversations)
-      .catch(() => loadConversations());
+    void loadConversations();
   }, [canViewChat, loadConversations]);
 
   useEffect(() => {
@@ -462,7 +510,8 @@ function useChatPageContent() {
 
     void (async () => {
       try {
-        await ensureServerMessageKey();
+        const key = await ensureServerMessageKey(myId);
+        if (!cancelled) setDeviceKeyFingerprint(key.fingerprint);
       } catch {
         if (!cancelled) {
           setSecureStatus(t.chat_secure_setup_failed_device);
@@ -473,7 +522,7 @@ function useChatPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [canViewChat, t.chat_secure_setup_failed_device]);
+  }, [canViewChat, myId, t.chat_secure_setup_failed_device]);
 
   useEffect(() => {
     activePeerRef.current = activePeer;
@@ -485,11 +534,13 @@ function useChatPageContent() {
 
   const resetActivePeerSecurity = useCallback(() => {
     setActivePeerMessageKey(null);
+    setPendingPeerMessageKey(null);
     setSecureStatus(null);
   }, []);
 
   const applyActivePeerMessageKey = useCallback((key: MessageKeyEnvelope | null) => {
     setActivePeerMessageKey(key);
+    setPendingPeerMessageKey(null);
     setSecureStatus(null);
   }, []);
 
@@ -505,23 +556,13 @@ function useChatPageContent() {
     setActiveName(name);
     setActiveRole(role);
     setMessages([]);
+    setHasOlderMessages(false);
     setMessageLoading(true);
     setMessageError(false);
     setShowNewChat(false);
     setPendingFile(null);
+    setMessageSearch("");
   }, []);
-
-  const applyDraftFromRoute = useCallback((draft: string) => {
-    setInput(draft);
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete("draft");
-        return next;
-      },
-      { replace: true }
-    );
-  }, [setSearchParams]);
 
   useEffect(() => {
     if (!canViewChat) {
@@ -540,8 +581,13 @@ function useChatPageContent() {
         const key = await loadPeerMessageKey(activePeer);
         if (cancelled) return;
         applyActivePeerMessageKey(key);
-      } catch {
-        if (!cancelled) {
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof PeerMessageKeyChangedError) {
+          setActivePeerMessageKey(null);
+          setPendingPeerMessageKey(error.candidate);
+          setSecureStatus(t.chat_secure_identity_changed);
+        } else {
           failActivePeerMessageKey();
         }
       }
@@ -558,6 +604,7 @@ function useChatPageContent() {
     failActivePeerMessageKey,
     loadPeerMessageKey,
     resetActivePeerSecurity,
+    t.chat_secure_identity_changed,
   ]);
 
   useEffect(() => {
@@ -585,21 +632,55 @@ function useChatPageContent() {
       openPeerFromRoute(peer, name, role);
     }
 
-    const draft = searchParams.get("draft");
-    if (draft && hydratedDraftRef.current !== `${peer}:${draft}`) {
-      hydratedDraftRef.current = `${peer}:${draft}`;
-      applyDraftFromRoute(draft);
-    }
   }, [
     activeName,
     activePeer,
     activeRole,
     allUsers,
-    applyDraftFromRoute,
     conversations,
     openPeerFromRoute,
     searchParams,
   ]);
+
+  useEffect(() => {
+    const state = location.state as
+      | {
+          __gmedNavigationUserId?: unknown;
+          chatDraft?: unknown;
+          chatDraftPeerId?: unknown;
+        }
+      | null;
+    if (!state) return;
+
+    const peer = searchParams.get("peer");
+    const isOwnedDraft =
+      state.__gmedNavigationUserId === myId &&
+      state.chatDraftPeerId === peer &&
+      typeof state.chatDraft === "string" &&
+      state.chatDraft.length <= 10_000;
+    if (isOwnedDraft) {
+      setInput(state.chatDraft as string);
+    }
+
+    // History state is not an appropriate store for patient/free-text data.
+    // Consume it once and immediately replace the current entry without it.
+    setSearchParams(
+      (current) => new URLSearchParams(current),
+      { replace: true, state: null },
+    );
+  }, [location.state, myId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!searchParams.has("draft")) return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("draft");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   // Keep chat live via WebSocket push.
   useEffect(() => {
@@ -609,11 +690,30 @@ function useChatPageContent() {
     let reconnectTimer: number | null = null;
     let connectTimer: number | null = null;
     let disposed = false;
+    let reconnectAttempt = 0;
+
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      setConnectionStatus("reconnecting");
+      const baseDelay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt);
+      const jitter = Math.floor(baseDelay * 0.25 * Math.random());
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(connect, baseDelay + jitter);
+    };
 
     const connect = () => {
+      setConnectionStatus(reconnectAttempt === 0 ? "connecting" : "reconnecting");
       const nextSocket = openMessagesSocket();
-      if (!nextSocket) return;
+      if (!nextSocket) {
+        setConnectionStatus("offline");
+        scheduleReconnect();
+        return;
+      }
       socket = nextSocket;
+      socket.onopen = () => {
+        reconnectAttempt = 0;
+        setConnectionStatus("connected");
+      };
       socket.onmessage = (event) => {
         const payload = (() => {
           try {
@@ -630,15 +730,15 @@ function useChatPageContent() {
 
         void loadMessagesForPeer(
           currentPeer,
-          payload.type === "message_created" && payload.user_id !== myId,
+          payload.type === "message_created" && payload.user_id === myId,
+          true,
         ).catch(() => undefined);
       };
       socket.onerror = () => {
         socket?.close();
       };
       socket.onclose = () => {
-        if (disposed) return;
-        reconnectTimer = window.setTimeout(connect, 3000);
+        scheduleReconnect();
       };
     };
 
@@ -646,6 +746,7 @@ function useChatPageContent() {
 
     return () => {
       disposed = true;
+      setConnectionStatus("offline");
       if (connectTimer !== null) window.clearTimeout(connectTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
@@ -656,6 +757,7 @@ function useChatPageContent() {
   useEffect(() => {
     if (!activePeer) {
       setMessages([]);
+      setHasOlderMessages(false);
       return;
     }
     void (async () => {
@@ -676,10 +778,12 @@ function useChatPageContent() {
     setActiveName(name);
     setActiveRole(role);
     setMessages([]);
+    setHasOlderMessages(false);
     setMessageLoading(true);
     setMessageError(false);
     setShowNewChat(false);
     setPendingFile(null);
+    setMessageSearch("");
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -701,9 +805,11 @@ function useChatPageContent() {
     setActiveName("");
     setActiveRole("");
     setMessages([]);
+    setHasOlderMessages(false);
     setMessageLoading(false);
     setMessageError(false);
     setPendingFile(null);
+    setMessageSearch("");
     resetActivePeerSecurity();
     setSearchParams(
       (current) => {
@@ -740,14 +846,37 @@ function useChatPageContent() {
 
   const resetKeyDialog = useCallback(() => {
     setKeyDialogMode(null);
-    setKeyPassphrase("");
-    setKeyDialogBusy(false);
-    setKeyDialogStatus(null);
-    setImportedKeyBackup(null);
-    if (keyBackupInputRef.current) {
-      keyBackupInputRef.current.value = "";
-    }
   }, []);
+
+  const trustPendingPeerIdentity = useCallback(async () => {
+    if (!activePeer || !pendingPeerMessageKey) return;
+    try {
+      const trusted = await fetchPeerMessageKey(
+        myId,
+        activePeer,
+        null,
+        pendingPeerMessageKey.fingerprint,
+      );
+      if (!trusted) throw new Error("Peer key is unavailable");
+      peerMessageKeyCacheRef.current[`${activePeer}:${trusted.fingerprint}`] = trusted;
+      setActivePeerMessageKey(trusted);
+      setPendingPeerMessageKey(null);
+      setSecureStatus(null);
+    } catch (error) {
+      if (error instanceof PeerMessageKeyChangedError) {
+        setPendingPeerMessageKey(error.candidate);
+        setSecureStatus(t.chat_secure_identity_changed);
+        return;
+      }
+      setSecureStatus(t.chat_secure_key_failed);
+    }
+  }, [
+    activePeer,
+    myId,
+    pendingPeerMessageKey,
+    t.chat_secure_identity_changed,
+    t.chat_secure_key_failed,
+  ]);
 
   const downloadBlob = useCallback((blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -773,7 +902,7 @@ function useChatPageContent() {
         message.from_user === myId
           ? message.recipient_key_fingerprint
           : message.sender_key_fingerprint;
-      const localKey = getLocalMessageKey(myFingerprint);
+      const localKey = await getLocalMessageKey(myId, myFingerprint);
       if (!localKey || !peerFingerprint) {
         setSecureStatus(t.chat_secure_attachment_unavailable);
         return;
@@ -845,57 +974,6 @@ function useChatPageContent() {
     [downloadBlob, t.chat_secure_operation_failed],
   );
 
-  const handleKeyBackupFileChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      const content = await file.text();
-      setImportedKeyBackup({ name: file.name, content });
-      setKeyDialogMode("import");
-      setKeyDialogStatus(null);
-    },
-    [],
-  );
-
-  const handleKeyDialogSubmit = useCallback(async () => {
-    if (!keyPassphrase.trim()) {
-      setKeyDialogStatus(t.chat_secure_passphrase_required);
-      return;
-    }
-
-    setKeyDialogBusy(true);
-    try {
-      if (keyDialogMode === "export") {
-        const payload = await exportKeyRingBackup(keyPassphrase);
-        downloadBlob(
-          new Blob([payload], { type: "application/json" }),
-          `gmed-secure-chat-keys-${new Date().toISOString().slice(0, 10)}.json`,
-        );
-        setKeyDialogStatus(t.chat_secure_backup_downloaded);
-      } else if (keyDialogMode === "import" && importedKeyBackup) {
-        const result = await importKeyRingBackup(importedKeyBackup.content, keyPassphrase);
-        setKeyDialogStatus(
-          t.chat_secure_keys_imported.replace("{count}", String(result.importedKeys)),
-        );
-      }
-    } catch (error) {
-      setKeyDialogStatus(
-        error instanceof Error ? error.message : t.chat_secure_operation_failed,
-      );
-    } finally {
-      setKeyDialogBusy(false);
-    }
-  }, [
-    downloadBlob,
-    importedKeyBackup,
-    keyDialogMode,
-    keyPassphrase,
-    t.chat_secure_backup_downloaded,
-    t.chat_secure_keys_imported,
-    t.chat_secure_operation_failed,
-    t.chat_secure_passphrase_required,
-  ]);
-
   const applyDeliveryReceipt = (
     peerId: string,
     clientMessageId: string,
@@ -930,23 +1008,39 @@ function useChatPageContent() {
           ? { expires_in_seconds: message.retry_expires_in_seconds }
           : {}),
       };
-      const receipt = activePeerMessageKey
-        ? await (async () => {
-            const senderKey = await ensureServerMessageKey();
+      const currentPeerKey = await loadPeerMessageKey(peerId);
+      if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
+      applyActivePeerMessageKey(currentPeerKey);
+      const receipt = await (async () => {
+            const senderKey = await ensureServerMessageKey(myId);
             const payload = await encryptMessageForPeer(
               text,
               senderKey,
-              activePeerMessageKey,
+              currentPeerKey,
             );
             return sendPeerMessage(peerId, { ...payload, ...lifecycle });
-          })()
-        : await sendPeerMessage(peerId, { message: text, ...lifecycle });
+          })();
 
       applyDeliveryReceipt(peerId, clientMessageId, receipt);
       setSecureStatus(null);
       void loadMessagesForPeer(peerId).catch(() => undefined);
       void loadConversations();
-    } catch {
+    } catch (error) {
+      if (error instanceof PeerMessageKeyChangedError) {
+        setActivePeerMessageKey(null);
+        setPendingPeerMessageKey(error.candidate);
+        if (activePeerRef.current === peerId) {
+          setMessages((current) =>
+            current.map((item) =>
+              item.client_message_id === clientMessageId
+                ? { ...item, delivery_state: "failed" }
+                : item,
+            ),
+          );
+          setSecureStatus(t.chat_secure_identity_changed);
+        }
+        return;
+      }
       try {
         const serverMessages = await fetchPeerMessages(peerId);
         if (serverMessages.some((item) => item.client_message_id === clientMessageId)) {
@@ -1029,11 +1123,14 @@ function useChatPageContent() {
         formData.append("expires_in_seconds", String(messageTimerSeconds));
       }
       try {
-        const senderKey = await ensureServerMessageKey();
+        const currentPeerKey = await loadPeerMessageKey(activePeer);
+        if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
+        applyActivePeerMessageKey(currentPeerKey);
+        const senderKey = await ensureServerMessageKey(myId);
         const encryptedAttachment = await encryptAttachmentForPeer(
           new Uint8Array(await pendingFile.arrayBuffer()),
           senderKey,
-          activePeerMessageKey,
+          currentPeerKey,
         );
         formData.append(
           "file",
@@ -1067,7 +1164,7 @@ function useChatPageContent() {
           const payload = await encryptMessageForPeer(
             caption,
             senderKey,
-            activePeerMessageKey,
+            currentPeerKey,
           );
           formData.append("e2e_algorithm", payload.e2e_algorithm);
           formData.append("e2e_ciphertext", payload.e2e_ciphertext);
@@ -1082,8 +1179,14 @@ function useChatPageContent() {
         setInput("");
         setPendingFile(null);
         setMessageTimerSeconds(0);
-      } catch {
-        setSecureStatus(t.chat_secure_attachment_send_failed);
+      } catch (error) {
+        if (error instanceof PeerMessageKeyChangedError) {
+          setActivePeerMessageKey(null);
+          setPendingPeerMessageKey(error.candidate);
+          setSecureStatus(t.chat_secure_identity_changed);
+        } else {
+          setSecureStatus(t.chat_secure_attachment_send_failed);
+        }
       } finally {
         setSending(false);
       }
@@ -1155,10 +1258,17 @@ function useChatPageContent() {
             ? t.chat_message_timer_week
             : t.chat_message_timer_off;
 
+  const normalizedMessageSearch = deNormalize(messageSearch);
   const displayMsgs = [...messages]
     .filter(
       (message) =>
         !message.expires_at || new Date(message.expires_at).getTime() > expiryClock,
+    )
+    .filter(
+      (message) =>
+        !normalizedMessageSearch ||
+        deNormalize(message.message ?? "").includes(normalizedMessageSearch) ||
+        deNormalize(message.attachment_filename ?? "").includes(normalizedMessageSearch),
     )
     .reverse();
 
@@ -1187,8 +1297,10 @@ function useChatPageContent() {
               setShowNewChat(!showNewChat);
             }}
             aria-label={t.chat_new}
+            aria-expanded={showNewChat}
+            aria-controls="chat-new-peer-picker"
             title={t.chat_new}
-            className="flex items-center justify-center size-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex size-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <MessageSquarePlus className="size-[18px]" />
           </button>
@@ -1210,6 +1322,7 @@ function useChatPageContent() {
         {/* New chat picker */}
         {showNewChat && (
           <div
+            id="chat-new-peer-picker"
             data-testid="chat-new-picker"
             className="border-b px-4 py-2 space-y-2 bg-muted/30 animate-in fade-in slide-in-from-top-1 duration-200"
           >
@@ -1219,7 +1332,11 @@ function useChatPageContent() {
               onChange={(e) => setUserSearch(e.target.value)}
               className="h-8 rounded-lg text-sm"
             />
-            <div className="max-h-40 overflow-y-auto space-y-0.5">
+            <div
+              className="max-h-40 overflow-y-auto space-y-0.5"
+              role="listbox"
+              aria-label={t.chat_search_users}
+            >
               {userError ? (
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
                   <p className="text-xs text-destructive">{t.common_error}</p>
@@ -1234,6 +1351,8 @@ function useChatPageContent() {
               ) : filteredUsers.map((u) => (
                 <button
                   key={u.id}
+                  role="option"
+                  aria-selected={activePeer === u.id}
                   onClick={() => openConversation(u.id, u.name, u.role)}
                   className="flex items-center gap-2.5 w-full px-2 py-1.5 rounded-lg text-left hover:bg-muted transition-colors"
                 >
@@ -1253,7 +1372,17 @@ function useChatPageContent() {
         {/* Conversation list */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <p className="text-sm text-muted-foreground text-center py-8">{t.common_loading}</p>
+            <div className="space-y-3 p-4" aria-label={t.common_loading} aria-busy="true">
+              {[0, 1, 2, 3].map((item) => (
+                <div key={item} className="flex animate-pulse items-center gap-3">
+                  <div className="size-10 rounded-full bg-muted" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 w-1/2 rounded bg-muted" />
+                    <div className="h-2.5 w-4/5 rounded bg-muted" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : conversationError ? (
             <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
               <p className="text-sm text-destructive">{t.chat_load_failed}</p>
@@ -1262,11 +1391,18 @@ function useChatPageContent() {
               </Button>
             </div>
           ) : filteredConvos.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">{t.chat_no_conversations}</p>
+            <div className="flex flex-col items-center gap-3 px-5 py-10 text-center">
+              <p className="text-sm text-muted-foreground">{t.chat_no_conversations}</p>
+              <Button type="button" size="sm" onClick={() => setShowNewChat(true)}>
+                <MessageSquarePlus className="size-4" />
+                {t.chat_start_conversation}
+              </Button>
+            </div>
           ) : (
             filteredConvos.map((c) => (
               <button
                 key={c.user_id}
+                aria-current={activePeer === c.user_id ? "page" : undefined}
                 onClick={() => openConversation(c.user_id, c.name, c.role)}
                 className={cn(
                   "flex items-center gap-3 w-full px-5 py-3 text-left transition-colors border-b border-border/30",
@@ -1310,6 +1446,10 @@ function useChatPageContent() {
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
             <MessageSquare className="size-12 opacity-30" />
             <p className="text-sm">{t.chat_select_conversation}</p>
+            <Button type="button" variant="outline" onClick={() => setShowNewChat(true)}>
+              <MessageSquarePlus className="size-4" />
+              {t.chat_start_conversation}
+            </Button>
           </div>
         ) : (
           <>
@@ -1319,7 +1459,7 @@ function useChatPageContent() {
                 <button
                   type="button"
                   aria-label={t.chat_title}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
                   onClick={closeConversation}
                 >
                   <ArrowLeft className="size-4" />
@@ -1337,27 +1477,26 @@ function useChatPageContent() {
                         : t.chat_secure_server_channel_label
                     }`}
                   </p>
+                  <p className="text-[10px] text-muted-foreground" aria-live="polite">
+                    {connectionStatus === "connected"
+                      ? t.chat_connection_connected
+                      : connectionStatus === "reconnecting"
+                        ? t.chat_connection_reconnecting
+                        : connectionStatus === "offline"
+                          ? t.chat_connection_offline
+                          : t.chat_connection_connecting}
+                  </p>
                 </div>
               </div>
-              <input
-                ref={keyBackupInputRef}
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={(event) => void handleKeyBackupFileChange(event)}
-              />
               <button
                 type="button"
                 className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex size-11 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   activePeerMessageKey
                     ? "border-emerald-200 text-emerald-700"
                     : "border-border text-muted-foreground",
                 )}
-                onClick={() => {
-                  setKeyDialogMode("manage");
-                  setKeyDialogStatus(null);
-                }}
+                onClick={() => setKeyDialogMode("manage")}
                 title={t.chat_security_settings}
                 aria-label={t.chat_security_settings}
               >
@@ -1365,8 +1504,30 @@ function useChatPageContent() {
               </button>
             </div>
 
+            <div className="border-b px-3 py-2 sm:px-5">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={messageSearch}
+                  onChange={(event) => setMessageSearch(event.target.value)}
+                  placeholder={t.chat_search_messages}
+                  aria-label={t.chat_search_messages}
+                  className="h-9 rounded-lg pl-9"
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {t.chat_search_loaded_history}
+              </p>
+            </div>
+
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+            <div
+              className="flex-1 overflow-y-auto px-3 py-4 sm:px-5"
+              role="log"
+              aria-live="polite"
+              aria-relevant="additions text"
+              aria-label={t.chat_message_history}
+            >
               {messageLoading && displayMsgs.length === 0 ? (
                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                   {t.common_loading}
@@ -1382,6 +1543,24 @@ function useChatPageContent() {
                     onClick={() => activePeer && void loadMessagesForPeer(activePeer, true)}
                   >
                     {t.common_refresh}
+                  </Button>
+                </div>
+              ) : null}
+              {!messageLoading && !messageError && messageSearch && displayMsgs.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  {t.chat_no_message_matches}
+                </p>
+              ) : null}
+              {hasOlderMessages ? (
+                <div className="mb-4 flex justify-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={olderMessagesLoading}
+                    onClick={() => void loadOlderMessages()}
+                  >
+                    {olderMessagesLoading ? t.common_loading : t.chat_load_older}
                   </Button>
                 </div>
               ) : null}
@@ -1449,6 +1628,9 @@ function useChatPageContent() {
                             </p>
                             <p className="text-[10px] opacity-70">
                               {t.chat_secure_attachment_label} - {formatSize(m.attachment_size ?? 0)}
+                            </p>
+                            <p className="text-[10px] opacity-80">
+                              {t.chat_secure_attachment_unscanned}
                             </p>
                           </div>
                           <Download className="size-3.5 shrink-0 opacity-60" />
@@ -1528,7 +1710,7 @@ function useChatPageContent() {
                       {mine && m.delivery_state !== "sending" ? (
                         <button
                           type="button"
-                          className="inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover/message:opacity-100"
+                          className="inline-flex size-11 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive sm:size-7"
                           onClick={() => setDeleteTarget(m)}
                           disabled={deletingMessageId === m.id}
                           aria-label={t.chat_message_delete}
@@ -1551,7 +1733,7 @@ function useChatPageContent() {
                 <span className="min-w-0 flex-1">{secureStatus}</span>
                 <button
                   type="button"
-                  className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-muted"
                   onClick={() => setSecureStatus(null)}
                   aria-label={t.common_close}
                   title={t.common_close}
@@ -1580,10 +1762,11 @@ function useChatPageContent() {
             )}
 
             {/* Input */}
-            <form onSubmit={handleSend} className="flex items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
+            <form onSubmit={handleSend} className="flex flex-wrap items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
               <input
                 ref={fileInputRef}
                 type="file"
+                accept={CHAT_ATTACHMENT_ACCEPT}
                 className="hidden"
                 onChange={(e) => {
                   if (!activePeerMessageKey) {
@@ -1592,7 +1775,10 @@ function useChatPageContent() {
                     return;
                   }
                   const file = e.target.files?.[0];
-                  if (file && file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+                  if (file && !isAllowedChatAttachment(file)) {
+                    setSecureStatus(t.chat_attachment_type_blocked);
+                    setPendingFile(null);
+                  } else if (file && file.size > CHAT_ATTACHMENT_MAX_BYTES) {
                     setSecureStatus(t.chat_attachment_too_large);
                     setPendingFile(null);
                   } else if (file) {
@@ -1618,13 +1804,13 @@ function useChatPageContent() {
                     : secureChannelPendingStatus
                 }
                 aria-label={t.chat_secure_attachment_label}
-                className="flex items-center justify-center size-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Paperclip className="size-[18px]" />
               </button>
               <label
                 className={cn(
-                  "relative flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  "relative flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                   messageTimerSeconds > 0 && "bg-amber-50 text-amber-700",
                 )}
                 title={`${t.chat_message_timer}: ${messageTimerLabel}`}
@@ -1656,6 +1842,7 @@ function useChatPageContent() {
                 </select>
               </label>
               <textarea
+                ref={composerRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(event) => {
@@ -1673,138 +1860,91 @@ function useChatPageContent() {
                 rows={1}
                 maxLength={10_000}
                 aria-label={t.chat_type_message}
+                aria-describedby="chat-composer-keyboard-hint"
                 className="min-h-10 max-h-28 flex-1 resize-none rounded-xl border border-input bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
               />
               <button
                 type="submit"
-                disabled={sending || (!input.trim() && !pendingFile)}
+                disabled={
+                  sending ||
+                  !activePeerMessageKey ||
+                  (!input.trim() && !pendingFile)
+                }
                 aria-label={t.chat_send}
                 title={t.chat_send}
-                className="flex items-center justify-center size-9 rounded-lg bg-foreground text-background hover:opacity-80 transition-opacity shrink-0 disabled:opacity-40"
+                className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-40"
               >
                 <Send className="size-4" />
               </button>
+              <p
+                id="chat-composer-keyboard-hint"
+                className="basis-full pr-1 text-right text-[10px] text-muted-foreground"
+              >
+                {t.chat_composer_keyboard_hint}
+              </p>
             </form>
 
             <Dialog open={keyDialogMode !== null} onOpenChange={(open) => !open && resetKeyDialog()}>
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle>
-                    {keyDialogMode === "manage"
-                      ? t.chat_security_settings
-                      : keyDialogMode === "export"
-                        ? t.chat_export_secure_keys_title
-                        : t.chat_import_secure_keys_title}
-                  </DialogTitle>
+                  <DialogTitle>{t.chat_security_settings}</DialogTitle>
                   <DialogDescription>
-                    {keyDialogMode === "manage"
-                      ? t.chat_security_settings_description
-                      : keyDialogMode === "export"
-                        ? t.chat_export_secure_keys_description
-                        : t.chat_import_secure_keys_description}
+                    {t.chat_security_device_bound_description}
                   </DialogDescription>
                 </DialogHeader>
 
-                {keyDialogMode === "manage" ? (
-                  <>
-                    <div className="space-y-3">
-                      <div className="flex items-start gap-3 rounded-xl border bg-muted/30 px-3 py-3">
-                        <ShieldCheck
-                          className={cn(
-                            "mt-0.5 size-4 shrink-0",
-                            activePeerMessageKey
-                              ? "text-emerald-600"
-                              : "text-muted-foreground",
-                          )}
-                        />
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 rounded-xl border bg-muted/30 px-3 py-3">
+                    <ShieldCheck
+                      className={cn(
+                        "mt-0.5 size-4 shrink-0",
+                        activePeerMessageKey
+                          ? "text-emerald-600"
+                          : "text-muted-foreground",
+                      )}
+                    />
+                    <div className="min-w-0 space-y-2">
+                      <p className="text-sm font-medium">
+                        {activePeerMessageKey
+                          ? t.chat_secure_encrypted_label
+                          : t.chat_secure_identity_unverified}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t.chat_security_e2e_description}
+                      </p>
+                      <dl className="space-y-1 font-mono text-[10px] text-muted-foreground">
                         <div>
-                          <p className="text-sm font-medium">
-                            {activePeerMessageKey
-                              ? t.chat_secure_encrypted_label
-                              : t.chat_secure_server_channel_label}
-                          </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {activePeerMessageKey
-                              ? t.chat_security_e2e_description
-                              : t.chat_security_server_description}
-                          </p>
+                          <dt className="font-sans font-medium">{t.chat_security_this_device}</dt>
+                          <dd className="break-all">{deviceKeyFingerprint ?? "-"}</dd>
                         </div>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            setKeyDialogMode("export");
-                            setKeyDialogStatus(null);
-                          }}
-                        >
-                          {t.chat_export_keys}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => keyBackupInputRef.current?.click()}
-                        >
-                          {t.chat_import_keys}
-                        </Button>
-                      </div>
+                        <div>
+                          <dt className="font-sans font-medium">{t.chat_security_peer_device}</dt>
+                          <dd className="break-all">
+                            {activePeerMessageKey?.fingerprint ?? pendingPeerMessageKey?.fingerprint ?? "-"}
+                          </dd>
+                        </div>
+                      </dl>
                     </div>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={resetKeyDialog}>
-                        {t.chat_close}
-                      </Button>
-                    </DialogFooter>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-3">
-                      {keyDialogMode === "import" && (
-                        <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                          {importedKeyBackup
-                            ? t.chat_backup_selected.replace("{name}", importedKeyBackup.name)
-                            : t.chat_backup_choose_first}
-                        </div>
-                      )}
-                      <div className="space-y-2">
-                        <Label htmlFor="chat-key-passphrase">{t.chat_key_passphrase}</Label>
-                        <Input
-                          id="chat-key-passphrase"
-                          type="password"
-                          value={keyPassphrase}
-                          onChange={(event) => setKeyPassphrase(event.target.value)}
-                          placeholder={t.chat_key_passphrase_placeholder}
-                        />
-                      </div>
-                      {keyDialogStatus && (
-                        <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                          {keyDialogStatus}
-                        </div>
-                      )}
-                    </div>
-
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={resetKeyDialog}>
-                        {t.chat_close}
-                      </Button>
+                  </div>
+                  {pendingPeerMessageKey ? (
+                    <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950">
+                      <p>{t.chat_secure_identity_changed}</p>
                       <Button
                         type="button"
-                        onClick={() => void handleKeyDialogSubmit()}
-                        disabled={
-                          keyDialogBusy ||
-                          !keyPassphrase.trim() ||
-                          (keyDialogMode === "import" && !importedKeyBackup)
-                        }
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void trustPendingPeerIdentity()}
                       >
-                        {keyDialogBusy
-                          ? t.chat_working
-                          : keyDialogMode === "export"
-                            ? t.chat_export_backup
-                            : t.chat_import_backup}
+                        {t.chat_secure_trust_new_identity}
                       </Button>
-                    </DialogFooter>
-                  </>
-                )}
+                    </div>
+                  ) : null}
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={resetKeyDialog}>
+                    {t.chat_close}
+                  </Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
             <DirtyDismissConfirmDialog

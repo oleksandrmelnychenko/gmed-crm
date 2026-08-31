@@ -196,9 +196,10 @@ function useAppointmentBillingHandoffSectionContentContent({
       peer: assignee.id,
       name: assignee.name,
       role: assignee.role,
-      draft: draftParts.join("\n"),
     });
-    staffGo(`/chat?${params.toString()}`);
+    staffGo(`/chat?${params.toString()}`, {
+      state: { chatDraft: draftParts.join("\n"), chatDraftPeerId: assignee.id },
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

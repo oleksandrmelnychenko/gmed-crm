@@ -27,6 +27,7 @@ const WAIT_UNTIL_DELAY_MS: u64 = 50;
 pub struct TestSuiteContext {
     pub app: axum::Router,
     pub release_app: axum::Router,
+    pub state: AppState,
     pub pool: PgPool,
     pub admin_id: Uuid,
     _suite_db: Arc<SuiteDatabase>,
@@ -68,13 +69,14 @@ pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
     let release_app = gmed_server::build_app(app_state.clone())
         .layer(Extension(ConnectInfo(TEST_PEER_ADDR)))
         .layer(Extension(suite_db.clone()));
-    let app = gmed_server::build_app_for_role_contract_tests(app_state)
+    let app = gmed_server::build_app_for_role_contract_tests(app_state.clone())
         .layer(Extension(ConnectInfo(TEST_PEER_ADDR)))
         .layer(Extension(suite_db.clone()));
 
     Some(TestSuiteContext {
         app,
         release_app,
+        state: app_state,
         pool: suite_db.pool.clone(),
         admin_id: suite_db.admin_id,
         _suite_db: suite_db,

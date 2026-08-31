@@ -526,21 +526,47 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
         .await
         .unwrap();
 
-    sqlx::query(
+    let message_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO direct_messages (
                 from_user, to_user, message,
-                attachment_filename, attachment_mime, attachment_size, attachment_key
+                e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
+                sender_key_fingerprint, recipient_key_fingerprint,
+                attachment_filename, attachment_mime, attachment_size, attachment_key,
+                attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7
-           )"#,
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16
+           ) RETURNING id"#,
     )
     .bind(patient_user_id)
     .bind(pm_id)
     .bind("Sensitive patient message")
+    .bind("p256-hkdf-aes256gcm-v1")
+    .bind(vec![1_u8, 2, 3])
+    .bind(vec![4_u8; 12])
+    .bind(vec![5_u8; 16])
+    .bind("patient-fingerprint")
+    .bind("staff-fingerprint")
     .bind("erasure-note.txt")
     .bind("text/plain")
     .bind(25_i64)
     .bind(&attachment_key)
+    .bind("p256-hkdf-aes256gcm-v1")
+    .bind(vec![6_u8; 12])
+    .bind(vec![7_u8; 16])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        r#"INSERT INTO user_notifications (
+               user_id, kind, title, body, entity_type, entity_id, source_message_id
+           ) VALUES ($1, 'direct_message', 'New message', $2, 'message_peer', $3, $4)"#,
+    )
+    .bind(pm_id)
+    .bind("Sensitive patient message")
+    .bind(patient_user_id)
+    .bind(message_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -611,7 +637,12 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     assert!(!patient_row.try_get::<bool, _>("is_active").unwrap());
 
     let redacted_message = sqlx::query(
-        r#"SELECT message, attachment_key, redacted_at, redaction_reason
+        r#"SELECT message, message_ciphertext, message_nonce,
+                  e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
+                  sender_key_fingerprint, recipient_key_fingerprint,
+                  attachment_key, attachment_nonce, attachment_e2e_algorithm,
+                  attachment_e2e_nonce, attachment_e2e_salt,
+                  redacted_at, redaction_reason
            FROM direct_messages
            WHERE (from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1)
            ORDER BY created_at DESC
@@ -635,6 +666,38 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
             .unwrap(),
         None
     );
+    for field in [
+        "message_ciphertext",
+        "message_nonce",
+        "e2e_ciphertext",
+        "e2e_nonce",
+        "e2e_salt",
+        "attachment_nonce",
+        "attachment_e2e_nonce",
+        "attachment_e2e_salt",
+    ] {
+        assert_eq!(
+            redacted_message
+                .try_get::<Option<Vec<u8>>, _>(field)
+                .unwrap(),
+            None,
+            "{field} must be cleared"
+        );
+    }
+    for field in [
+        "e2e_algorithm",
+        "sender_key_fingerprint",
+        "recipient_key_fingerprint",
+        "attachment_e2e_algorithm",
+    ] {
+        assert_eq!(
+            redacted_message
+                .try_get::<Option<String>, _>(field)
+                .unwrap(),
+            None,
+            "{field} must be cleared"
+        );
+    }
     assert!(
         redacted_message
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("redacted_at")
@@ -649,6 +712,18 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
         Some("dsgvo_erasure")
     );
     assert!(!attachment_path.exists());
+
+    let chat_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE entity_type = 'message_peer'
+             AND kind IN ('direct_message', 'direct_message_attachment')
+             AND (user_id = $1 OR entity_id = $1)"#,
+    )
+    .bind(patient_user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(chat_notifications, 0);
 
     let audit_count = wait_for_patient_audit_actions(
         &pool,

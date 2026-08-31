@@ -2188,6 +2188,13 @@ async fn anonymize_patient_record(
 ) -> Result<Value, axum::response::Response> {
     let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
     let anonymized_at = Utc::now();
+    let mut tx = state.db.begin().await.map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "begin patient erasure transaction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?;
 
     let update = sqlx::query(
         r#"UPDATE patients
@@ -2229,7 +2236,7 @@ async fn anonymize_patient_record(
         "anonymized_by": actor_id.to_string(),
         "privacy_request_status": "completed",
     }))
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
     if let Err(e) = update {
@@ -2244,23 +2251,44 @@ async fn anonymize_patient_record(
         "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND revoked_at IS NULL",
     )
     .bind(patient_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
-    .map(|result| result.rows_affected())
-    .unwrap_or_default();
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "revoke assignments during patient erasure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?
+    .rows_affected();
 
     let consents_revoked = sqlx::query(
         "UPDATE consent_records SET revoked_at = $2 WHERE patient_id = $1 AND granted = true AND revoked_at IS NULL",
     )
     .bind(patient_id)
     .bind(anonymized_at)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
-    .map(|result| result.rows_affected())
-    .unwrap_or_default();
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "revoke consents during patient erasure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?
+    .rows_affected();
 
-    let (redacted_messages, removed_attachments) =
-        redact_patient_direct_messages(state, patient_id).await?;
+    let (redacted_messages, attachment_keys) =
+        redact_patient_direct_messages(&mut tx, patient_id).await?;
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "commit patient erasure transaction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?;
+
+    let removed_attachments = remove_redacted_chat_attachments(patient_id, attachment_keys).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "dsgvo_anonymize",
@@ -2293,9 +2321,9 @@ async fn anonymize_patient_record(
 }
 
 async fn redact_patient_direct_messages(
-    state: &AppState,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
-) -> Result<(u64, u64), axum::response::Response> {
+) -> Result<(u64, Vec<String>), axum::response::Response> {
     let patient_user_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"SELECT DISTINCT pa.user_id
            FROM patient_assignments pa
@@ -2304,7 +2332,7 @@ async fn redact_patient_direct_messages(
              AND u.role = 'patient'"#,
     )
     .bind(patient_id)
-    .fetch_all(&state.db)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "load patient messaging identities");
@@ -2315,7 +2343,7 @@ async fn redact_patient_direct_messages(
     })?;
 
     if patient_user_ids.is_empty() {
-        return Ok((0, 0));
+        return Ok((0, Vec::new()));
     }
 
     let attachment_rows = sqlx::query(
@@ -2325,7 +2353,7 @@ async fn redact_patient_direct_messages(
              AND attachment_key IS NOT NULL"#,
     )
     .bind(&patient_user_ids)
-    .fetch_all(&state.db)
+    .fetch_all(&mut **tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "load patient message attachments");
@@ -2340,19 +2368,29 @@ async fn redact_patient_direct_messages(
            SET message = '[redacted due to DSGVO erasure]',
                message_ciphertext = NULL,
                message_nonce = NULL,
+               e2e_algorithm = NULL,
+               e2e_ciphertext = NULL,
+               e2e_nonce = NULL,
+               e2e_salt = NULL,
+               sender_key_fingerprint = NULL,
+               recipient_key_fingerprint = NULL,
                attachment_filename = NULL,
                attachment_mime = NULL,
                attachment_size = NULL,
                attachment_key = NULL,
                attachment_nonce = NULL,
+               attachment_e2e_algorithm = NULL,
+               attachment_e2e_nonce = NULL,
+               attachment_e2e_salt = NULL,
                is_read = true,
+               read_at = COALESCE(read_at, now()),
                redacted_at = now(),
                redaction_reason = 'dsgvo_erasure'
            WHERE (from_user = ANY($1) OR to_user = ANY($1))
              AND redacted_at IS NULL"#,
     )
     .bind(&patient_user_ids)
-    .execute(&state.db)
+    .execute(&mut **tx)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "redact patient direct messages");
@@ -2363,20 +2401,53 @@ async fn redact_patient_direct_messages(
     })?
     .rows_affected();
 
+    if let Err(e) = sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE entity_type = 'message_peer'
+             AND kind IN ('direct_message', 'direct_message_attachment')
+             AND (user_id = ANY($1) OR entity_id = ANY($1))"#,
+    )
+    .bind(&patient_user_ids)
+    .execute(&mut **tx)
+    .await
+    {
+        tracing::error!(error = %e, patient_id = %patient_id, "delete patient chat notifications during erasure");
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        ));
+    }
+
+    let attachment_keys = attachment_rows
+        .into_iter()
+        .filter_map(|row| {
+            row.try_get::<Option<String>, _>("attachment_key")
+                .unwrap_or_default()
+        })
+        .collect();
+
+    Ok((redacted_messages, attachment_keys))
+}
+
+async fn remove_redacted_chat_attachments(patient_id: Uuid, attachment_keys: Vec<String>) -> u64 {
     let mut removed_attachments = 0_u64;
-    for row in attachment_rows {
-        let Some(attachment_key) = row
-            .try_get::<Option<String>, _>("attachment_key")
-            .unwrap_or_default()
-        else {
+    for attachment_key in attachment_keys {
+        let file_name_matches = std::path::Path::new(&attachment_key)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value == attachment_key);
+        if !file_name_matches {
+            tracing::warn!(
+                patient_id = %patient_id,
+                attachment_key = %attachment_key,
+                "refused unsafe redacted chat attachment path"
+            );
             continue;
-        };
+        }
 
         let path = std::path::Path::new(CHAT_UPLOAD_DIR).join(&attachment_key);
         match tokio::fs::remove_file(&path).await {
-            Ok(_) => {
-                removed_attachments += 1;
-            }
+            Ok(_) => removed_attachments += 1,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 tracing::warn!(
@@ -2388,8 +2459,7 @@ async fn redact_patient_direct_messages(
             }
         }
     }
-
-    Ok((redacted_messages, removed_attachments))
+    removed_attachments
 }
 
 async fn revoke_third_party_consents(
