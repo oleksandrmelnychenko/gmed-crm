@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { ConciergeAssignee } from "./model";
-import { selectTaskAssigneeId } from "./task-event-dialog";
+import type { ConciergeAssignee, ConciergeService } from "./model";
+import { isConciergeServiceSelectableForTask, selectTaskAssigneeId } from "./task-event-dialog";
 
 const assignees: ConciergeAssignee[] = [
   { id: "ceo-1", name: "Oleksandr", email: "ceo@example.com", role: "ceo", is_active: true },
@@ -25,5 +25,23 @@ describe("selectTaskAssigneeId", () => {
 
   it("does not keep an assignee that is absent from the active Concierge list", () => {
     expect(selectTaskAssigneeId("inactive-concierge", "ceo-1", assignees)).toBe("concierge-1");
+  });
+});
+
+const service = {
+  id: "service-1",
+  assigned_concierge_id: "concierge-1",
+  task_eligible: true,
+} as ConciergeService;
+
+describe("isConciergeServiceSelectableForTask", () => {
+  it("accepts only task-eligible services assigned to the selected Concierge", () => {
+    expect(isConciergeServiceSelectableForTask(service, "concierge-1")).toBe(true);
+    expect(isConciergeServiceSelectableForTask(service, "concierge-2")).toBe(false);
+    expect(isConciergeServiceSelectableForTask({ ...service, task_eligible: false }, "concierge-1")).toBe(false);
+  });
+
+  it("keeps an existing service link when the task assignee is changed", () => {
+    expect(isConciergeServiceSelectableForTask(service, "concierge-2", service.id)).toBe(true);
   });
 });

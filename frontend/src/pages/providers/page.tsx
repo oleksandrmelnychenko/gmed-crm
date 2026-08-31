@@ -2777,7 +2777,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
 
   async function handleUpdateProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail) return;
+    if (!detail || !permissions.canEditProvider) return;
 
     setProviderBusy(true);
     setProviderError("");
@@ -2799,7 +2799,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
   }
 
   function openProviderEditSheet() {
-    if (!detail || !permissions.canManageRegistry) return;
+    if (!detail || !permissions.canEditProvider) return;
     setProviderError("");
     setProviderForm(providerToForm(detail));
     setProviderEditOpen(true);
@@ -4113,7 +4113,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     >
                       {t.common_cancel}
                     </Button>
-                    {permissions.canManageRegistry ? (
+                    {permissions.canEditProvider ? (
                       <Button
                         type="submit"
                         form="provider-profile-form"
@@ -4165,7 +4165,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     {detail.children}
                   </ProviderChildrenSection>
 
-                {permissions.canManageRegistry || permissions.canViewPage ? (
+                {permissions.canEditProvider || permissions.canViewPage ? (
                   <form
                     id="provider-profile-form"
                     onSubmit={handleUpdateProvider}
@@ -4185,11 +4185,11 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                         setProviderForm((current) => ({ ...current, contacts }))
                       }
                       forceNonMedical={permissions.forceNonMedical}
-                      disabled={!permissions.canManageRegistry}
+                      disabled={!permissions.canEditProvider}
                       onManageSpecializations={permissions.canManageRegistry ? openSpecializationManager : undefined}
                       grouped
                     />
-                    {!permissions.canManageRegistry ? (
+                    {!permissions.canEditProvider ? (
                       <p className="text-[12px] text-muted-foreground italic">
                         {t.providers_edit_restricted_note}
                       </p>
@@ -5272,7 +5272,7 @@ function ProviderEditFormSheet({
                 onChange={onChange}
                 onContactsChange={onContactsChange}
                 forceNonMedical={permissions.forceNonMedical}
-                disabled={!permissions.canManageRegistry}
+                disabled={!permissions.canEditProvider}
                 onManageSpecializations={onManageSpecializations}
                 grouped
               />
@@ -6669,7 +6669,7 @@ function ProviderSheetHero({
           </div>
         </div>
         <div className="flex flex-col justify-start gap-4 border-t border-dashed border-border/70 pt-3 text-left md:border-l md:border-t-0 md:pl-5 md:pt-0">
-          {permissions.canManageRegistry ? (
+          {(Boolean(onEdit) && permissions.canEditProvider) || permissions.canManageRegistry ? (
             <div className="flex flex-col gap-2">
               {onEdit ? (
                 <Button
@@ -6683,21 +6683,23 @@ function ProviderSheetHero({
                   {l("patients_edit")}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
-                disabled={providerActionBusy === "delete"}
-                onClick={onDelete}
-              >
-                {providerActionBusy === "delete" ? (
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                ) : (
-                  <Trash2 className="size-3.5" />
-                )}
-                {l("patients_delete")}
-              </Button>
+              {permissions.canManageRegistry ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                  disabled={providerActionBusy === "delete"}
+                  onClick={onDelete}
+                >
+                  {providerActionBusy === "delete" ? (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-3.5" />
+                  )}
+                  {l("patients_delete")}
+                </Button>
+              ) : null}
             </div>
           ) : null}
           <p className="text-right text-sm font-semibold tabular-nums text-foreground">

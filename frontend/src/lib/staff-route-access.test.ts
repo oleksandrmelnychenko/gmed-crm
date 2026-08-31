@@ -55,6 +55,7 @@ describe("first-release staff RBAC", () => {
       "/chat",
       "/leads",
       "/providers/provider-1",
+      "/projects",
       "/files",
       "/concierge",
       "/task-manager",
@@ -158,8 +159,10 @@ describe("first-release staff RBAC", () => {
         expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(
           (allowedRoles as readonly string[]).includes(role),
         );
+        const hiddenFromCombinedNavigation = path === "/task-manager"
+          && (role === "ceo" || role === "concierge");
         expect(listStaffNavItems(role).map((item) => item.to).includes(path), `${role} nav -> ${path}`).toBe(
-          (allowedRoles as readonly string[]).includes(role),
+          (allowedRoles as readonly string[]).includes(role) && !hiddenFromCombinedNavigation,
         );
       }
     }
@@ -174,7 +177,8 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/appointments");
     expect(concierge).toContain("/employees");
     expect(concierge).toContain("/concierge");
-    expect(concierge).toContain("/task-manager");
+    expect(concierge).not.toContain("/task-manager");
+    expect(concierge).not.toContain("/projects");
     expect(concierge).toContain("/files");
     expect(concierge).not.toContain("/documents");
     expect(concierge).not.toContain("/sops");
@@ -189,6 +193,10 @@ describe("first-release staff RBAC", () => {
     expect(billing).not.toContain("/concierge");
     expect(billing).toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
+
+    expect(ceo).toContain("/concierge");
+    expect(ceo).not.toContain("/task-manager");
+    expect(ceo).toContain("/projects");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
       "/chat",

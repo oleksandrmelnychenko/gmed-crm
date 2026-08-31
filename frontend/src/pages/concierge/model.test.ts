@@ -109,6 +109,13 @@ describe("filterConciergeTaskAssignees", () => {
       ),
     ).toBe("Удалить можно только ошибочно созданную открытую задачу без комментариев, чек-листа и файлов.");
     expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
+    expect(
+      conciergeTaskErrorMessage(
+        new Error("concierge_service_id must reference an assigned non-medical service"),
+        "ru",
+        "fallback",
+      ),
+    ).toBe("Выбранный сервис не подходит для этой задачи. Выберите немедицинский сервис, назначенный текущему исполнителю.");
   });
 
   it("keeps concierge and interpreter assignment branches separate", () => {

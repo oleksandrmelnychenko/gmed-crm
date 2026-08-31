@@ -25,6 +25,7 @@ export type ConciergeService = {
   patient_pid: string;
   appointment_id: string | null;
   appointment_title: string | null;
+  task_eligible?: boolean;
   provider_id: string | null;
   provider_name: string | null;
   assigned_concierge_id: string | null;
@@ -344,6 +345,7 @@ const TASK_NOT_FOUND_ERROR = "Operational item not found";
 const TASK_TRANSITION_ERROR = "Invalid task status transition";
 const TASK_DELETE_ERROR = "Only an untouched open task can be deleted; cancel or archive it instead";
 const TASK_ACCESS_ERROR = "Only the task assignee, creator, or a higher role can access this task";
+const TASK_SERVICE_ERROR = "concierge_service_id must reference an assigned non-medical service";
 
 export function conciergeTaskErrorMessage(
   error: unknown,
@@ -385,6 +387,12 @@ export function conciergeTaskErrorMessage(
     return lang === "ru"
       ? "У вас нет доступа к этой задаче."
       : "Sie haben keinen Zugriff auf diese Aufgabe.";
+  }
+
+  if (message === TASK_SERVICE_ERROR) {
+    return lang === "ru"
+      ? "Выбранный сервис не подходит для этой задачи. Выберите немедицинский сервис, назначенный текущему исполнителю."
+      : "Der ausgewählte Service kann für diese Aufgabe nicht verwendet werden. Wählen Sie einen nicht-medizinischen Service, der der zuständigen Person zugewiesen ist.";
   }
 
   if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {

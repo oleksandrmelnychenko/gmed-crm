@@ -44,10 +44,11 @@ function paramsFromPath(path: string) {
 }
 
 describe("provider permissions", () => {
-  it("lets Concierge create only the non-medical provider form without full registry access", () => {
+  it("lets Concierge create and edit non-medical providers without full registry access", () => {
     expect(providerPermissions("concierge")).toEqual({
       canViewPage: true,
       canCreateProvider: true,
+      canEditProvider: true,
       canManageRegistry: false,
       forceNonMedical: true,
     });
@@ -55,7 +56,9 @@ describe("provider permissions", () => {
 
   it("keeps read-only provider roles from creating providers", () => {
     expect(providerPermissions("billing").canCreateProvider).toBe(false);
+    expect(providerPermissions("billing").canEditProvider).toBe(false);
     expect(providerPermissions("sales").canCreateProvider).toBe(false);
+    expect(providerPermissions("sales").canEditProvider).toBe(false);
   });
 });
 

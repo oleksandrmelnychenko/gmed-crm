@@ -9,6 +9,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { canAccessStaffRoute } from "@/lib/staff-route-access";
 
 import {
   assignableConciergeTaskUsers,
@@ -32,6 +33,7 @@ import {
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
 import { ConciergeTaskManager } from "./task-manager";
+import { OperationsWorkspaceTabs } from "./operations-workspace-tabs";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
@@ -57,6 +59,8 @@ const copy = {
   de: {
     title: "Aufgabenmanager",
     subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
+    operationsTitle: "Operationszentrale",
+    operationsSubtitle: "Anfragen, Services und Aufgaben in einem gemeinsamen Arbeitsbereich",
     newTask: "Aufgabe / Termin",
     newServiceTask: "Concierge-Aufgabe",
     serviceRequired: "Wählen Sie einen Service für die Concierge-Aufgabe aus.",
@@ -78,6 +82,8 @@ const copy = {
   ru: {
     title: "Менеджер задач",
     subtitle: "Распределение задач, календарь событий и контроль сроков",
+    operationsTitle: "Операционный центр",
+    operationsSubtitle: "Запросы, услуги и задачи в едином рабочем пространстве",
     newTask: "Задача / событие",
     newServiceTask: "Консьерж-задача",
     serviceRequired: "Для консьерж-задачи выберите связанный сервис.",
@@ -129,6 +135,11 @@ export function ConciergeTaskManagerPage() {
   const taskParam = searchParams.get("task");
   const now = useMemo(() => new Date(), [tasks, version]);
   const isPersonalConcierge = user?.role === "concierge" || user?.role === "interpreter";
+  const showOperationsWorkspace = Boolean(
+    user
+    && canAccessStaffRoute(user.role, "/concierge")
+    && canAccessStaffRoute(user.role, "/task-manager"),
+  );
   const taskListPath = useMemo(
     () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
     [user?.id, user?.role],
@@ -403,8 +414,8 @@ export function ConciergeTaskManagerPage() {
   return (
     <div className="space-y-3" data-testid="concierge-task-manager-page">
       <PageHeader
-        title={isPersonalConcierge ? labels.myTitle : labels.title}
-        description={isPersonalConcierge ? labels.mySubtitle : labels.subtitle}
+        title={showOperationsWorkspace ? labels.operationsTitle : isPersonalConcierge ? labels.myTitle : labels.title}
+        description={showOperationsWorkspace ? labels.operationsSubtitle : isPersonalConcierge ? labels.mySubtitle : labels.subtitle}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
@@ -418,6 +429,7 @@ export function ConciergeTaskManagerPage() {
           </div>
         )}
       />
+      {showOperationsWorkspace ? <OperationsWorkspaceTabs lang={lang} /> : null}
 
       {error ? (
         <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">

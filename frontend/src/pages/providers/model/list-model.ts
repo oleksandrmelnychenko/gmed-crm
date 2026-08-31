@@ -834,6 +834,7 @@ export function providerPermissions(role?: string): ProviderPermissions {
       return {
         canViewPage: true,
         canCreateProvider: true,
+        canEditProvider: true,
         canManageRegistry: true,
         forceNonMedical: false,
       };
@@ -841,6 +842,7 @@ export function providerPermissions(role?: string): ProviderPermissions {
       return {
         canViewPage: true,
         canCreateProvider: true,
+        canEditProvider: true,
         canManageRegistry: false,
         forceNonMedical: true,
       };
@@ -849,6 +851,7 @@ export function providerPermissions(role?: string): ProviderPermissions {
       return {
         canViewPage: true,
         canCreateProvider: false,
+        canEditProvider: false,
         canManageRegistry: false,
         forceNonMedical: false,
       };
@@ -856,6 +859,7 @@ export function providerPermissions(role?: string): ProviderPermissions {
       return {
         canViewPage: false,
         canCreateProvider: false,
+        canEditProvider: false,
         canManageRegistry: false,
         forceNonMedical: false,
       };

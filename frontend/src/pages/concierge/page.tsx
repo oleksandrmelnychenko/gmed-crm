@@ -30,6 +30,8 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
+import { OperationsWorkspaceTabs } from "./operations-workspace-tabs";
+
 import {
   CONCIERGE_BOARD_COLUMNS,
   conciergeServiceCostVariance,
@@ -127,7 +129,7 @@ const REALTIME_EVENTS = [
 const text = {
   de: {
     title: "Operationszentrale",
-    subtitle: "CRM-Anfragen, Kundenservices und die tägliche operative Arbeit steuern",
+    subtitle: "Anfragen, Services und Aufgaben in einem gemeinsamen Arbeitsbereich",
     searchLabel: "Suche",
     search: "Service, Patient, Anbieter oder Referenz suchen",
     refresh: "Aktualisieren",
@@ -183,7 +185,7 @@ const text = {
   },
   ru: {
     title: "Операционный центр",
-    subtitle: "Заявки из CRM, клиентские сервисы и ежедневная операционная работа",
+    subtitle: "Запросы, услуги и задачи в едином рабочем пространстве",
     searchLabel: "Поиск",
     search: "Поиск по услуге, пациенту, поставщику или номеру",
     refresh: "Обновить",
@@ -1092,6 +1094,7 @@ export function ConciergeWorkspacePage() {
         title={labels.title}
         description={labels.subtitle}
       />
+      <OperationsWorkspaceTabs lang={lang} />
 
       {error ? (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

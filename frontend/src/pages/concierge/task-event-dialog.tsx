@@ -204,6 +204,18 @@ function assigneeRoleLabel(role: string, lang: Lang) {
   return label ? (lang === "de" ? label[0] : label[1]) : role;
 }
 
+export function isConciergeServiceSelectableForTask(
+  service: ConciergeService,
+  assigneeId: string | null,
+  existingServiceId: string | null = null,
+) {
+  if (service.task_eligible === false) return false;
+  return service.id === existingServiceId
+    || !assigneeId
+    || !service.assigned_concierge_id
+    || service.assigned_concierge_id === assigneeId;
+}
+
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-field px-3 py-1 text-sm text-foreground shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30";
 const textAreaClass =
@@ -372,15 +384,29 @@ export function ConciergeTaskEventDialog({
 
   const sortedServices = useMemo(
     () => services
-      .filter((service) => (
-        service.id === serviceId
-        || !assigneeId
-        || !service.assigned_concierge_id
-        || service.assigned_concierge_id === assigneeId
+      .filter((service) => isConciergeServiceSelectableForTask(
+        service,
+        assigneeId || null,
+        item?.concierge_service_id ?? null,
       ))
       .sort((left, right) => conciergeServiceDisplayTitle(left, lang).localeCompare(conciergeServiceDisplayTitle(right, lang))),
-    [assigneeId, lang, serviceId, services],
+    [assigneeId, item?.concierge_service_id, lang, services],
   );
+
+  useEffect(() => {
+    if (!open || !serviceId) return;
+    const selectedService = services.find((service) => service.id === serviceId);
+    if (
+      !selectedService
+      || !isConciergeServiceSelectableForTask(
+        selectedService,
+        assigneeId || null,
+        item?.concierge_service_id ?? null,
+      )
+    ) {
+      setServiceId("");
+    }
+  }, [assigneeId, item?.concierge_service_id, open, serviceId, services]);
 
   useEffect(() => {
     if (!open) return;
@@ -480,12 +506,22 @@ export function ConciergeTaskEventDialog({
       let saved = createdTaskRef.current;
       const retryingAttachmentUpload = Boolean(saved);
       if (!saved) {
+        const selectedService = services.find((service) => service.id === serviceId);
+        const selectedServiceId = showServiceLink
+          && selectedService
+          && isConciergeServiceSelectableForTask(
+            selectedService,
+            assigneeId || null,
+            item?.concierge_service_id ?? null,
+          )
+          ? selectedService.id
+          : null;
         saved = await onSave({
           kind,
           title: title.trim(),
           note: note.trim() || null,
           concierge_service_id: showServiceLink
-            ? serviceId || null
+            ? selectedServiceId
             : item?.concierge_service_id ?? null,
           due_at: kind === "task" ? toIso(dueAt) : null,
           starts_at: kind === "event" ? toIso(startsAt) : null,

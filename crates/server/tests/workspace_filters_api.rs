@@ -9042,6 +9042,83 @@ async fn sales_can_read_provider_registry_but_cannot_update_provider() {
 }
 
 #[tokio::test]
+async fn concierge_can_update_all_non_medical_providers_but_not_medical_providers() {
+    let Some((app, pool, _admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-provider-update");
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let first_non_medical_id =
+        seed_provider_with_type(&pool, &format!("{tag}-travel"), "non_medical", "Italy").await;
+    let second_non_medical_id =
+        seed_provider_with_type(&pool, &format!("{tag}-hotel"), "non_medical", "Austria").await;
+    let medical_id =
+        seed_provider_with_type(&pool, &format!("{tag}-clinic"), "medical", "Germany").await;
+
+    for (provider_id, name) in [
+        (first_non_medical_id, format!("Travel updated {tag}")),
+        (second_non_medical_id, format!("Hotel updated {tag}")),
+    ] {
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/update"),
+            &concierge_bearer,
+            Some(json!({
+                "name": name,
+                "provider_type": "non_medical"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        let stored_name: String = sqlx::query_scalar("SELECT name FROM providers WHERE id = $1")
+            .bind(provider_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored_name, name);
+    }
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{medical_id}/update"),
+        &concierge_bearer,
+        Some(json!({
+            "name": format!("Clinic forbidden {tag}"),
+            "provider_type": "non_medical"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{first_non_medical_id}/update"),
+        &concierge_bearer,
+        Some(json!({
+            "name": format!("Travel converted {tag}"),
+            "provider_type": "medical"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let stored_types: Vec<String> = sqlx::query_scalar(
+        "SELECT provider_type FROM providers WHERE id = ANY($1) ORDER BY provider_type",
+    )
+    .bind(vec![first_non_medical_id, medical_id])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_types, vec!["medical", "non_medical"]);
+}
+
+#[tokio::test]
 async fn provider_and_doctor_detail_expose_linked_patients_and_interactions() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;

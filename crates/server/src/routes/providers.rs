@@ -2682,7 +2682,7 @@ async fn update_provider(
     Path(provider_id): Path<Uuid>,
     Json(body): Json<UpsertProviderRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
     }
 
@@ -2690,6 +2690,12 @@ async fn update_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if auth.role == Role::Concierge && provider.provider_type != "non_medical" {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge can only update non-medical providers",
+        );
+    }
     if let Err(resp) =
         validate_provider_parent(&state, Some(provider_id), provider.parent_provider_id).await
     {
@@ -2717,6 +2723,36 @@ async fn update_provider(
             );
         }
     };
+
+    if auth.role == Role::Concierge {
+        let current_provider_type: Option<String> = match sqlx::query_scalar(
+            "SELECT provider_type FROM providers WHERE id = $1 FOR UPDATE",
+        )
+        .bind(provider_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, provider_id = %provider_id, "Failed to authorize concierge provider update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update provider",
+                );
+            }
+        };
+
+        match current_provider_type.as_deref() {
+            Some("non_medical") => {}
+            Some(_) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "Concierge can only update non-medical providers",
+                );
+            }
+            None => return err(StatusCode::NOT_FOUND, "Provider not found"),
+        }
+    }
 
     let row = match sqlx::query(
         r#"UPDATE providers

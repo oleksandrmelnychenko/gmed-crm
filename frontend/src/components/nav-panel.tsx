@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   BadgeCheck,
   BellRing,
@@ -257,12 +257,15 @@ function NavGroup({
   counters?: NavCounterMap;
   onNavigate: () => void;
 }) {
+  const { pathname } = useLocation();
+
   return (
     <div className="flex flex-col gap-0.5">
       {items.map((item) => {
         const Icon = NAV_ICONS[item.id] ?? FileText;
         const label = navItemLabel(item, tr, translations);
         const count = counters?.[item.id] ?? 0;
+        const isOperationsCenterActive = item.id === "concierge" && pathname === "/task-manager";
         return (
           <NavLink
             key={item.to}
@@ -270,12 +273,13 @@ function NavGroup({
             end={item.to === "/"}
             title={collapsed ? label : undefined}
             aria-label={collapsed ? label : undefined}
+            aria-current={isOperationsCenterActive ? "page" : undefined}
             onClick={onNavigate}
             className={({ isActive }: { isActive: boolean }) =>
               cn(
                 "relative flex items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
                 collapsed ? "justify-center size-10 mx-auto" : "gap-3 px-3 h-9",
-                isActive
+                isActive || isOperationsCenterActive
                   ? "bg-[var(--brand)]/10 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                   : "text-sidebar-foreground/90 hover:text-sidebar-foreground hover:bg-sidebar-accent/60",
               )
@@ -285,11 +289,11 @@ function NavGroup({
               <>
                 <Icon
                   aria-hidden="true"
-                  strokeWidth={isActive ? 1.85 : 1.6}
+                  strokeWidth={isActive || isOperationsCenterActive ? 1.85 : 1.6}
                   className={cn(
                     "shrink-0",
                     collapsed ? "size-5" : "size-[18px]",
-                    isActive && "text-[var(--brand)]",
+                    (isActive || isOperationsCenterActive) && "text-[var(--brand)]",
                   )}
                 />
                 {!collapsed && (

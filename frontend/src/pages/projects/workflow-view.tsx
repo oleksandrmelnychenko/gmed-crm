@@ -258,34 +258,6 @@ function localizeWorkflowError(error: unknown, labels: WorkflowLabels, fallback:
   return error.message || fallback;
 }
 
-function WorkflowStat({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string | number;
-  tone?: "neutral" | "success" | "warning" | "danger";
-}) {
-  return (
-    <div className={cn(
-      "min-w-0 rounded-xl border px-3 py-2.5",
-      tone === "success" && "border-emerald-200 bg-emerald-50/70",
-      tone === "warning" && "border-orange-200 bg-orange-50/70",
-      tone === "danger" && "border-rose-200 bg-rose-50/70",
-      tone === "neutral" && "bg-card",
-    )}>
-      <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={cn(
-        "mt-1 text-lg font-semibold tabular-nums",
-        tone === "success" && "text-emerald-700",
-        tone === "warning" && "text-orange-700",
-        tone === "danger" && "text-rose-700",
-      )}>{value}</p>
-    </div>
-  );
-}
-
 function WorkflowTaskCard({
   task,
   unresolvedCount,
@@ -704,14 +676,6 @@ export function ProjectWorkflowView({
         </div>
       ) : (
         <>
-          <section className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            <WorkflowStat label={labels.tasks} value={stats.total} />
-            <WorkflowStat label={labels.completed} value={stats.completed} tone="success" />
-            <WorkflowStat label={labels.blocked} value={stats.blocked} tone={stats.blocked ? "warning" : "neutral"} />
-            <WorkflowStat label={labels.overdue} value={stats.overdue} tone={stats.overdue ? "danger" : "neutral"} />
-            <WorkflowStat label={labels.progress} value={`${stats.progress}%`} tone="success" />
-          </section>
-
           <section className="flex flex-col gap-2 rounded-xl border bg-card p-3 sm:flex-row sm:items-center">
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

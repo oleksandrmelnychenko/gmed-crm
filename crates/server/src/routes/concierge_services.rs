@@ -835,7 +835,10 @@ async fn list_concierge_services(
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   ku.name AS key_responsible_user_name,
-                  a.title AS appointment_title
+                  a.title AS appointment_title,
+                  (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
+                  AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
+                      AS task_eligible
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
@@ -3032,7 +3035,10 @@ async fn load_service_row(
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   ku.name AS key_responsible_user_name,
-                  a.title AS appointment_title
+                  a.title AS appointment_title,
+                  (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
+                  AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
+                      AS task_eligible
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
@@ -3819,6 +3825,7 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "patient_pid": row.try_get::<String, _>("patient_code").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
+        "task_eligible": row.try_get::<bool, _>("task_eligible").unwrap_or(false),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "provider_service_id": row.try_get::<Option<Uuid>, _>("provider_service_id").unwrap_or_default(),
