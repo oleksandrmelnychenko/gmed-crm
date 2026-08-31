@@ -1186,8 +1186,8 @@ async fn get_conversation(
     )
     .bind(auth.user_id)
     .bind(user_id)
-    .bind(&q.before_created_at)
-    .bind(&q.before_id)
+    .bind(q.before_created_at)
+    .bind(q.before_id)
     .bind(limit)
     .fetch_all(&state.db)
     .await
@@ -1977,13 +1977,13 @@ async fn upload_file(
         Some(d) if !d.is_empty() => d,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
-    if file_name.as_bytes().len() > MAX_ATTACHMENT_FILENAME_BYTES {
+    if file_name.len() > MAX_ATTACHMENT_FILENAME_BYTES {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Attachment filename is too long",
         );
     }
-    if mime_type.as_bytes().len() > MAX_ATTACHMENT_MIME_BYTES {
+    if mime_type.len() > MAX_ATTACHMENT_MIME_BYTES {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Attachment MIME type is too long",

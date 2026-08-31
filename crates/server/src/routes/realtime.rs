@@ -638,6 +638,14 @@ async fn can_receive_case_event(
         })
 }
 
+fn err(status: StatusCode, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({"error": status.canonical_reason().unwrap_or("error"), "message": message})),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::requires_current_entity_authorization;
@@ -664,12 +672,4 @@ mod tests {
 
         assert!(!requires_current_entity_authorization(&event));
     }
-}
-
-fn err(status: StatusCode, message: &str) -> axum::response::Response {
-    (
-        status,
-        Json(serde_json::json!({"error": status.canonical_reason().unwrap_or("error"), "message": message})),
-    )
-        .into_response()
 }
