@@ -525,28 +525,6 @@ async fn update_user(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
         })?
         .rows_affected();
-
-        sqlx::query(
-            r#"INSERT INTO audit_log (
-                    user_id, action, entity_type, entity_id, context, old_value, new_value
-               ) VALUES (
-                    $1, 'revoke_user_resource_access_on_role_change', 'user', $2, $3, $4, $5
-               )"#,
-        )
-        .bind(auth.user_id)
-        .bind(user_id)
-        .bind(serde_json::json!({
-            "revoked_profile_assignments": revoked_profile_assignments,
-            "revoked_direct_rules": revoked_direct_rules,
-        }))
-        .bind(serde_json::json!({ "role": current_role }))
-        .bind(serde_json::json!({ "role": new_role }))
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, user_id = %user_id, "Failed to audit access revocation after role change");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
-        })?;
     }
 
     let response = UserResponse {
@@ -584,8 +562,13 @@ async fn update_user(
     if role_changed {
         crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_role_changed").await;
     }
+    let audit_action = if role_changed {
+        "revoke_user_resource_access_on_role_change"
+    } else {
+        "update_user"
+    };
     state.audit_sender.try_send(audit::domain_diff_event(
-        "update_user",
+        audit_action,
         Some(auth.user_id),
         "user",
         Some(user_id),

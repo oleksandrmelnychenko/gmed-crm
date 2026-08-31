@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::{access::role_db_name, auth::middleware::AuthUser, state::AppState};
+use crate::{
+    access::role_db_name, audit::AuditContext, auth::middleware::AuthUser, state::AppState,
+};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -433,6 +435,7 @@ async fn get_profile(
 async fn create_profile(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Extension(audit): Extension<AuditContext>,
     Json(body): Json<CreateProfileRequest>,
 ) -> Response {
     if let Err(response) = auth.require_exact_role(&[Role::Ceo]) {
@@ -497,23 +500,14 @@ async fn create_profile(
         "rules": body.rules,
         "version": 1,
     });
-    if let Err(error) = insert_audit(
-        &mut tx,
-        auth.user_id,
-        "create_staff_access_profile",
-        "staff_access_profile",
-        profile_id,
-        None,
-        Some(audit_value),
-    )
-    .await
-    {
-        return database_error("Failed to audit access profile creation", error);
-    }
-
     if let Err(error) = tx.commit().await {
         return database_error("Failed to commit access profile creation", error);
     }
+
+    audit.set_entity("staff_access_profile", profile_id);
+    audit.set_action("create_staff_access_profile");
+    audit.set_context(serde_json::json!({"source": "staff_access_api"}));
+    audit.set_new_value(audit_value);
 
     match load_profile(&state.db, profile_id).await {
         Ok(Some(profile)) => (StatusCode::CREATED, Json(profile)).into_response(),
@@ -528,6 +522,7 @@ async fn create_profile(
 async fn update_profile(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Extension(audit): Extension<AuditContext>,
     Path(profile_id): Path<Uuid>,
     Json(body): Json<UpdateProfileRequest>,
 ) -> Response {
@@ -693,23 +688,15 @@ async fn update_profile(
         "rules": body.rules,
         "version": new_version,
     });
-    if let Err(error) = insert_audit(
-        &mut tx,
-        auth.user_id,
-        "update_staff_access_profile",
-        "staff_access_profile",
-        profile_id,
-        Some(old_value),
-        Some(new_value),
-    )
-    .await
-    {
-        return database_error("Failed to audit access profile update", error);
-    }
-
     if let Err(error) = tx.commit().await {
         return database_error("Failed to commit access profile update", error);
     }
+
+    audit.set_entity("staff_access_profile", profile_id);
+    audit.set_action("update_staff_access_profile");
+    audit.set_context(serde_json::json!({"source": "staff_access_api"}));
+    audit.set_old_value(old_value);
+    audit.set_new_value(new_value);
 
     match load_profile(&state.db, profile_id).await {
         Ok(Some(profile)) => Json(profile).into_response(),
@@ -724,6 +711,7 @@ async fn update_profile(
 async fn clone_profile(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Extension(audit): Extension<AuditContext>,
     Path(profile_id): Path<Uuid>,
     Json(body): Json<CloneProfileRequest>,
 ) -> Response {
@@ -814,26 +802,19 @@ async fn clone_profile(
         return database_error("Failed to clone access profile rules", error);
     }
 
-    if let Err(error) = insert_audit(
-        &mut tx,
-        auth.user_id,
-        "clone_staff_access_profile",
-        "staff_access_profile",
-        cloned_id,
-        None,
-        Some(serde_json::json!({
-            "source_profile_id": profile_id,
-            "name": name,
-            "description": description,
-        })),
-    )
-    .await
-    {
-        return database_error("Failed to audit access profile clone", error);
-    }
+    let audit_value = serde_json::json!({
+        "source_profile_id": profile_id,
+        "name": name,
+        "description": description,
+    });
     if let Err(error) = tx.commit().await {
         return database_error("Failed to commit access profile clone", error);
     }
+
+    audit.set_entity("staff_access_profile", cloned_id);
+    audit.set_action("clone_staff_access_profile");
+    audit.set_context(serde_json::json!({"source": "staff_access_api"}));
+    audit.set_new_value(audit_value);
 
     match load_profile(&state.db, cloned_id).await {
         Ok(Some(profile)) => (StatusCode::CREATED, Json(profile)).into_response(),
@@ -875,6 +856,7 @@ async fn get_user_access(
 async fn update_user_access(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    Extension(audit): Extension<AuditContext>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserAccessRequest>,
 ) -> Response {
@@ -1085,30 +1067,25 @@ async fn update_user_access(
         Err(error) => return database_error("Failed to update access revision", error),
     };
 
-    if let Err(error) = insert_audit(
-        &mut tx,
-        auth.user_id,
-        "update_staff_user_access",
-        "user",
-        user_id,
-        Some(serde_json::json!({
-            "access_revision": locked_user.access_revision,
-        })),
-        Some(serde_json::json!({
-            "access_revision": new_revision,
-            "profile_id": body.profile_id,
-            "profile_valid_until": body.profile_valid_until,
-            "direct_rules": body.direct_rules,
-        })),
-    )
-    .await
-    {
-        return database_error("Failed to audit user access update", error);
-    }
+    let audit_old_value = serde_json::json!({
+        "access_revision": locked_user.access_revision,
+    });
+    let audit_new_value = serde_json::json!({
+        "access_revision": new_revision,
+        "profile_id": body.profile_id,
+        "profile_valid_until": body.profile_valid_until,
+        "direct_rules": body.direct_rules,
+    });
 
     if let Err(error) = tx.commit().await {
         return database_error("Failed to commit user access update", error);
     }
+
+    audit.set_entity("user", user_id);
+    audit.set_action("update_staff_user_access");
+    audit.set_context(serde_json::json!({"source": "staff_access_api"}));
+    audit.set_old_value(audit_old_value);
+    audit.set_new_value(audit_new_value);
 
     match load_user_row(&state.db, user_id).await {
         Ok(Some(user)) => match load_user_access(&state.db, user).await {
@@ -1606,32 +1583,6 @@ fn validate_mutable_target(user: &UserRow) -> Result<Role, Response> {
             "User has an unsupported role",
         )),
     }
-}
-
-async fn insert_audit(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    actor_id: Uuid,
-    action: &str,
-    entity_type: &str,
-    entity_id: Uuid,
-    old_value: Option<serde_json::Value>,
-    new_value: Option<serde_json::Value>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"INSERT INTO audit_log
-               (user_id, action, entity_type, entity_id, old_value, new_value, context)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
-    )
-    .bind(actor_id)
-    .bind(action)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(old_value)
-    .bind(new_value)
-    .bind(serde_json::json!({"source": "staff_access_api"}))
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
 }
 
 fn normalize_name(value: &str) -> Result<String, &'static str> {

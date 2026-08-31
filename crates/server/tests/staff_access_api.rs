@@ -366,25 +366,30 @@ async fn ceo_can_create_update_and_clone_reusable_profile() {
     assert_eq!(cloned["rules"], updated["rules"]);
     let cloned_id = Uuid::parse_str(cloned["id"].as_str().unwrap()).unwrap();
 
-    let audit_count: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE user_id = $1
-             AND (
-                 (entity_id = $2 AND action IN (
-                     'create_staff_access_profile',
-                     'update_staff_access_profile'
-                 ))
-                 OR (entity_id = $3 AND action = 'clone_staff_access_profile')
-             )"#,
-    )
-    .bind(admin_id)
-    .bind(profile_id)
-    .bind(cloned_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(audit_count, 3);
+    support::wait_until("staff access profile audit trail", || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                r#"SELECT count(*)
+                   FROM audit_log
+                   WHERE user_id = $1
+                     AND (
+                         (entity_id = $2 AND action IN (
+                             'create_staff_access_profile',
+                             'update_staff_access_profile'
+                         ))
+                         OR (entity_id = $3 AND action = 'clone_staff_access_profile')
+                     )"#,
+            )
+            .bind(admin_id)
+            .bind(profile_id)
+            .bind(cloned_id)
+            .fetch_one(&pool)
+            .await
+            .is_ok_and(|count| count == 3)
+        }
+    })
+    .await;
 }
 
 #[tokio::test]

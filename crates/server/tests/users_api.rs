@@ -282,18 +282,23 @@ async fn changing_user_role_revokes_profile_and_direct_resource_access() {
     assert_eq!(active_profile_assignments, 0);
     assert_eq!(active_direct_rules, 0);
 
-    let access_revocation_audit: i64 = sqlx::query_scalar(
-        r#"SELECT count(*)
-           FROM audit_log
-           WHERE action = 'revoke_user_resource_access_on_role_change'
-             AND entity_type = 'user'
-             AND entity_id = $1"#,
-    )
-    .bind(target_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(access_revocation_audit, 1);
+    support::wait_until("role-change access revocation audit", || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                r#"SELECT count(*)
+                   FROM audit_log
+                   WHERE action = 'revoke_user_resource_access_on_role_change'
+                     AND entity_type = 'user'
+                     AND entity_id = $1"#,
+            )
+            .bind(target_id)
+            .fetch_one(&pool)
+            .await
+            .is_ok_and(|count| count == 1)
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
