@@ -111,6 +111,13 @@ compose_args=(
   -f docker-compose.dev-hetzner.yml
 )
 
+prepare_upload_volume() {
+  docker compose "${compose_args[@]}" "$@" run --rm --no-deps \
+    --user 0:0 \
+    --entrypoint /usr/local/bin/gmed-prepare-uploads \
+    backend
+}
+
 if [[ -n "$backend_image" || -n "$frontend_image" || -n "$parser_image" ]]; then
   if [[ -z "$backend_image" || -z "$frontend_image" || -z "$parser_image" ]]; then
     echo "ERROR: set GMED_BACKEND_IMAGE, GMED_FRONTEND_IMAGE, and GMED_PARSER_IMAGE together, or leave all three empty for local build." >&2
@@ -125,10 +132,13 @@ if [[ -n "$backend_image" || -n "$frontend_image" || -n "$parser_image" ]]; then
 
   echo "Deploying DEV from prebuilt GHCR images"
   docker compose "${compose_args[@]}" -f docker-compose.ghcr.yml pull backend frontend clinical-document-parser
+  prepare_upload_volume -f docker-compose.ghcr.yml
   docker compose "${compose_args[@]}" -f docker-compose.ghcr.yml up -d --remove-orphans
 else
   echo "Deploying DEV from local host build"
-  docker compose "${compose_args[@]}" up -d --build --remove-orphans
+  docker compose "${compose_args[@]}" build backend frontend clinical-document-parser
+  prepare_upload_volume
+  docker compose "${compose_args[@]}" up -d --no-build --remove-orphans
 fi
 
 docker image prune -f --filter "until=24h"

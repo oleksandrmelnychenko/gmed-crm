@@ -53,6 +53,7 @@ const ROLES_FINANCE_CATALOG = [
 
 const ROLES_DOCUMENTS = [
   "ceo",
+  "concierge",
   "billing",
 ] as const satisfies readonly StaffRole[];
 

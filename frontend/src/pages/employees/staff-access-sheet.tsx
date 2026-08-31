@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Copy,
@@ -44,10 +44,12 @@ import {
 import {
   accessDraftSignature,
   canRoleUseMedicalDocuments,
+  effectiveProfileAllRule,
+  effectiveProfileRule,
   profileRulesFromDirectRules,
-  ruleMatchesRecord,
+  setDirectAllRuleEnabled,
+  setDirectRuleEnabled,
   STAFF_ACCESS_CAPABILITIES,
-  toggleDirectAllowRule,
 } from "./staff-access-model";
 import type {
   StaffAccessCapability,
@@ -121,6 +123,19 @@ function directRuleFor(
   );
 }
 
+function directAllRuleFor(
+  rules: StaffDirectAccessRuleInput[],
+  resourceType: StaffAccessResourceType,
+  capability: StaffAccessCapability,
+) {
+  return rules.find(
+    (rule) =>
+      rule.resource_type === resourceType &&
+      rule.scope_type === "all" &&
+      rule.capability === capability,
+  );
+}
+
 export function StaffAccessSheet({
   open,
   employee,
@@ -157,6 +172,7 @@ export function StaffAccessSheet({
             directDeny: "Direkt verboten",
             inheritedRule: "Profil",
             globalRules: "Globale persönliche Regeln",
+            allScopeHint: "Persönliche Regel für alle verfügbaren Einträge; medizinische Systemgrenzen bleiben aktiv.",
             remove: "Entfernen",
             create: "Profil erstellen",
             clone: "Profil duplizieren",
@@ -196,6 +212,7 @@ export function StaffAccessSheet({
             directDeny: "Пряма заборона",
             inheritedRule: "Профіль",
             globalRules: "Глобальні персональні правила",
+            allScopeHint: "Персональне правило для всіх доступних записів; системні медичні обмеження залишаються чинними.",
             remove: "Видалити",
             create: "Створити профіль",
             clone: "Дублювати профіль",
@@ -249,6 +266,7 @@ export function StaffAccessSheet({
   const [profileDescription, setProfileDescription] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const activeEmployeeIdRef = useRef<string | null>(null);
 
   const buildDraftBody = useCallback(
     (): Omit<UpdateStaffUserAccessBody, "expected_access_revision"> => ({
@@ -279,21 +297,24 @@ export function StaffAccessSheet({
 
   const loadMainData = useCallback(async () => {
     if (!employee || employee.role === "ceo") return;
+    const requestedEmployeeId = employee.id;
     setLoading(true);
     setLoadError("");
     setSaveError("");
     setConflict(false);
     try {
       const [nextAccess, nextProfiles] = await Promise.all([
-        getStaffUserAccess(employee.id),
+        getStaffUserAccess(requestedEmployeeId),
         listStaffAccessProfiles(),
       ]);
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       applyAccessResponse(nextAccess);
       setProfiles(nextProfiles);
     } catch (reason) {
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       setLoadError(reason instanceof Error ? reason.message : copy.loadError);
     } finally {
-      setLoading(false);
+      if (activeEmployeeIdRef.current === requestedEmployeeId) setLoading(false);
     }
   }, [applyAccessResponse, copy.loadError, employee]);
 
@@ -330,10 +351,14 @@ export function StaffAccessSheet({
   );
 
   useEffect(() => {
+    activeEmployeeIdRef.current = open && employee?.role !== "ceo" ? employee?.id ?? null : null;
     if (!open || !employee || employee.role === "ceo") return;
+    const activeEmployeeId = employee.id;
     setAccess(null);
     setProfiles([]);
     setResources(EMPTY_RESOURCE_STATE);
+    setSaving(false);
+    setProfileBusy(false);
     setActiveTab("provider");
     setSearches({ provider: "", patient: "", document: "" });
     setDraftProfileId("");
@@ -348,6 +373,11 @@ export function StaffAccessSheet({
     void loadResourceCatalog("provider");
     void loadResourceCatalog("patient");
     void loadResourceCatalog("document");
+    return () => {
+      if (activeEmployeeIdRef.current === activeEmployeeId) {
+        activeEmployeeIdRef.current = null;
+      }
+    };
   }, [employee, loadMainData, loadResourceCatalog, open]);
 
   const compatibleProfiles = useMemo(() => {
@@ -399,17 +429,20 @@ export function StaffAccessSheet({
 
   const save = async () => {
     if (!employee || !access || !dirty || saving) return;
+    const requestedEmployeeId = employee.id;
     setSaving(true);
     setSaveError("");
     setConflict(false);
     try {
-      const next = await updateStaffUserAccess(employee.id, {
+      const next = await updateStaffUserAccess(requestedEmployeeId, {
         expected_access_revision: access.access_revision,
         ...buildDraftBody(),
       });
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       applyAccessResponse(next);
       onClose();
     } catch (reason) {
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       if (reason instanceof ApiRequestError && reason.status === 409) {
         setConflict(true);
         setSaveError(copy.conflict);
@@ -417,7 +450,7 @@ export function StaffAccessSheet({
         setSaveError(reason instanceof Error ? reason.message : copy.saveError);
       }
     } finally {
-      setSaving(false);
+      if (activeEmployeeIdRef.current === requestedEmployeeId) setSaving(false);
     }
   };
 
@@ -430,6 +463,8 @@ export function StaffAccessSheet({
 
   const submitProfileForm = async () => {
     if (!employee || !profileName.trim() || profileBusy) return;
+    const requestedEmployeeId = employee.id;
+    const requestedEmployeeRole = employee.role;
     setProfileBusy(true);
     setProfileError("");
     try {
@@ -444,9 +479,10 @@ export function StaffAccessSheet({
           : await createStaffAccessProfile({
               name: profileName.trim(),
               description: profileDescription.trim() || null,
-              roles: [employee.role],
+              roles: [requestedEmployeeRole],
               rules: profileRulesFromDirectRules(draftRules),
             });
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       setProfiles((current) => [created, ...current.filter((profile) => profile.id !== created.id)]);
       setDraftProfileId(created.id);
       setDraftProfileValidUntil("");
@@ -455,9 +491,10 @@ export function StaffAccessSheet({
       setProfileName("");
       setProfileDescription("");
     } catch (reason) {
+      if (activeEmployeeIdRef.current !== requestedEmployeeId) return;
       setProfileError(reason instanceof Error ? reason.message : copy.profileCreateError);
     } finally {
-      setProfileBusy(false);
+      if (activeEmployeeIdRef.current === requestedEmployeeId) setProfileBusy(false);
     }
   };
 
@@ -473,6 +510,62 @@ export function StaffAccessSheet({
 
     return (
       <TabsContent value={resourceType} className="space-y-3 pt-2">
+        <div className="rounded-xl border border-border bg-muted/20 p-3">
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium text-foreground">{copy.all}</p>
+            <p className="text-xs text-muted-foreground">{copy.allScopeHint}</p>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {capabilities.map((capability) => {
+              const direct = directAllRuleFor(draftRules, resourceType, capability);
+              const inherited = effectiveProfileAllRule(
+                selectedProfile?.rules ?? [],
+                resourceType,
+                capability,
+              );
+              const checked = (direct?.effect ?? inherited?.effect) === "allow";
+              return (
+                <label
+                  key={capability}
+                  className={cn(
+                    "inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs",
+                    checked && "border-primary/40 bg-primary/5 text-foreground",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={saving}
+                    onChange={(event) =>
+                      setDraftRules((current) =>
+                        setDirectAllRuleEnabled(
+                          current,
+                          resourceType,
+                          capability,
+                          event.target.checked,
+                          inherited?.effect,
+                        ),
+                      )
+                    }
+                    className="size-3.5 accent-[var(--primary)]"
+                  />
+                  <span>{capabilityLabel(capability)}</span>
+                  {inherited && !direct ? (
+                    <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
+                      {copy.inheritedRule}
+                    </span>
+                  ) : null}
+                  {direct?.effect === "deny" ? (
+                    <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-rose-700">
+                      {copy.directDeny}
+                    </span>
+                  ) : null}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -552,10 +645,16 @@ export function StaffAccessSheet({
                   <div className="mt-3 flex flex-wrap gap-2">
                     {capabilities.map((capability) => {
                       const direct = directRuleFor(draftRules, resourceType, item.id, capability);
-                      const inherited = selectedProfile?.rules.some(
-                        (rule) => ruleMatchesRecord(rule, resourceType, item.id, capability),
+                      const directAll = directAllRuleFor(draftRules, resourceType, capability);
+                      const inherited = effectiveProfileRule(
+                        selectedProfile?.rules ?? [],
+                        resourceType,
+                        item.id,
+                        capability,
                       );
-                      const checked = direct?.effect === "allow";
+                      const inheritedEffect = directAll?.effect ?? inherited?.effect;
+                      const checked =
+                        !medicalLocked && (direct?.effect ?? inheritedEffect) === "allow";
                       return (
                         <label
                           key={capability}
@@ -569,15 +668,22 @@ export function StaffAccessSheet({
                             type="checkbox"
                             checked={checked}
                             disabled={medicalLocked || saving}
-                            onChange={() =>
+                            onChange={(event) =>
                               setDraftRules((current) =>
-                                toggleDirectAllowRule(current, resourceType, item.id, capability),
+                                setDirectRuleEnabled(
+                                  current,
+                                  resourceType,
+                                  item.id,
+                                  capability,
+                                  event.target.checked,
+                                  inheritedEffect,
+                                ),
                               )
                             }
                             className="size-3.5 accent-[var(--primary)]"
                           />
                           <span>{capabilityLabel(capability)}</span>
-                          {inherited ? (
+                          {inherited && !direct && !directAll ? (
                             <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
                               {copy.inheritedRule}
                             </span>

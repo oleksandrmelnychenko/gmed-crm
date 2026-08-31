@@ -106,6 +106,7 @@ import {
   applyStaffFieldChange,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
+  canManageProviderPeople,
   compactDate,
   compactDateTime,
   composeDoctorDisplayName,
@@ -3450,7 +3451,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={doctorBusy}
                     relationshipBusy={relationshipBusy}
-                    canManage={permissions.canManageRegistry}
+                    canManage={canManageProviderPeople(user?.role, detail.provider_type)}
                     onOpenProvider={openProvider}
                     onNew={() => {
                       setDoctorError("");
@@ -3480,8 +3481,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={staffBusy}
                     staffRoles={staffRoles}
-                    canManage={permissions.canManageRegistry}
-                    onManageRoles={openStaffRoleManager}
+                    canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                    onManageRoles={permissions.canManageRegistry ? openStaffRoleManager : undefined}
                     onNew={() => {
                       setStaffError("");
                       setStaffForm(blankStaffForm());
@@ -4201,7 +4202,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={doctorBusy}
                   relationshipBusy={relationshipBusy}
-                  canManage={permissions.canManageRegistry}
+                  canManage={canManageProviderPeople(user?.role, detail.provider_type)}
                   onOpenProvider={openProvider}
                   onNew={() => {
                     setDoctorError("");
@@ -4231,8 +4232,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={staffBusy}
                   staffRoles={staffRoles}
-                  canManage={permissions.canManageRegistry}
-                  onManageRoles={openStaffRoleManager}
+                  canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                  onManageRoles={permissions.canManageRegistry ? openStaffRoleManager : undefined}
                   onNew={() => {
                     setStaffError("");
                     setStaffForm(blankStaffForm());
@@ -6487,13 +6488,18 @@ function HeroInfoTableRow({
   icon: Icon,
   label,
   children,
+  className,
 }: {
   icon: typeof MapPin;
   label: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]">
+    <div className={cn(
+      "grid min-w-0 content-start gap-4 px-3 py-2.5 sm:grid-cols-[10.25rem_minmax(0,1fr)]",
+      className,
+    )}>
       <div className="flex min-w-0 items-start gap-2 text-xs font-medium leading-5 text-foreground">
         <Icon className="mt-0.5 size-3.5 shrink-0 text-foreground/75" />
         <span className="min-w-0 break-words">{label}</span>
@@ -6514,7 +6520,12 @@ function HeroAvailabilityTable({
   const rows = formatWeeklyAvailabilityDisplayItems(value, lang);
   if (rows.length === 0) return <span>{t.common_not_set}</span>;
 
-  return <WeeklyAvailabilityBadgeList value={value} className="max-w-md gap-x-1.5 gap-y-1.5" />;
+  return (
+    <WeeklyAvailabilityBadgeList
+      value={value}
+      className="max-w-none gap-1.5 [&>span]:px-2 [&>span]:py-0.5 [&>span]:text-[10px]"
+    />
+  );
 }
 
 function localizedProviderMeta(
@@ -6575,8 +6586,9 @@ function ProviderSheetHero({
           detail.is_active ? "bg-emerald-500" : "bg-slate-300",
         )}
       />
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_240px] md:items-stretch">
-        <div className="min-w-0">
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h2 className="min-w-0 truncate text-xl font-semibold leading-tight text-foreground" title={detail.name}>
               {detail.name}
@@ -6633,44 +6645,17 @@ function ProviderSheetHero({
                 {detail.parent_provider_name}
               </Badge>
             ) : null}
+            <Badge
+              variant="outline"
+              className="rounded-full border-border/60 bg-muted/30 px-2 py-0.5 text-[11px] font-normal text-muted-foreground/80"
+            >
+              {t.providers_created_at}: {compactDateTime(detail.created_at, t.common_not_set)}
+            </Badge>
           </div>
-          <div className="mt-5 grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
-            <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
-              {addressLine || localizedProviderMeta(detail, lang) || t.common_not_set}
-            </HeroInfoTableRow>
-            <HeroInfoTableRow icon={Phone} label={t.field_phone}>
-              {detail.phone || t.common_not_set}
-            </HeroInfoTableRow>
-            <HeroInfoTableRow icon={Mail} label={t.field_email}>
-              {detail.email || t.common_not_set}
-            </HeroInfoTableRow>
-            <HeroInfoTableRow icon={CalendarClock} label={l("providers_opening_hours")}>
-              <HeroAvailabilityTable value={detail.opening_hours} />
-            </HeroInfoTableRow>
-            <HeroInfoTableRow icon={Star} label={t.providers_internal_rating}>
-              <span className="break-words">
-                <span>{internalRatingLabel}</span>
-                {detail.internal_rating_note ? (
-                  <span className="font-medium"> · {detail.internal_rating_note}</span>
-                ) : null}
-              </span>
-            </HeroInfoTableRow>
-            <HeroInfoTableRow icon={BadgeCheck} label={l("providers_tax_id")}>
-              {detail.tax_id || t.common_not_set}
-            </HeroInfoTableRow>
-            {isMedical ? (
-              <HeroInfoTableRow icon={ShieldCheck} label={t.patients_insurance_type}>
-                {insuranceTypeLine || t.common_not_set}
-              </HeroInfoTableRow>
-            ) : null}
-            <HeroInfoTableRow icon={Stethoscope} label={t.providers_fachbereich}>
-              {specializationLine || t.common_not_set}
-            </HeroInfoTableRow>
           </div>
-        </div>
-        <div className="flex flex-col justify-start gap-4 border-t border-dashed border-border/70 pt-3 text-left md:border-l md:border-t-0 md:pl-5 md:pt-0">
-          {(Boolean(onEdit) && permissions.canEditProvider) || permissions.canManageRegistry ? (
-            <div className="flex flex-col gap-2">
+          <div className="flex shrink-0 border-t border-dashed border-border/70 pt-3 text-left xl:w-[190px] xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
+            {(Boolean(onEdit) && permissions.canEditProvider) || permissions.canManageRegistry ? (
+              <div className="flex w-full gap-2 xl:flex-col">
               {onEdit ? (
                 <Button
                   type="button"
@@ -6700,11 +6685,46 @@ function ProviderSheetHero({
                   {l("patients_delete")}
                 </Button>
               ) : null}
-            </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="grid overflow-hidden rounded-lg border border-border/70 bg-card md:grid-cols-2">
+          <HeroInfoTableRow icon={MapPin} label={l("patients_address")}>
+            {addressLine || localizedProviderMeta(detail, lang) || t.common_not_set}
+          </HeroInfoTableRow>
+          <HeroInfoTableRow icon={Phone} label={t.field_phone}>
+            {detail.phone || t.common_not_set}
+          </HeroInfoTableRow>
+          <HeroInfoTableRow icon={Mail} label={t.field_email}>
+            {detail.email || t.common_not_set}
+          </HeroInfoTableRow>
+          <HeroInfoTableRow icon={Star} label={t.providers_internal_rating}>
+            <span className="break-words">
+              <span>{internalRatingLabel}</span>
+              {detail.internal_rating_note ? (
+                <span className="font-medium"> · {detail.internal_rating_note}</span>
+              ) : null}
+            </span>
+          </HeroInfoTableRow>
+          <HeroInfoTableRow icon={BadgeCheck} label={l("providers_tax_id")}>
+            {detail.tax_id || t.common_not_set}
+          </HeroInfoTableRow>
+          {isMedical ? (
+            <HeroInfoTableRow icon={ShieldCheck} label={t.patients_insurance_type}>
+              {insuranceTypeLine || t.common_not_set}
+            </HeroInfoTableRow>
           ) : null}
-          <p className="text-right text-sm font-semibold tabular-nums text-foreground">
-            {compactDateTime(detail.updated_at, t.common_not_set)}
-          </p>
+          <HeroInfoTableRow icon={Stethoscope} label={t.providers_fachbereich}>
+            {specializationLine || t.common_not_set}
+          </HeroInfoTableRow>
+          <HeroInfoTableRow
+            icon={CalendarClock}
+            label={l("providers_opening_hours")}
+            className="md:col-span-2"
+          >
+            <HeroAvailabilityTable value={detail.opening_hours} />
+          </HeroInfoTableRow>
         </div>
       </div>
     </section>
@@ -7436,7 +7456,7 @@ function StaffSection({
   busy: boolean;
   staffRoles: ProviderStaffRoleItem[];
   canManage: boolean;
-  onManageRoles: () => void;
+  onManageRoles?: () => void;
   onNew: () => void;
   onOpen: (staff: ProviderStaff) => void;
   onEdit: (staff: ProviderStaff) => void;
@@ -7571,16 +7591,18 @@ function StaffSection({
                   <Plus className="size-3.5" />
                   {l("providers_staff_new")}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 shrink-0 self-center rounded-lg"
-                  onClick={onManageRoles}
-                >
-                  <BadgeCheck className="size-3.5" />
-                  {l("providers_staff_roles_manage")}
-                </Button>
+                {onManageRoles ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 self-center rounded-lg"
+                    onClick={onManageRoles}
+                  >
+                    <BadgeCheck className="size-3.5" />
+                    {l("providers_staff_roles_manage")}
+                  </Button>
+                ) : null}
               </>
             ) : null}
             <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />

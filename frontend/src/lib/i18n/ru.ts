@@ -288,6 +288,7 @@ export const ru = {
   providers_inactive: "Неактивен",
   providers_activate: "Активировать",
   providers_deactivate: "Деактивировать",
+  providers_created_at: "Дата создания",
   providers_city: "Город",
   providers_country: "Страна",
   providers_street: "Улица",

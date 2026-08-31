@@ -309,6 +309,13 @@ compose_cmd=(
   -f docker-compose.ghcr.yml
 )
 
+prepare_upload_volume() {
+  "${compose_cmd[@]}" run --rm --no-deps \
+    --user 0:0 \
+    --entrypoint /usr/local/bin/gmed-prepare-uploads \
+    backend
+}
+
 wait_for_compose_service_healthy() {
   local service="$1"
   local cid=""
@@ -433,6 +440,7 @@ SQL
 }
 
 sanitized_this_run=false
+prepare_upload_volume
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
   sanitizer_marker="${PROD_EMPTY_DATABASE_MARKER:-/etc/gmed/prod-db-sanitized}"
   if [[ ! -e "$sanitizer_marker" || "${PROD_EMPTY_DATABASE_FORCE:-false}" == "true" ]]; then

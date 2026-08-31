@@ -44,6 +44,10 @@ use gmed_domain::{
     access::{
         data_sensitivity::DataSensitivity,
         policy::{self, AccessContext},
+        resource_access::{
+            AccessCapability, AccessRuleSource, ResourceAccessDecision, ResourceAccessRequest,
+            ResourceType, passes_absolute_resource_boundary,
+        },
         share_status::ShareStatus,
     },
     role::Role,
@@ -2701,7 +2705,9 @@ fn is_document_intake_queue_candidate(row: &sqlx::postgres::PgRow) -> bool {
         .try_get::<Option<String>, _>("uploaded_by_role")
         .unwrap_or_default();
 
-    document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref())
+    (matches!(ursprung.as_deref(), Some("manual_intake"))
+        && matches!(status.as_deref(), Some("draft")))
+        || document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref())
         || is_interpreter_review_document(
             uploaded_by_role.as_deref(),
             ursprung.as_deref(),
@@ -9602,21 +9608,25 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         category.clone(),
         share_status,
     );
-    let classification_suggestion = suggest_document_classification(
-        row.try_get::<Option<String>, _>("original_filename")
-            .unwrap_or_default()
-            .as_deref(),
-        row.try_get::<Option<String>, _>("auto_name")
-            .unwrap_or_default()
-            .as_deref(),
-        row.try_get::<Option<String>, _>("mime_type")
-            .unwrap_or_default()
-            .as_deref(),
-        ursprung.as_deref(),
-        row.try_get::<Option<String>, _>("notes")
-            .unwrap_or_default()
-            .as_deref(),
-    );
+    let classification_suggestion = if matches!(ursprung.as_deref(), Some("manual_intake")) {
+        None
+    } else {
+        suggest_document_classification(
+            row.try_get::<Option<String>, _>("original_filename")
+                .unwrap_or_default()
+                .as_deref(),
+            row.try_get::<Option<String>, _>("auto_name")
+                .unwrap_or_default()
+                .as_deref(),
+            row.try_get::<Option<String>, _>("mime_type")
+                .unwrap_or_default()
+                .as_deref(),
+            ursprung.as_deref(),
+            row.try_get::<Option<String>, _>("notes")
+                .unwrap_or_default()
+                .as_deref(),
+        )
+    };
     let needs_categorization =
         document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref());
 
@@ -10174,7 +10184,7 @@ async fn load_replacement_document_version(
     })
 }
 
-async fn load_assignment_set(
+pub(crate) async fn load_assignment_set(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<HashSet<Uuid>, axum::response::Response> {
@@ -10237,7 +10247,344 @@ async fn require_generated_document_patient_access(
     }
 }
 
-fn can_view_document_row(
+#[derive(Debug, Clone, Copy)]
+struct DocumentAclCandidate {
+    resource_id: Option<Uuid>,
+    source: AccessRuleSource,
+    source_priority: i32,
+    specificity: i32,
+    deny: bool,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DocumentAclCandidates {
+    candidates: Vec<DocumentAclCandidate>,
+}
+
+impl DocumentAclCandidates {
+    pub(crate) fn decision(
+        &self,
+        role: Role,
+        document_id: Uuid,
+        capability: AccessCapability,
+        is_medical: bool,
+    ) -> ResourceAccessDecision {
+        if role == Role::Ceo {
+            return ResourceAccessDecision::Allow(AccessRuleSource::Ceo);
+        }
+
+        let request = ResourceAccessRequest {
+            resource_type: ResourceType::Document,
+            resource_id: document_id,
+            capability,
+            is_medical,
+        };
+        if !passes_absolute_resource_boundary(role, &request) {
+            return ResourceAccessDecision::DenySystemBoundary;
+        }
+
+        let candidate = self
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.resource_id.is_none() || candidate.resource_id == Some(document_id)
+            })
+            .max_by_key(|candidate| {
+                (
+                    candidate.source_priority,
+                    candidate.specificity,
+                    i32::from(candidate.deny),
+                )
+            });
+
+        match candidate {
+            Some(candidate) if candidate.deny => ResourceAccessDecision::Deny(candidate.source),
+            Some(candidate) => ResourceAccessDecision::Allow(candidate.source),
+            None => ResourceAccessDecision::NoExplicitRule,
+        }
+    }
+}
+
+/// Load active candidates once for the main document list. This mirrors the
+/// central resolver precedence without issuing one resolver query per row.
+pub(crate) async fn load_document_acl_candidates(
+    state: &AppState,
+    auth: &AuthUser,
+    capability: AccessCapability,
+) -> Result<DocumentAclCandidates, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(DocumentAclCandidates::default());
+    }
+    let Some(role_name) = access::role_db_name(auth.role) else {
+        return Ok(DocumentAclCandidates::default());
+    };
+
+    let rows = sqlx::query(
+        r#"SELECT direct.resource_id,
+                  direct.effect,
+                  'user'::text AS source,
+                  2::int AS source_priority,
+                  CASE direct.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+           FROM staff_user_access_rules direct
+           WHERE direct.user_id = $1
+             AND direct.granted_for_role = $2
+             AND direct.resource_type = 'document'
+             AND direct.capability = $3
+             AND direct.revoked_at IS NULL
+             AND direct.valid_from <= now()
+             AND (direct.valid_until IS NULL OR direct.valid_until > now())
+
+           UNION ALL
+
+           SELECT rule.resource_id,
+                  rule.effect,
+                  'profile'::text AS source,
+                  1::int AS source_priority,
+                  CASE rule.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+           FROM staff_access_profile_assignments assignment
+           JOIN staff_access_profiles profile
+             ON profile.id = assignment.profile_id
+            AND profile.is_active = true
+           JOIN staff_access_profile_roles profile_role
+             ON profile_role.profile_id = profile.id
+            AND profile_role.role = $2
+           JOIN staff_access_profile_rules rule
+             ON rule.profile_id = profile.id
+           WHERE assignment.user_id = $1
+             AND assignment.assigned_for_role = $2
+             AND assignment.revoked_at IS NULL
+             AND assignment.valid_from <= now()
+             AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+             AND rule.resource_type = 'document'
+             AND rule.capability = $3"#,
+    )
+    .bind(auth.user_id)
+    .bind(role_name)
+    .bind(capability.as_str())
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, user_id = %auth.user_id, "load document ACL candidates");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document access",
+        )
+    })?;
+
+    let candidates = rows
+        .into_iter()
+        .filter_map(|row| {
+            let source = match row.try_get::<String, _>("source").ok()?.as_str() {
+                "user" => AccessRuleSource::UserRule,
+                "profile" => AccessRuleSource::ProfileRule,
+                _ => return None,
+            };
+            Some(DocumentAclCandidate {
+                resource_id: row.try_get::<Option<Uuid>, _>("resource_id").ok()?,
+                source,
+                source_priority: row.try_get::<i32, _>("source_priority").ok()?,
+                specificity: row.try_get::<i32, _>("specificity").ok()?,
+                deny: row.try_get::<String, _>("effect").ok()?.as_str() == "deny",
+            })
+        })
+        .collect();
+
+    Ok(DocumentAclCandidates { candidates })
+}
+
+async fn resolve_document_explicit_access(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+    capability: AccessCapability,
+    is_medical: bool,
+) -> Result<ResourceAccessDecision, axum::response::Response> {
+    access::resolve_explicit_resource_access(
+        &state.db,
+        auth.user_id,
+        auth.role,
+        ResourceAccessRequest {
+            resource_type: ResourceType::Document,
+            resource_id: document_id,
+            capability,
+            is_medical,
+        },
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, user_id = %auth.user_id, document_id = %document_id, "resolve explicit document access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document access",
+        )
+    })
+}
+
+async fn has_explicit_all_document_upload_allow(
+    state: &AppState,
+    auth: &AuthUser,
+) -> Result<bool, axum::response::Response> {
+    let Some(role_name) = access::role_db_name(auth.role) else {
+        return Ok(false);
+    };
+    let effect = sqlx::query_scalar::<_, String>(
+        r#"WITH candidates AS (
+               SELECT direct.effect,
+                      2::int AS source_priority
+               FROM staff_user_access_rules direct
+               WHERE direct.user_id = $1
+                 AND direct.granted_for_role = $2
+                 AND direct.resource_type = 'document'
+                 AND direct.scope_type = 'all'
+                 AND direct.capability = 'upload'
+                 AND direct.revoked_at IS NULL
+                 AND direct.valid_from <= now()
+                 AND (direct.valid_until IS NULL OR direct.valid_until > now())
+
+               UNION ALL
+
+               SELECT rule.effect,
+                      1::int AS source_priority
+               FROM staff_access_profile_assignments assignment
+               JOIN staff_access_profiles profile
+                 ON profile.id = assignment.profile_id
+                AND profile.is_active = true
+               JOIN staff_access_profile_roles profile_role
+                 ON profile_role.profile_id = profile.id
+                AND profile_role.role = $2
+               JOIN staff_access_profile_rules rule
+                 ON rule.profile_id = profile.id
+               WHERE assignment.user_id = $1
+                 AND assignment.assigned_for_role = $2
+                 AND assignment.revoked_at IS NULL
+                 AND assignment.valid_from <= now()
+                 AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+                 AND rule.resource_type = 'document'
+                 AND rule.scope_type = 'all'
+                 AND rule.capability = 'upload'
+           )
+           SELECT effect
+           FROM candidates
+           ORDER BY source_priority DESC,
+                    CASE effect WHEN 'deny' THEN 1 ELSE 0 END DESC
+           LIMIT 1"#,
+    )
+    .bind(auth.user_id)
+    .bind(role_name)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, user_id = %auth.user_id, "resolve all-document upload access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document upload access",
+        )
+    })?;
+
+    Ok(effect.as_deref() == Some("allow"))
+}
+
+async fn require_existing_document_upload_access(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let row = fetch_document_row(state, document_id, auth.user_id)
+        .await?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Replacement document not found"))?;
+    let assignment_set = load_assignment_set(state, auth).await?;
+    let baseline_view = can_view_document_row(auth, &row, &assignment_set);
+
+    for capability in [AccessCapability::View, AccessCapability::Upload] {
+        if !document_row_capability_allowed(state, auth, &row, capability, baseline_view).await? {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+    }
+
+    Ok(())
+}
+
+fn is_concierge_expense_receipt_row(row: &sqlx::postgres::PgRow) -> bool {
+    row.try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default()
+        .as_deref()
+        == Some("concierge_expense_receipt")
+}
+
+fn explicit_document_policy_boundary_allows(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
+    let visibility = row
+        .try_get::<String, _>("visibility")
+        .unwrap_or_else(|_| "internal".to_string());
+    let Some(share_status) = parse_share_status(&visibility) else {
+        return false;
+    };
+    let sensitivity = infer_document_sensitivity(
+        row.try_get::<bool, _>("is_medical").unwrap_or(false),
+        row.try_get::<Option<String>, _>("art").unwrap_or_default(),
+        row.try_get::<Option<String>, _>("category")
+            .unwrap_or_default(),
+        share_status,
+    );
+
+    policy::check_access(&AccessContext {
+        role: auth.role,
+        user_id: auth.user_id,
+        // Explicit record access may replace assignment/share scope, but not
+        // sensitivity, release or role policy boundaries.
+        is_assigned: true,
+        data_sensitivity: sensitivity,
+        share_status: Some(share_status),
+    })
+    .allowed
+}
+
+pub(crate) fn document_access_allowed(
+    auth: &AuthUser,
+    row: &sqlx::postgres::PgRow,
+    baseline_allowed: bool,
+    explicit: ResourceAccessDecision,
+) -> bool {
+    // Receipt ownership/service assignment remains an absolute workflow rule;
+    // ACL may revoke it but may not grant another Concierge access to a receipt.
+    if is_concierge_expense_receipt_row(row) && !baseline_allowed {
+        return false;
+    }
+
+    match explicit {
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => false,
+        ResourceAccessDecision::Allow(_) => {
+            baseline_allowed || explicit_document_policy_boundary_allows(auth, row)
+        }
+        ResourceAccessDecision::NoExplicitRule => baseline_allowed,
+    }
+}
+
+async fn document_row_capability_allowed(
+    state: &AppState,
+    auth: &AuthUser,
+    row: &sqlx::postgres::PgRow,
+    capability: AccessCapability,
+    baseline_allowed: bool,
+) -> Result<bool, axum::response::Response> {
+    let document_id = row.try_get::<Uuid, _>("id").map_err(|error| {
+        tracing::error!(error = %error, "decode document id for ACL");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document access",
+        )
+    })?;
+    let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+    let explicit =
+        resolve_document_explicit_access(state, auth, document_id, capability, is_medical).await?;
+    Ok(document_access_allowed(
+        auth,
+        row,
+        baseline_allowed,
+        explicit,
+    ))
+}
+
+pub(crate) fn can_view_document_row(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
     assignment_set: &HashSet<Uuid>,
@@ -11514,6 +11861,13 @@ async fn generate_document(
         return resp;
     }
 
+    if let Some(replace_document_id) = body.replace_document_id
+        && let Err(response) =
+            require_existing_document_upload_access(&state, &auth, replace_document_id).await
+    {
+        return response;
+    }
+
     if let Some(provider_template_id) = parse_provider_template_public_id(body.template_id.trim()) {
         if body.lead_id.is_some() {
             return err(
@@ -12026,12 +12380,16 @@ async fn generate_document(
                 .clone()
                 .unwrap_or_else(|| template.label.to_string());
             let preview = manual_generated_text_preview_html(&title, manual_text);
-            let pdf_bytes = match build_manual_generated_text_pdf(
-                &auto_name,
-                &title,
-                manual_text,
-                &generated_doc_id,
-            ) {
+            let pdf_result = if template.id == "free_text_document" {
+                let agency = match load_agency_contract_settings(&state).await {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                };
+                build_agency_free_text_document_pdf(&agency, &title, manual_text, &generated_doc_id)
+            } else {
+                build_manual_generated_text_pdf(&auto_name, &title, manual_text, &generated_doc_id)
+            };
+            let pdf_bytes = match pdf_result {
                 Ok(bytes) => bytes,
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build manual generated document PDF");
@@ -14087,6 +14445,25 @@ fn build_manual_generated_text_pdf(
     let mut layout = TreatmentPlanPdfLayout::new(footer.to_string(), regular, bold);
     layout.set_document_reference(document_reference);
     layout.text_block_centered(title, 13.0, true, TreatmentPlanPdfColor::Body, 3.0, 2.0);
+    for line in generated_manual_text_paragraphs(text) {
+        if line.trim().is_empty() {
+            layout.spacer(3.0);
+        } else {
+            admin_block(&mut layout, line.trim(), 0.0, 1.0);
+        }
+    }
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+fn build_agency_free_text_document_pdf(
+    agency: &AgencyContractSettings,
+    title: &str,
+    text: &str,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    layout.text_block_centered(title, 16.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
     for line in generated_manual_text_paragraphs(text) {
         if line.trim().is_empty() {
             layout.spacer(3.0);
@@ -17761,6 +18138,10 @@ async fn list_documents(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    let view_acl = match load_document_acl_candidates(&state, &auth, AccessCapability::View).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let search = query
         .search
         .as_deref()
@@ -17972,7 +18353,16 @@ async fn list_documents(
 
     let items: Vec<_> = rows
         .iter()
-        .filter(|row| can_view_document_row(&auth, row, &assignment_set))
+        .filter(|row| {
+            let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+            let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+            document_access_allowed(
+                &auth,
+                row,
+                can_view_document_row(&auth, row, &assignment_set),
+                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
+            )
+        })
         .map(document_json)
         .collect();
 
@@ -17993,6 +18383,10 @@ async fn list_document_intake_queue(
     }
 
     let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let view_acl = match load_document_acl_candidates(&state, &auth, AccessCapability::View).await {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -18077,6 +18471,16 @@ async fn list_document_intake_queue(
     let items: Vec<_> = rows
         .iter()
         .filter(|row| can_review_document_intake_row(&auth, row, &assignment_set))
+        .filter(|row| {
+            let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+            let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+            document_access_allowed(
+                &auth,
+                row,
+                true,
+                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
+            )
+        })
         .filter(|row| is_document_intake_queue_candidate(row))
         .map(document_json)
         .collect();
@@ -18116,9 +18520,21 @@ async fn get_document(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if receipt_access == Some(false)
-        || (receipt_access.is_none() && !can_view_document_row(&auth, &row, &assignment_set))
+    let baseline_view =
+        receipt_access.unwrap_or_else(|| can_view_document_row(&auth, &row, &assignment_set));
+    let view_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        id,
+        AccessCapability::View,
+        row.try_get::<bool, _>("is_medical").unwrap_or(false),
+    )
+    .await
     {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !document_access_allowed(&auth, &row, baseline_view, view_access) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18153,7 +18569,20 @@ async fn get_document_text_extraction(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let allowed = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !allowed {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18185,7 +18614,32 @@ async fn run_document_text_extraction(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let can_view = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    let can_use = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::Use,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !can_view || !can_use {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18268,7 +18722,20 @@ async fn list_document_versions(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let allowed = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !allowed {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18339,11 +18806,25 @@ async fn list_document_versions(
         }
     };
 
-    let items: Vec<_> = rows
-        .iter()
-        .filter(|version_row| can_view_document_row(&auth, version_row, &assignment_set))
-        .map(document_json)
-        .collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for version_row in &rows {
+        let baseline_view = can_view_document_row(&auth, version_row, &assignment_set);
+        let allowed = match document_row_capability_allowed(
+            &state,
+            &auth,
+            version_row,
+            AccessCapability::View,
+            baseline_view,
+        )
+        .await
+        {
+            Ok(allowed) => allowed,
+            Err(response) => return response,
+        };
+        if allowed {
+            items.push(document_json(version_row));
+        }
+    }
 
     Json(items).into_response()
 }
@@ -18366,6 +18847,15 @@ async fn list_document_translation_request_queue(
         return resp;
     }
 
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let view_acl = match load_document_acl_candidates(&state, &auth, AccessCapability::View).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let statuses = match parse_translation_queue_statuses(query.status.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -18387,6 +18877,18 @@ async fn list_document_translation_request_queue(
         None => None,
     };
     let can_view_all = matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing);
+    // Widen only the SQL candidate set for explicit ACL allows. The batch
+    // resolver below still applies precedence, deny overrides and policy
+    // boundaries before any queue row is returned.
+    let has_view_allow_all = view_acl
+        .candidates
+        .iter()
+        .any(|candidate| candidate.resource_id.is_none() && !candidate.deny);
+    let view_allow_document_ids = view_acl
+        .candidates
+        .iter()
+        .filter_map(|candidate| (!candidate.deny).then_some(candidate.resource_id).flatten())
+        .collect::<Vec<_>>();
     let status_sql = statuses
         .iter()
         .map(|status| format!("'{status}'"))
@@ -18407,6 +18909,14 @@ async fn list_document_translation_request_queue(
                   d.auto_name AS document_name,
                   d.art AS document_art,
                   d.category AS document_category,
+                  d.lead_id, d.visibility, d.is_medical, d.art, d.category,
+                  d.ursprung, d.uploaded_by,
+                  EXISTS(
+                    SELECT 1 FROM document_shares ds
+                    WHERE ds.document_id = d.id
+                      AND ds.shared_with_user_id = $4
+                      AND ds.revoked_at IS NULL
+                  ) AS shared_to_current,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
            FROM document_translation_requests dtr
@@ -18428,33 +18938,52 @@ async fn list_document_translation_request_queue(
                       AND pa.user_id = $4
                       AND pa.revoked_at IS NULL
                 )
+                OR $5::boolean = true
+                OR d.id = ANY($6::uuid[])
              )
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC
-           LIMIT 100"#
+           LIMIT 1000"#
     );
 
-    match sqlx::query(&sql)
+    let rows = match sqlx::query(&sql)
         .bind(source)
         .bind(query.patient_id)
         .bind(can_view_all)
         .bind(auth.user_id)
+        .bind(has_view_allow_all)
+        .bind(view_allow_document_ids)
         .fetch_all(&state.db)
         .await
     {
-        Ok(rows) => Json(
-            rows.iter()
-                .map(document_translation_request_json)
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, "list document translation queue");
-            err(
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load translation queue",
-            )
+            );
         }
-    }
+    };
+
+    let items = rows
+        .iter()
+        .filter(|row| {
+            let document_id = row
+                .try_get::<Uuid, _>("document_id")
+                .unwrap_or_else(|_| Uuid::nil());
+            let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+            document_access_allowed(
+                &auth,
+                row,
+                can_view_document_row(&auth, row, &assignment_set),
+                view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical),
+            )
+        })
+        .take(100)
+        .map(document_translation_request_json)
+        .collect::<Vec<_>>();
+
+    Json(items).into_response()
 }
 
 async fn list_document_translation_requests(
@@ -18485,7 +19014,20 @@ async fn list_document_translation_requests(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let allowed = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !allowed {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18555,7 +19097,32 @@ async fn create_document_translation_request(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let can_view = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    let can_use = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::Use,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !can_view || !can_use {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -18742,7 +19309,32 @@ async fn update_document_translation_request(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &document_row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &document_row, &assignment_set);
+    let can_view = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &document_row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    let can_edit = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &document_row,
+        AccessCapability::Edit,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !can_view || !can_edit {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -19244,9 +19836,37 @@ async fn download_document(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if receipt_access == Some(false)
-        || (receipt_access.is_none() && !can_view_document_row(&auth, &row, &assignment_set))
+    let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+    let baseline_view =
+        receipt_access.unwrap_or_else(|| can_view_document_row(&auth, &row, &assignment_set));
+    let view_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        id,
+        AccessCapability::View,
+        is_medical,
+    )
+    .await
     {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !document_access_allowed(&auth, &row, baseline_view, view_access) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let download_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        id,
+        AccessCapability::Download,
+        is_medical,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !document_access_allowed(&auth, &row, baseline_view, download_access) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -19827,6 +20447,7 @@ async fn upload_document(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
+        Role::Concierge,
         Role::ItAdmin,
     ]) {
         return resp;
@@ -19862,6 +20483,7 @@ async fn upload_document(
     let mut payment_due_date: Option<NaiveDate> = None;
     let mut payment_date: Option<NaiveDate> = None;
     let mut payment_method: Option<String> = None;
+    let mut manual_intake = false;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or_default().to_string();
@@ -20015,6 +20637,13 @@ async fn upload_document(
                     Err(resp) => return resp,
                 }
             }
+            "manual_intake" => {
+                manual_intake = parse_optional_text_field(field)
+                    .await
+                    .as_deref()
+                    .map(parse_bool_flag)
+                    .unwrap_or(false)
+            }
             _ => {}
         }
     }
@@ -20041,6 +20670,32 @@ async fn upload_document(
             .clone()
             .unwrap_or_else(|| "Uploaded document".to_string());
     }
+    if manual_intake {
+        if !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Manual document intake requires document management access",
+            );
+        }
+        if patient_id.is_some()
+            || lead_id.is_some()
+            || order_id.is_some()
+            || appointment_id.is_some()
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Manual intake documents must be linked during review",
+            );
+        }
+        status = "draft".to_string();
+        visibility = "internal".to_string();
+        art = "uploaded_document".to_string();
+        category = None;
+        is_medical_override = Some(false);
+        ursprung = Some("manual_intake".to_string());
+        document_direction = Some("incoming".to_string());
+        access_category = Some("internal".to_string());
+    }
     if !matches!(status.as_str(), "draft" | "active" | "archived") {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document status");
     }
@@ -20064,7 +20719,12 @@ async fn upload_document(
         Err(resp) => return resp,
     };
 
-    if patient_id.is_none() && lead_id.is_none() && order_id.is_none() && appointment_id.is_none() {
+    if !manual_intake
+        && patient_id.is_none()
+        && lead_id.is_none()
+        && order_id.is_none()
+        && appointment_id.is_none()
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Document must be linked to lead, patient, order or appointment",
@@ -20084,6 +20744,16 @@ async fn upload_document(
             StatusCode::FORBIDDEN,
             "Insufficient permissions for lead documents",
         );
+    }
+
+    if auth.role == Role::Concierge {
+        // A granted upload capability may widen this route only for an
+        // assigned/explicitly visible patient. Concierge uploads stay in the
+        // internal workflow and cannot self-release a document.
+        visibility = "internal".to_string();
+        if ursprung.as_deref().unwrap_or_default().trim().is_empty() {
+            ursprung = Some("concierge_upload".to_string());
+        }
     }
 
     if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter) {
@@ -20114,13 +20784,17 @@ async fn upload_document(
     }
 
     let original_filename = file_name.unwrap_or_else(|| "document".to_string());
-    let classification_suggestion = suggest_document_classification(
-        Some(original_filename.as_str()),
-        Some(auto_name.trim()),
-        Some(mime_type.as_str()),
-        ursprung.as_deref(),
-        notes.as_deref(),
-    );
+    let classification_suggestion = if manual_intake {
+        None
+    } else {
+        suggest_document_classification(
+            Some(original_filename.as_str()),
+            Some(auto_name.trim()),
+            Some(mime_type.as_str()),
+            ursprung.as_deref(),
+            notes.as_deref(),
+        )
+    };
     let resolved_art = if art.trim().is_empty() {
         classification_suggestion
             .as_ref()
@@ -20149,6 +20823,50 @@ async fn upload_document(
                 document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
             })
     });
+    let concierge_upload_is_medical = resolved_is_medical
+        || document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
+        || classification_suggestion
+            .as_ref()
+            .and_then(classification_suggestion_is_medical)
+            .unwrap_or(false);
+    if auth.role == Role::Concierge && concierge_upload_is_medical {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge cannot upload medical documents",
+        );
+    }
+    let concierge_all_upload_allowed = if auth.role == Role::Concierge {
+        match has_explicit_all_document_upload_allow(&state, &auth).await {
+            Ok(allowed) => allowed,
+            Err(response) => return response,
+        }
+    } else {
+        true
+    };
+    // A new multipart upload has no document id, so only an `all` Upload rule
+    // can match this nil sentinel. Existing role, patient and lead boundaries
+    // above remain authoritative; an ACL allow does not widen this route.
+    let upload_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        Uuid::nil(),
+        AccessCapability::Upload,
+        resolved_is_medical,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if matches!(
+        upload_access,
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_)
+    ) || (auth.role == Role::Concierge
+        && (!concierge_all_upload_allowed
+            || !matches!(upload_access, ResourceAccessDecision::Allow(_))))
+    {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
     let needs_categorization = document_needs_categorization(
         Some(resolved_art.as_str()),
         resolved_category.as_deref(),
@@ -20209,7 +20927,9 @@ async fn upload_document(
         };
 
     let should_auto_name = !auto_name_was_supplied || auto_name_generated;
-    let auto_naming_queued = if patient_id.is_some() && should_auto_name {
+    let auto_naming_queued = if manual_intake {
+        false
+    } else if patient_id.is_some() && should_auto_name {
         match enqueue_document_auto_naming(&state, document_id, auto_name.trim(), auth.user_id)
             .await
         {
@@ -20389,8 +21109,12 @@ async fn update_document(
 ) -> axum::response::Response {
     if let Err(resp) = auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+        Role::Billing,
         Role::ItAdmin,
     ]) {
         return resp;
@@ -20406,13 +21130,48 @@ async fn update_document(
         Err(resp) => return resp,
     };
 
-    if auth.role == Role::TeamleadInterpreter {
-        if !can_review_document_intake_row(&auth, &current, &assignment_set) {
-            return err(
-                StatusCode::FORBIDDEN,
-                "Teamlead may review only interpreter-origin intake documents for assigned patients",
-            );
+    let is_medical = current.try_get::<bool, _>("is_medical").unwrap_or(false);
+    let baseline_view = can_view_document_row(&auth, &current, &assignment_set);
+    let view_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        id,
+        AccessCapability::View,
+        is_medical,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !document_access_allowed(&auth, &current, baseline_view, view_access) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let baseline_edit = match auth.role {
+        Role::Ceo | Role::PatientManager | Role::ItAdmin => true,
+        Role::TeamleadInterpreter => {
+            can_review_document_intake_row(&auth, &current, &assignment_set)
         }
+        _ => false,
+    };
+    let edit_access = match resolve_document_explicit_access(
+        &state,
+        &auth,
+        id,
+        AccessCapability::Edit,
+        is_medical,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !document_access_allowed(&auth, &current, baseline_edit, edit_access) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    if auth.role == Role::TeamleadInterpreter {
         if let Err(resp) = validate_teamlead_document_review_update(&body) {
             return resp;
         }
@@ -20468,11 +21227,15 @@ async fn update_document(
             .try_get::<Option<String>, _>("klinik")
             .unwrap_or_default()
     });
-    let ursprung = body.ursprung.clone().or_else(|| {
-        current
-            .try_get::<Option<String>, _>("ursprung")
-            .unwrap_or_default()
-    });
+    let current_ursprung = current
+        .try_get::<Option<String>, _>("ursprung")
+        .unwrap_or_default();
+    let is_manual_intake = matches!(current_ursprung.as_deref(), Some("manual_intake"));
+    let ursprung = if is_manual_intake {
+        current_ursprung
+    } else {
+        body.ursprung.clone().or(current_ursprung)
+    };
     let notes = body.notes.clone().or_else(|| {
         current
             .try_get::<Option<String>, _>("notes")
@@ -20609,6 +21372,21 @@ async fn update_document(
         Err(resp) => return resp,
     };
 
+    if is_manual_intake && status == "active" {
+        if patient_id.is_none() && order_id.is_none() && appointment_id.is_none() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Manual intake review requires a patient, order or appointment link",
+            );
+        }
+        if document_needs_categorization(Some(art.trim()), category.as_deref(), None) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Manual intake review requires document type and category",
+            );
+        }
+    }
+
     if auth.role == Role::TeamleadInterpreter && visibility != "internal" {
         return err(
             StatusCode::FORBIDDEN,
@@ -20640,6 +21418,33 @@ async fn update_document(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Invalid document visibility",
         );
+    }
+
+    let resulting_request = ResourceAccessRequest {
+        resource_type: ResourceType::Document,
+        resource_id: id,
+        capability: AccessCapability::Edit,
+        is_medical,
+    };
+    let resulting_share_status = parse_share_status(&visibility)
+        .expect("document visibility was validated immediately above");
+    let resulting_sensitivity = infer_document_sensitivity(
+        is_medical,
+        Some(art.clone()),
+        category.clone(),
+        resulting_share_status,
+    );
+    if !passes_absolute_resource_boundary(auth.role, &resulting_request)
+        || !policy::check_access(&AccessContext {
+            role: auth.role,
+            user_id: auth.user_id,
+            is_assigned: true,
+            data_sensitivity: resulting_sensitivity,
+            share_status: Some(resulting_share_status),
+        })
+        .allowed
+    {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     let next_status = status.clone();
@@ -20792,6 +21597,28 @@ async fn delete_document_file(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let baseline_view = can_view_document_row(&auth, &current, &assignment_set);
+    for capability in [AccessCapability::View, AccessCapability::Edit] {
+        let allowed = match document_row_capability_allowed(
+            &state,
+            &auth,
+            &current,
+            capability,
+            baseline_view,
+        )
+        .await
+        {
+            Ok(allowed) => allowed,
+            Err(response) => return response,
+        };
+        if !allowed {
+            return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
+    }
 
     let previous_status = current
         .try_get::<String, _>("status")
@@ -21488,6 +22315,29 @@ async fn release_document_to_patient_portal(
         );
     }
 
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    for capability in [AccessCapability::View, AccessCapability::Edit] {
+        let allowed =
+            match document_row_capability_allowed(&state, &auth, &row, capability, baseline_view)
+                .await
+            {
+                Ok(allowed) => allowed,
+                Err(response) => return response,
+            };
+        if !allowed {
+            return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
+    }
+
     match release_document_to_patient_portal_internal(
         &state,
         auth.user_id,
@@ -21524,6 +22374,24 @@ async fn revoke_document_from_patient_portal(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    for capability in [AccessCapability::View, AccessCapability::Edit] {
+        let allowed =
+            match document_row_capability_allowed(&state, &auth, &row, capability, baseline_view)
+                .await
+            {
+                Ok(allowed) => allowed,
+                Err(response) => return response,
+            };
+        if !allowed {
+            return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+        }
+    }
 
     let Some(patient_id) = row
         .try_get::<Option<Uuid>, _>("patient_id")
@@ -21624,7 +22492,20 @@ async fn list_document_shares(
         Err(resp) => return resp,
     };
 
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let allowed = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !allowed {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -21717,7 +22598,32 @@ async fn create_bulk_document_shares(
             Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
             Err(resp) => return resp,
         };
-        if !can_view_document_row(&auth, &row, &assignment_set) {
+        let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+        let can_view = match document_row_capability_allowed(
+            &state,
+            &auth,
+            &row,
+            AccessCapability::View,
+            baseline_view,
+        )
+        .await
+        {
+            Ok(allowed) => allowed,
+            Err(response) => return response,
+        };
+        let can_edit = match document_row_capability_allowed(
+            &state,
+            &auth,
+            &row,
+            AccessCapability::Edit,
+            baseline_view,
+        )
+        .await
+        {
+            Ok(allowed) => allowed,
+            Err(response) => return response,
+        };
+        if !can_view || !can_edit {
             return err(StatusCode::FORBIDDEN, "Insufficient permissions");
         }
         let context = match shareable_document_context_from_row(&row) {
@@ -21829,7 +22735,32 @@ async fn create_document_share(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let can_view = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    let can_edit = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::Edit,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !can_view || !can_edit {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let document = match shareable_document_context_from_row(&row) {
@@ -21902,7 +22833,32 @@ async fn revoke_document_share(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
-    if !can_view_document_row(&auth, &row, &assignment_set) {
+    let baseline_view = can_view_document_row(&auth, &row, &assignment_set);
+    let can_view = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::View,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    let can_edit = match document_row_capability_allowed(
+        &state,
+        &auth,
+        &row,
+        AccessCapability::Edit,
+        baseline_view,
+    )
+    .await
+    {
+        Ok(allowed) => allowed,
+        Err(response) => return response,
+    };
+    if !can_view || !can_edit {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -22154,13 +23110,14 @@ mod tests {
         ServiceLineInput, TreatmentPlanPdfLayout, admin_signature_grid,
         adult_legal_agency_identity, agency_block_lines, agency_identity_profile_lines,
         build_adult_confidentiality_release_pdf, build_adult_privacy_consents_pdf,
-        build_adult_privacy_information_pdf, build_consent_pdf, build_cost_estimate_pdf,
-        build_enhanced_due_diligence_pdf, build_framework_contract_pdf,
-        build_manual_generated_text_pdf, build_order_cost_estimate_pdf, build_patient_sticker_pdf,
-        build_single_order_pdf, compute_line_item_totals, consent_type_for_compliance_kind,
-        cost_coverage_money_cell, cost_estimate_price_text, create_private_ocr_temp_file,
-        document_attachment_response, document_satisfies_compliance_kind, document_template_by_id,
-        finalize_admin_pdf, generated_binding_snapshot, generated_cost_estimate_document_number,
+        build_adult_privacy_information_pdf, build_agency_free_text_document_pdf,
+        build_consent_pdf, build_cost_estimate_pdf, build_enhanced_due_diligence_pdf,
+        build_framework_contract_pdf, build_manual_generated_text_pdf,
+        build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
+        compute_line_item_totals, consent_type_for_compliance_kind, cost_coverage_money_cell,
+        cost_estimate_price_text, create_private_ocr_temp_file, document_attachment_response,
+        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
+        generated_binding_snapshot, generated_cost_estimate_document_number,
         generated_document_number_for_template, generated_typed_document_number,
         german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
@@ -22681,6 +23638,23 @@ mod tests {
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(extracted_text.contains("Dokument-Nr."));
         assert!(extracted_text.contains("DOC-MANUAL-1"));
+        assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
+        assert!(extracted_text.contains("Individueller Text für den Patienten"));
+    }
+
+    #[test]
+    fn free_text_document_pdf_uses_lead_agency_template() {
+        let agency = legal_test_agency();
+        let bytes = build_agency_free_text_document_pdf(
+            &agency,
+            "Freies Dokument",
+            "Sehr geehrte Damen und Herren,\n\nIndividueller Text für den Patienten.",
+            "ADMIN-20260831-UNITTEST0001",
+        )
+        .unwrap();
+
+        let extracted_text = assert_legal_pdf_chrome(&bytes, "ADMIN-20260831-UNITTEST0001");
+        assert!(extracted_text.contains("Freies Dokument"));
         assert!(extracted_text.contains("Sehr geehrte Damen und Herren"));
         assert!(extracted_text.contains("Individueller Text für den Patienten"));
     }

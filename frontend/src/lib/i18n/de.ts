@@ -289,6 +289,7 @@ export const de = {
   providers_inactive: "Inaktiv",
   providers_activate: "Aktivieren",
   providers_deactivate: "Deaktivieren",
+  providers_created_at: "Erstellt am",
   providers_city: "Stadt",
   providers_country: "Land",
   providers_street: "Straße",

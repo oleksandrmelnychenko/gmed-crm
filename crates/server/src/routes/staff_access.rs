@@ -390,6 +390,39 @@ async fn update_profile(
             "Access profile was changed by another request",
         );
     }
+    let compatible_role_names = body
+        .roles
+        .iter()
+        .filter_map(|role| configurable_staff_role_name(*role))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let has_incompatible_assignment = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM staff_access_profile_assignments assignment
+               WHERE assignment.profile_id = $1
+                 AND assignment.revoked_at IS NULL
+                 AND assignment.valid_from <= now()
+                 AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+                 AND NOT (assignment.assigned_for_role = ANY($2::text[]))
+           )"#,
+    )
+    .bind(profile_id)
+    .bind(&compatible_role_names)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            return database_error("Failed to validate assigned profile roles", error);
+        }
+    };
+    if has_incompatible_assignment {
+        return err(
+            StatusCode::CONFLICT,
+            "Access profile is assigned to a user whose role would become incompatible",
+        );
+    }
     let old_value = serde_json::json!({
         "name": current.try_get::<String, _>("name").ok(),
         "description": current.try_get::<Option<String>, _>("description").ok().flatten(),

@@ -11,8 +11,8 @@ export const STAFF_ACCESS_CAPABILITIES: Record<
   readonly StaffAccessCapability[]
 > = {
   provider: ["view", "use", "edit"],
-  patient: ["view", "use"],
-  document: ["view", "download", "upload"],
+  patient: ["view", "use", "edit"],
+  document: ["view", "use", "edit", "upload", "download"],
 };
 
 const MEDICAL_DATA_ROLES = new Set([
@@ -44,11 +44,75 @@ export function ruleMatchesRecord(
   );
 }
 
-export function toggleDirectAllowRule(
+export function effectiveProfileRule(
+  rules: StaffAccessRule[],
+  resourceType: StaffAccessResourceType,
+  resourceId: string,
+  capability: StaffAccessCapability,
+) {
+  return rules
+    .filter((rule) => ruleMatchesRecord(rule, resourceType, resourceId, capability))
+    .sort((left, right) => {
+      const specificity = Number(right.scope_type === "record") - Number(left.scope_type === "record");
+      if (specificity !== 0) return specificity;
+      return Number(right.effect === "deny") - Number(left.effect === "deny");
+    })[0];
+}
+
+export function effectiveProfileAllRule(
+  rules: StaffAccessRule[],
+  resourceType: StaffAccessResourceType,
+  capability: StaffAccessCapability,
+): StaffAccessRule | undefined {
+  return rules
+    .filter(
+      (rule) =>
+        rule.resource_type === resourceType &&
+        rule.scope_type === "all" &&
+        rule.capability === capability,
+    )
+    .sort((left, right) => Number(right.effect === "deny") - Number(left.effect === "deny"))[0];
+}
+
+export function setDirectAllRuleEnabled(
+  rules: StaffDirectAccessRuleInput[],
+  resourceType: StaffAccessResourceType,
+  capability: StaffAccessCapability,
+  enabled: boolean,
+  inheritedEffect?: "allow" | "deny",
+): StaffDirectAccessRuleInput[] {
+  const withoutExactRule = rules.filter(
+    (rule) =>
+      !(
+        rule.resource_type === resourceType &&
+        rule.scope_type === "all" &&
+        rule.capability === capability
+      ),
+  );
+  const inheritedEnabled = inheritedEffect === "allow";
+  if (enabled === inheritedEnabled) return withoutExactRule;
+
+  return [
+    ...withoutExactRule,
+    {
+      resource_type: resourceType,
+      scope_type: "all" as const,
+      resource_id: null,
+      capability,
+      effect: enabled ? "allow" as const : "deny" as const,
+      reason: null,
+      valid_until: null,
+    },
+  ];
+}
+
+export function setDirectRuleEnabled(
   rules: StaffDirectAccessRuleInput[],
   resourceType: StaffAccessResourceType,
   resourceId: string,
   capability: StaffAccessCapability,
+  enabled: boolean,
+  inheritedEffect?: "allow" | "deny",
 ) {
   const exactRule = rules.find(
     (rule) =>
@@ -59,7 +123,8 @@ export function toggleDirectAllowRule(
   );
 
   const withoutExactRule = rules.filter((rule) => rule !== exactRule);
-  if (exactRule?.effect === "allow") return withoutExactRule;
+  const inheritedEnabled = inheritedEffect === "allow";
+  if (enabled === inheritedEnabled) return withoutExactRule;
 
   return [
     ...withoutExactRule,
@@ -68,7 +133,7 @@ export function toggleDirectAllowRule(
       scope_type: "record" as const,
       resource_id: resourceId,
       capability,
-      effect: "allow" as const,
+      effect: enabled ? "allow" as const : "deny" as const,
       reason: null,
       valid_until: null,
     },

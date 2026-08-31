@@ -275,6 +275,7 @@ export interface Translations
   providers_inactive: string;
   providers_activate: string;
   providers_deactivate: string;
+  providers_created_at: string;
   providers_city: string;
   providers_country: string;
   providers_street: string;

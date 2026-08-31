@@ -41,6 +41,9 @@ services:
       DOCUMENT_OCR_LANGUAGES: "${GMED_DOCUMENT_OCR_LANGUAGES:-deu+eng+ukr+rus}"
     ports:
       - "${BACKEND_PORT:-3000}:3000"
+    # Must match the fixed identity baked into both document-writing images.
+    # The named uploads volume persists numeric ownership across deployments.
+    user: "100:101"
     restart: unless-stopped
     volumes:
       - uploads:/app/uploads
@@ -84,6 +87,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    user: "100:101"
     volumes:
       - uploads:/app/uploads:ro
 

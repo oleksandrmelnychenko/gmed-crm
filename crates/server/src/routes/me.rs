@@ -9,6 +9,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use sqlx::Row;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::audit;
@@ -16,6 +17,7 @@ use crate::auth::middleware::AuthUser;
 use crate::routes::documents::read_document_storage_bytes;
 use crate::routes::patients::{
     load_patient_document_alerts_summary, patient_document_alerts_payload,
+    retain_visible_document_alert_matches,
 };
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -376,10 +378,40 @@ async fn list_my_document_alerts(
         Err(resp) => return resp,
     };
 
-    match load_patient_document_alerts_summary(&state, patient_id).await {
-        Ok(summary) => Json(patient_document_alerts_payload(&summary)).into_response(),
-        Err(resp) => resp,
-    }
+    let summary = match load_patient_document_alerts_summary(&state, patient_id).await {
+        Ok(summary) => summary,
+        Err(resp) => return resp,
+    };
+    let visible_document_ids = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT d.id
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.visibility = 'patient_visible'
+             AND EXISTS (
+                 SELECT 1
+                 FROM document_shares ds
+                 WHERE ds.document_id = d.id
+                   AND ds.shared_with_user_id = $2
+                   AND ds.revoked_at IS NULL
+             )"#,
+    )
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(document_ids) => document_ids.into_iter().collect::<HashSet<_>>(),
+        Err(error) => {
+            tracing::error!(error = %error, user_id = %auth.user_id, patient_id = %patient_id, "load patient-visible document alert scope");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document alerts",
+            );
+        }
+    };
+    let mut payload = patient_document_alerts_payload(&summary);
+    retain_visible_document_alert_matches(&mut payload, &visible_document_ids);
+    Json(payload).into_response()
 }
 
 async fn list_my_documents(

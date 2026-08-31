@@ -116,7 +116,7 @@ export function EmployeesPage() {
               type="button"
               size="sm"
               variant="outline"
-              className="h-8 gap-1.5 rounded-lg"
+              className="h-8 gap-1.5 rounded-lg border-orange-500 bg-orange-500 text-white shadow-sm hover:border-orange-600 hover:bg-orange-600 hover:text-white"
               onClick={(event) => {
                 event.stopPropagation();
                 setAccessEmployee(row);

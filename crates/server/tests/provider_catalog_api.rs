@@ -441,6 +441,433 @@ async fn concierge_cannot_convert_provider_type_in_either_direction() {
 }
 
 #[tokio::test]
+async fn nested_medical_provider_routes_require_view_and_never_expose_patient_lists() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-nested");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical", "Germany").await;
+    seed_direct_provider_rule(&pool, concierge_id, admin_id, provider_id, "view", "allow").await;
+    let doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("ACL doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, appointment_type,
+                title, date, status, created_by
+           ) VALUES (
+                $1, $2, $3, 'medical',
+                $4, CURRENT_DATE, 'planned', $5
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(format!("ACL appointment {tag}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/services"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["linked_patients"], json!([]));
+    assert_eq!(detail["interactions"], json!([]));
+    let doctor = detail["doctors"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"] == doctor_id.to_string())
+        })
+        .expect("selected provider doctor");
+    assert_eq!(doctor["linked_patients"], json!([]));
+    assert_eq!(doctor["patient_count"], 0);
+    assert_eq!(doctor["appointment_count"], 0);
+
+    let (status, doctor_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doctor_detail["linked_patients"], json!([]));
+    assert_eq!(doctor_detail["interactions"], json!([]));
+    assert_eq!(doctor_detail["patient_count"], 0);
+    assert_eq!(doctor_detail["appointment_count"], 0);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?linked_patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/patients"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    sqlx::query(
+        r#"UPDATE staff_user_access_rules
+           SET effect = 'deny'
+           WHERE user_id = $1
+             AND resource_type = 'provider'
+             AND resource_id = $2
+             AND capability = 'view'
+             AND revoked_at IS NULL"#,
+    )
+    .bind(concierge_id)
+    .bind(provider_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for path in [
+        format!("/api/v1/providers/{provider_id}"),
+        format!("/api/v1/providers/{provider_id}/services"),
+    ] {
+        let (status, _) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn concierge_cross_provider_relationship_requires_target_view_and_use() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-relationship-target");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let source_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-source"), "medical", "Germany").await;
+    let target_provider_id =
+        seed_provider_with_type(&pool, &format!("{tag}-target"), "medical", "Germany").await;
+    for capability in ["view", "edit"] {
+        seed_direct_provider_rule(
+            &pool,
+            concierge_id,
+            admin_id,
+            source_provider_id,
+            capability,
+            "allow",
+        )
+        .await;
+    }
+    let source_doctor_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO provider_doctors (provider_id, name) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(source_provider_id)
+    .bind(format!("Source doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let target_doctor_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO provider_doctors (provider_id, name) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(target_provider_id)
+    .bind(format!("Target doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO provider_doctor_relationships (
+                source_doctor_id, target_doctor_id, relationship_type
+           ) VALUES ($1, $2, 'professional')"#,
+    )
+    .bind(source_doctor_id)
+    .bind(target_doctor_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let relationships_path =
+        format!("/api/v1/providers/{source_provider_id}/doctors/{source_doctor_id}/relationships");
+    let relationship_payload = json!({
+        "target_doctor_id": target_doctor_id,
+        "target_provider_id": target_provider_id,
+        "relationship_type": "referral"
+    });
+
+    let (status, relationships) =
+        json_request(&app, "GET", &relationships_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(relationships, json!([]));
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &relationships_path,
+        &bearer,
+        Some(relationship_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_provider_rule(
+        &pool,
+        concierge_id,
+        admin_id,
+        target_provider_id,
+        "view",
+        "allow",
+    )
+    .await;
+    let (status, relationships) =
+        json_request(&app, "GET", &relationships_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        relationships
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &relationships_path,
+        &bearer,
+        Some(relationship_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_provider_rule(
+        &pool,
+        concierge_id,
+        admin_id,
+        target_provider_id,
+        "use",
+        "allow",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &relationships_path,
+        &bearer,
+        Some(relationship_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn provider_view_deny_overrides_billing_baseline() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-billing-deny");
+    let billing_id = seed_staff_user(&pool, &tag, "billing").await;
+    let bearer = auth_header_for(billing_id, "billing");
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Germany").await;
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type,
+                resource_id, capability, effect, granted_by
+           ) VALUES ($1, 'billing', 'provider', 'record', $2, 'view', 'deny', $3)"#,
+    )
+    .bind(billing_id)
+    .bind(provider_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!response_contains_provider(&body, provider_id));
+}
+
+#[tokio::test]
+async fn provider_edit_deny_blocks_patient_manager_lifecycle_mutations() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-pm-edit-deny");
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(manager_id, "patient_manager");
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Germany").await;
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type,
+                resource_id, capability, effect, granted_by
+           ) VALUES ($1, 'patient_manager', 'provider', 'record', $2, 'edit', 'deny', $3)"#,
+    )
+    .bind(manager_id)
+    .bind(provider_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for suffix in ["activate", "deactivate", "delete"] {
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/providers/{provider_id}/{suffix}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    let still_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM providers WHERE id = $1 AND is_active = true)",
+    )
+    .bind(provider_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(still_exists);
+}
+
+#[tokio::test]
+async fn provider_view_does_not_bypass_patient_manager_patient_scope() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-pm-patient-scope");
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(manager_id, "patient_manager");
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical", "Germany").await;
+    let doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Scoped doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, appointment_type,
+                title, date, status, created_by
+           ) VALUES (
+                $1, $2, $3, 'medical',
+                $4, CURRENT_DATE, 'planned', $5
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(format!("Scoped appointment {tag}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, patients) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/patients"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(patients, json!([]));
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["linked_patients"], json!([]));
+    assert_eq!(detail["interactions"], json!([]));
+
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type,
+                resource_id, capability, effect, granted_by
+           ) VALUES ($1, 'patient_manager', 'patient', 'record', $2, 'view', 'allow', $3)"#,
+    )
+    .bind(manager_id)
+    .bind(patient_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, patients) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/patients"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(patients.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["id"] == patient_id.to_string())
+    }));
+}
+
+#[tokio::test]
 async fn insurance_provider_options_include_patient_insurance_names() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;

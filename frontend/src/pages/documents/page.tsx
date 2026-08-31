@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
   type ReactElement,
   type ReactNode,
@@ -203,6 +204,16 @@ const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
 const documentSectionClassName = "border-0 bg-transparent p-0 shadow-none";
+const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+type IntakeUploadStatus = "queued" | "uploading" | "uploaded" | "error";
+
+type IntakeUploadItem = {
+  error: string;
+  file: File;
+  id: string;
+  status: IntakeUploadStatus;
+};
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -999,6 +1010,48 @@ function StaffDocumentsPage({
       lang === "ru"
         ? "Введите текст произвольного документа."
         : "Geben Sie den Text des freien Dokuments ein.",
+    intakeUploadTitle:
+      lang === "ru" ? "Загрузить входящие документы" : "Eingehende Dokumente hochladen",
+    intakeUploadDescription:
+      lang === "ru"
+        ? "Добавьте несколько файлов сразу. Пациент, заказ, прием и категория указываются позже при ручной проверке."
+        : "Fügen Sie mehrere Dateien gleichzeitig hinzu. Patient, Auftrag, Termin und Kategorie werden später bei der manuellen Prüfung zugeordnet.",
+    intakeDropTitle:
+      lang === "ru"
+        ? "Перетащите документы сюда"
+        : "Dokumente hierher ziehen",
+    intakeDropHint:
+      lang === "ru"
+        ? "или выберите несколько файлов · до 25 МБ каждый"
+        : "oder mehrere Dateien auswählen · jeweils bis 25 MB",
+    intakeBrowse:
+      lang === "ru" ? "Выбрать файлы" : "Dateien auswählen",
+    intakeNoFiles:
+      lang === "ru" ? "Добавьте хотя бы один документ." : "Fügen Sie mindestens ein Dokument hinzu.",
+    intakeTooLarge: (name: string) =>
+      lang === "ru"
+        ? `${name}: файл больше 25 МБ.`
+        : `${name}: Datei ist größer als 25 MB.`,
+    intakeQueued: lang === "ru" ? "В очереди" : "Wartet",
+    intakeUploading: lang === "ru" ? "Загружается" : "Wird hochgeladen",
+    intakeUploaded: lang === "ru" ? "Ожидает проверки" : "Wartet auf Prüfung",
+    intakeUploadFailed: lang === "ru" ? "Ошибка" : "Fehler",
+    intakeUploadAction: (count: number) =>
+      lang === "ru"
+        ? `Загрузить (${count})`
+        : `Hochladen (${count})`,
+    intakeUploadedNotice: (count: number) =>
+      lang === "ru"
+        ? `Документы добавлены в очередь: ${count}.`
+        : `Dokumente zur Warteschlange hinzugefügt: ${count}.`,
+    intakeReviewRequired:
+      lang === "ru"
+        ? "Для завершения проверки выберите пациента, тип и категорию документа."
+        : "Wählen Sie Patient, Dokumenttyp und Kategorie, um die Prüfung abzuschließen.",
+    intakeReviewWorkspace:
+      lang === "ru"
+        ? "Сверяйте документ справа и заполняйте данные слева. После сохранения документ будет активирован и удален из очереди."
+        : "Prüfen Sie das Dokument rechts und erfassen Sie die Daten links. Nach dem Speichern wird es aktiviert und aus der Warteschlange entfernt.",
   };
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
@@ -1069,6 +1122,11 @@ function StaffDocumentsPage({
   >([]);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [intakeUploadOpen, setIntakeUploadOpen] = useState(false);
+  const [intakeUploadItems, setIntakeUploadItems] = useState<IntakeUploadItem[]>([]);
+  const [intakeUploadBusy, setIntakeUploadBusy] = useState(false);
+  const [intakeUploadError, setIntakeUploadError] = useState("");
+  const [intakeDragActive, setIntakeDragActive] = useState(false);
 
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
@@ -1119,6 +1177,15 @@ function StaffDocumentsPage({
   const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   const documentPreviewUrlRef = useRef<string | null>(null);
+  const [editPreview, setEditPreview] = useState<{
+    contentType: string;
+    id: string;
+    title: string;
+    url: string;
+  } | null>(null);
+  const [editPreviewBusy, setEditPreviewBusy] = useState(false);
+  const [editPreviewError, setEditPreviewError] = useState("");
+  const editPreviewUrlRef = useRef<string | null>(null);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationError, setTranslationError] = useState("");
   const [translationActionMenuOpen, setTranslationActionMenuOpen] = useState<string | null>(null);
@@ -1174,10 +1241,26 @@ function StaffDocumentsPage({
     setDocumentPreview(nextPreview);
   }
 
+  function replaceEditPreview(nextPreview: typeof editPreview) {
+    const currentUrl = editPreviewUrlRef.current;
+    if (currentUrl && currentUrl !== nextPreview?.url) {
+      revokeDocumentPreviewObjectUrl(currentUrl);
+    }
+    editPreviewUrlRef.current = nextPreview?.url ?? null;
+    setEditPreview(nextPreview);
+  }
+
   useEffect(() => () => {
     if (documentPreviewUrlRef.current) {
       revokeDocumentPreviewObjectUrl(documentPreviewUrlRef.current);
       documentPreviewUrlRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (editPreviewUrlRef.current) {
+      revokeDocumentPreviewObjectUrl(editPreviewUrlRef.current);
+      editPreviewUrlRef.current = null;
     }
   }, []);
 
@@ -1189,6 +1272,46 @@ function StaffDocumentsPage({
     setDocumentPreview(null);
     setDocumentPreviewError("");
   }, [activeDocumentDetailId]);
+
+  useEffect(() => {
+    if (!metadataEditOpen || !detail?.has_stored_file) {
+      replaceEditPreview(null);
+      setEditPreviewBusy(false);
+      setEditPreviewError("");
+      return;
+    }
+
+    let active = true;
+    setEditPreviewBusy(true);
+    setEditPreviewError("");
+    void createDocumentPreviewObjectUrl(detail.id)
+      .then((preview) => {
+        if (!active) {
+          revokeDocumentPreviewObjectUrl(preview.url);
+          return;
+        }
+        replaceEditPreview({
+          ...preview,
+          id: detail.id,
+          title: detail.original_filename ?? detail.auto_name,
+        });
+      })
+      .catch((nextError) => {
+        if (!active) return;
+        setEditPreviewError(
+          nextError instanceof Error
+            ? nextError.message
+            : t.documents_failed_open_preview,
+        );
+      })
+      .finally(() => {
+        if (active) setEditPreviewBusy(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [detail?.auto_name, detail?.has_stored_file, detail?.id, detail?.original_filename, metadataEditOpen, t.documents_failed_open_preview]);
 
   const shareTargetDocuments = useMemo(() => {
     const targetIds =
@@ -1636,7 +1759,11 @@ function StaffDocumentsPage({
         setDetailVersions(versionResponse);
         setTranslationRequests(translationResponse);
         setTextExtraction(extractionResponse);
-        setEditForm(detailToEditForm(documentResponse));
+        const nextEditForm = detailToEditForm(documentResponse);
+        if (documentResponse.ursprung === "manual_intake") {
+          nextEditForm.status = "active";
+        }
+        setEditForm(nextEditForm);
         setShares(shareResponse);
       } catch (nextError) {
         if (!active) return;
@@ -1824,6 +1951,7 @@ function StaffDocumentsPage({
   function closeDocumentOverlayLayers() {
     setTemplateOpen(false);
     setUploadOpen(false);
+    setIntakeUploadOpen(false);
     setTranslationRequestOpen(false);
     setMetadataEditOpen(false);
     setShareCreateOpen(false);
@@ -1850,6 +1978,18 @@ function StaffDocumentsPage({
     staffGo(`/documents/${id}${search ? `?${search}` : ""}`);
   }
 
+  function openIntakeDocument(id: string) {
+    if (!canManage) {
+      openDocument(id);
+      return;
+    }
+    setSaveError("");
+    setDetail(null);
+    setEditForm(null);
+    setSelectedId(id);
+    setMetadataEditOpen(true);
+  }
+
   function toggleDocumentSelection(id: string, checked: boolean) {
     setSelectedDocumentIds((current) => {
       if (checked) {
@@ -1857,6 +1997,116 @@ function StaffDocumentsPage({
       }
       return current.filter((value) => value !== id);
     });
+  }
+
+  function addIntakeUploadFiles(files: Iterable<File>) {
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+
+    setIntakeUploadError("");
+    setIntakeUploadItems((current) => {
+      const existing = new Set(
+        current.map(
+          (item) =>
+            `${item.file.name}:${item.file.size}:${item.file.lastModified}`,
+        ),
+      );
+      const additions = incoming.flatMap((file) => {
+        const fingerprint = `${file.name}:${file.size}:${file.lastModified}`;
+        if (existing.has(fingerprint)) return [];
+        existing.add(fingerprint);
+        return [{
+          id: `${fingerprint}:${crypto.randomUUID()}`,
+          file,
+          status: file.size > MAX_DOCUMENT_UPLOAD_BYTES ? "error" as const : "queued" as const,
+          error:
+            file.size > MAX_DOCUMENT_UPLOAD_BYTES
+              ? metaText.intakeTooLarge(file.name)
+              : "",
+        }];
+      });
+      return [...current, ...additions];
+    });
+  }
+
+  function handleIntakeDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIntakeDragActive(false);
+    if (intakeUploadBusy) return;
+    addIntakeUploadFiles(event.dataTransfer.files);
+  }
+
+  async function handleIntakeBatchUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const uploadable = intakeUploadItems.filter(
+      (item) => item.status === "queued" || (item.status === "error" && item.file.size <= MAX_DOCUMENT_UPLOAD_BYTES),
+    );
+    if (uploadable.length === 0) {
+      setIntakeUploadError(metaText.intakeNoFiles);
+      return;
+    }
+
+    setIntakeUploadBusy(true);
+    setIntakeUploadError("");
+    let cursor = 0;
+    let completed = 0;
+    const worker = async () => {
+      while (cursor < uploadable.length) {
+        const item = uploadable[cursor];
+        cursor += 1;
+        setIntakeUploadItems((current) =>
+          current.map((candidate) =>
+            candidate.id === item.id
+              ? { ...candidate, status: "uploading", error: "" }
+              : candidate,
+          ),
+        );
+        try {
+          const formData = new FormData();
+          formData.append("file", item.file);
+          formData.append("manual_intake", "true");
+          await uploadDocument(formData);
+          completed += 1;
+          setIntakeUploadItems((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id
+                ? { ...candidate, status: "uploaded", error: "" }
+                : candidate,
+            ),
+          );
+        } catch (nextError) {
+          setIntakeUploadItems((current) =>
+            current.map((candidate) =>
+              candidate.id === item.id
+                ? {
+                    ...candidate,
+                    status: "error",
+                    error:
+                      nextError instanceof Error
+                        ? nextError.message
+                        : t.documents_failed_upload,
+                  }
+                : candidate,
+            ),
+          );
+        }
+      }
+    };
+
+    try {
+      await Promise.all(
+        Array.from(
+          { length: Math.min(3, uploadable.length) },
+          () => worker(),
+        ),
+      );
+      if (completed > 0) {
+        setNotice(metaText.intakeUploadedNotice(completed));
+        refresh();
+      }
+    } finally {
+      setIntakeUploadBusy(false);
+    }
   }
 
   function handleUploadFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -2542,6 +2792,14 @@ function StaffDocumentsPage({
       setSaveError(t.documents_save_type_required);
       return;
     }
+    const isManualIntakeReview = detail.ursprung === "manual_intake";
+    if (
+      isManualIntakeReview &&
+      (!editForm.patientId || !editForm.art.trim() || !editForm.category)
+    ) {
+      setSaveError(metaText.intakeReviewRequired);
+      return;
+    }
     setSaveBusy(true);
     setSaveError("");
     try {
@@ -2553,7 +2811,7 @@ function StaffDocumentsPage({
             auto_name: editForm.autoName.trim(),
             art: editForm.art.trim(),
             category: editForm.category || null,
-            status: editForm.status,
+            status: isManualIntakeReview ? "active" : editForm.status,
             visibility: editForm.visibility,
             is_medical: editForm.isMedical,
             klinik: editForm.klinik.trim() || null,
@@ -2880,7 +3138,15 @@ function StaffDocumentsPage({
               <Button
                 size="sm"
                 className="h-8 rounded-lg gap-1.5"
-                onClick={() => setUploadOpen(true)}
+                onClick={() => {
+                  if (isIntakeRoute && canManage) {
+                    setIntakeUploadItems([]);
+                    setIntakeUploadError("");
+                    setIntakeUploadOpen(true);
+                    return;
+                  }
+                  setUploadOpen(true);
+                }}
               >
                 <FolderPlus className="size-3.5" />
                 {t.documents_upload}
@@ -2921,7 +3187,7 @@ function StaffDocumentsPage({
             l={l}
             loading={intakeBusy}
             onApplySuggestion={handleApplyClassificationSuggestion}
-            onOpenDocument={openDocument}
+            onOpenDocument={openIntakeDocument}
             rows={intakeQueue}
             selectedId={selectedId}
             t={t}
@@ -4084,6 +4350,175 @@ function StaffDocumentsPage({
         </DialogContent>
       </Dialog>
 
+      {canManage ? (
+        <Dialog
+          open={intakeUploadOpen}
+          onOpenChange={(open) => {
+            if (intakeUploadBusy) return;
+            setIntakeUploadOpen(open);
+            if (!open) {
+              setIntakeDragActive(false);
+              setIntakeUploadError("");
+            }
+          }}
+        >
+          <DialogContent className="flex max-h-[88vh] w-[94vw] max-w-3xl flex-col overflow-hidden rounded-xl p-0">
+            <DialogHeader className="border-b border-border/70 px-6 py-5">
+              <DialogTitle>{metaText.intakeUploadTitle}</DialogTitle>
+              <DialogDescription>
+                {metaText.intakeUploadDescription}
+              </DialogDescription>
+            </DialogHeader>
+            <form
+              onSubmit={handleIntakeBatchUpload}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+                {intakeUploadError ? (
+                  <Banner tone="error">{intakeUploadError}</Banner>
+                ) : null}
+                <div
+                  className={cn(
+                    "flex min-h-44 flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors motion-reduce:transition-none",
+                    intakeDragActive
+                      ? "border-[var(--brand)] bg-[var(--brand)]/5"
+                      : "border-border bg-muted/20",
+                    intakeUploadBusy && "pointer-events-none opacity-60",
+                  )}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setIntakeDragActive(true);
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => {
+                    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                    setIntakeDragActive(false);
+                  }}
+                  onDrop={handleIntakeDrop}
+                >
+                  <FolderPlus className="mb-3 size-8 text-[var(--brand)]" />
+                  <p className="text-sm font-semibold text-foreground">
+                    {metaText.intakeDropTitle}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {metaText.intakeDropHint}
+                  </p>
+                  <Input
+                    id="intake-document-files"
+                    type="file"
+                    multiple
+                    disabled={intakeUploadBusy}
+                    className="sr-only"
+                    onChange={(event) => {
+                      if (event.target.files) addIntakeUploadFiles(event.target.files);
+                      event.target.value = "";
+                    }}
+                  />
+                  <label
+                    htmlFor="intake-document-files"
+                    className="mt-4 inline-flex h-8 cursor-pointer items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    {metaText.intakeBrowse}
+                  </label>
+                </div>
+
+                {intakeUploadItems.length > 0 ? (
+                  <div className="overflow-hidden rounded-xl border border-border/70">
+                    {intakeUploadItems.map((item) => {
+                      const statusLabel =
+                        item.status === "queued"
+                          ? metaText.intakeQueued
+                          : item.status === "uploading"
+                            ? metaText.intakeUploading
+                            : item.status === "uploaded"
+                              ? metaText.intakeUploaded
+                              : metaText.intakeUploadFailed;
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0"
+                        >
+                          <FileText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-foreground">
+                              {item.file.name}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {formatFileSize(item.file.size)}
+                              {item.error ? ` · ${item.error}` : ""}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "shrink-0 rounded-full text-[10px]",
+                              item.status === "uploaded" && "border-emerald-200 bg-emerald-50 text-emerald-700",
+                              item.status === "uploading" && "border-blue-200 bg-blue-50 text-blue-700",
+                              item.status === "error" && "border-destructive/30 bg-destructive/5 text-destructive",
+                            )}
+                          >
+                            {item.status === "uploading" ? (
+                              <LoaderCircle className="mr-1 size-3 animate-spin" />
+                            ) : null}
+                            {statusLabel}
+                          </Badge>
+                          {item.status !== "uploading" && item.status !== "uploaded" ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="shrink-0 rounded-md"
+                              aria-label={t.common_delete}
+                              onClick={() =>
+                                setIntakeUploadItems((current) =>
+                                  current.filter((candidate) => candidate.id !== item.id),
+                                )
+                              }
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <DialogFooter className="border-t border-border/70 px-6 py-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={intakeUploadBusy}
+                  onClick={() => setIntakeUploadOpen(false)}
+                >
+                  {t.common_close}
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    intakeUploadBusy ||
+                    !intakeUploadItems.some(
+                      (item) =>
+                        item.status === "queued" ||
+                        (item.status === "error" && item.file.size <= MAX_DOCUMENT_UPLOAD_BYTES),
+                    )
+                  }
+                >
+                  {intakeUploadBusy ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : (
+                    <FolderPlus className="size-4" />
+                  )}
+                  {metaText.intakeUploadAction(
+                    intakeUploadItems.filter((item) => item.status !== "uploaded").length,
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
       <Sheet open={uploadOpen} onOpenChange={setUploadOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[760px]">
           <form onSubmit={handleUpload} className="flex flex-1 min-h-0 flex-col">
@@ -4819,25 +5254,48 @@ function StaffDocumentsPage({
       </Sheet>
 
       {canManage && editForm ? (
-        <Sheet open={metadataEditOpen} onOpenChange={setMetadataEditOpen}>
-          <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        <Dialog
+          open={metadataEditOpen}
+          onOpenChange={(open) => {
+            if (saveBusy) return;
+            setMetadataEditOpen(open);
+          }}
+        >
+          <DialogContent className="flex h-[92vh] w-[96vw] max-w-[1680px] flex-col overflow-hidden rounded-xl p-0">
+            <DialogHeader className="sr-only">
+              <DialogTitle>{t.documents_edit_metadata_title}</DialogTitle>
+              <DialogDescription>
+                {detail?.ursprung === "manual_intake"
+                  ? metaText.intakeReviewWorkspace
+                  : t.documents_edit_metadata_title}
+              </DialogDescription>
+            </DialogHeader>
             <form
               onSubmit={handleSave}
-              className="flex flex-1 min-h-0 flex-col"
+              className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]"
             >
-              <AdminSheetScaffold
-                title={t.documents_edit_metadata_title}
-                footer={(
-                  <SheetFormFooter
-                    cancelLabel={t.common_cancel}
-                    submitLabel={t.documents_save_metadata}
-                    submittingLabel={t.patients_saving}
-                    submitting={saveBusy}
-                    submitDisabled={!editForm.autoName.trim() || !editForm.art.trim()}
-                    onCancel={() => setMetadataEditOpen(false)}
-                  />
-                )}
-              >
+              <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border/70">
+                <AdminSheetScaffold
+                  title={t.documents_edit_metadata_title}
+                  footer={(
+                    <SheetFormFooter
+                      cancelLabel={t.common_cancel}
+                      submitLabel={t.documents_save_metadata}
+                      submittingLabel={t.patients_saving}
+                      submitting={saveBusy}
+                      submitDisabled={
+                        !editForm.autoName.trim() ||
+                        !editForm.art.trim() ||
+                        (detail?.ursprung === "manual_intake" &&
+                          (!editForm.patientId || !editForm.category))
+                      }
+                      onCancel={() => setMetadataEditOpen(false)}
+                    />
+                  )}
+                >
+                {detail?.ursprung === "manual_intake" ? (
+                  <Banner tone="warning">{metaText.intakeReviewWorkspace}</Banner>
+                ) : null}
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
                 <div className="space-y-4 rounded-xl">
                   <DocumentSheetSection title={t.documents_section_metadata}>
@@ -5040,6 +5498,7 @@ function StaffDocumentsPage({
                   <Field label={t.documents_source}>
                     <Input
                       value={editForm.ursprung}
+                      disabled={detail?.ursprung === "manual_intake"}
                       onChange={(event) =>
                         setEditForm((current) =>
                           current
@@ -5316,10 +5775,63 @@ function StaffDocumentsPage({
                     </Field>
                   </DocumentSheetSection>
                 </div>
-              </AdminSheetScaffold>
+                </AdminSheetScaffold>
+              </div>
+              <aside className="hidden min-h-0 min-w-0 flex-col bg-slate-50 lg:flex">
+                <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">
+                      {detail?.original_filename ?? detail?.auto_name ?? t.documents_preview}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {editPreview?.contentType ?? detail?.mime_type ?? ""}
+                    </p>
+                  </div>
+                  {detail?.has_stored_file ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 shrink-0 gap-1.5 rounded-lg"
+                      onClick={() =>
+                        void downloadDocumentFile(
+                          detail.id,
+                          detail.original_filename ?? detail.auto_name,
+                        )
+                      }
+                    >
+                      <Download className="size-3.5" />
+                      {t.documents_download}
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex min-h-0 flex-1 items-center justify-center p-3">
+                  {editPreviewBusy ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <LoaderCircle className="size-4 animate-spin" />
+                      {t.common_loading}
+                    </div>
+                  ) : editPreviewError ? (
+                    <Banner tone="error">{editPreviewError}</Banner>
+                  ) : editPreview ? (
+                    <iframe
+                      title={editPreview.title || t.documents_preview}
+                      src={editPreview.url}
+                      sandbox=""
+                      className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+                    />
+                  ) : (
+                    <p className="max-w-sm text-center text-sm text-muted-foreground">
+                      {detail?.has_stored_file
+                        ? t.documents_failed_open_preview
+                        : t.documents_file_removed}
+                    </p>
+                  )}
+                </div>
+              </aside>
             </form>
-          </SheetContent>
-        </Sheet>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       <Dialog
@@ -7183,10 +7695,23 @@ function DocumentIntakeQueueTable({
                   : t.documents_apply_suggestion}
               </span>
             </Button>
+          ) : item.ursprung === "manual_intake" ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 rounded-md px-2 text-xs"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenDocument(item.id);
+              }}
+            >
+              {t.documents_open_document}
+            </Button>
           ) : null,
       },
     ],
-    [actionId, l, onApplySuggestion, t, text],
+    [actionId, l, onApplySuggestion, onOpenDocument, t, text],
   );
 
   return (

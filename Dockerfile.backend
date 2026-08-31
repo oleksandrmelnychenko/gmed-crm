@@ -28,7 +28,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim AS runtime
 
-RUN apt-get update \
+ARG GMED_RUNTIME_UID=100
+ARG GMED_RUNTIME_GID=101
+
+# Keep the runtime identity stable across package changes. The uploads volume
+# stores numeric ownership, so allowing apt packages to shift this UID/GID can
+# make existing private documents unwritable after an image upgrade.
+RUN addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
+    && adduser --system --uid "${GMED_RUNTIME_UID}" --ingroup gmed --home /app gmed \
+    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -42,9 +50,7 @@ RUN apt-get update \
         tesseract-ocr-rus \
         tesseract-ocr-ukr \
     && freshclam --quiet \
-    && rm -rf /var/lib/apt/lists/* \
-    && addgroup --system gmed \
-    && adduser --system --ingroup gmed --home /app gmed
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -52,6 +58,8 @@ RUN mkdir -p /app/uploads/chat /app/uploads/documents \
     && chown -R gmed:gmed /app
 
 COPY --from=builder /tmp/gmed-server /usr/local/bin/gmed-server
+COPY scripts/prepare-upload-volume.sh /usr/local/bin/gmed-prepare-uploads
+RUN chmod 0755 /usr/local/bin/gmed-prepare-uploads
 
 USER gmed:gmed
 
@@ -62,6 +70,6 @@ EXPOSE 3000
 VOLUME ["/app/uploads"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["sh", "-c", "curl --fail --silent http://127.0.0.1:${PORT:-3000}/health > /dev/null || exit 1"]
+  CMD ["sh", "-c", "test -w /app/uploads/documents && curl --fail --silent http://127.0.0.1:${PORT:-3000}/health > /dev/null || exit 1"]
 
 ENTRYPOINT ["gmed-server"]

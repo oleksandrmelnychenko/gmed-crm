@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 
 ARG DEBIAN_SECURITY_REFRESH=local
+ARG GMED_RUNTIME_UID=100
+ARG GMED_RUNTIME_GID=101
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -35,8 +37,8 @@ ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1 \
 # so runtime OCR never needs root or outbound internet.
 RUN python -c "from app.extraction import _get_paddle_ocr; _get_paddle_ocr()"
 RUN test -d /root/.paddlex \
-    && addgroup --system gmed \
-    && adduser --system --ingroup gmed --home /home/gmed gmed \
+    && addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
+    && adduser --system --uid "${GMED_RUNTIME_UID}" --ingroup gmed --home /home/gmed gmed \
     && mv /root/.paddlex /home/gmed/.paddlex \
     && chown -R gmed:gmed /home/gmed/.paddlex
 

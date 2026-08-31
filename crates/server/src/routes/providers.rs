@@ -12,7 +12,7 @@ use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::access::resolve_explicit_resource_access;
+use crate::access::{resolve_explicit_resource_access, role_db_name};
 use crate::audit::{self as audit_mod};
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
@@ -400,26 +400,33 @@ struct UpsertProviderTemplateRequest {
 }
 
 #[derive(Default)]
-struct ConciergeProviderRuleScope {
+struct ProviderRuleScope {
     record_rule_ids: HashSet<Uuid>,
     record_allow_ids: HashSet<Uuid>,
     has_all_rule: bool,
+    has_all_allow: bool,
 }
 
-async fn load_concierge_provider_rule_scope(
+async fn load_provider_rule_scope(
     state: &AppState,
-    user_id: Uuid,
+    auth: &AuthUser,
     capability: AccessCapability,
-) -> Result<ConciergeProviderRuleScope, axum::response::Response> {
+) -> Result<ProviderRuleScope, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(ProviderRuleScope::default());
+    }
+    let Some(role_name) = role_db_name(auth.role) else {
+        return Ok(ProviderRuleScope::default());
+    };
     let rows = match sqlx::query(
         r#"SELECT scope_type, resource_id, effect
            FROM (
                SELECT direct.scope_type, direct.resource_id, direct.effect
                FROM staff_user_access_rules direct
                WHERE direct.user_id = $1
-                 AND direct.granted_for_role = 'concierge'
+                 AND direct.granted_for_role = $2
                  AND direct.resource_type = 'provider'
-                 AND direct.capability = $2
+                 AND direct.capability = $3
                  AND direct.revoked_at IS NULL
                  AND direct.valid_from <= now()
                  AND (direct.valid_until IS NULL OR direct.valid_until > now())
@@ -433,26 +440,27 @@ async fn load_concierge_provider_rule_scope(
                 AND profile.is_active = true
                JOIN staff_access_profile_roles profile_role
                  ON profile_role.profile_id = profile.id
-                AND profile_role.role = 'concierge'
+                AND profile_role.role = $2
                JOIN staff_access_profile_rules rule
                  ON rule.profile_id = profile.id
                WHERE assignment.user_id = $1
-                 AND assignment.assigned_for_role = 'concierge'
+                 AND assignment.assigned_for_role = $2
                  AND assignment.revoked_at IS NULL
                  AND assignment.valid_from <= now()
                  AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
                  AND rule.resource_type = 'provider'
-                 AND rule.capability = $2
+                 AND rule.capability = $3
            ) candidates"#,
     )
-    .bind(user_id)
+    .bind(auth.user_id)
+    .bind(role_name)
     .bind(capability.as_str())
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => rows,
         Err(e) => {
-            tracing::error!(error = %e, user_id = %user_id, "Failed to load concierge provider access candidates");
+            tracing::error!(error = %e, user_id = %auth.user_id, "Failed to load provider access candidates");
             return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to authorize provider access",
@@ -460,25 +468,27 @@ async fn load_concierge_provider_rule_scope(
         }
     };
 
-    let mut scope = ConciergeProviderRuleScope::default();
+    let mut scope = ProviderRuleScope::default();
     for row in rows {
         let scope_type = row.try_get::<String, _>("scope_type").unwrap_or_default();
+        let is_allow = matches!(row.try_get::<String, _>("effect").as_deref(), Ok("allow"));
         if scope_type == "all" {
             scope.has_all_rule = true;
+            scope.has_all_allow |= is_allow;
             continue;
         }
         let Ok(provider_id) = row.try_get::<Uuid, _>("resource_id") else {
             continue;
         };
         scope.record_rule_ids.insert(provider_id);
-        if matches!(row.try_get::<String, _>("effect").as_deref(), Ok("allow")) {
+        if is_allow {
             scope.record_allow_ids.insert(provider_id);
         }
     }
     Ok(scope)
 }
 
-async fn resolve_concierge_provider_access(
+async fn resolve_provider_access(
     state: &AppState,
     auth: &AuthUser,
     provider_id: Uuid,
@@ -506,7 +516,7 @@ async fn resolve_concierge_provider_access(
             user_id = %auth.user_id,
             provider_id = %provider_id,
             ?capability,
-            "Failed to resolve concierge provider access"
+            "Failed to resolve provider access"
         );
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -517,18 +527,230 @@ async fn resolve_concierge_provider_access(
     Ok(match decision {
         ResourceAccessDecision::Allow(_) => true,
         ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => false,
-        ResourceAccessDecision::NoExplicitRule => provider_type == "non_medical",
+        ResourceAccessDecision::NoExplicitRule => {
+            auth.role != Role::Concierge || provider_type == "non_medical"
+        }
     })
 }
 
-async fn concierge_can_access_provider(
+async fn can_access_provider(
     state: &AppState,
     auth: &AuthUser,
     provider_id: Uuid,
     provider_type: &str,
     capability: AccessCapability,
 ) -> Result<bool, axum::response::Response> {
-    resolve_concierge_provider_access(state, auth, provider_id, provider_type, capability).await
+    resolve_provider_access(state, auth, provider_id, provider_type, capability).await
+}
+
+async fn ensure_provider_access(
+    state: &AppState,
+    auth: &AuthUser,
+    provider_id: Uuid,
+    require_edit: bool,
+) -> Result<(), axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(());
+    }
+
+    let provider_type = load_provider_type(state, provider_id).await?;
+    let capability_count = if require_edit { 2 } else { 1 };
+    for capability in [AccessCapability::View, AccessCapability::Edit]
+        .into_iter()
+        .take(capability_count)
+    {
+        if !can_access_provider(state, auth, provider_id, &provider_type, capability).await? {
+            return Err(err(StatusCode::FORBIDDEN, "Provider is outside user scope"));
+        }
+    }
+
+    Ok(())
+}
+
+async fn can_access_provider_with_scope(
+    state: &AppState,
+    auth: &AuthUser,
+    provider_id: Uuid,
+    provider_type: &str,
+    capability: AccessCapability,
+    scope: &ProviderRuleScope,
+) -> Result<bool, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+    if auth.role == Role::Concierge
+        && provider_type == "medical"
+        && !scope.has_all_allow
+        && !scope.record_allow_ids.contains(&provider_id)
+    {
+        return Ok(false);
+    }
+    let needs_explicit_resolution = (auth.role == Role::Concierge && provider_type == "medical")
+        || scope.has_all_rule
+        || scope.record_rule_ids.contains(&provider_id);
+    if !needs_explicit_resolution {
+        return Ok(true);
+    }
+
+    can_access_provider(state, auth, provider_id, provider_type, capability).await
+}
+
+async fn ensure_cross_provider_use_access(
+    state: &AppState,
+    auth: &AuthUser,
+    source_provider_id: Uuid,
+    target_provider_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    if source_provider_id == target_provider_id || auth.role == Role::Ceo {
+        return Ok(());
+    }
+    let provider_type = load_provider_type(state, target_provider_id).await?;
+    for capability in [AccessCapability::View, AccessCapability::Use] {
+        if !can_access_provider(state, auth, target_provider_id, &provider_type, capability).await?
+        {
+            return Err(err(
+                StatusCode::FORBIDDEN,
+                "Target provider is outside user scope",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn redact_provider_patient_metrics(item: &mut Value) {
+    let Some(object) = item.as_object_mut() else {
+        return;
+    };
+    object.insert("patient_count".to_string(), json!(0));
+    object.insert("appointment_count".to_string(), json!(0));
+    object.insert("last_interaction_at".to_string(), Value::Null);
+}
+
+async fn can_access_linked_patient(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+
+    let decision = resolve_explicit_resource_access(
+        &state.db,
+        auth.user_id,
+        auth.role,
+        ResourceAccessRequest {
+            resource_type: ResourceType::Patient,
+            resource_id: patient_id,
+            capability: AccessCapability::View,
+            is_medical: false,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, user_id = %auth.user_id, "Failed to authorize patient-linked provider filter");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to authorize provider filter",
+        )
+    })?;
+    match decision {
+        ResourceAccessDecision::Allow(_) => return Ok(true),
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => {
+            return Ok(false);
+        }
+        ResourceAccessDecision::NoExplicitRule => {}
+    }
+
+    if !crate::access::requires_patient_assignment(auth.role) {
+        return Ok(true);
+    }
+    if crate::access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, patient_id = %patient_id, user_id = %auth.user_id, "Failed to validate patient assignment for provider filter");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to authorize provider filter",
+            )
+        })?
+    {
+        return Ok(true);
+    }
+    if auth.role != Role::Concierge {
+        return Ok(false);
+    }
+
+    crate::access::has_active_concierge_task_patient_access(
+        &state.db,
+        patient_id,
+        auth.user_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, user_id = %auth.user_id, "Failed to validate concierge patient task for provider filter");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to authorize provider filter",
+        )
+    })
+}
+
+async fn filter_accessible_patient_items(
+    state: &AppState,
+    auth: &AuthUser,
+    items: Vec<Value>,
+    patient_id_key: &str,
+) -> Result<Vec<Value>, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(items);
+    }
+
+    let mut visible = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(patient_id) = item
+            .get(patient_id_key)
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+        else {
+            continue;
+        };
+        if can_access_linked_patient(state, auth, patient_id).await? {
+            visible.push(item);
+        }
+    }
+    Ok(visible)
+}
+
+async fn filter_doctor_linked_patient_items(
+    state: &AppState,
+    auth: &AuthUser,
+    doctors: &mut [Value],
+) -> Result<(), axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(());
+    }
+
+    for doctor in doctors {
+        let linked_patients = doctor
+            .as_object_mut()
+            .and_then(|object| object.remove("linked_patients"))
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default();
+        let original_count = linked_patients.len();
+        let linked_patients =
+            filter_accessible_patient_items(state, auth, linked_patients, "id").await?;
+        let visible_count = linked_patients.len();
+        let Some(object) = doctor.as_object_mut() else {
+            continue;
+        };
+        object.insert("linked_patients".to_string(), json!(linked_patients));
+        object.insert("patient_count".to_string(), json!(visible_count));
+        if visible_count != original_count {
+            object.insert("appointment_count".to_string(), json!(0));
+        }
+    }
+    Ok(())
 }
 
 async fn list_providers(
@@ -569,6 +791,19 @@ async fn list_providers(
     let linked_patient_id = query.linked_patient_id;
     let insurance_provider_filters = normalize_csv_list(query.insurance_provider);
 
+    if let Some(patient_id) = linked_patient_id {
+        match can_access_linked_patient(&state, &auth, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "Patient-linked provider filtering requires patient access",
+                );
+            }
+            Err(resp) => return resp,
+        }
+    }
+
     if let Some(ref provider_type) = requested_provider_type
         && !is_valid_provider_type(provider_type)
     {
@@ -592,28 +827,24 @@ async fn list_providers(
         );
     }
 
-    let concierge_view_scope = if auth.role == Role::Concierge {
-        match load_concierge_provider_rule_scope(&state, auth.user_id, AccessCapability::View).await
-        {
-            Ok(scope) => Some(scope),
+    let provider_view_scope =
+        match load_provider_rule_scope(&state, &auth, AccessCapability::View).await {
+            Ok(scope) => scope,
             Err(resp) => return resp,
-        }
-    } else {
-        None
-    };
-    let concierge_medical_provider_ids = concierge_view_scope
-        .as_ref()
-        .map(|scope| scope.record_allow_ids.iter().copied().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let concierge_has_all_view_rule = concierge_view_scope
-        .as_ref()
-        .is_some_and(|scope| scope.has_all_rule);
+        };
+    let concierge_medical_provider_ids = provider_view_scope
+        .record_allow_ids
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+    let concierge_has_all_view_allow = provider_view_scope.has_all_allow;
 
     let rows = match sqlx::query(
         r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
                   p.address_street, p.address_city, p.address_country, p.fachbereich,
                   p.phone, p.email, p.opening_hours, p.is_active, p.created_at,
                   p.parent_provider_id, parent.name AS parent_provider_name,
+                  parent.provider_type AS parent_provider_type,
                   p.organization_level,
                   p.internal_rating, p.internal_rating_note, p.taxonomy_attributes,
                   (p.kooperationsvertrag IS NOT NULL) AS has_contract,
@@ -1111,7 +1342,7 @@ async fn list_providers(
     .bind(insurance_provider_filters)
     .bind(auth.role == Role::Concierge)
     .bind(&concierge_medical_provider_ids)
-    .bind(concierge_has_all_view_rule)
+    .bind(concierge_has_all_view_allow)
     .fetch_all(&state.db)
     .await
     {
@@ -1125,7 +1356,7 @@ async fn list_providers(
         }
     };
 
-    let rows = if auth.role == Role::Concierge {
+    let rows = if auth.role != Role::Ceo {
         let mut visible_rows = Vec::with_capacity(rows.len());
         for row in rows {
             let provider_id = match row.try_get::<Uuid, _>("id") {
@@ -1146,17 +1377,15 @@ async fn list_providers(
                     );
                 }
             };
-            let view_scope = concierge_view_scope
-                .as_ref()
-                .expect("concierge view scope must be loaded");
-            let needs_explicit_resolution = provider_type == "medical"
-                || view_scope.has_all_rule
-                || view_scope.record_rule_ids.contains(&provider_id);
+            let needs_explicit_resolution = (auth.role == Role::Concierge
+                && provider_type == "medical")
+                || provider_view_scope.has_all_rule
+                || provider_view_scope.record_rule_ids.contains(&provider_id);
             if !needs_explicit_resolution {
                 visible_rows.push(row);
                 continue;
             }
-            match resolve_concierge_provider_access(
+            match resolve_provider_access(
                 &state,
                 &auth,
                 provider_id,
@@ -1175,6 +1404,38 @@ async fn list_providers(
         rows
     };
 
+    let mut visible_parent_provider_ids = HashSet::new();
+    let mut evaluated_parent_provider_ids = HashSet::new();
+    for row in &rows {
+        let (Some(parent_provider_id), Some(parent_provider_type)) = (
+            row.try_get::<Option<Uuid>, _>("parent_provider_id")
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("parent_provider_type")
+                .unwrap_or_default(),
+        ) else {
+            continue;
+        };
+        if !evaluated_parent_provider_ids.insert(parent_provider_id) {
+            continue;
+        }
+        match can_access_provider_with_scope(
+            &state,
+            &auth,
+            parent_provider_id,
+            &parent_provider_type,
+            AccessCapability::View,
+            &provider_view_scope,
+        )
+        .await
+        {
+            Ok(true) => {
+                visible_parent_provider_ids.insert(parent_provider_id);
+            }
+            Ok(false) => {}
+            Err(resp) => return resp,
+        }
+    }
+
     // The per-provider enrichment used to issue 4+ queries per row, which
     // multiplies network latency by the provider count (30s+ against a
     // remote/tunneled database). Everything is now prefetched in a handful of
@@ -1190,8 +1451,19 @@ async fn list_providers(
 
     let mut providers = Vec::with_capacity(rows.len());
     for row in rows {
-        match provider_row_json(row, &enrichment) {
-            Ok(value) => providers.push(value),
+        let show_parent = row
+            .try_get::<Option<Uuid>, _>("parent_provider_id")
+            .unwrap_or_default()
+            .is_some_and(|parent_provider_id| {
+                visible_parent_provider_ids.contains(&parent_provider_id)
+            });
+        match provider_row_json(row, &enrichment, show_parent) {
+            Ok(mut value) => {
+                if crate::access::requires_patient_assignment(auth.role) {
+                    redact_provider_patient_metrics(&mut value);
+                }
+                providers.push(value);
+            }
             Err(resp) => return resp,
         }
     }
@@ -1442,6 +1714,7 @@ async fn load_providers_enrichment(
 fn provider_row_json(
     row: PgRow,
     enrichment: &ProvidersEnrichment,
+    show_parent: bool,
 ) -> Result<Value, axum::response::Response> {
     let decode_err = || {
         err(
@@ -1484,8 +1757,16 @@ fn provider_row_json(
             "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
             "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
             "opening_hours": row.try_get::<Option<String>, _>("opening_hours").unwrap_or_default(),
-            "parent_provider_id": row.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
-            "parent_provider_name": row.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
+            "parent_provider_id": if show_parent {
+                row.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default()
+            } else {
+                None
+            },
+            "parent_provider_name": if show_parent {
+                row.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default()
+            } else {
+                None
+            },
             "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
             "taxonomy_node_id": taxonomy.get("taxonomy_node_id").cloned().unwrap_or(Value::Null),
             "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
@@ -1560,22 +1841,17 @@ async fn list_providers_by_specializations(
         );
     }
 
-    let concierge_view_scope = if auth.role == Role::Concierge {
-        match load_concierge_provider_rule_scope(&state, auth.user_id, AccessCapability::View).await
-        {
-            Ok(scope) => Some(scope),
+    let provider_view_scope =
+        match load_provider_rule_scope(&state, &auth, AccessCapability::View).await {
+            Ok(scope) => scope,
             Err(resp) => return resp,
-        }
-    } else {
-        None
-    };
-    let concierge_medical_provider_ids = concierge_view_scope
-        .as_ref()
-        .map(|scope| scope.record_allow_ids.iter().copied().collect::<Vec<_>>())
-        .unwrap_or_default();
-    let concierge_has_all_view_rule = concierge_view_scope
-        .as_ref()
-        .is_some_and(|scope| scope.has_all_rule);
+        };
+    let concierge_medical_provider_ids = provider_view_scope
+        .record_allow_ids
+        .iter()
+        .copied()
+        .collect::<Vec<_>>();
+    let concierge_has_all_view_allow = provider_view_scope.has_all_allow;
 
     let rows = match sqlx::query(
         r#"SELECT
@@ -1607,7 +1883,7 @@ async fn list_providers_by_specializations(
     .bind(&specialization_ids)
     .bind(auth.role == Role::Concierge)
     .bind(&concierge_medical_provider_ids)
-    .bind(concierge_has_all_view_rule)
+    .bind(concierge_has_all_view_allow)
     .fetch_all(&state.db)
     .await
     {
@@ -1629,13 +1905,11 @@ async fn list_providers_by_specializations(
         let provider_type = row
             .try_get::<String, _>("provider_type")
             .unwrap_or_default();
-        if auth.role == Role::Concierge {
-            let view_scope = concierge_view_scope
-                .as_ref()
-                .expect("concierge view scope must be loaded");
-            let needs_explicit_resolution = provider_type == "medical"
-                || view_scope.has_all_rule
-                || view_scope.record_rule_ids.contains(&provider_id);
+        if auth.role != Role::Ceo {
+            let needs_explicit_resolution = (auth.role == Role::Concierge
+                && provider_type == "medical")
+                || provider_view_scope.has_all_rule
+                || provider_view_scope.record_rule_ids.contains(&provider_id);
             if !needs_explicit_resolution {
                 providers.push(json!({
                     "id": provider_id,
@@ -1651,7 +1925,7 @@ async fn list_providers_by_specializations(
                 }));
                 continue;
             }
-            match resolve_concierge_provider_access(
+            match resolve_provider_access(
                 &state,
                 &auth,
                 provider_id,
@@ -2627,6 +2901,12 @@ async fn create_provider(
             "Concierge can only create non-medical providers",
         );
     }
+    if let Some(parent_provider_id) = provider.parent_provider_id
+        && let Err(resp) =
+            ensure_cross_provider_use_access(&state, &auth, Uuid::nil(), parent_provider_id).await
+    {
+        return resp;
+    }
     if let Err(resp) = validate_provider_parent(&state, None, provider.parent_provider_id).await {
         return resp;
     }
@@ -2799,6 +3079,7 @@ async fn get_provider(
                   address_country, phone, email, website, opening_hours, fachbereich, kooperationsvertrag, notes,
                   parent_provider_id,
                   (SELECT name FROM providers parent WHERE parent.id = providers.parent_provider_id) AS parent_provider_name,
+                  (SELECT provider_type FROM providers parent WHERE parent.id = providers.parent_provider_id) AS parent_provider_type,
                   organization_level,
                   taxonomy_attributes, internal_rating, internal_rating_note,
                   is_active, created_at, updated_at
@@ -2819,23 +3100,57 @@ async fn get_provider(
     let provider_type = provider
         .try_get::<String, _>("provider_type")
         .unwrap_or_default();
-    if auth.role == Role::Concierge {
-        match concierge_can_access_provider(
-            &state,
-            &auth,
-            provider_id,
-            &provider_type,
-            AccessCapability::View,
-        )
-        .await
-        {
-            Ok(true) => {}
-            Ok(false) => {
-                return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
-            }
-            Err(resp) => return resp,
+    match can_access_provider(
+        &state,
+        &auth,
+        provider_id,
+        &provider_type,
+        AccessCapability::View,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
+            return err(StatusCode::FORBIDDEN, "Provider is outside user scope");
         }
+        Err(resp) => return resp,
     }
+
+    let raw_parent_provider_id = provider
+        .try_get::<Option<Uuid>, _>("parent_provider_id")
+        .unwrap_or_default();
+    let show_parent_provider = match (
+        raw_parent_provider_id,
+        provider
+            .try_get::<Option<String>, _>("parent_provider_type")
+            .unwrap_or_default(),
+    ) {
+        (Some(parent_provider_id), Some(parent_provider_type)) => {
+            match can_access_provider(
+                &state,
+                &auth,
+                parent_provider_id,
+                &parent_provider_type,
+                AccessCapability::View,
+            )
+            .await
+            {
+                Ok(allowed) => allowed,
+                Err(resp) => return resp,
+            }
+        }
+        _ => false,
+    };
+    let parent_provider_id = show_parent_provider
+        .then_some(raw_parent_provider_id)
+        .flatten();
+    let parent_provider_name = if show_parent_provider {
+        provider
+            .try_get::<Option<String>, _>("parent_provider_name")
+            .unwrap_or_default()
+    } else {
+        None
+    };
 
     let (
         doctors,
@@ -2850,7 +3165,7 @@ async fn get_provider(
         children,
         taxonomy,
     ) = tokio::join!(
-        load_doctors_json(&state, provider_id),
+        load_doctors_json(&state, &auth, provider_id),
         load_services_json(&state, provider_id),
         load_provider_patients_json(&state, provider_id, None),
         load_provider_interactions_json(&state, provider_id, None),
@@ -2868,14 +3183,17 @@ async fn get_provider(
                 .unwrap_or_default(),
         ),
         load_provider_staff_json(&state, provider_id),
-        load_provider_children_json(&state, provider_id),
+        load_provider_children_json(&state, &auth, provider_id),
         load_provider_taxonomy_json(&state, provider_id),
     );
 
-    let doctors = match doctors {
+    let mut doctors = match doctors {
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    if let Err(resp) = filter_doctor_linked_patient_items(&state, &auth, &mut doctors).await {
+        return resp;
+    }
     let services = match services {
         Ok(items) => items,
         Err(resp) => return resp,
@@ -2884,10 +3202,20 @@ async fn get_provider(
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let linked_patients =
+        match filter_accessible_patient_items(&state, &auth, linked_patients, "id").await {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
     let interactions = match interactions {
         Ok(items) => items,
         Err(resp) => return resp,
     };
+    let interactions =
+        match filter_accessible_patient_items(&state, &auth, interactions, "patient_uuid").await {
+            Ok(items) => items,
+            Err(resp) => return resp,
+        };
     let templates = match templates {
         Ok(items) => items,
         Err(resp) => return resp,
@@ -2935,8 +3263,8 @@ async fn get_provider(
         "fachbereich": provider.try_get::<Option<String>, _>("fachbereich").unwrap_or_default(),
         "specializations": specializations,
         "insurance_providers": insurance_providers,
-        "parent_provider_id": provider.try_get::<Option<Uuid>, _>("parent_provider_id").unwrap_or_default(),
-        "parent_provider_name": provider.try_get::<Option<String>, _>("parent_provider_name").unwrap_or_default(),
+        "parent_provider_id": parent_provider_id,
+        "parent_provider_name": parent_provider_name,
         "organization_level": provider.try_get::<String, _>("organization_level").unwrap_or_else(|_| "organization".to_string()),
         "taxonomy_node_id": taxonomy.get("taxonomy_node_id").cloned().unwrap_or(Value::Null),
         "taxonomy_node": taxonomy.get("taxonomy_node").cloned().unwrap_or(Value::Null),
@@ -2976,34 +3304,38 @@ async fn update_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if auth.role == Role::Concierge {
-        let current_provider_type = match load_provider_type(&state, provider_id).await {
-            Ok(value) => value,
-            Err(resp) => return resp,
-        };
-        if current_provider_type != provider.provider_type {
-            return err(
-                StatusCode::FORBIDDEN,
-                "Concierge cannot change provider type",
-            );
-        }
-        for capability in [AccessCapability::View, AccessCapability::Edit] {
-            match concierge_can_access_provider(
-                &state,
-                &auth,
-                provider_id,
-                &current_provider_type,
-                capability,
-            )
-            .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
-                }
-                Err(resp) => return resp,
+    let current_provider_type = match load_provider_type(&state, provider_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if auth.role == Role::Concierge && current_provider_type != provider.provider_type {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge cannot change provider type",
+        );
+    }
+    for capability in [AccessCapability::View, AccessCapability::Edit] {
+        match can_access_provider(
+            &state,
+            &auth,
+            provider_id,
+            &current_provider_type,
+            capability,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(StatusCode::FORBIDDEN, "Provider is outside user scope");
             }
+            Err(resp) => return resp,
         }
+    }
+    if let Some(parent_provider_id) = provider.parent_provider_id
+        && let Err(resp) =
+            ensure_cross_provider_use_access(&state, &auth, provider_id, parent_provider_id).await
+    {
+        return resp;
     }
     if let Err(resp) =
         validate_provider_parent(&state, Some(provider_id), provider.parent_provider_id).await
@@ -3232,6 +3564,9 @@ async fn delete_provider(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
+    }
 
     match sqlx::query("DELETE FROM providers WHERE id = $1")
         .bind(provider_id)
@@ -3281,21 +3616,24 @@ async fn list_provider_patients(
     Extension(auth): Extension<AuthUser>,
     Path(provider_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing, Role::Sales])
+    {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
         return resp;
     }
 
-    match load_provider_patients_json(&state, provider_id, None).await {
+    let items = match load_provider_patients_json(&state, provider_id, None).await {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
+    match filter_accessible_patient_items(&state, &auth, items, "id").await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -3315,6 +3653,9 @@ async fn list_provider_templates(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
         return resp;
@@ -3332,8 +3673,11 @@ async fn create_provider_template(
     Path(provider_id): Path<Uuid>,
     Json(body): Json<UpsertProviderTemplateRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
@@ -3437,8 +3781,11 @@ async fn update_provider_template(
     Path((provider_id, template_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertProviderTemplateRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let payload = match normalize_provider_template_payload(body) {
@@ -3536,21 +3883,24 @@ async fn list_doctor_patients(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing, Role::Sales])
+    {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await {
         return resp;
     }
 
-    match load_provider_patients_json(&state, provider_id, Some(doctor_id)).await {
+    let items = match load_provider_patients_json(&state, provider_id, Some(doctor_id)).await {
+        Ok(items) => items,
+        Err(resp) => return resp,
+    };
+    match filter_accessible_patient_items(&state, &auth, items, "id").await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -3570,12 +3920,19 @@ async fn list_doctor_relationships(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
 
     if let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await {
         return resp;
     }
 
-    match load_doctor_relationships_json(&state, doctor_id).await {
+    let view_scope = match load_provider_rule_scope(&state, &auth, AccessCapability::View).await {
+        Ok(scope) => scope,
+        Err(resp) => return resp,
+    };
+    match load_doctor_relationships_json(&state, &auth, doctor_id, &view_scope).await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
     }
@@ -3587,8 +3944,11 @@ async fn create_doctor_relationship(
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertDoctorRelationshipRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await {
@@ -3609,6 +3969,11 @@ async fn create_doctor_relationship(
         Ok(target_provider_id) => target_provider_id,
         Err(resp) => return resp,
     };
+    if let Err(resp) =
+        ensure_cross_provider_use_access(&state, &auth, provider_id, target_provider_id).await
+    {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3694,8 +4059,11 @@ async fn update_doctor_relationship(
     Path((provider_id, doctor_id, relationship_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(body): Json<UpsertDoctorRelationshipRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await {
@@ -3716,6 +4084,11 @@ async fn update_doctor_relationship(
         Ok(target_provider_id) => target_provider_id,
         Err(resp) => return resp,
     };
+    if let Err(resp) =
+        ensure_cross_provider_use_access(&state, &auth, provider_id, target_provider_id).await
+    {
+        return resp;
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3866,8 +4239,11 @@ async fn delete_doctor_relationship(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, doctor_id, relationship_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_doctor_belongs_to_provider(&state, provider_id, doctor_id).await {
@@ -3987,13 +4363,22 @@ async fn list_doctors(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
         return resp;
     }
 
-    match load_doctors_json(&state, provider_id).await {
-        Ok(doctors) => Json(doctors).into_response(),
+    match load_doctors_json(&state, &auth, provider_id).await {
+        Ok(mut doctors) => {
+            if let Err(resp) = filter_doctor_linked_patient_items(&state, &auth, &mut doctors).await
+            {
+                return resp;
+            }
+            Json(doctors).into_response()
+        }
         Err(resp) => resp,
     }
 }
@@ -4012,6 +4397,14 @@ async fn get_doctor(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
+    let relationship_view_scope =
+        match load_provider_rule_scope(&state, &auth, AccessCapability::View).await {
+            Ok(scope) => scope,
+            Err(resp) => return resp,
+        };
 
     match sqlx::query(
         r#"SELECT d.id, l.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
@@ -4073,12 +4466,43 @@ async fn get_doctor(
                     Ok(items) => items,
                     Err(resp) => return resp,
                 };
+            let original_patient_count = linked_patients.len();
+            let linked_patients = match filter_accessible_patient_items(
+                &state,
+                &auth,
+                linked_patients,
+                "id",
+            )
+            .await
+            {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
+            let patient_metrics_restricted = linked_patients.len() != original_patient_count;
             let interactions =
                 match load_provider_interactions_json(&state, provider_id, Some(doctor_id)).await {
                     Ok(items) => items,
                     Err(resp) => return resp,
                 };
-            let relationships = match load_doctor_relationships_json(&state, doctor_id).await {
+            let interactions = match filter_accessible_patient_items(
+                &state,
+                &auth,
+                interactions,
+                "patient_uuid",
+            )
+            .await
+            {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
+            let relationships = match load_doctor_relationships_json(
+                &state,
+                &auth,
+                doctor_id,
+                &relationship_view_scope,
+            )
+            .await
+            {
                 Ok(items) => items,
                 Err(resp) => return resp,
             };
@@ -4111,7 +4535,11 @@ async fn get_doctor(
                 "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
                 "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                 "patient_count": linked_patients.len() as i64,
-                "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+                "appointment_count": if patient_metrics_restricted {
+                    0
+                } else {
+                    row.try_get::<i64, _>("appointment_count").unwrap_or_default()
+                },
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 "relationships": relationships,
                 "linked_patients": linked_patients,
@@ -4216,8 +4644,11 @@ async fn create_doctor(
     Path(provider_id): Path<Uuid>,
     Json(body): Json<UpsertDoctorRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let provider_type = match load_provider_type(&state, provider_id).await {
@@ -4447,8 +4878,11 @@ async fn update_doctor(
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertDoctorRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let provider_type = match load_provider_type(&state, provider_id).await {
@@ -4636,8 +5070,11 @@ async fn delete_doctor(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, doctor_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let mut tx = match state.db.begin().await {
@@ -4753,6 +5190,9 @@ async fn list_provider_staff(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
         return resp;
@@ -4770,8 +5210,11 @@ async fn create_provider_staff(
     Path(provider_id): Path<Uuid>,
     Json(body): Json<UpsertProviderStaffRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
@@ -4887,8 +5330,11 @@ async fn update_provider_staff(
     Path((provider_id, staff_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertProviderStaffRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let staff = match normalize_provider_staff_payload(body) {
@@ -4992,8 +5438,11 @@ async fn delete_provider_staff(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, staff_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     match sqlx::query("DELETE FROM provider_staff WHERE provider_id = $1 AND id = $2")
@@ -5048,6 +5497,9 @@ async fn list_services(
     ]) {
         return e;
     }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
+    }
 
     if let Err(resp) = ensure_provider_exists(&state, provider_id).await {
         return resp;
@@ -5072,6 +5524,9 @@ async fn get_service(
         Role::Sales,
     ]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, false).await {
+        return resp;
     }
 
     match sqlx::query(
@@ -5126,8 +5581,11 @@ async fn create_service(
     Path(provider_id): Path<Uuid>,
     Json(body): Json<UpsertServiceRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let service = match normalize_service_payload(body) {
@@ -5231,8 +5689,11 @@ async fn update_service(
     Path((provider_id, service_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertServiceRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     let service = match normalize_service_payload(body) {
@@ -5319,8 +5780,11 @@ async fn delete_service(
     Extension(auth): Extension<AuthUser>,
     Path((provider_id, service_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     match sqlx::query("DELETE FROM service_catalog WHERE provider_id = $1 AND id = $2")
@@ -6746,6 +7210,9 @@ async fn toggle_provider_active(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
+    }
+    if let Err(resp) = ensure_provider_access(&state, &auth, provider_id, true).await {
+        return resp;
     }
 
     match sqlx::query("UPDATE providers SET is_active = $2, updated_at = now() WHERE id = $1")
@@ -8849,7 +9316,9 @@ async fn load_person_contacts_json(
 
 async fn load_doctor_relationships_json(
     state: &AppState,
+    auth: &AuthUser,
     doctor_id: Uuid,
+    view_scope: &ProviderRuleScope,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT r.id, r.source_doctor_id, r.target_doctor_id, r.relationship_type,
@@ -8857,7 +9326,8 @@ async fn load_doctor_relationships_json(
                   target.name AS target_doctor_name,
                   target.title AS target_doctor_title,
                   target.provider_id AS target_provider_id,
-                  provider.name AS target_provider_name
+                  provider.name AS target_provider_name,
+                  provider.provider_type AS target_provider_type
            FROM provider_doctor_relationships r
            JOIN provider_doctors target ON target.id = r.target_doctor_id
            JOIN providers provider ON provider.id = target.provider_id
@@ -8875,16 +9345,33 @@ async fn load_doctor_relationships_json(
         )
     })?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            json!({
+    let mut relationships = Vec::with_capacity(rows.len());
+    for row in rows {
+        let target_provider_id = row
+            .try_get::<Uuid, _>("target_provider_id")
+            .unwrap_or_default();
+        let target_provider_type = row
+            .try_get::<String, _>("target_provider_type")
+            .unwrap_or_default();
+        if !can_access_provider_with_scope(
+            state,
+            auth,
+            target_provider_id,
+            &target_provider_type,
+            AccessCapability::View,
+            view_scope,
+        )
+        .await?
+        {
+            continue;
+        }
+        relationships.push(json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "source_doctor_id": row.try_get::<Uuid, _>("source_doctor_id").unwrap_or(doctor_id),
                 "target_doctor_id": row.try_get::<Uuid, _>("target_doctor_id").unwrap_or_default(),
                 "target_doctor_name": row.try_get::<String, _>("target_doctor_name").unwrap_or_default(),
                 "target_doctor_title": row.try_get::<Option<String>, _>("target_doctor_title").unwrap_or_default(),
-                "target_provider_id": row.try_get::<Uuid, _>("target_provider_id").unwrap_or_default(),
+                "target_provider_id": target_provider_id,
                 "target_provider_name": row.try_get::<String, _>("target_provider_name").unwrap_or_default(),
                 "relationship_type": row.try_get::<String, _>("relationship_type").unwrap_or_else(|_| "professional".to_string()),
                 "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
@@ -8892,9 +9379,9 @@ async fn load_doctor_relationships_json(
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
-            })
-        })
-        .collect())
+        }));
+    }
+    Ok(relationships)
 }
 
 async fn load_provider_staff_json(
@@ -8952,8 +9439,10 @@ async fn load_provider_staff_json(
 
 async fn load_provider_children_json(
     state: &AppState,
+    auth: &AuthUser,
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let view_scope = load_provider_rule_scope(state, auth, AccessCapability::View).await?;
     let rows = sqlx::query(
         r#"SELECT id, name, provider_type, organization_level, address_city, address_country, is_active
            FROM providers
@@ -8971,26 +9460,44 @@ async fn load_provider_children_json(
         )
     })?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+    let mut children = Vec::with_capacity(rows.len());
+    for row in rows {
+        let child_provider_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let child_provider_type = row
+            .try_get::<String, _>("provider_type")
+            .unwrap_or_default();
+        if !can_access_provider_with_scope(
+            state,
+            auth,
+            child_provider_id,
+            &child_provider_type,
+            AccessCapability::View,
+            &view_scope,
+        )
+        .await?
+        {
+            continue;
+        }
+        children.push(json!({
+                "id": child_provider_id,
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
-                "provider_type": row.try_get::<String, _>("provider_type").unwrap_or_default(),
+                "provider_type": child_provider_type,
                 "organization_level": row.try_get::<String, _>("organization_level").unwrap_or_else(|_| "clinic".to_string()),
                 "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
                 "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
-            })
-        })
-        .collect())
+        }));
+    }
+    Ok(children)
 }
 
 async fn load_doctors_json(
     state: &AppState,
+    auth: &AuthUser,
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+    let relationship_view_scope =
+        load_provider_rule_scope(state, auth, AccessCapability::View).await?;
     let rows = sqlx::query(
         r#"SELECT d.id, l.provider_id, d.shared_identity_id, d.name, d.first_name, d.last_name, d.display_name,
                   d.title, d.role_code, d.role_label, d.subrole, d.website, d.schwerpunkt, d.gender, d.opening_hours,
@@ -9060,7 +9567,9 @@ async fn load_doctors_json(
             email.clone(),
         )
         .await?;
-        let relationships = load_doctor_relationships_json(state, doctor_id).await?;
+        let relationships =
+            load_doctor_relationships_json(state, auth, doctor_id, &relationship_view_scope)
+                .await?;
         doctors.push(json!({
             "id": doctor_id,
             "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or(provider_id),

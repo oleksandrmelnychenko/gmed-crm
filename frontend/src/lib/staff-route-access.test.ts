@@ -64,6 +64,8 @@ describe("first-release staff RBAC", () => {
       "/employees",
       "/patients",
       "/patients/patient-1",
+      "/documents",
+      "/documents/document-1",
     ]) {
       expect(canAccessStaffRoute("concierge", path), path).toBe(true);
     }
@@ -71,8 +73,6 @@ describe("first-release staff RBAC", () => {
       "/feedback",
       "/reports",
       "/sops",
-      "/documents",
-      "/documents/document-1",
       "/orders",
       "/contracts",
       "/invoices",
@@ -180,7 +180,7 @@ describe("first-release staff RBAC", () => {
     expect(concierge).not.toContain("/task-manager");
     expect(concierge).not.toContain("/projects");
     expect(concierge).toContain("/files");
-    expect(concierge).not.toContain("/documents");
+    expect(concierge).toContain("/documents");
     expect(concierge).not.toContain("/sops");
     expect(concierge).toContain("/patients");
     expect(concierge).not.toContain("/feedback");

@@ -535,6 +535,134 @@ async fn seed_document(
     .unwrap()
 }
 
+async fn seed_direct_document_rule(
+    pool: &PgPool,
+    user_id: Uuid,
+    role: &str,
+    document_id: Uuid,
+    capability: &str,
+    effect: &str,
+    granted_by: Uuid,
+) {
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type, resource_id,
+                capability, effect, reason, granted_by
+           ) VALUES ($1, $2, 'document', 'record', $3, $4, $5, $6, $7)"#,
+    )
+    .bind(user_id)
+    .bind(role)
+    .bind(document_id)
+    .bind(capability)
+    .bind(effect)
+    .bind("document ACL integration test")
+    .bind(granted_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_direct_all_document_upload_rule(
+    pool: &PgPool,
+    user_id: Uuid,
+    role: &str,
+    effect: &str,
+    granted_by: Uuid,
+) {
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type, resource_id,
+                capability, effect, reason, granted_by
+           ) VALUES ($1, $2, 'document', 'all', NULL, 'upload', $3, $4, $5)"#,
+    )
+    .bind(user_id)
+    .bind(role)
+    .bind(effect)
+    .bind("document upload ACL integration test")
+    .bind(granted_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_document_access_profile(
+    pool: &PgPool,
+    user_id: Uuid,
+    role: &str,
+    rules: &[(Uuid, &str, &str)],
+    assigned_by: Uuid,
+    tag: &str,
+) {
+    let profile_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO staff_access_profiles (name, description, created_by, updated_by)
+           VALUES ($1, $2, $3, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("Document ACL {tag}"))
+    .bind("document ACL integration test profile")
+    .bind(assigned_by)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO staff_access_profile_roles (profile_id, role) VALUES ($1, $2)")
+        .bind(profile_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    for (document_id, capability, effect) in rules {
+        sqlx::query(
+            r#"INSERT INTO staff_access_profile_rules (
+                    profile_id, resource_type, scope_type, resource_id,
+                    capability, effect, created_by
+               ) VALUES ($1, 'document', 'record', $2, $3, $4, $5)"#,
+        )
+        .bind(profile_id)
+        .bind(document_id)
+        .bind(capability)
+        .bind(effect)
+        .bind(assigned_by)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    sqlx::query(
+        r#"INSERT INTO staff_access_profile_assignments (
+                user_id, profile_id, assigned_for_role, assigned_by
+           ) VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(user_id)
+    .bind(profile_id)
+    .bind(role)
+    .bind(assigned_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_document_translation_request(
+    pool: &PgPool,
+    document_id: Uuid,
+    patient_id: Uuid,
+    requested_by: Uuid,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, requested_by
+           ) VALUES ($1, $2, 'de', $3)
+           RETURNING id"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(requested_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn document_upload_list_get_and_download_work() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
@@ -893,6 +1021,241 @@ async fn uncategorized_uploads_land_in_document_intake_queue() {
         .expect("upload should be visible in intake queue");
     assert_eq!(queued_item["art"], "uploaded_document");
     assert_eq!(queued_item["needs_categorization"], true);
+}
+
+#[tokio::test]
+async fn manual_intake_upload_stays_unlinked_and_skips_text_extraction_until_review() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("manual-intake");
+
+    let (status, upload_body) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[("manual_intake", "true".to_string())],
+        &format!("incoming-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-manual-intake%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(upload_body["patient_id"].is_null());
+    assert!(upload_body["order_id"].is_null());
+    assert!(upload_body["appointment_id"].is_null());
+    assert_eq!(upload_body["art"], "uploaded_document");
+    assert!(upload_body["category"].is_null());
+    assert_eq!(upload_body["auto_naming_status"], "not_queued");
+    assert!(upload_body["classification_suggestion"].is_null());
+
+    let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
+    let stored = sqlx::query(
+        r#"SELECT patient_id, order_id, appointment_id, status, ursprung,
+                  text_extraction_status
+           FROM documents
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(stored.get::<Option<Uuid>, _>("patient_id").is_none());
+    assert!(stored.get::<Option<Uuid>, _>("order_id").is_none());
+    assert!(stored.get::<Option<Uuid>, _>("appointment_id").is_none());
+    assert_eq!(stored.get::<String, _>("status"), "draft");
+    assert_eq!(
+        stored.get::<Option<String>, _>("ursprung").as_deref(),
+        Some("manual_intake")
+    );
+    assert_eq!(
+        stored.get::<String, _>("text_extraction_status"),
+        "not_started"
+    );
+
+    let naming_jobs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM document_auto_naming_jobs WHERE document_id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(naming_jobs, 0);
+
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let queued_item = queue_body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == document_id.to_string())
+        .expect("manual upload should be visible in intake queue");
+    assert!(queued_item["patient_id"].is_null());
+    assert_eq!(queued_item["status"], "draft");
+    assert_eq!(queued_item["ursprung"], "manual_intake");
+    assert!(queued_item["classification_suggestion"].is_null());
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "art": "medical_report",
+            "category": "medical",
+            "status": "active",
+            "ursprung": "external_mail"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Manual intake review requires a patient, order or appointment link"
+    );
+
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "art": "medical_report",
+            "category": "medical",
+            "is_medical": true,
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, queue_body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !queue_body
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == document_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_internal() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("concierge-document-upload");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let nonmedical_fields = [
+        ("patient_id", patient_id.to_string()),
+        ("auto_name", format!("Concierge upload {tag}")),
+        ("art", "uploaded_document".to_string()),
+        ("category", "general".to_string()),
+        ("is_medical", "false".to_string()),
+        ("visibility", "released_to_patient".to_string()),
+    ];
+
+    let (status, _) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &nonmedical_fields,
+        &format!("concierge-no-grant-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-no-grant%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_document_rule(
+        &pool,
+        concierge_id,
+        "concierge",
+        Uuid::new_v4(),
+        "upload",
+        "allow",
+        admin_id,
+    )
+    .await;
+    let (status, _) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &nonmedical_fields,
+        &format!("concierge-record-grant-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-record-grant%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_all_document_upload_rule(&pool, concierge_id, "concierge", "allow", admin_id).await;
+    let medical_fields = [
+        ("patient_id", patient_id.to_string()),
+        ("auto_name", format!("Medical concierge upload {tag}")),
+        ("art", "medical_report".to_string()),
+        ("category", "medical".to_string()),
+        // A forged false flag must not override medical art/category metadata.
+        ("is_medical", "false".to_string()),
+        ("visibility", "internal".to_string()),
+    ];
+    let (status, _) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &medical_fields,
+        &format!("concierge-medical-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-medical%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, uploaded) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &concierge_bearer,
+        &nonmedical_fields,
+        &format!("concierge-internal-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-concierge-internal%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let document_id = Uuid::parse_str(uploaded["id"].as_str().unwrap()).unwrap();
+    let stored = sqlx::query(
+        "SELECT visibility, is_medical, uploaded_by, ursprung FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.get::<String, _>("visibility"), "internal");
+    assert!(!stored.get::<bool, _>("is_medical"));
+    assert_eq!(stored.get::<Uuid, _>("uploaded_by"), concierge_id);
+    assert_eq!(
+        stored.get::<Option<String>, _>("ursprung").as_deref(),
+        Some("concierge_upload")
+    );
 }
 
 #[tokio::test]
@@ -1468,6 +1831,313 @@ async fn billing_can_access_financial_documents_but_not_medical_ones() {
         &format!("/api/v1/documents/{medical_id}"),
         &billing_bearer,
         None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn explicit_profile_view_selects_nonmedical_document_but_never_medical_content() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-acl-selected");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    let nonmedical_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "general",
+        &format!("{tag}-nonmedical"),
+    )
+    .await;
+    let medical_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-medical"),
+    )
+    .await;
+    seed_document_access_profile(
+        &pool,
+        concierge_id,
+        "concierge",
+        &[
+            (nonmedical_id, "view", "allow"),
+            (medical_id, "view", "allow"),
+        ],
+        admin_id,
+        &tag,
+    )
+    .await;
+    seed_document_translation_request(&pool, nonmedical_id, patient_id, admin_id).await;
+    seed_document_translation_request(&pool, medical_id, patient_id, admin_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&nonmedical_id.to_string().as_str()));
+    assert!(!ids.contains(&medical_id.to_string().as_str()));
+
+    let (status, queue) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/translation-requests",
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let queued_document_ids = queue
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["document_id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(queued_document_ids.contains(&nonmedical_id.to_string().as_str()));
+    assert!(!queued_document_ids.contains(&medical_id.to_string().as_str()));
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{nonmedical_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{medical_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn explicit_direct_and_profile_view_denies_override_document_shares() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-acl-deny");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+
+    let profile_denied_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "general",
+        &format!("{tag}-profile"),
+    )
+    .await;
+    let direct_denied_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "general",
+        &format!("{tag}-direct"),
+    )
+    .await;
+    for document_id in [profile_denied_id, direct_denied_id] {
+        sqlx::query(
+            r#"INSERT INTO document_shares (
+                    document_id, shared_with_user_id, shared_by, channel
+               ) VALUES ($1, $2, $3, 'internal')"#,
+        )
+        .bind(document_id)
+        .bind(concierge_id)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    seed_document_access_profile(
+        &pool,
+        concierge_id,
+        "concierge",
+        &[(profile_denied_id, "view", "deny")],
+        admin_id,
+        &tag,
+    )
+    .await;
+    seed_direct_document_rule(
+        &pool,
+        concierge_id,
+        "concierge",
+        direct_denied_id,
+        "view",
+        "deny",
+        admin_id,
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_document_translation_request(&pool, profile_denied_id, patient_id, admin_id).await;
+    seed_document_translation_request(&pool, direct_denied_id, patient_id, admin_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!ids.contains(&profile_denied_id.to_string().as_str()));
+    assert!(!ids.contains(&direct_denied_id.to_string().as_str()));
+
+    let (status, queue) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/translation-requests",
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let queued_document_ids = queue
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["document_id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(!queued_document_ids.contains(&profile_denied_id.to_string().as_str()));
+    assert!(!queued_document_ids.contains(&direct_denied_id.to_string().as_str()));
+
+    for document_id in [profile_denied_id, direct_denied_id] {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &concierge_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn explicit_document_view_does_not_imply_download_edit_or_use() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-acl-capability");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "general",
+        &tag,
+    )
+    .await;
+    seed_direct_document_rule(
+        &pool,
+        concierge_id,
+        "concierge",
+        document_id,
+        "view",
+        "allow",
+        admin_id,
+    )
+    .await;
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &concierge_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &concierge_bearer,
+        Some(json!({
+            "requested_language": "de",
+            "note": "must require Use"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &concierge_bearer,
+        Some(json!({ "notes": "must require Edit" })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -2745,6 +3415,9 @@ async fn patient_document_alerts_report_missing_required_documents() {
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let appointment_id =
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let patient_manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    let patient_manager_bearer = auth_header_for(patient_manager_id, "patient_manager");
 
     configure_required_patient_documents(
         &pool,
@@ -2765,7 +3438,7 @@ async fn patient_document_alerts_report_missing_required_documents() {
     )
     .await;
 
-    let _passport_document = seed_document(
+    let passport_document = seed_document(
         &pool,
         admin_id,
         patient_id,
@@ -2795,6 +3468,37 @@ async fn patient_document_alerts_report_missing_required_documents() {
     );
     assert_eq!(body["required_documents"][0]["fulfilled"], true);
     assert_eq!(body["required_documents"][1]["fulfilled"], false);
+    assert_eq!(
+        body["required_documents"][0]["matching_documents"][0]["id"],
+        passport_document.to_string()
+    );
+
+    seed_direct_document_rule(
+        &pool,
+        patient_manager_id,
+        "patient_manager",
+        passport_document,
+        "view",
+        "deny",
+        admin_id,
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/document-alerts"),
+        &patient_manager_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["required_documents"][0]["fulfilled"], true);
+    assert!(
+        body["required_documents"][0]["matching_documents"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     let _consent_document = seed_document(
         &pool,

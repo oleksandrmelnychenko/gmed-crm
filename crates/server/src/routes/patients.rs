@@ -15,7 +15,10 @@ use crate::access::{self, resolve_explicit_resource_access};
 use crate::audit;
 use crate::auth::{middleware::AuthUser, password};
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
-use crate::routes::documents::is_iso_country_code;
+use crate::routes::documents::{
+    can_view_document_row, document_access_allowed, is_iso_country_code, load_assignment_set,
+    load_document_acl_candidates,
+};
 use crate::state::AppState;
 use gmed_domain::access::resource_access::{
     AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
@@ -185,6 +188,155 @@ pub fn router() -> Router<AppState> {
 struct FieldPolicy {
     access_level: String,
     condition_type: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct PatientRuleCandidate {
+    allow: bool,
+    source_priority: i32,
+    specificity: i32,
+}
+
+#[derive(Default)]
+struct PatientViewRuleScope {
+    all: Vec<PatientRuleCandidate>,
+    records: HashMap<Uuid, Vec<PatientRuleCandidate>>,
+}
+
+impl PatientViewRuleScope {
+    fn decision(&self, patient_id: Uuid) -> Option<bool> {
+        self.all
+            .iter()
+            .chain(
+                self.records
+                    .get(&patient_id)
+                    .into_iter()
+                    .flat_map(|rules| rules.iter()),
+            )
+            .max_by_key(|rule| {
+                (
+                    rule.source_priority,
+                    rule.specificity,
+                    if rule.allow { 0 } else { 1 },
+                )
+            })
+            .map(|rule| rule.allow)
+    }
+
+    fn all_decision(&self) -> Option<bool> {
+        self.all
+            .iter()
+            .max_by_key(|rule| {
+                (
+                    rule.source_priority,
+                    rule.specificity,
+                    if rule.allow { 0 } else { 1 },
+                )
+            })
+            .map(|rule| rule.allow)
+    }
+
+    fn allowed_record_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.records
+            .keys()
+            .copied()
+            .filter(|patient_id| self.decision(*patient_id) == Some(true))
+    }
+
+    fn record_rule_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.records.keys().copied()
+    }
+}
+
+async fn load_patient_view_rule_scope(
+    state: &AppState,
+    auth: &AuthUser,
+) -> Result<PatientViewRuleScope, axum::response::Response> {
+    if auth.role == Role::Ceo {
+        return Ok(PatientViewRuleScope::default());
+    }
+    let Some(role_name) = access::role_db_name(auth.role) else {
+        return Ok(PatientViewRuleScope::default());
+    };
+
+    let rows = sqlx::query(
+        r#"SELECT scope_type, resource_id, effect, source_priority, specificity
+           FROM (
+               SELECT direct.scope_type,
+                      direct.resource_id,
+                      direct.effect,
+                      2::int AS source_priority,
+                      CASE direct.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+               FROM staff_user_access_rules direct
+               WHERE direct.user_id = $1
+                 AND direct.granted_for_role = $2
+                 AND direct.resource_type = 'patient'
+                 AND direct.capability = 'view'
+                 AND direct.revoked_at IS NULL
+                 AND direct.valid_from <= now()
+                 AND (direct.valid_until IS NULL OR direct.valid_until > now())
+
+               UNION ALL
+
+               SELECT rule.scope_type,
+                      rule.resource_id,
+                      rule.effect,
+                      1::int AS source_priority,
+                      CASE rule.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+               FROM staff_access_profile_assignments assignment
+               JOIN staff_access_profiles profile
+                 ON profile.id = assignment.profile_id
+                AND profile.is_active = true
+               JOIN staff_access_profile_roles profile_role
+                 ON profile_role.profile_id = profile.id
+                AND profile_role.role = $2
+               JOIN staff_access_profile_rules rule
+                 ON rule.profile_id = profile.id
+               WHERE assignment.user_id = $1
+                 AND assignment.assigned_for_role = $2
+                 AND assignment.revoked_at IS NULL
+                 AND assignment.valid_from <= now()
+                 AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+                 AND rule.resource_type = 'patient'
+                 AND rule.capability = 'view'
+           ) candidates"#,
+    )
+    .bind(auth.user_id)
+    .bind(role_name)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            error = %e,
+            user_id = %auth.user_id,
+            "Failed to load patient view access candidates"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate patient access",
+        )
+    })?;
+
+    let mut scope = PatientViewRuleScope::default();
+    for row in rows {
+        let effect = row.try_get::<String, _>("effect").unwrap_or_default();
+        let candidate = PatientRuleCandidate {
+            allow: effect == "allow",
+            source_priority: row.try_get("source_priority").unwrap_or_default(),
+            specificity: row.try_get("specificity").unwrap_or_default(),
+        };
+        match row.try_get::<String, _>("scope_type").as_deref() {
+            Ok("all") => scope.all.push(candidate),
+            Ok("record") => {
+                if let Ok(patient_id) = row.try_get::<Uuid, _>("resource_id") {
+                    scope.records.entry(patient_id).or_default().push(candidate);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(scope)
 }
 
 #[derive(Deserialize)]
@@ -2035,8 +2187,9 @@ async fn list_patients(
         auth.role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
     );
-    let restrict_to_assigned_patients = access::requires_patient_assignment(auth.role);
-    let assigned_patient_ids = if restrict_to_assigned_patients {
+    let view_rule_scope = load_patient_view_rule_scope(&state, &auth).await?;
+    let requires_patient_assignment = access::requires_patient_assignment(auth.role);
+    let baseline_patient_ids = if requires_patient_assignment {
         let mut patient_ids = access::load_active_patient_assignment_set(&state.db, auth.user_id)
             .await
             .map_err(|e| {
@@ -2059,10 +2212,14 @@ async fn list_patients(
                     })?,
             );
         }
-        patient_ids.into_iter().collect::<Vec<_>>()
+        patient_ids
     } else {
-        Vec::new()
+        HashSet::new()
     };
+    let baseline_patient_ids = baseline_patient_ids.iter().copied().collect::<Vec<_>>();
+    let allowed_record_ids = view_rule_scope.allowed_record_ids().collect::<Vec<_>>();
+    let record_rule_ids = view_rule_scope.record_rule_ids().collect::<Vec<_>>();
+    let all_view_decision = view_rule_scope.all_decision();
     let lifecycle = query
         .lifecycle
         .as_deref()
@@ -2255,7 +2412,19 @@ async fn list_patients(
                       AND ol.doctor_id = $4
                 )
              )
-             AND ($7::boolean = false OR p.id = ANY($8::uuid[]))
+             AND (
+                p.id = ANY($9::uuid[])
+                OR (
+                    NOT (p.id = ANY($10::uuid[]))
+                    AND (
+                        $11::boolean = true
+                        OR (
+                            $11::boolean IS NULL
+                            AND ($7::boolean = false OR p.id = ANY($8::uuid[]))
+                        )
+                    )
+                )
+             )
            ORDER BY p.created_at DESC
            LIMIT 100"#,
     )
@@ -2265,8 +2434,11 @@ async fn list_patients(
     .bind(doctor_id)
     .bind(lifecycle)
     .bind(include_financial_balance)
-    .bind(restrict_to_assigned_patients)
-    .bind(&assigned_patient_ids)
+    .bind(requires_patient_assignment)
+    .bind(&baseline_patient_ids)
+    .bind(&allowed_record_ids)
+    .bind(&record_rule_ids)
+    .bind(all_view_decision)
     .fetch_all(&state.db)
     .await;
 
@@ -2281,6 +2453,15 @@ async fn list_patients(
                         "Failed to decode patient",
                     )
                 })?;
+
+                let baseline_allows =
+                    !requires_patient_assignment || baseline_patient_ids.contains(&patient_id);
+                if !view_rule_scope
+                    .decision(patient_id)
+                    .unwrap_or(baseline_allows)
+                {
+                    continue;
+                }
 
                 patients.push(build_patient_summary_json(
                     &auth,
@@ -2792,7 +2973,7 @@ async fn create_patient(
     if let Some(relations) = patient_relations.as_ref() {
         for relation in relations {
             if let Some(related_patient_id) = relation.related_patient_id {
-                ensure_related_patient_exists(&state, related_patient_id).await?;
+                ensure_related_patient_usable(&state, &auth, related_patient_id).await?;
             }
         }
     }
@@ -2944,7 +3125,7 @@ async fn update_patient(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -3578,7 +3759,7 @@ async fn update_patient_lab_result(
     if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return response;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_response) => {
@@ -3841,7 +4022,7 @@ async fn delete_patient_lab_result(
     if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return response;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_response) => {
@@ -4019,7 +4200,7 @@ async fn create_patient_lab_result(
     if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return response;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -4328,7 +4509,7 @@ async fn create_patient_vital_measurement(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -4611,7 +4792,7 @@ async fn update_patient_vital_measurement(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -4747,7 +4928,7 @@ async fn delete_patient_vital_measurement(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -4915,7 +5096,7 @@ async fn create_patient_card_entry(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -5074,7 +5255,7 @@ async fn create_patient_medical_order(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -5172,7 +5353,7 @@ async fn update_patient_medical_order(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -5425,7 +5606,7 @@ async fn create_patient_risk_score(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -5513,7 +5694,7 @@ async fn update_patient_risk_score(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -5619,7 +5800,7 @@ async fn delete_patient_risk_score(
         return e;
     }
 
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(_) => {
@@ -6076,7 +6257,7 @@ async fn activate_patient_portal_account(
 ) -> Result<(StatusCode, Json<Value>), axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])?;
 
-    if !has_patient_access(&state, &auth, patient_uuid).await? && auth.role != Role::Ceo {
+    if !has_patient_edit_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
 
@@ -6660,9 +6841,14 @@ async fn list_patient_documents(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
     let hide_medical_documents = auth.role == Role::Concierge;
+    let document_view_acl =
+        load_document_acl_candidates(&state, &auth, AccessCapability::View).await?;
+    let document_assignment_set = load_assignment_set(&state, &auth).await?;
 
     let rows = sqlx::query(
         r#"SELECT d.id,
+                  d.patient_id,
+                  d.lead_id,
                   d.document_number,
                   d.generated_template_id,
                   d.order_id,
@@ -6671,6 +6857,10 @@ async fn list_patient_documents(
                   d.version_number,
                   d.file_size,
                   d.is_medical,
+                  d.art,
+                  d.visibility,
+                  d.ursprung,
+                  d.uploaded_by,
                   d.mime_type,
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
                   COALESCE(d.category, d.art) AS category,
@@ -6689,7 +6879,14 @@ async fn list_patient_documents(
                   d.payment_date,
                   d.payment_method,
                   u.name AS uploaded_by_name,
-                  d.created_at
+                  d.created_at,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_shares ds
+                    WHERE ds.document_id = d.id
+                      AND ds.shared_with_user_id = $3
+                      AND ds.revoked_at IS NULL
+                  ) AS shared_to_current
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
@@ -6698,6 +6895,7 @@ async fn list_patient_documents(
     )
     .bind(patient_uuid)
     .bind(hide_medical_documents)
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -6708,11 +6906,24 @@ async fn list_patient_documents(
         )
     })?;
 
-    let items = rows
-        .into_iter()
-        .map(|row| {
-            serde_json::json!({
-                "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let document_id = row.try_get::<Uuid, _>("id").map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to decode patient document",
+            )
+        })?;
+        let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+        let decision =
+            document_view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical);
+        let baseline_allowed = can_view_document_row(&auth, &row, &document_assignment_set);
+        if !document_access_allowed(&auth, &row, baseline_allowed, decision) {
+            continue;
+        }
+
+        items.push(serde_json::json!({
+                "id": document_id,
                 "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
                 "generated_template_id": row.try_get::<Option<String>, _>("generated_template_id").unwrap_or_default(),
                 "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
@@ -6740,9 +6951,8 @@ async fn list_patient_documents(
                 "payment_method": row.try_get::<Option<String>, _>("payment_method").unwrap_or_default(),
                 "uploaded_by_name": row.try_get::<Option<String>, _>("uploaded_by_name").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            })
-        })
-        .collect::<Vec<_>>();
+            }));
+    }
 
     Ok(Json(items))
 }
@@ -6998,6 +7208,113 @@ pub(crate) fn patient_document_alerts_payload(summary: &PatientDocumentAlertsSum
     })
 }
 
+pub(crate) fn retain_visible_document_alert_matches(
+    payload: &mut Value,
+    visible_document_ids: &HashSet<Uuid>,
+) {
+    let Some(required_documents) = payload
+        .get_mut("required_documents")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for rule in required_documents {
+        let Some(matching_documents) = rule
+            .get_mut("matching_documents")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        matching_documents.retain(|document| {
+            document
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some_and(|document_id| visible_document_ids.contains(&document_id))
+        });
+    }
+}
+
+fn clear_document_alert_matches(payload: &mut Value) {
+    let Some(required_documents) = payload
+        .get_mut("required_documents")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+
+    for rule in required_documents {
+        if let Some(matching_documents) = rule
+            .get_mut("matching_documents")
+            .and_then(Value::as_array_mut)
+        {
+            matching_documents.clear();
+        }
+    }
+}
+
+async fn load_staff_visible_patient_document_ids(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_uuid: Uuid,
+) -> Result<HashSet<Uuid>, axum::response::Response> {
+    let document_view_acl =
+        load_document_acl_candidates(state, auth, AccessCapability::View).await?;
+    let assignment_set = load_assignment_set(state, auth).await?;
+    let rows = sqlx::query(
+        r#"SELECT d.id,
+                  d.patient_id,
+                  d.lead_id,
+                  d.is_medical,
+                  d.art,
+                  d.category,
+                  d.visibility,
+                  d.ursprung,
+                  d.uploaded_by,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_shares ds
+                    WHERE ds.document_id = d.id
+                      AND ds.shared_with_user_id = $2
+                      AND ds.revoked_at IS NULL
+                  ) AS shared_to_current
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.status IN ('draft', 'active')"#,
+    )
+    .bind(patient_uuid)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, patient_id = %patient_uuid, "Failed to load document alert access scope");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate patient document alerts",
+        )
+    })?;
+
+    let mut visible_document_ids = HashSet::with_capacity(rows.len());
+    for row in rows {
+        let document_id = row.try_get::<Uuid, _>("id").map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate patient document alerts",
+            )
+        })?;
+        let is_medical = row.try_get::<bool, _>("is_medical").unwrap_or(false);
+        let baseline_allowed = can_view_document_row(auth, &row, &assignment_set);
+        let decision =
+            document_view_acl.decision(auth.role, document_id, AccessCapability::View, is_medical);
+        if document_access_allowed(auth, &row, baseline_allowed, decision) {
+            visible_document_ids.insert(document_id);
+        }
+    }
+
+    Ok(visible_document_ids)
+}
+
 /// Days before expiry at which a passport starts to count as a compliance
 /// warning (#6). A product-tunable window; expiry itself is the hard boundary.
 const PASSPORT_EXPIRY_WARNING_DAYS: i64 = 90;
@@ -7223,6 +7540,10 @@ pub(crate) async fn load_patient_recheck_readiness(
     let compliance_ready = compliance_completed && dsgvo_signed;
 
     let document_alerts = load_patient_document_alerts_summary(state, patient_uuid).await?;
+    let mut document_alerts_payload = patient_document_alerts_payload(&document_alerts);
+    // Process gates need the completeness result, not document metadata. The
+    // dedicated alerts endpoint applies record-level Document View access.
+    clear_document_alert_matches(&mut document_alerts_payload);
     let document_pack_ready =
         document_alerts.document_pack_complete || document_alerts.stored_document_pack_complete;
 
@@ -7431,7 +7752,7 @@ pub(crate) async fn load_patient_recheck_readiness(
                 "compliance_completed": compliance_completed,
                 "contract_status": stored_contract_status,
             },
-            "document_alerts": patient_document_alerts_payload(&document_alerts),
+            "document_alerts": document_alerts_payload,
             "latest_framework_contract": latest_framework_contract,
         }),
     }))
@@ -7451,7 +7772,11 @@ async fn get_patient_document_alerts(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
     let summary = load_patient_document_alerts_summary(&state, patient_uuid).await?;
-    Ok(Json(patient_document_alerts_payload(&summary)))
+    let visible_document_ids =
+        load_staff_visible_patient_document_ids(&state, &auth, patient_uuid).await?;
+    let mut payload = patient_document_alerts_payload(&summary);
+    retain_visible_document_alert_matches(&mut payload, &visible_document_ids);
+    Ok(Json(payload))
 }
 
 async fn get_patient_recheck(
@@ -7915,6 +8240,36 @@ async fn list_relations(
         Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    let linked_patient_view_rules = load_patient_view_rule_scope(&state, &auth).await?;
+    let linked_patient_requires_assignment = access::requires_patient_assignment(auth.role);
+    let linked_patient_baseline_ids = if linked_patient_requires_assignment {
+        let mut patient_ids =
+            access::load_active_patient_assignment_set(&state.db, auth.user_id)
+                .await
+                .map_err(|error| {
+                    tracing::error!(error = %error, user_id = %auth.user_id, "Failed to load linked patient access scope");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate patient access",
+                    )
+                })?;
+        if auth.role == Role::Concierge {
+            patient_ids.extend(
+                access::load_active_concierge_task_patient_access_set(&state.db, auth.user_id)
+                    .await
+                    .map_err(|error| {
+                        tracing::error!(error = %error, user_id = %auth.user_id, "Failed to load linked Concierge patient scope");
+                        err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to validate patient access",
+                        )
+                    })?,
+            );
+        }
+        patient_ids
+    } else {
+        HashSet::new()
+    };
 
     let rows = sqlx::query(
         r#"SELECT pr.id, pr.patient_id, pr.related_patient_id, pr.related_name, pr.relation_type,
@@ -7940,7 +8295,20 @@ async fn list_relations(
 
     let items = rows
         .into_iter()
-        .map(build_relation_json)
+        .map(|row| {
+            let linked_patient_visible = row
+                .try_get::<Option<Uuid>, _>("related_patient_id")
+                .unwrap_or_default()
+                .map(|related_patient_id| {
+                    let baseline_allows = !linked_patient_requires_assignment
+                        || linked_patient_baseline_ids.contains(&related_patient_id);
+                    linked_patient_view_rules
+                        .decision(related_patient_id)
+                        .unwrap_or(baseline_allows)
+                })
+                .unwrap_or(true);
+            build_relation_json(row, linked_patient_visible)
+        })
         .collect::<Vec<_>>();
 
     Ok(Json(items))
@@ -7961,11 +8329,11 @@ async fn create_relation(
     Json(body): Json<UpsertRelationRequest>,
 ) -> Result<(StatusCode, Json<Value>), axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
-    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    ensure_patient_editable(&state, &auth, patient_uuid).await?;
     validate_relation_request(&body, patient_uuid)?;
 
     if let Some(related_patient_id) = body.related_patient_id {
-        ensure_related_patient_exists(&state, related_patient_id).await?;
+        ensure_related_patient_usable(&state, &auth, related_patient_id).await?;
     }
 
     let phone = relation_opt_text(body.phone.as_deref());
@@ -8017,7 +8385,7 @@ async fn create_relation(
         }),
     ));
 
-    Ok((StatusCode::CREATED, Json(build_relation_json(row))))
+    Ok((StatusCode::CREATED, Json(build_relation_json(row, true))))
 }
 
 async fn update_relation(
@@ -8027,11 +8395,11 @@ async fn update_relation(
     Json(body): Json<UpsertRelationRequest>,
 ) -> Result<Json<Value>, axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
-    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    ensure_patient_editable(&state, &auth, patient_uuid).await?;
     validate_relation_request(&body, patient_uuid)?;
 
     if let Some(related_patient_id) = body.related_patient_id {
-        ensure_related_patient_exists(&state, related_patient_id).await?;
+        ensure_related_patient_usable(&state, &auth, related_patient_id).await?;
     }
 
     let phone = relation_opt_text(body.phone.as_deref());
@@ -8093,7 +8461,7 @@ async fn update_relation(
         }),
     ));
 
-    Ok(Json(build_relation_json(row)))
+    Ok(Json(build_relation_json(row, true)))
 }
 
 async fn delete_relation(
@@ -8102,7 +8470,7 @@ async fn delete_relation(
     Path((patient_uuid, relation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Value>, axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
-    ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    ensure_patient_editable(&state, &auth, patient_uuid).await?;
 
     let result = sqlx::query("DELETE FROM patient_relations WHERE patient_id = $1 AND id = $2")
         .bind(patient_uuid)
@@ -9212,7 +9580,7 @@ async fn assign_patient(
         return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
     }
 
-    if auth.role != Role::Ceo && !has_patient_access(&state, &auth, patient_uuid).await? {
+    if !has_patient_edit_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
 
@@ -9349,8 +9717,9 @@ fn validate_relation_request(
     Ok(())
 }
 
-async fn ensure_related_patient_exists(
+async fn ensure_related_patient_usable(
     state: &AppState,
+    auth: &AuthUser,
     related_patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let exists = sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
@@ -9365,10 +9734,14 @@ async fn ensure_related_patient_exists(
         )
     })?;
 
-    if exists {
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "Related patient not found"));
+    }
+
+    if has_patient_use_access(state, auth, related_patient_id).await? {
         Ok(())
     } else {
-        Err(err(StatusCode::NOT_FOUND, "Related patient not found"))
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
 }
 
@@ -9401,13 +9774,48 @@ async fn ensure_patient_visible(
     }
 }
 
-fn build_relation_json(row: sqlx::postgres::PgRow) -> Value {
-    let related_first = row
-        .try_get::<Option<String>, _>("related_first_name")
-        .unwrap_or_default();
-    let related_last = row
-        .try_get::<Option<String>, _>("related_last_name")
-        .unwrap_or_default();
+async fn ensure_patient_editable(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate patient");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate patient access",
+                )
+            })?;
+
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
+    }
+
+    if has_patient_edit_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+fn build_relation_json(row: sqlx::postgres::PgRow, linked_patient_visible: bool) -> Value {
+    let related_first = linked_patient_visible
+        .then(|| {
+            row.try_get::<Option<String>, _>("related_first_name")
+                .unwrap_or_default()
+        })
+        .flatten();
+    let related_last = linked_patient_visible
+        .then(|| {
+            row.try_get::<Option<String>, _>("related_last_name")
+                .unwrap_or_default()
+        })
+        .flatten();
     let related_name = row.try_get::<String, _>("related_name").unwrap_or_default();
     let related_display_name = match (related_first, related_last) {
         (Some(first), Some(last)) if !first.is_empty() || !last.is_empty() => {
@@ -9421,8 +9829,8 @@ fn build_relation_json(row: sqlx::postgres::PgRow) -> Value {
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_else(|_| Uuid::nil()),
-        "related_patient_id": row.try_get::<Option<Uuid>, _>("related_patient_id").unwrap_or_default(),
-        "related_patient_pid": row.try_get::<Option<String>, _>("related_patient_pid").unwrap_or_default(),
+        "related_patient_id": linked_patient_visible.then(|| row.try_get::<Option<Uuid>, _>("related_patient_id").unwrap_or_default()).flatten(),
+        "related_patient_pid": linked_patient_visible.then(|| row.try_get::<Option<String>, _>("related_patient_pid").unwrap_or_default()).flatten(),
         "related_name": related_name,
         "related_display_name": related_display_name,
         "relation_type": row.try_get::<String, _>("relation_type").unwrap_or_default(),
@@ -9562,7 +9970,102 @@ async fn has_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if auth.role.has_full_access() {
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+
+    let decision =
+        resolve_explicit_patient_access(state, auth, patient_id, AccessCapability::View).await?;
+    match decision {
+        ResourceAccessDecision::Allow(_) => return Ok(true),
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => {
+            return Ok(false);
+        }
+        ResourceAccessDecision::NoExplicitRule => {}
+    }
+
+    has_baseline_patient_access(state, auth, patient_id).await
+}
+
+async fn has_patient_edit_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    has_patient_secondary_capability_access(state, auth, patient_id, AccessCapability::Edit).await
+}
+
+async fn has_patient_use_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    has_patient_secondary_capability_access(state, auth, patient_id, AccessCapability::Use).await
+}
+
+async fn has_patient_secondary_capability_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+    capability: AccessCapability,
+) -> Result<bool, axum::response::Response> {
+    if !has_patient_access(state, auth, patient_id).await? {
+        return Ok(false);
+    }
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+
+    let decision = resolve_explicit_patient_access(state, auth, patient_id, capability).await?;
+    match decision {
+        ResourceAccessDecision::Allow(_) => Ok(true),
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => Ok(false),
+        ResourceAccessDecision::NoExplicitRule => {
+            has_baseline_patient_access(state, auth, patient_id).await
+        }
+    }
+}
+
+async fn resolve_explicit_patient_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+    capability: AccessCapability,
+) -> Result<ResourceAccessDecision, axum::response::Response> {
+    resolve_explicit_resource_access(
+        &state.db,
+        auth.user_id,
+        auth.role,
+        ResourceAccessRequest {
+            resource_type: ResourceType::Patient,
+            resource_id: patient_id,
+            capability,
+            // Patient field sensitivity remains governed by field_access_policies.
+            is_medical: false,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            error = %e,
+            user_id = %auth.user_id,
+            patient_id = %patient_id,
+            ?capability,
+            "Failed to resolve explicit patient access"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate patient access",
+        )
+    })
+}
+
+async fn has_baseline_patient_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    if auth.role == Role::Ceo {
         return Ok(true);
     }
 
@@ -10258,6 +10761,11 @@ async fn revoke_assignment(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
+    match has_patient_edit_access(&state, &auth, patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
     let patient_context =
         match load_patient_assignment_notification_context(&state, patient_id).await {
             Ok(context) => context,
@@ -10321,6 +10829,11 @@ async fn activate_patient(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
+    match has_patient_edit_access(&state, &auth, patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
     match sqlx::query(
         r#"UPDATE patients
            SET lifecycle_status = 'active', is_active = true, updated_at = now()
@@ -10382,6 +10895,11 @@ async fn deactivate_patient(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
+    }
+    match has_patient_edit_access(&state, &auth, patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
     }
     match sqlx::query(
         r#"UPDATE patients
@@ -11663,7 +12181,7 @@ async fn save_patient_diagnoses(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -12057,7 +12575,7 @@ async fn save_patient_medications(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -12336,7 +12854,7 @@ async fn save_patient_examinations(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -12595,7 +13113,7 @@ async fn save_patient_narrative(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -12970,7 +13488,7 @@ async fn delete_patient_narrative(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -13190,7 +13708,7 @@ async fn save_patient_verlauf(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -13419,7 +13937,7 @@ async fn save_patient_procedures(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -13560,7 +14078,7 @@ async fn save_patient_clinical_warnings(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -13771,7 +14289,7 @@ async fn save_patient_impfstatus(
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
     }
-    match has_patient_access(&state, &auth, patient_uuid).await {
+    match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,

@@ -36,6 +36,13 @@ compose() {
     "${@:2}"
 }
 
+prepare_upload_volume() {
+  compose "$1" run --rm --no-deps \
+    --user 0:0 \
+    --entrypoint /usr/local/bin/gmed-prepare-uploads \
+    backend
+}
+
 finish() {
   local rc=$?
   trap - EXIT
@@ -175,6 +182,7 @@ echo "Building DEV images with the host Docker cache..."
 export COMPOSE_BAKE=true
 compose "$STAGING_DIR" build backend frontend clinical-document-parser
 unset COMPOSE_BAKE
+prepare_upload_volume "$STAGING_DIR"
 
 BACKUP_PATH="$BACKUP_DIR/gmed-crm.before-$STAMP"
 mv "$REPO_DIR" "$BACKUP_PATH"

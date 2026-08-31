@@ -866,6 +866,17 @@ export function providerPermissions(role?: string): ProviderPermissions {
   }
 }
 
+export function canManageProviderPeople(
+  role: string | undefined,
+  providerType: ProviderType,
+) {
+  return (
+    role === "ceo" ||
+    role === "patient_manager" ||
+    (role === "concierge" && providerType === "non_medical")
+  );
+}
+
 export function blankProviderForm(providerType: ProviderType = "medical"): ProviderFormState {
   return {
     name: "",

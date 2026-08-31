@@ -10,6 +10,7 @@ import {
   blankStaffForm,
   buildProviderAttributeValueOptionsQuery,
   buildProvidersQuery,
+  canManageProviderPeople,
   composeDoctorDisplayName,
   composeStaffDisplayName,
   doctorIdentityValue,
@@ -59,6 +60,13 @@ describe("provider permissions", () => {
     expect(providerPermissions("billing").canEditProvider).toBe(false);
     expect(providerPermissions("sales").canCreateProvider).toBe(false);
     expect(providerPermissions("sales").canEditProvider).toBe(false);
+  });
+
+  it("lets Concierge manage contacts and staff only for non-medical providers", () => {
+    expect(canManageProviderPeople("concierge", "non_medical")).toBe(true);
+    expect(canManageProviderPeople("concierge", "medical")).toBe(false);
+    expect(canManageProviderPeople("patient_manager", "medical")).toBe(true);
+    expect(canManageProviderPeople("billing", "non_medical")).toBe(false);
   });
 });
 

@@ -615,6 +615,20 @@ async fn patient_can_see_required_document_alerts_in_portal_scope() {
     assert_eq!(missing.len(), 1);
     assert_eq!(missing[0]["key"], "consent");
     assert_eq!(missing[0]["label"], "Consent form");
+    let required_documents = body["required_documents"]
+        .as_array()
+        .expect("required document alerts");
+    let passport = required_documents
+        .iter()
+        .find(|rule| rule["key"] == "passport")
+        .expect("passport alert");
+    assert_eq!(passport["fulfilled"], true);
+    assert!(
+        passport["matching_documents"]
+            .as_array()
+            .expect("passport matches")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
