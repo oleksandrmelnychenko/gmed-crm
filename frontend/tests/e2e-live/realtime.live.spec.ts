@@ -262,6 +262,7 @@ test.describe("realtime live propagation", () => {
           .getByRole("heading", { name: /Guten|Hello|Willkommen/i })
           .first(),
       ).toBeVisible();
+      await waitForRealtime(operationsPage);
       await expect(operationsPage.getByText(taskTitle)).toHaveCount(0);
       const taskPanel = operationsPage.locator("div").filter({
         has: operationsPage.getByRole("heading", {

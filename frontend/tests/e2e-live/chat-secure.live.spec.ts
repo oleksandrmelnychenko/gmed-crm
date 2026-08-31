@@ -258,7 +258,11 @@ test.describe("secure chat live workflows", () => {
         patientPage.getByText("Patient secure update for the care team"),
       ).toBeVisible();
 
-      await reopenConversation(conciergePage, scenario.credentials.patient.name);
+      await reopenConversation(conciergePage, {
+        id: scenario.credentials.patient.user_id,
+        name: scenario.credentials.patient.name,
+        role: "patient",
+      });
       await refreshOwnChatKey(conciergePage);
       await waitForConversationContent(
         conciergePage,
