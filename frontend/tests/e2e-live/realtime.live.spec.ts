@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
 
 import {
   bootstrapFullSmokeScenario,
@@ -15,6 +15,11 @@ type ApiPostResult = {
 
 type TaskListItem = {
   status: string;
+  title: string;
+};
+
+type AppointmentListItem = {
+  title: string;
 };
 
 function futureDate(daysFromNow: number) {
@@ -27,6 +32,19 @@ async function waitForRealtime(page: Page) {
   await expect(
     page.locator('[aria-label="Realtime verbunden"]'),
   ).toBeVisible({ timeout: 30_000 });
+}
+
+function waitForApiGet(page: Page, path: string): Promise<Response> {
+  return page.waitForResponse(
+    (response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === `/api/v1${path}`
+      );
+    },
+    { timeout: 15_000 },
+  );
 }
 
 async function browserApiGet<T>(page: Page, path: string): Promise<T> {
@@ -181,13 +199,23 @@ test.describe("realtime live propagation", () => {
         operationsObserver.email,
         password,
       );
+      const initialAppointmentsResponsePromise = waitForApiGet(
+        operationsPage,
+        "/appointments",
+      );
       await operationsPage.goto(`/appointments?patient=${scenario.patient.id}`);
+      const initialAppointmentsResponse = await initialAppointmentsResponsePromise;
+      expect(initialAppointmentsResponse.ok()).toBeTruthy();
       await expect(
         operationsPage.getByRole("heading", { level: 1, name: "Termine" }),
       ).toBeVisible();
       await waitForRealtime(operationsPage);
       await expect(operationsPage.getByText(appointmentTitle)).toHaveCount(0);
 
+      const appointmentRefreshPromise = waitForApiGet(
+        operationsPage,
+        "/appointments",
+      );
       await browserApiPost(mutatorPage, "/appointments", {
         patient_id: scenario.patient.id,
         provider_id: null,
@@ -210,12 +238,25 @@ test.describe("realtime live propagation", () => {
         recurrence_count: null,
         recurrence_until: null,
       });
+      const appointmentRefreshResponse = await appointmentRefreshPromise;
+      expect(appointmentRefreshResponse.ok()).toBeTruthy();
+      const refreshedAppointments =
+        (await appointmentRefreshResponse.json()) as AppointmentListItem[];
+      expect(
+        refreshedAppointments.some((item) => item.title === appointmentTitle),
+      ).toBeTruthy();
 
       await expect(operationsPage.getByText(appointmentTitle).first()).toBeVisible({
         timeout: 30_000,
       });
 
+      const initialTasksResponsePromise = waitForApiGet(
+        operationsPage,
+        "/concierge-operational-items",
+      );
       await operationsPage.goto("/");
+      const initialTasksResponse = await initialTasksResponsePromise;
+      expect(initialTasksResponse.ok()).toBeTruthy();
       await expect(
         operationsPage
           .getByRole("heading", { name: /Guten|Hello|Willkommen/i })
@@ -229,22 +270,47 @@ test.describe("realtime live propagation", () => {
       }).first();
       const tasksBefore = await browserApiGet<TaskListItem[]>(
         operationsPage,
-        "/tasks?mine_only=true",
+        "/concierge-operational-items?archive=active",
       );
       const expectedOpenTasksCount =
-        tasksBefore.filter((task) => task.status !== "done" && task.status !== "cancelled")
+        tasksBefore.filter(
+          (task) =>
+            task.status !== "done" &&
+            task.status !== "completed" &&
+            task.status !== "cancelled",
+        )
           .length + 1;
 
-      await browserApiPost(mutatorPage, "/tasks", {
+      const taskRefreshPromise = waitForApiGet(
+        operationsPage,
+        "/concierge-operational-items",
+      );
+      const taskRequestId = await mutatorPage.evaluate(() => crypto.randomUUID());
+      await browserApiPost(mutatorPage, "/concierge-operational-items", {
+        request_id: taskRequestId,
+        kind: "task",
         title: taskTitle,
-        description: "Created in another browser context for dashboard realtime.",
+        note: "Created in another browser context for dashboard realtime.",
         assigned_to: operationsObserver.user_id,
+        concierge_service_id: null,
+        starts_at: null,
+        ends_at: null,
+        location: null,
         patient_id: scenario.patient.id,
-        order_id: null,
-        appointment_id: null,
-        due_date: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        provider_id: null,
+        due_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         priority: "urgent",
+        reminder_at: null,
+        task_audience: "internal",
+        external_assignee_type: null,
+        external_assignee_name: null,
+        external_assignee_phone: null,
+        external_assignee_email: null,
       });
+      const taskRefreshResponse = await taskRefreshPromise;
+      expect(taskRefreshResponse.ok()).toBeTruthy();
+      const refreshedTasks = (await taskRefreshResponse.json()) as TaskListItem[];
+      expect(refreshedTasks.some((task) => task.title === taskTitle)).toBeTruthy();
 
       await expect(operationsPage.getByText(taskTitle).first()).toBeVisible({
         timeout: 30_000,
