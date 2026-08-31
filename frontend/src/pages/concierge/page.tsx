@@ -630,7 +630,9 @@ export function ConciergeWorkspacePage() {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
           }),
-          apiFetch<ConciergeProvider[]>("/providers?provider_type=non_medical&active_only=true", {
+          apiFetch<ConciergeProvider[]>(user?.role === "concierge"
+            ? "/providers?active_only=true"
+            : "/providers?provider_type=non_medical&active_only=true", {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
           }).catch(() => []),

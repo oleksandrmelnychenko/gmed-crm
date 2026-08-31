@@ -6,6 +6,7 @@ import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { RevenueTranslations } from "./catalogs/revenue";
 import type { SharedCoreTranslations } from "./catalogs/shared";
+import type { StaffAccessTranslations } from "./catalogs/staff-access";
 
 export type TranslationShape = SharedCoreTranslations &
   AdminSystemTranslations &
@@ -15,4 +16,5 @@ export type TranslationShape = SharedCoreTranslations &
   OperationsTranslations &
   PatientsPortalTranslations &
   RevenueTranslations &
+  StaffAccessTranslations &
   Record<string, unknown>;

@@ -1044,6 +1044,11 @@ export function emptyGenerateForm(patientId = ""): GenerateFormState {
 }
 
 export function detailToEditForm(detail: DocumentItem): EditFormState {
+  const sourcePerson =
+    detail.source_person?.trim().toLowerCase() === "manual_intake"
+      ? ""
+      : (detail.source_person ?? "");
+
   return {
     patientId: detail.patient_id ?? "",
     orderId: detail.order_id ?? "",
@@ -1062,7 +1067,7 @@ export function detailToEditForm(detail: DocumentItem): EditFormState {
     accessCategory:
       detail.access_category ?? (detail.is_medical ? "medical" : "internal"),
     documentDate: detail.document_date ?? "",
-    sourcePerson: detail.source_person ?? "",
+    sourcePerson,
     sourceInstitution: detail.source_institution ?? "",
     addresseePerson: detail.addressee_person ?? "",
     addresseeInstitution: detail.addressee_institution ?? "",

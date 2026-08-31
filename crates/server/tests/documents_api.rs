@@ -1051,7 +1051,7 @@ async fn manual_intake_upload_stays_unlinked_and_skips_text_extraction_until_rev
 
     let document_id = Uuid::parse_str(upload_body["id"].as_str().unwrap()).unwrap();
     let stored = sqlx::query(
-        r#"SELECT patient_id, order_id, appointment_id, status, ursprung,
+        r#"SELECT patient_id, order_id, appointment_id, status, ursprung, source_person,
                   text_extraction_status
            FROM documents
            WHERE id = $1"#,
@@ -1068,6 +1068,7 @@ async fn manual_intake_upload_stays_unlinked_and_skips_text_extraction_until_rev
         stored.get::<Option<String>, _>("ursprung").as_deref(),
         Some("manual_intake")
     );
+    assert!(stored.get::<Option<String>, _>("source_person").is_none());
     assert_eq!(
         stored.get::<String, _>("text_extraction_status"),
         "not_started"
@@ -1855,7 +1856,7 @@ async fn explicit_profile_view_selects_nonmedical_document_but_never_medical_con
         admin_id,
         patient_id,
         appointment_id,
-        "released_internal",
+        "internal",
         false,
         "general",
         &format!("{tag}-nonmedical"),

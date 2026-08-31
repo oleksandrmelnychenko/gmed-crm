@@ -19,6 +19,10 @@ import {
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
+import { FilterBuilder } from "@/components/data-table/filter-builder";
+import { applyFilters } from "@/components/data-table/filter-logic";
+import { DataTablePager } from "@/components/data-table/data-table-pager";
+import type { ColumnDef, FilterPredicate } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,12 +73,21 @@ type ResourceLoadState = {
 };
 
 type ResourceStateMap = Record<StaffAccessResourceType, ResourceLoadState>;
+type ResourceFilterStateMap = Record<StaffAccessResourceType, FilterPredicate[]>;
 
 const EMPTY_RESOURCE_STATE: ResourceStateMap = {
   provider: { items: [], loading: false, error: "" },
   patient: { items: [], loading: false, error: "" },
   document: { items: [], loading: false, error: "" },
 };
+
+const EMPTY_RESOURCE_FILTERS: ResourceFilterStateMap = {
+  provider: [],
+  patient: [],
+  document: [],
+};
+
+const RESOURCE_PAGE_SIZE = 50;
 
 const RESOURCE_ICONS = {
   provider: Stethoscope,
@@ -145,102 +158,22 @@ export function StaffAccessSheet({
   employee: Pick<StaffAccessUser, "id" | "name" | "email" | "role"> | null;
   onClose: () => void;
 }) {
-  const { lang, t } = useLang();
-  const isGerman = lang === "de";
-  const copy = useMemo(
-    () =>
-      isGerman
-        ? {
-            title: "Zugriffe",
-            fullAccess: "Vollständiger Systemzugriff",
-            loadError: "Zugriffe konnten nicht geladen werden.",
-            resourceLoadError: "Katalog konnte nicht geladen werden.",
-            retry: "Erneut versuchen",
-            profile: "Wiederverwendbares Profil",
-            noProfile: "Ohne Profil",
-            profileHint: "Das Profil wird vererbt; persönliche Regeln bleiben separat.",
-            validUntil: "Profil gültig bis",
-            inherited: "Vom Profil geerbt",
-            noInherited: "Das gewählte Profil enthält keine Regeln.",
-            personal: "Persönliche Regeln",
-            providers: "Anbieter",
-            patients: "Patienten",
-            documents: "Dokumente",
-            search: "Ressource suchen",
-            empty: "Keine Ressourcen gefunden.",
-            medicalLocked: "Medizinisches Dokument: für diese Rolle systemweit gesperrt.",
-            directDeny: "Direkt verboten",
-            inheritedRule: "Profil",
-            globalRules: "Globale persönliche Regeln",
-            allScopeHint: "Persönliche Regel für alle verfügbaren Einträge; medizinische Systemgrenzen bleiben aktiv.",
-            remove: "Entfernen",
-            create: "Profil erstellen",
-            clone: "Profil duplizieren",
-            newProfileName: "Profilname",
-            description: "Beschreibung (optional)",
-            createFromDirect: "Aus persönlichen Regeln erstellen",
-            creating: "Wird erstellt…",
-            profileCreateError: "Profil konnte nicht erstellt werden.",
-            conflict: "Die Zugriffe wurden in einer anderen Sitzung geändert. Laden Sie die aktuellen Daten neu und wiederholen Sie die Änderungen.",
-            saveError: "Zugriffe konnten nicht gespeichert werden.",
-            save: "Zugriffe speichern",
-            saving: "Wird gespeichert…",
-            all: "Alle Einträge",
-            inactive: "Inaktiv",
-            assigned: "zugewiesen",
-            unavailable: "Nicht im aktuellen Katalog verfügbar",
-          }
-        : {
-            title: "Доступи",
-            fullAccess: "Повний системний доступ",
-            loadError: "Не вдалося завантажити доступи.",
-            resourceLoadError: "Не вдалося завантажити каталог.",
-            retry: "Спробувати ще",
-            profile: "Багаторазовий профіль",
-            noProfile: "Без профілю",
-            profileHint: "Правила профілю успадковуються, а персональні правила зберігаються окремо.",
-            validUntil: "Профіль діє до",
-            inherited: "Успадковано з профілю",
-            noInherited: "У вибраному профілі ще немає правил.",
-            personal: "Персональні правила",
-            providers: "Провайдери",
-            patients: "Пацієнти",
-            documents: "Документи",
-            search: "Знайти ресурс",
-            empty: "Ресурсів не знайдено.",
-            medicalLocked: "Медичний документ: для цієї ролі доступ заблокований системно.",
-            directDeny: "Пряма заборона",
-            inheritedRule: "Профіль",
-            globalRules: "Глобальні персональні правила",
-            allScopeHint: "Персональне правило для всіх доступних записів; системні медичні обмеження залишаються чинними.",
-            remove: "Видалити",
-            create: "Створити профіль",
-            clone: "Дублювати профіль",
-            newProfileName: "Назва профілю",
-            description: "Опис (необов'язково)",
-            createFromDirect: "Створити з персональних правил",
-            creating: "Створення…",
-            profileCreateError: "Не вдалося створити профіль.",
-            conflict: "Доступи змінили в іншій сесії. Завантажте актуальні дані та повторіть зміни.",
-            saveError: "Не вдалося зберегти доступи.",
-            save: "Зберегти доступи",
-            saving: "Збереження…",
-            all: "Усі записи",
-            inactive: "Неактивний",
-            assigned: "призначено",
-            unavailable: "Недоступний у поточному каталозі",
-          },
-    [isGerman],
-  );
+  const { t } = useLang();
+  const copy = t.staffAccess;
 
   const capabilityLabel = useCallback(
     (capability: StaffAccessCapability) => {
-      const labels = isGerman
-        ? { view: "Ansehen", use: "Verwenden", edit: "Bearbeiten", download: "Download", upload: "Upload" }
-        : { view: "Перегляд", use: "Використання", edit: "Редагування", download: "Завантаження", upload: "Вивантаження" };
-      return labels[capability];
+      return copy.capabilities[capability];
     },
-    [isGerman],
+    [copy.capabilities],
+  );
+
+  const resourceStatusLabel = useCallback(
+    (status: string) => {
+      const labels = copy.statuses as Record<string, string>;
+      return labels[status] ?? copy.statuses.unknown;
+    },
+    [copy.statuses],
   );
 
   const [access, setAccess] = useState<StaffUserAccessResponse | null>(null);
@@ -256,6 +189,13 @@ export function StaffAccessSheet({
     provider: "",
     patient: "",
     document: "",
+  });
+  const [resourceFilters, setResourceFilters] =
+    useState<ResourceFilterStateMap>(EMPTY_RESOURCE_FILTERS);
+  const [resourcePages, setResourcePages] = useState<Record<StaffAccessResourceType, number>>({
+    provider: 0,
+    patient: 0,
+    document: 0,
   });
   const [draftProfileId, setDraftProfileId] = useState("");
   const [draftProfileValidUntil, setDraftProfileValidUntil] = useState("");
@@ -361,6 +301,8 @@ export function StaffAccessSheet({
     setProfileBusy(false);
     setActiveTab("provider");
     setSearches({ provider: "", patient: "", document: "" });
+    setResourceFilters({ provider: [], patient: [], document: [] });
+    setResourcePages({ provider: 0, patient: 0, document: 0 });
     setDraftProfileId("");
     setDraftProfileValidUntil("");
     setDraftRules([]);
@@ -413,6 +355,7 @@ export function StaffAccessSheet({
           id: rule.resource_id,
           label: rule.resource_id,
           description: copy.unavailable,
+          status: "unknown",
         });
       }
     }
@@ -423,9 +366,9 @@ export function StaffAccessSheet({
   };
 
   const globalDirectRules = draftRules.filter((rule) => rule.scope_type === "all");
-  const targetCanUseMedicalDocuments = employee
-    ? canRoleUseMedicalDocuments(employee.role)
-    : false;
+  const targetRole = access?.user.role ?? employee?.role ?? "";
+  const targetCanUseMedicalDocuments =
+    Boolean(access?.ceo_full_access) || canRoleUseMedicalDocuments(targetRole);
 
   const save = async () => {
     if (!employee || !access || !dirty || saving) return;
@@ -506,75 +449,81 @@ export function StaffAccessSheet({
     const state = resources[resourceType];
     const Icon = RESOURCE_ICONS[resourceType];
     const capabilities = STAFF_ACCESS_CAPABILITIES[resourceType];
-    const displayedResources = resourcesForType(resourceType);
+    const resourceTitle =
+      resourceType === "provider"
+        ? copy.providers
+        : resourceType === "patient"
+          ? copy.patients
+          : copy.documents;
+    const catalogResources = resourcesForType(resourceType);
+    const filterColumns: ColumnDef<StaffAccessResource>[] = [
+      {
+        id: "resource",
+        label: resourceTitle,
+        accessor: (item) => `${item.label} ${item.description}`.trim(),
+        filterType: "text",
+      },
+      ...(resourceType === "provider" || resourceType === "document"
+        ? [{
+            id: "resource_type",
+            label: copy.resourceType,
+            accessor: (item: StaffAccessResource) => item.medicalKind ?? "",
+            filterType: "enum" as const,
+            filterOptions: [
+              { value: "medical", label: t.providers_type_medical },
+              { value: "non_medical", label: t.providers_type_non_medical },
+            ],
+          }]
+        : []),
+      {
+        id: "resource_status",
+        label: copy.resourceStatus,
+        accessor: (item) => item.status,
+        filterType: "enum",
+        filterOptions: Array.from(new Set(catalogResources.map((item) => item.status)))
+          .sort()
+          .map((status) => ({ value: status, label: resourceStatusLabel(status) })),
+      },
+    ];
+    const filterAccessors = Object.fromEntries(
+      filterColumns.map((column) => [column.id, column.accessor]),
+    );
+    const displayedResources = applyFilters(
+      catalogResources,
+      resourceFilters[resourceType],
+      { accessors: filterAccessors },
+    );
+    const totalPages = Math.max(1, Math.ceil(displayedResources.length / RESOURCE_PAGE_SIZE));
+    const pageIndex = Math.min(resourcePages[resourceType], totalPages - 1);
+    const pagedResources = displayedResources.slice(
+      pageIndex * RESOURCE_PAGE_SIZE,
+      (pageIndex + 1) * RESOURCE_PAGE_SIZE,
+    );
 
     return (
       <TabsContent value={resourceType} className="space-y-3 pt-2">
-        <div className="rounded-xl border border-border bg-muted/20 p-3">
-          <div className="space-y-0.5">
-            <p className="text-sm font-medium text-foreground">{copy.all}</p>
-            <p className="text-xs text-muted-foreground">{copy.allScopeHint}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[260px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searches[resourceType]}
+              onChange={(event) => {
+                setSearches((current) => ({ ...current, [resourceType]: event.target.value }));
+                setResourcePages((current) => ({ ...current, [resourceType]: 0 }));
+              }}
+              placeholder={copy.search}
+              className="h-9 bg-field pl-9"
+            />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {capabilities.map((capability) => {
-              const direct = directAllRuleFor(draftRules, resourceType, capability);
-              const inherited = effectiveProfileAllRule(
-                selectedProfile?.rules ?? [],
-                resourceType,
-                capability,
-              );
-              const checked = (direct?.effect ?? inherited?.effect) === "allow";
-              return (
-                <label
-                  key={capability}
-                  className={cn(
-                    "inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs",
-                    checked && "border-primary/40 bg-primary/5 text-foreground",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={saving}
-                    onChange={(event) =>
-                      setDraftRules((current) =>
-                        setDirectAllRuleEnabled(
-                          current,
-                          resourceType,
-                          capability,
-                          event.target.checked,
-                          inherited?.effect,
-                        ),
-                      )
-                    }
-                    className="size-3.5 accent-[var(--primary)]"
-                  />
-                  <span>{capabilityLabel(capability)}</span>
-                  {inherited && !direct ? (
-                    <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
-                      {copy.inheritedRule}
-                    </span>
-                  ) : null}
-                  {direct?.effect === "deny" ? (
-                    <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-rose-700">
-                      {copy.directDeny}
-                    </span>
-                  ) : null}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searches[resourceType]}
-            onChange={(event) =>
-              setSearches((current) => ({ ...current, [resourceType]: event.target.value }))
-            }
-            placeholder={copy.search}
-            className="h-9 bg-field pl-9"
+          <FilterBuilder
+            columns={filterColumns}
+            rows={catalogResources}
+            filters={resourceFilters[resourceType]}
+            onChange={(filters) => {
+              setResourceFilters((current) => ({ ...current, [resourceType]: filters }));
+              setResourcePages((current) => ({ ...current, [resourceType]: 0 }));
+            }}
+            className="shrink-0"
           />
         </div>
 
@@ -597,93 +546,81 @@ export function StaffAccessSheet({
         {state.loading ? <TabLoader /> : null}
 
         {!state.loading && !state.error ? (
-          <div className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
-            {displayedResources.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                {copy.empty}
-              </div>
-            ) : null}
-            {displayedResources.map((item) => {
-              const medicalLocked =
-                resourceType === "document" &&
-                item.isMedical &&
-                !targetCanUseMedicalDocuments;
-              return (
-                <article
-                  key={item.id}
-                  className={cn(
-                    "rounded-xl border border-border bg-card/70 p-3",
-                    medicalLocked && "bg-muted/40 opacity-75",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="max-h-[46vh] overflow-auto rounded-xl border border-border bg-card">
+              <table className="w-full min-w-[720px] border-collapse text-left">
+              <thead className="sticky top-0 z-10 bg-muted/95 backdrop-blur">
+                <tr className="border-b border-border">
+                  <th className="min-w-[280px] px-3 py-2.5 text-xs font-semibold text-foreground">
+                    {resourceTitle}
+                  </th>
+                  {capabilities.map((capability) => (
+                    <th
+                      key={capability}
+                      className="min-w-[110px] px-2 py-2.5 text-center text-xs font-semibold text-foreground"
+                    >
+                      {capabilityLabel(capability)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                <tr className="bg-primary/[0.035]">
+                  <td className="px-3 py-3 align-middle">
                     <div className="flex min-w-0 items-start gap-2">
-                      <span className="mt-0.5 rounded-md bg-muted p-1.5 text-muted-foreground">
-                        {medicalLocked ? <LockKeyhole className="size-3.5" /> : <Icon className="size-3.5" />}
+                      <span className="mt-0.5 rounded-md bg-primary/10 p-1.5 text-primary">
+                        <Icon className="size-3.5" />
                       </span>
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
-                        {item.description ? (
-                          <p className="truncate text-xs text-muted-foreground">{item.description}</p>
-                        ) : null}
+                        <p className="text-sm font-semibold text-foreground">{copy.all}</p>
+                        <p className="text-xs text-muted-foreground">{copy.allScopeHint}</p>
                       </div>
                     </div>
-                    {item.isMedical ? (
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
-                        Medical
-                      </Badge>
-                    ) : null}
-                  </div>
-
-                  {medicalLocked ? (
-                    <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700">
-                      <AlertTriangle className="size-3.5 shrink-0" />
-                      {copy.medicalLocked}
-                    </p>
-                  ) : null}
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {capabilities.map((capability) => {
-                      const direct = directRuleFor(draftRules, resourceType, item.id, capability);
-                      const directAll = directAllRuleFor(draftRules, resourceType, capability);
-                      const inherited = effectiveProfileRule(
-                        selectedProfile?.rules ?? [],
-                        resourceType,
-                        item.id,
-                        capability,
-                      );
-                      const inheritedEffect = directAll?.effect ?? inherited?.effect;
-                      const checked =
-                        !medicalLocked && (direct?.effect ?? inheritedEffect) === "allow";
-                      return (
-                        <label
-                          key={capability}
-                          className={cn(
-                            "inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs",
-                            checked && "border-primary/40 bg-primary/5 text-foreground",
-                            medicalLocked && "cursor-not-allowed",
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={medicalLocked || saving}
-                            onChange={(event) =>
-                              setDraftRules((current) =>
-                                setDirectRuleEnabled(
-                                  current,
-                                  resourceType,
-                                  item.id,
-                                  capability,
-                                  event.target.checked,
-                                  inheritedEffect,
-                                ),
-                              )
+                  </td>
+                  {capabilities.map((capability) => {
+                    const direct = directAllRuleFor(draftRules, resourceType, capability);
+                    const inherited = effectiveProfileAllRule(
+                      selectedProfile?.rules ?? [],
+                      resourceType,
+                      capability,
+                    );
+                    const checked = (direct?.effect ?? inherited?.effect) === "allow";
+                    const medicalAllLocked =
+                      resourceType === "document" && !targetCanUseMedicalDocuments;
+                    return (
+                      <td key={capability} className="px-2 py-3 text-center align-middle">
+                        <div className="flex flex-col items-center gap-1">
+                          <label
+                            className={cn(
+                              "inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background",
+                              checked && "border-primary/40 bg-primary/5",
+                              medicalAllLocked && "cursor-not-allowed bg-muted/60",
+                            )}
+                            title={
+                              medicalAllLocked
+                                ? copy.medicalLocked
+                                : `${copy.all}: ${capabilityLabel(capability)}`
                             }
-                            className="size-3.5 accent-[var(--primary)]"
-                          />
-                          <span>{capabilityLabel(capability)}</span>
-                          {inherited && !direct && !directAll ? (
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={saving || medicalAllLocked}
+                              onChange={(event) =>
+                                setDraftRules((current) =>
+                                  setDirectAllRuleEnabled(
+                                    current,
+                                    resourceType,
+                                    capability,
+                                    event.target.checked,
+                                    inherited?.effect,
+                                  ),
+                                )
+                              }
+                              className="size-3.5 accent-[var(--primary)]"
+                            />
+                          </label>
+                          {inherited && !direct ? (
                             <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
                               {copy.inheritedRule}
                             </span>
@@ -693,13 +630,188 @@ export function StaffAccessSheet({
                               {copy.directDeny}
                             </span>
                           ) : null}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </article>
-              );
-            })}
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+
+                {displayedResources.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={capabilities.length + 1}
+                      className="px-4 py-8 text-center text-sm text-muted-foreground"
+                    >
+                      {copy.empty}
+                    </td>
+                  </tr>
+                ) : null}
+
+                {pagedResources.map((item) => {
+                  const medicalLocked =
+                    resourceType === "document" &&
+                    item.isMedical &&
+                    !targetCanUseMedicalDocuments;
+                  return (
+                    <tr
+                      key={item.id}
+                      className={cn(
+                        "transition-colors hover:bg-muted/25",
+                        medicalLocked && "bg-muted/35 text-muted-foreground",
+                      )}
+                    >
+                      <td className="px-3 py-3 align-middle">
+                        <div className="flex min-w-0 items-start gap-2">
+                          <span className="mt-0.5 rounded-md bg-muted p-1.5 text-muted-foreground">
+                            {medicalLocked ? (
+                              <LockKeyhole className="size-3.5" />
+                            ) : (
+                              <Icon className="size-3.5" />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {item.label}
+                              </p>
+                              {item.medicalKind ? (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "shrink-0 rounded-full text-[10px]",
+                                    item.medicalKind === "medical"
+                                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                                      : "border-violet-200 bg-violet-50 text-violet-700",
+                                  )}
+                                >
+                                  {item.medicalKind === "medical"
+                                    ? t.providers_type_medical
+                                    : t.providers_type_non_medical}
+                                </Badge>
+                              ) : null}
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "shrink-0 rounded-full text-[10px]",
+                                  item.status === "active" &&
+                                    "border-emerald-200 bg-emerald-50 text-emerald-700",
+                                  (item.status === "inactive" || item.status === "deleted") &&
+                                    "border-rose-200 bg-rose-50 text-rose-700",
+                                  (item.status === "draft" || item.status === "prospective") &&
+                                    "border-amber-200 bg-amber-50 text-amber-700",
+                                )}
+                              >
+                                {resourceStatusLabel(item.status)}
+                              </Badge>
+                            </div>
+                            {item.description ? (
+                              <p className="truncate text-xs text-muted-foreground">
+                                {item.description}
+                              </p>
+                            ) : null}
+                            {medicalLocked ? (
+                              <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-700">
+                                <AlertTriangle className="size-3 shrink-0" />
+                                {copy.medicalLocked}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </td>
+                      {capabilities.map((capability) => {
+                        const direct = directRuleFor(
+                          draftRules,
+                          resourceType,
+                          item.id,
+                          capability,
+                        );
+                        const directAll = directAllRuleFor(
+                          draftRules,
+                          resourceType,
+                          capability,
+                        );
+                        const inherited = effectiveProfileRule(
+                          selectedProfile?.rules ?? [],
+                          resourceType,
+                          item.id,
+                          capability,
+                        );
+                        const inheritedEffect = directAll?.effect ?? inherited?.effect;
+                        const checked =
+                          !medicalLocked && (direct?.effect ?? inheritedEffect) === "allow";
+                        return (
+                          <td key={capability} className="px-2 py-3 text-center align-middle">
+                            <div className="flex flex-col items-center gap-1">
+                              <label
+                                className={cn(
+                                  "inline-flex size-8 cursor-pointer items-center justify-center rounded-lg border border-border bg-background",
+                                  checked && "border-primary/40 bg-primary/5",
+                                  medicalLocked && "cursor-not-allowed bg-muted/60",
+                                )}
+                                title={`${item.label}: ${capabilityLabel(capability)}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={medicalLocked || saving}
+                                  onChange={(event) =>
+                                    setDraftRules((current) =>
+                                      setDirectRuleEnabled(
+                                        current,
+                                        resourceType,
+                                        item.id,
+                                        capability,
+                                        event.target.checked,
+                                        inheritedEffect,
+                                      ),
+                                    )
+                                  }
+                                  className="size-3.5 accent-[var(--primary)]"
+                                />
+                              </label>
+                              {inherited && !direct && !directAll ? (
+                                <span className="rounded bg-sky-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-sky-700">
+                                  {copy.inheritedRule}
+                                </span>
+                              ) : null}
+                              {direct?.effect === "deny" ? (
+                                <span className="rounded bg-rose-50 px-1 py-0.5 text-[9px] font-semibold uppercase text-rose-700">
+                                  {copy.directDeny}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {copy.resourceCount
+                  .replace("{shown}", String(displayedResources.length))
+                  .replace("{total}", String(catalogResources.length))}
+              </p>
+              {totalPages > 1 ? (
+                <DataTablePager
+                  pageIndex={pageIndex}
+                  pageSize={RESOURCE_PAGE_SIZE}
+                  totalPages={totalPages}
+                  totalRows={displayedResources.length}
+                  previousLabel={t.pagination_previous}
+                  nextLabel={t.pagination_next}
+                  onPageChange={(nextPage) =>
+                    setResourcePages((current) => ({
+                      ...current,
+                      [resourceType]: nextPage,
+                    }))
+                  }
+                />
+              ) : null}
+            </div>
           </div>
         ) : null}
       </TabsContent>
@@ -710,7 +822,7 @@ export function StaffAccessSheet({
     <Sheet open={open} dirty={dirty} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <SheetContent
         side="right"
-        className="w-full border-l border-border p-0 sm:max-w-[min(920px,78vw)]"
+        className="!inset-[10px] !h-[calc(100dvh-20px)] !w-[calc(100vw-20px)] !max-w-none !rounded-xl !border !border-border !p-0 !shadow-xl"
       >
         <AdminSheetScaffold
           title={`${copy.title} — ${employee?.name ?? ""}`}
@@ -766,7 +878,6 @@ export function StaffAccessSheet({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
                     <AdminSectionTitle>{copy.profile}</AdminSectionTitle>
-                    <p className="text-xs text-muted-foreground">{copy.profileHint}</p>
                   </div>
                   <div className="flex gap-2">
                     <Button type="button" size="sm" variant="outline" onClick={() => openProfileForm("create")}>

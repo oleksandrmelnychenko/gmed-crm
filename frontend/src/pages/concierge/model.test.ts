@@ -678,6 +678,10 @@ describe("concierge workspace model", () => {
     expect(filterConciergeProviders([driver, restaurant], "restaurants", "bavaria")).toEqual([
       restaurant,
     ]);
+    const medical = provider({ id: "medical", provider_type: "medical" });
+    expect(
+      filterConciergeProviders([driver, medical], "all", "", "medical").map((item) => item.id),
+    ).toEqual(["medical"]);
     expect(sortConciergeProviders([driver, restaurant]).map((item) => item.id)).toEqual([
       "restaurant",
       "driver",

@@ -10526,11 +10526,19 @@ fn explicit_document_policy_boundary_allows(auth: &AuthUser, row: &sqlx::postgre
         share_status,
     );
 
+    // A CEO-granted record rule is the assignment boundary for a Concierge.
+    // Keep medical and financial categories blocked, but allow an explicitly
+    // selected non-medical internal document even when it has no patient link
+    // or has not been released to a broader audience.
+    if auth.role == Role::Concierge && sensitivity == DataSensitivity::Internal {
+        return true;
+    }
+
     policy::check_access(&AccessContext {
         role: auth.role,
         user_id: auth.user_id,
-        // Explicit record access may replace assignment/share scope, but not
-        // sensitivity, release or role policy boundaries.
+        // For all other roles and sensitivities, an explicit record rule may
+        // replace assignment scope but not the normal release/role boundary.
         is_assigned: true,
         data_sensitivity: sensitivity,
         share_status: Some(share_status),
@@ -20904,7 +20912,11 @@ async fn upload_document(
                 visibility.as_str(),
             ))),
         document_date: document_date.or_else(|| Some(chrono::Utc::now().date_naive())),
-        source_person: source_person.as_deref().or(ursprung.as_deref()),
+        source_person: if manual_intake {
+            source_person.as_deref()
+        } else {
+            source_person.as_deref().or(ursprung.as_deref())
+        },
         source_institution: source_institution.as_deref().or(klinik.as_deref()),
         addressee_person: addressee_person.as_deref(),
         addressee_institution: addressee_institution.as_deref(),
@@ -21580,7 +21592,7 @@ async fn delete_document_file(
     Path(id): Path<Uuid>,
     Json(body): Json<DeleteDocumentFileRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
         return resp;
     }
 

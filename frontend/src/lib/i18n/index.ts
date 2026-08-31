@@ -10,6 +10,7 @@ import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { RevenueTranslations } from "./catalogs/revenue";
 import type { SharedCoreTranslations } from "./catalogs/shared";
+import type { StaffAccessTranslations } from "./catalogs/staff-access";
 
 export interface Translations
   extends SharedCoreTranslations,
@@ -19,7 +20,8 @@ export interface Translations
     ExtractedUiTranslations,
     OperationsTranslations,
     PatientsPortalTranslations,
-    RevenueTranslations {
+    RevenueTranslations,
+    StaffAccessTranslations {
   app_name: string;
   app_subtitle: string;
   app_not_found_title: string;

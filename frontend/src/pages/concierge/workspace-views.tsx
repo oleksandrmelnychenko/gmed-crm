@@ -43,6 +43,7 @@ import {
   type ConciergeAgendaItem,
   type ConciergeProvider,
   type ConciergeProviderCategory,
+  type ConciergeProviderTypeFilter,
   type ConciergeRouteStop,
   type ConciergeService,
   type ConciergeTask,
@@ -82,12 +83,15 @@ const copy = {
     destinations: "Serviceziele",
     partners: "Empfohlene Partner",
     partnerSubtitle: "Aktive nicht-medizinische Partner und Leistungserbringer nach Kategorie und Bewertung.",
+    partnerSubtitleWithMedical: "Aktive Partner und ausdrücklich freigegebene medizinische Anbieter.",
     providerSearch: "Partner oder Ort suchen",
     all: "Alle",
     restaurants: "Restaurants",
     drivers: "Fahrer",
     hotels: "Hotels",
     other: "Weitere",
+    medical: "Medizinisch",
+    nonMedical: "Nicht medizinisch",
     noPartners: "Keine passenden Partner gefunden.",
     noDestinations: "Für die aktuellen Services sind noch keine Partner- oder Ausführungsadressen hinterlegt.",
     rating: "Bewertung",
@@ -148,12 +152,15 @@ const copy = {
     destinations: "Адреса услуг",
     partners: "Рекомендованные партнёры",
     partnerSubtitle: "Активные немедицинские партнёры и исполнители по категории и рейтингу.",
+    partnerSubtitleWithMedical: "Активные партнёры и явно разрешённые медицинские провайдеры.",
     providerSearch: "Поиск партнёра или города",
     all: "Все",
     restaurants: "Рестораны",
     drivers: "Водители",
     hotels: "Отели",
     other: "Другие",
+    medical: "Медицинский",
+    nonMedical: "Немедицинский",
     noPartners: "Подходящие партнёры не найдены.",
     noDestinations: "Для текущих услуг ещё не указаны адреса партнёров или исполнителей.",
     rating: "Оценка",
@@ -474,6 +481,7 @@ export function ConciergeMapView({
 }) {
   const labels = copy[lang];
   const [category, setCategory] = useState<ConciergeProviderCategory>("all");
+  const [providerType, setProviderType] = useState<ConciergeProviderTypeFilter>("all");
   const [providerQuery, setProviderQuery] = useState("");
   const [routeDate, setRouteDate] = useState(() => localDateInputValue(new Date()));
   const [routeOrder, setRouteOrder] = useState<string[]>([]);
@@ -536,9 +544,12 @@ export function ConciergeMapView({
     });
   }, [providersById, services]);
   const recommendations = useMemo(
-    () => sortConciergeProviders(filterConciergeProviders(providers, category, providerQuery)),
-    [category, providerQuery, providers],
+    () => sortConciergeProviders(
+      filterConciergeProviders(providers, category, providerQuery, providerType),
+    ),
+    [category, providerQuery, providerType, providers],
   );
+  const hasMedicalProviders = providers.some((provider) => provider.provider_type === "medical");
   const categories: ConciergeProviderCategory[] = ["all", "restaurants", "drivers", "hotels", "other"];
 
   function selectRouteDate(value: string) {
@@ -745,10 +756,32 @@ export function ConciergeMapView({
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h2 className="text-sm font-semibold">{labels.partners}</h2>
           </div>
-          <p className="mt-1 pl-4 text-xs leading-5 text-muted-foreground">{labels.partnerSubtitle}</p>
+          <p className="mt-1 pl-4 text-xs leading-5 text-muted-foreground">
+            {hasMedicalProviders ? labels.partnerSubtitleWithMedical : labels.partnerSubtitle}
+          </p>
         </div>
         <div className="space-y-2 border-b border-border/60 p-3">
           <Input className="h-8 rounded-md bg-field text-xs" value={providerQuery} onChange={(event) => setProviderQuery(event.target.value)} placeholder={labels.providerSearch} aria-label={labels.providerSearch} />
+          {hasMedicalProviders ? (
+            <div className="flex gap-1 overflow-x-auto pb-1" aria-label={labels.partners}>
+              {(["all", "non_medical", "medical"] as const).map((item) => (
+                <Button
+                  key={item}
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-full px-3 text-xs"
+                  variant={providerType === item ? "default" : "outline"}
+                  aria-pressed={providerType === item}
+                  onClick={() => {
+                    setProviderType(item);
+                    if (item === "medical") setCategory("all");
+                  }}
+                >
+                  {item === "all" ? labels.all : item === "medical" ? labels.medical : labels.nonMedical}
+                </Button>
+              ))}
+            </div>
+          ) : null}
           <div className="flex gap-1 overflow-x-auto pb-1">
             {categories.map((item) => (
               <Button key={item} type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs" variant={category === item ? "default" : "ghost"} aria-pressed={category === item} onClick={() => setCategory(item)}>
@@ -772,7 +805,20 @@ export function ConciergeMapView({
                       <h3 className="truncate text-sm font-semibold">{provider.name}</h3>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">{conciergeProviderTaxonomyLabel(provider, lang)}</p>
                     </div>
-                    {rating !== null ? <Badge variant="outline" className="rounded-full text-[10px]"><Star className="fill-amber-400 text-amber-500" />{rating.toFixed(1)}</Badge> : null}
+                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "rounded-full text-[10px]",
+                          provider.provider_type === "medical"
+                            ? "border-sky-200 bg-sky-50 text-sky-700"
+                            : "border-violet-200 bg-violet-50 text-violet-700",
+                        )}
+                      >
+                        {provider.provider_type === "medical" ? labels.medical : labels.nonMedical}
+                      </Badge>
+                      {rating !== null ? <Badge variant="outline" className="rounded-full text-[10px]"><Star className="fill-amber-400 text-amber-500" />{rating.toFixed(1)}</Badge> : null}
+                    </div>
                   </div>
                   <p className="mt-2 flex min-h-10 items-start gap-1.5 text-xs leading-5 text-muted-foreground"><MapPin className="mt-0.5 size-3.5 shrink-0" />{address || labels.routeUnavailable}</p>
                   <p className="mt-1 text-xs text-muted-foreground">{provider.open_concierge_service_count} {labels.openServices}</p>

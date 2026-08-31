@@ -643,5 +643,16 @@ describe("document operational metadata forms", () => {
       paymentDueDate: "2026-06-30",
       paymentMethod: "bank_transfer",
     });
+
+    expect(
+      detailToEditForm({
+        ...detail,
+        ursprung: "manual_intake",
+        source_person: "manual_intake",
+      }),
+    ).toMatchObject({
+      ursprung: "manual_intake",
+      sourcePerson: "",
+    });
   });
 });

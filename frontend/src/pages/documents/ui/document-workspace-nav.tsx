@@ -53,7 +53,7 @@ export function DocumentWorkspaceNav() {
     <nav
       data-workspace-tabs="documents"
       aria-label={t.nav_documents}
-      className="mx-auto grid w-full grid-cols-3 gap-1 sm:flex sm:w-fit"
+      className="mx-auto flex w-fit max-w-full items-center justify-center gap-2 overflow-x-auto px-2 py-1"
     >
       {items.map((item) => {
         const isActive = currentKey === item.key;
@@ -67,13 +67,16 @@ export function DocumentWorkspaceNav() {
             className={cn(
               buttonVariants({
                 size: "sm",
-                variant: isActive ? "default" : "ghost",
+                variant: "ghost",
               }),
-              "h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3",
+              "h-11 min-w-fit rounded-xl px-4 text-sm font-medium",
+              isActive
+                ? "bg-orange-500 text-white shadow-sm hover:bg-orange-600 hover:text-white"
+                : "text-foreground hover:bg-muted",
             )}
           >
-            <Icon className="size-3.5 shrink-0" strokeWidth={1.7} />
-            <span className="min-w-0 truncate">{item.label}</span>
+            <Icon className="size-4 shrink-0" strokeWidth={1.8} />
+            <span className="whitespace-nowrap">{item.label}</span>
           </StaffLink>
         );
       })}

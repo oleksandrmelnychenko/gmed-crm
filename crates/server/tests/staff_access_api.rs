@@ -87,6 +87,26 @@ async fn seed_document(pool: &PgPool, uploaded_by: Uuid, is_medical: bool) -> Uu
     .unwrap()
 }
 
+async fn seed_patient(pool: &PgPool, created_by: Uuid, active: bool) -> Uuid {
+    let suffix = Uuid::new_v4().simple().to_string();
+    sqlx::query_scalar(
+        r#"INSERT INTO patients (
+               patient_id, first_name, last_name, birth_date, gender,
+               email, is_active, lifecycle_status, created_by
+           ) VALUES ($1, 'Ivan', $2, '1990-01-01', 'diverse', $3, $4, $5, $6)
+           RETURNING id"#,
+    )
+    .bind(format!("ACL-{suffix}"))
+    .bind(format!("Catalog {suffix}"))
+    .bind(format!("acl-catalog-{suffix}@example.com"))
+    .bind(active)
+    .bind(if active { "active" } else { "inactive" })
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 async fn create_profile(
     app: &axum::Router,
     bearer: &str,
@@ -129,6 +149,76 @@ async fn staff_access_api_requires_exact_ceo_role() {
     .await;
 
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/staff-access/resources/provider",
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}
+
+#[tokio::test]
+async fn ceo_resource_catalog_includes_inactive_and_medical_records() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let provider_id = seed_provider(&pool).await;
+    sqlx::query(
+        "UPDATE providers SET provider_type = 'non_medical', is_active = false WHERE id = $1",
+    )
+    .bind(provider_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let patient_id = seed_patient(&pool, admin_id, false).await;
+    let document_id = seed_document(&pool, admin_id, true).await;
+
+    for (resource_type, expected_id, expected_status, expected_kind) in [
+        ("provider", provider_id, "inactive", Some("non_medical")),
+        ("patient", patient_id, "inactive", None),
+        ("document", document_id, "active", Some("medical")),
+    ] {
+        let expected_id_text = expected_id.to_string();
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/staff-access/resources/{resource_type}"),
+            &bearer,
+            json!(null),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let item = body
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["id"].as_str() == Some(expected_id_text.as_str()))
+            })
+            .unwrap_or_else(|| {
+                panic!("resource {expected_id} missing from {resource_type} catalog")
+            });
+        assert_eq!(item["status"], expected_status);
+        match expected_kind {
+            Some(kind) => assert_eq!(item["medical_kind"], kind),
+            None => assert!(item["medical_kind"].is_null()),
+        }
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/staff-access/resources/unsupported",
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }
 
 #[tokio::test]

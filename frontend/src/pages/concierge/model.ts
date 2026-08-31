@@ -523,6 +523,7 @@ export type ConciergeRoutePlan = {
 };
 
 export type ConciergeProviderCategory = "all" | "restaurants" | "drivers" | "hotels" | "other";
+export type ConciergeProviderTypeFilter = "all" | "medical" | "non_medical";
 
 export const CONCIERGE_BOARD_COLUMNS = [
   { id: "planned", statuses: ["planned"] },
@@ -986,9 +987,11 @@ export function filterConciergeProviders(
   providers: ConciergeProvider[],
   category: ConciergeProviderCategory,
   query: string,
+  providerType: ConciergeProviderTypeFilter = "all",
 ): ConciergeProvider[] {
   const needle = query.trim().toLocaleLowerCase();
   return providers.filter((provider) => {
+    if (providerType !== "all" && provider.provider_type !== providerType) return false;
     if (category !== "all" && conciergeProviderCategory(provider) !== category) return false;
     if (!needle) return true;
     return [

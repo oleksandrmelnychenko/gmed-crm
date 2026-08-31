@@ -7,9 +7,11 @@ import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { revenueRu } from "./catalogs/revenue";
 import { sharedCoreRu } from "./catalogs/shared";
+import { staffAccessRu } from "./catalogs/staff-access";
 
 export const ru = {
   uiText: extractedUiRu,
+  staffAccess: staffAccessRu,
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",
   app_not_found_title: "Страница не найдена",

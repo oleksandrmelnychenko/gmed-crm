@@ -592,6 +592,8 @@ function formatDocumentSourceLabel(
       return tr.documents_translation_requests;
     case "manual":
       return tr.orders_billing_source_manual;
+    case "manual_intake":
+      return `${tr.orders_billing_source_manual} · ${tr.documents_upload}`;
     default:
       return formatUnknownValue(source, tr);
   }
@@ -1036,6 +1038,10 @@ function StaffDocumentsPage({
     intakeUploading: lang === "ru" ? "Загружается" : "Wird hochgeladen",
     intakeUploaded: lang === "ru" ? "Ожидает проверки" : "Wartet auf Prüfung",
     intakeUploadFailed: lang === "ru" ? "Ошибка" : "Fehler",
+    intakeUploadFailedNotice: (count: number, reason: string) =>
+      lang === "ru"
+        ? `Не удалось загрузить документов: ${count}. ${reason}`
+        : `${count} Dokument(e) konnten nicht hochgeladen werden. ${reason}`,
     intakeUploadAction: (count: number) =>
       lang === "ru"
         ? `Загрузить (${count})`
@@ -1210,6 +1216,11 @@ function StaffDocumentsPage({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleteReason, setDeleteReason] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{
+    fromIntake: boolean;
+    id: string;
+    name: string;
+  } | null>(null);
 
   const [shares, setShares] = useState<DocumentShare[]>([]);
   const activeDocumentDetailId = routeDocumentId ?? selectedId;
@@ -1956,6 +1967,7 @@ function StaffDocumentsPage({
     setMetadataEditOpen(false);
     setShareCreateOpen(false);
     setDeleteOpen(false);
+    setDeleteTarget(null);
     setSelectedId("");
   }
 
@@ -1988,6 +2000,20 @@ function StaffDocumentsPage({
     setEditForm(null);
     setSelectedId(id);
     setMetadataEditOpen(true);
+  }
+
+  function requestDocumentDeletion(
+    document: Pick<DocumentItem, "id" | "auto_name" | "original_filename">,
+    fromIntake = false,
+  ) {
+    setDeleteError("");
+    setDeleteReason("");
+    setDeleteTarget({
+      fromIntake,
+      id: document.id,
+      name: document.original_filename ?? document.auto_name,
+    });
+    setDeleteOpen(true);
   }
 
   function toggleDocumentSelection(id: string, checked: boolean) {
@@ -2050,6 +2076,8 @@ function StaffDocumentsPage({
     setIntakeUploadError("");
     let cursor = 0;
     let completed = 0;
+    let failed = 0;
+    const failureMessages = new Set<string>();
     const worker = async () => {
       while (cursor < uploadable.length) {
         const item = uploadable[cursor];
@@ -2075,16 +2103,19 @@ function StaffDocumentsPage({
             ),
           );
         } catch (nextError) {
+          failed += 1;
+          const failureMessage =
+            nextError instanceof Error
+              ? nextError.message
+              : t.documents_failed_upload;
+          failureMessages.add(failureMessage);
           setIntakeUploadItems((current) =>
             current.map((candidate) =>
               candidate.id === item.id
                 ? {
                     ...candidate,
                     status: "error",
-                    error:
-                      nextError instanceof Error
-                        ? nextError.message
-                        : t.documents_failed_upload,
+                    error: failureMessage,
                   }
                 : candidate,
             ),
@@ -2103,6 +2134,14 @@ function StaffDocumentsPage({
       if (completed > 0) {
         setNotice(metaText.intakeUploadedNotice(completed));
         refresh();
+      }
+      if (failed > 0) {
+        setIntakeUploadError(
+          metaText.intakeUploadFailedNotice(
+            failed,
+            Array.from(failureMessages).join(" "),
+          ),
+        );
       }
     } finally {
       setIntakeUploadBusy(false);
@@ -2512,6 +2551,12 @@ function StaffDocumentsPage({
 
   async function handleOpenPreview() {
     if (!detail) return;
+    if (detail.ursprung === "manual_intake" && canManage) {
+      replaceDocumentPreview(null);
+      setSaveError("");
+      setMetadataEditOpen(true);
+      return;
+    }
     setDocumentPreviewBusy(true);
     setDocumentPreviewError("");
     try {
@@ -3029,7 +3074,8 @@ function StaffDocumentsPage({
   }
 
   async function handleDeleteStoredFile() {
-    if (!detail) return;
+    const targetId = deleteTarget?.id ?? detail?.id;
+    if (!targetId) return;
     if (!deleteReason.trim()) {
       setDeleteError(t.documents_delete_file_reason_required);
       return;
@@ -3038,31 +3084,47 @@ function StaffDocumentsPage({
     setDeleteBusy(true);
     setDeleteError("");
     try {
-      const response = await deleteStoredDocumentFile(detail.id, deleteReason.trim());
+      const response = await deleteStoredDocumentFile(targetId, deleteReason.trim());
 
       const [freshShares, freshVersions] = await Promise.all([
-        canManage
-          ? fetchDocumentShares(detail.id).catch(() => [])
+        canManage && detail?.id === targetId
+          ? fetchDocumentShares(targetId).catch(() => [])
           : Promise.resolve([]),
-        fetchDocumentVersions(detail.id).catch(() => []),
+        detail?.id === targetId
+          ? fetchDocumentVersions(targetId).catch(() => [])
+          : Promise.resolve([]),
       ]);
 
-      setDetail(response.document);
-      setEditForm(detailToEditForm(response.document));
-      setShares(freshShares);
-      setDetailVersions(freshVersions);
+      if (detail?.id === targetId) {
+        setDetail(response.document);
+        setEditForm(detailToEditForm(response.document));
+        setShares(freshShares);
+        setDetailVersions(freshVersions);
+      }
+      if (deleteTarget?.fromIntake) {
+        setMetadataEditOpen(false);
+        setSelectedId("");
+      }
       setDeleteOpen(false);
+      setDeleteTarget(null);
       setDeleteReason("");
       setNotice(t.documents_file_deleted_notice);
       refresh();
     } catch (nextError) {
       // The file may already be removed (409 Conflict). Reconcile to the real
       // state: if the stored file is already gone, treat it as success.
-      const fresh = await fetchDocument(detail.id).catch(() => null);
+      const fresh = await fetchDocument(targetId).catch(() => null);
       if (fresh && !fresh.has_stored_file) {
-        setDetail(fresh);
-        setEditForm(detailToEditForm(fresh));
+        if (detail?.id === targetId) {
+          setDetail(fresh);
+          setEditForm(detailToEditForm(fresh));
+        }
+        if (deleteTarget?.fromIntake) {
+          setMetadataEditOpen(false);
+          setSelectedId("");
+        }
         setDeleteOpen(false);
+        setDeleteTarget(null);
         setDeleteReason("");
         setNotice(t.documents_file_deleted_notice);
         refresh();
@@ -3183,10 +3245,12 @@ function StaffDocumentsPage({
           {intakeError ? <Banner tone="error">{intakeError}</Banner> : null}
           <DocumentIntakeQueueTable
             actionId={intakeActionId}
+            canDelete={canManage}
             emptyText={t.documents_no_intake_pending}
             l={l}
             loading={intakeBusy}
             onApplySuggestion={handleApplyClassificationSuggestion}
+            onDeleteDocument={(item) => requestDocumentDeletion(item, true)}
             onOpenDocument={openIntakeDocument}
             rows={intakeQueue}
             selectedId={selectedId}
@@ -3907,16 +3971,15 @@ function StaffDocumentsPage({
                 />
               </Field>
               <Field label={t.common_provider}>
-                <Input
+                <DocumentProviderCombobox
                   value={generateForm.klinik}
-                  onChange={(event) =>
+                  providers={providers}
+                  onValueChange={(value) =>
                     setGenerateForm((current) => ({
                       ...current,
-                      klinik: event.target.value,
+                      klinik: value,
                     }))
                   }
-                  className={shellInputClassName}
-                  placeholder={t.common_provider}
                 />
               </Field>
               <Field label={t.documents_source}>
@@ -4714,15 +4777,15 @@ function StaffDocumentsPage({
                       </Field>
                     ) : null}
                     <Field label={t.common_provider}>
-                      <Input
+                      <DocumentProviderCombobox
                         value={uploadForm.klinik}
-                        onChange={(event) =>
+                        providers={providers}
+                        onValueChange={(value) =>
                           setUploadForm((current) => ({
                             ...current,
-                            klinik: event.target.value,
+                            klinik: value,
                           }))
                         }
-                        className={shellInputClassName}
                       />
                     </Field>
                     {canManage ? (
@@ -5261,7 +5324,7 @@ function StaffDocumentsPage({
             setMetadataEditOpen(open);
           }}
         >
-          <DialogContent className="flex h-[92vh] w-[96vw] max-w-[1680px] flex-col overflow-hidden rounded-xl p-0">
+          <DialogContent className="flex h-[92vh] w-[98vw] max-w-[1680px] flex-col overflow-hidden rounded-xl p-0 sm:w-[98vw] sm:max-w-[1680px]">
             <DialogHeader className="sr-only">
               <DialogTitle>{t.documents_edit_metadata_title}</DialogTitle>
               <DialogDescription>
@@ -5272,7 +5335,7 @@ function StaffDocumentsPage({
             </DialogHeader>
             <form
               onSubmit={handleSave}
-              className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1.08fr)_minmax(420px,0.92fr)]"
+              className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]"
             >
               <div className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border/70">
                 <AdminSheetScaffold
@@ -5294,7 +5357,20 @@ function StaffDocumentsPage({
                   )}
                 >
                 {detail?.ursprung === "manual_intake" ? (
-                  <Banner tone="warning">{metaText.intakeReviewWorkspace}</Banner>
+                  <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm">{metaText.intakeReviewWorkspace}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 border-destructive/30 bg-background text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      disabled={deleteBusy}
+                      onClick={() => detail && requestDocumentDeletion(detail, true)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      {t.common_delete}
+                    </Button>
+                  </div>
                 ) : null}
                 {saveError ? <Banner tone="error">{saveError}</Banner> : null}
                 <div className="space-y-4 rounded-xl">
@@ -5483,21 +5559,25 @@ function StaffDocumentsPage({
                     </NativeComboboxSelect>
                   </Field>
                   <Field label={t.common_provider}>
-                    <Input
+                    <DocumentProviderCombobox
                       value={editForm.klinik}
-                      onChange={(event) =>
+                      providers={providers}
+                      onValueChange={(value) =>
                         setEditForm((current) =>
                           current
-                            ? { ...current, klinik: event.target.value }
+                            ? { ...current, klinik: value }
                             : current,
                         )
                       }
-                      className={shellInputClassName}
                     />
                   </Field>
                   <Field label={t.documents_source}>
                     <Input
-                      value={editForm.ursprung}
+                      value={
+                        detail?.ursprung === "manual_intake"
+                          ? formatDocumentSourceLabel(editForm.ursprung, t)
+                          : editForm.ursprung
+                      }
                       disabled={detail?.ursprung === "manual_intake"}
                       onChange={(event) =>
                         setEditForm((current) =>
@@ -5777,8 +5857,8 @@ function StaffDocumentsPage({
                 </div>
                 </AdminSheetScaffold>
               </div>
-              <aside className="hidden min-h-0 min-w-0 flex-col bg-slate-50 lg:flex">
-                <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background px-4 py-3">
+              <aside className="hidden min-h-0 min-w-0 flex-col bg-slate-50 md:flex">
+                <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background py-3 pl-4 pr-14">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">
                       {detail?.original_filename ?? detail?.auto_name ?? t.documents_preview}
@@ -5817,7 +5897,6 @@ function StaffDocumentsPage({
                     <iframe
                       title={editPreview.title || t.documents_preview}
                       src={editPreview.url}
-                      sandbox=""
                       className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
                     />
                   ) : (
@@ -5841,6 +5920,7 @@ function StaffDocumentsPage({
           if (!open) {
             setDeleteError("");
             setDeleteReason("");
+            setDeleteTarget(null);
           }
         }}
       >
@@ -5848,7 +5928,9 @@ function StaffDocumentsPage({
           <DialogHeader className="border-b border-border/70 px-6 pt-6 pb-4">
             <DialogTitle>{t.documents_delete_file}</DialogTitle>
             <DialogDescription>
-              {t.documents_delete_file_description}
+              {deleteTarget?.name
+                ? `${deleteTarget.name} · ${t.documents_delete_file_description}`
+                : t.documents_delete_file_description}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -5877,6 +5959,7 @@ function StaffDocumentsPage({
                   setDeleteOpen(false);
                   setDeleteError("");
                   setDeleteReason("");
+                  setDeleteTarget(null);
                 }}
               >
                 {t.common_cancel}
@@ -5910,7 +5993,7 @@ function StaffDocumentsPage({
           className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[70vw] sm:max-w-[1500px]"
         >
           <DialogHeader className="border-b border-border/70 px-5 py-4">
-            <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
+            <div className="flex min-w-0 items-start justify-between gap-4 pr-14">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
                   {documentPreview?.title ?? t.documents_preview}
@@ -5940,7 +6023,6 @@ function StaffDocumentsPage({
               <iframe
                 title={documentPreview.title || t.documents_preview}
                 src={documentPreview.url}
-                sandbox=""
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : null}
@@ -6056,11 +6138,7 @@ function StaffDocumentsPage({
                           className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
                           aria-label={t.documents_delete_file}
                           title={t.documents_delete_file}
-                          onClick={() => {
-                            setDeleteError("");
-                            setDeleteReason("");
-                            setDeleteOpen(true);
-                          }}
+                          onClick={() => requestDocumentDeletion(detail)}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -6195,7 +6273,12 @@ function StaffDocumentsPage({
                           />
                           <DocumentMetaFact
                             label={metaText.sourcePerson}
-                            value={detail.source_person || t.common_not_set}
+                            value={
+                              detail.source_person?.trim().toLowerCase() ===
+                              "manual_intake"
+                                ? t.common_not_set
+                                : detail.source_person || t.common_not_set
+                            }
                           />
                           <DocumentMetaFact
                             label={metaText.sourceInstitution}
@@ -7515,10 +7598,12 @@ type DocumentsPageText = {
 
 function DocumentIntakeQueueTable({
   actionId,
+  canDelete,
   emptyText,
   l,
   loading,
   onApplySuggestion,
+  onDeleteDocument,
   onOpenDocument,
   rows,
   selectedId,
@@ -7526,10 +7611,12 @@ function DocumentIntakeQueueTable({
   text,
 }: {
   actionId: string;
+  canDelete: boolean;
   emptyText: string;
   l: DocumentsLocalizer;
   loading: boolean;
   onApplySuggestion: (item: DocumentItem) => Promise<void>;
+  onDeleteDocument: (item: DocumentItem) => void;
   onOpenDocument: (id: string) => void;
   rows: DocumentItem[];
   selectedId: string;
@@ -7673,45 +7760,64 @@ function DocumentIntakeQueueTable({
         sortable: false,
         filterType: undefined,
         width: 220,
-        render: (item) =>
-          item.classification_suggestion ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 max-w-full overflow-hidden rounded-md px-2 text-xs"
-              disabled={actionId === item.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                void onApplySuggestion(item);
-              }}
-            >
-              {actionId === item.id ? (
-                <LoaderCircle className="size-3 shrink-0 animate-spin" />
-              ) : null}
-              <span className="truncate">
-                {item.ursprung === "interpreter_upload" && item.status === "draft"
-                  ? t.documents_apply_and_release
-                  : t.documents_apply_suggestion}
-              </span>
-            </Button>
-          ) : item.ursprung === "manual_intake" ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 rounded-md px-2 text-xs"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenDocument(item.id);
-              }}
-            >
-              {t.documents_open_document}
-            </Button>
-          ) : null,
+        render: (item) => (
+          <div className="flex items-center gap-1.5">
+            {item.classification_suggestion ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 max-w-full overflow-hidden rounded-md px-2 text-xs"
+                disabled={actionId === item.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onApplySuggestion(item);
+                }}
+              >
+                {actionId === item.id ? (
+                  <LoaderCircle className="size-3 shrink-0 animate-spin" />
+                ) : null}
+                <span className="truncate">
+                  {item.ursprung === "interpreter_upload" && item.status === "draft"
+                    ? t.documents_apply_and_release
+                    : t.documents_apply_suggestion}
+                </span>
+              </Button>
+            ) : item.ursprung === "manual_intake" ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 rounded-md px-2 text-xs"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenDocument(item.id);
+                }}
+              >
+                {t.documents_open_document}
+              </Button>
+            ) : null}
+            {canDelete && item.ursprung === "manual_intake" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="size-7 shrink-0 rounded-md text-destructive hover:bg-destructive/10 hover:text-destructive"
+                aria-label={t.common_delete}
+                title={t.common_delete}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteDocument(item);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        ),
       },
     ],
-    [actionId, l, onApplySuggestion, onOpenDocument, t, text],
+    [actionId, canDelete, l, onApplySuggestion, onDeleteDocument, onOpenDocument, t, text],
   );
 
   return (
@@ -8258,6 +8364,55 @@ function DocumentSheetSection({
       <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
       <div className="mt-5">{children}</div>
     </section>
+  );
+}
+
+function DocumentProviderCombobox({
+  value,
+  providers,
+  onValueChange,
+}: {
+  value: string;
+  providers: ProviderOption[];
+  onValueChange: (value: string) => void;
+}) {
+  const { t } = useLang();
+
+  return (
+    <NativeComboboxSelect
+      value={value}
+      onChange={(event) => onValueChange(event.target.value)}
+      className={selectClassName}
+      searchPlaceholder={t.common_search_placeholder}
+      emptyLabel={t.common_no_results}
+      missingValueLabel={(missingValue) => missingValue}
+    >
+      <option value="">{t.documents_select_provider}</option>
+      {providers.map((provider) => (
+        <option
+          key={provider.id}
+          value={provider.name}
+          data-search-text={[
+            provider.name,
+            provider.address_city,
+            provider.address_country,
+            provider.provider_type === "medical"
+              ? t.providers_type_medical
+              : t.providers_type_non_medical,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {provider.name}
+          {provider.address_city ? ` · ${provider.address_city}` : ""}
+          {` · ${
+            provider.provider_type === "medical"
+              ? t.providers_type_medical
+              : t.providers_type_non_medical
+          }`}
+        </option>
+      ))}
+    </NativeComboboxSelect>
   );
 }
 

@@ -287,6 +287,11 @@ export function uploadDocument(formData: FormData) {
   return apiFetch<UploadDocumentResponse>("/documents/upload", {
     method: "POST",
     body: formData,
+    // Uploads include malware scanning and can legitimately take longer when
+    // several documents are submitted together. The generic 20 second API
+    // timeout can otherwise report a failure after the server accepted the
+    // document, inviting a duplicate retry.
+    timeoutMs: 120_000,
   });
 }
 

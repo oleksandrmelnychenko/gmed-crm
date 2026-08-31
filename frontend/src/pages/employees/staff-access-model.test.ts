@@ -17,6 +17,8 @@ describe("staff access model", () => {
   });
 
   it("keeps medical documents unavailable for non-medical roles", () => {
+    expect(canRoleUseMedicalDocuments("ceo")).toBe(true);
+    expect(canRoleUseMedicalDocuments(" CEO ")).toBe(true);
     expect(canRoleUseMedicalDocuments("patient_manager")).toBe(true);
     expect(canRoleUseMedicalDocuments("interpreter")).toBe(true);
     expect(canRoleUseMedicalDocuments("concierge")).toBe(false);

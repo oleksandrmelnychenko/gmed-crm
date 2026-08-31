@@ -8,33 +8,34 @@ import type {
   UpdateStaffUserAccessBody,
 } from "./staff-access-types";
 
-type ProviderRow = {
+type StaffAccessResourceRow = {
   id: string;
-  name?: string | null;
-  provider_type?: string | null;
-  address_city?: string | null;
+  label: string;
+  description?: string | null;
+  medical_kind?: string | null;
+  is_medical: boolean;
+  is_active?: boolean | null;
+  status: string;
 };
 
-type PatientRow = {
-  id: string;
-  patient_id?: string | null;
-  title?: string | null;
-  first_name?: string | null;
-  last_name?: string | null;
-  email?: string | null;
-};
-
-type DocumentRow = {
-  id: string;
-  document_number?: string | null;
-  auto_name?: string | null;
-  original_filename?: string | null;
-  patient_name?: string | null;
-  is_medical?: boolean;
-};
-
-function compactText(values: Array<string | null | undefined>) {
-  return values.map((value) => value?.trim()).filter(Boolean).join(" · ");
+function listAccessResources(resourceType: "provider" | "patient" | "document") {
+  return apiFetch<StaffAccessResourceRow[]>(
+    `/staff-access/resources/${resourceType}`,
+    { forceFresh: true },
+  ).then((rows) =>
+    rows.map<StaffAccessResource>((row) => ({
+      id: row.id,
+      label: row.label.trim() || row.id,
+      description: row.description?.trim() || "",
+      isMedical: row.is_medical,
+      isActive: row.is_active ?? undefined,
+      medicalKind:
+        row.medical_kind === "medical" || row.medical_kind === "non_medical"
+          ? row.medical_kind
+          : undefined,
+      status: row.status.trim() || "unknown",
+    })),
+  );
 }
 
 export function listStaffAccessProfiles() {
@@ -84,39 +85,13 @@ export function cloneStaffAccessProfile(
 }
 
 export function listProviderAccessResources() {
-  return apiFetch<ProviderRow[]>("/providers", { forceFresh: true }).then((rows) =>
-    rows.map<StaffAccessResource>((row) => ({
-      id: row.id,
-      label: row.name?.trim() || row.id,
-      description: compactText([row.provider_type, row.address_city]),
-    })),
-  );
+  return listAccessResources("provider");
 }
 
 export function listPatientAccessResources() {
-  return apiFetch<PatientRow[]>("/patients", { forceFresh: true }).then((rows) =>
-    rows.map<StaffAccessResource>((row) => {
-      const name = compactText([row.title, row.first_name, row.last_name]).replaceAll(" · ", " ");
-      return {
-        id: row.id,
-        label: name || row.patient_id?.trim() || row.id,
-        description: compactText([row.patient_id, row.email]),
-      };
-    }),
-  );
+  return listAccessResources("patient");
 }
 
 export function listDocumentAccessResources() {
-  return apiFetch<DocumentRow[]>("/documents", { forceFresh: true }).then((rows) =>
-    rows.map<StaffAccessResource>((row) => ({
-      id: row.id,
-      label:
-        row.auto_name?.trim() ||
-        row.original_filename?.trim() ||
-        row.document_number?.trim() ||
-        row.id,
-      description: compactText([row.document_number, row.patient_name]),
-      isMedical: Boolean(row.is_medical),
-    })),
-  );
+  return listAccessResources("document");
 }

@@ -7,9 +7,11 @@ import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
 import { revenueDe } from "./catalogs/revenue";
 import { sharedCoreDe } from "./catalogs/shared";
+import { staffAccessDe } from "./catalogs/staff-access";
 
 export const de = {
   uiText: extractedUiDe,
+  staffAccess: staffAccessDe,
   app_name: "GMED CONSOLE",
   app_subtitle: "Medizintourismus-Management",
   app_not_found_title: "Seite nicht gefunden",

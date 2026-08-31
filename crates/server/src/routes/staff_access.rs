@@ -36,6 +36,10 @@ pub fn router() -> Router<AppState> {
             "/staff-access/profiles/{profile_id}/clone",
             post(clone_profile),
         )
+        .route(
+            "/staff-access/resources/{resource_type}",
+            get(list_resources),
+        )
         .route("/staff-access/users/{user_id}", get(get_user_access))
         .route(
             "/staff-access/users/{user_id}/update",
@@ -149,6 +153,17 @@ struct UserAccessResponse {
     direct_rules: Vec<DirectRuleResponse>,
 }
 
+#[derive(Debug, Serialize)]
+struct ResourceCatalogItemResponse {
+    id: Uuid,
+    label: String,
+    description: Option<String>,
+    medical_kind: Option<String>,
+    is_medical: bool,
+    is_active: Option<bool>,
+    status: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct DirectRuleInput {
     resource_type: ResourceType,
@@ -194,6 +209,178 @@ struct UserRow {
     role: String,
     is_active: bool,
     access_revision: i64,
+}
+
+async fn list_resources(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(resource_type): Path<String>,
+) -> Response {
+    if let Err(response) = auth.require_exact_role(&[Role::Ceo]) {
+        return response;
+    }
+
+    let items = match resource_type.as_str() {
+        "provider" => list_provider_resources(&state.db).await,
+        "patient" => list_patient_resources(&state.db).await,
+        "document" => list_document_resources(&state.db).await,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Unsupported staff access resource type",
+            );
+        }
+    };
+
+    match items {
+        Ok(items) => Json(items).into_response(),
+        Err(error) => database_error("Failed to load staff access resource catalog", error),
+    }
+}
+
+async fn list_provider_resources(
+    pool: &PgPool,
+) -> Result<Vec<ResourceCatalogItemResponse>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, name, provider_type, address_city, address_country, is_active
+           FROM providers
+           ORDER BY lower(name), id"#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id")?;
+            let name = normalized_catalog_value(row.try_get("name")?);
+            let provider_type = normalized_catalog_value(row.try_get("provider_type")?);
+            let is_active: bool = row.try_get("is_active")?;
+            Ok(ResourceCatalogItemResponse {
+                id,
+                label: name.unwrap_or_else(|| id.to_string()),
+                description: compact_catalog_values([
+                    row.try_get::<Option<String>, _>("address_city")?,
+                    row.try_get::<Option<String>, _>("address_country")?,
+                ]),
+                medical_kind: provider_type,
+                is_medical: false,
+                is_active: Some(is_active),
+                status: if is_active { "active" } else { "inactive" }.to_string(),
+            })
+        })
+        .collect()
+}
+
+async fn list_patient_resources(
+    pool: &PgPool,
+) -> Result<Vec<ResourceCatalogItemResponse>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, patient_id, title, first_name, last_name, email,
+                  is_active, lifecycle_status
+           FROM patients
+           ORDER BY lower(last_name), lower(first_name), patient_id, id"#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id")?;
+            let is_active: bool = row.try_get("is_active")?;
+            let lifecycle_status =
+                normalized_catalog_value(row.try_get::<Option<String>, _>("lifecycle_status")?)
+                    .unwrap_or_else(|| if is_active { "active" } else { "inactive" }.to_string());
+            let label = compact_catalog_values_with_separator(
+                [
+                    row.try_get::<Option<String>, _>("title")?,
+                    row.try_get::<Option<String>, _>("first_name")?,
+                    row.try_get::<Option<String>, _>("last_name")?,
+                ],
+                " ",
+            );
+            let patient_number = row.try_get::<Option<String>, _>("patient_id")?;
+            Ok(ResourceCatalogItemResponse {
+                id,
+                label: label
+                    .or_else(|| normalized_catalog_value(patient_number.clone()))
+                    .unwrap_or_else(|| id.to_string()),
+                description: compact_catalog_values([
+                    patient_number,
+                    row.try_get::<Option<String>, _>("email")?,
+                ]),
+                medical_kind: None,
+                is_medical: false,
+                is_active: Some(is_active),
+                status: lifecycle_status,
+            })
+        })
+        .collect()
+}
+
+async fn list_document_resources(
+    pool: &PgPool,
+) -> Result<Vec<ResourceCatalogItemResponse>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT d.id, d.document_number, d.auto_name, d.original_filename,
+                  d.is_medical, d.status,
+                  p.patient_id,
+                  trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
+           FROM documents d
+           LEFT JOIN patients p ON p.id = d.patient_id
+           ORDER BY d.created_at DESC, d.id"#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id")?;
+            let document_number = row.try_get::<Option<String>, _>("document_number")?;
+            let auto_name = row.try_get::<Option<String>, _>("auto_name")?;
+            let original_filename = row.try_get::<Option<String>, _>("original_filename")?;
+            let is_medical: bool = row.try_get("is_medical")?;
+            let label = [auto_name, original_filename, document_number.clone()]
+                .into_iter()
+                .find_map(normalized_catalog_value)
+                .unwrap_or_else(|| id.to_string());
+            Ok(ResourceCatalogItemResponse {
+                id,
+                label,
+                description: compact_catalog_values([
+                    document_number,
+                    row.try_get::<Option<String>, _>("patient_name")?,
+                    row.try_get::<Option<String>, _>("patient_id")?,
+                ]),
+                medical_kind: Some(if is_medical { "medical" } else { "non_medical" }.to_string()),
+                is_medical,
+                is_active: None,
+                status: normalized_catalog_value(row.try_get("status")?)
+                    .unwrap_or_else(|| "draft".to_string()),
+            })
+        })
+        .collect()
+}
+
+fn compact_catalog_values<const N: usize>(values: [Option<String>; N]) -> Option<String> {
+    compact_catalog_values_with_separator(values, " · ")
+}
+
+fn compact_catalog_values_with_separator<const N: usize>(
+    values: [Option<String>; N],
+    separator: &str,
+) -> Option<String> {
+    let value = values
+        .into_iter()
+        .filter_map(normalized_catalog_value)
+        .collect::<Vec<_>>()
+        .join(separator);
+    (!value.is_empty()).then_some(value)
+}
+
+fn normalized_catalog_value(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 async fn list_profiles(

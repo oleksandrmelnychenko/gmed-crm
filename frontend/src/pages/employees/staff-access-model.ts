@@ -28,7 +28,7 @@ export function canManageStaffAccess(currentRole: string | null | undefined) {
 }
 
 export function canRoleUseMedicalDocuments(role: string) {
-  return MEDICAL_DATA_ROLES.has(role);
+  return MEDICAL_DATA_ROLES.has(role.trim().toLowerCase());
 }
 
 export function ruleMatchesRecord(

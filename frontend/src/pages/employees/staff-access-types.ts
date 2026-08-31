@@ -77,4 +77,7 @@ export type StaffAccessResource = {
   label: string;
   description: string;
   isMedical?: boolean;
+  isActive?: boolean;
+  medicalKind?: "medical" | "non_medical";
+  status: string;
 };
