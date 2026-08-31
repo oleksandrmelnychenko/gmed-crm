@@ -86,7 +86,12 @@ pub struct WebSocketConnectionRegistry {
     state: Mutex<WebSocketConnectionCounts>,
 }
 
-pub const MAX_WEBSOCKET_CONNECTIONS_PER_USER: usize = 4;
+// Every open workspace tab owns one general realtime socket, while an active
+// chat tab owns a second chat-specific socket. Four connections made normal
+// multi-tab use exhaust the quota and caused both transports to enter a
+// reconnect loop. Keep the global bound below, but allow up to eight fully
+// active chat tabs for one authenticated account.
+pub const MAX_WEBSOCKET_CONNECTIONS_PER_USER: usize = 16;
 pub const MAX_WEBSOCKET_CONNECTIONS_GLOBAL: usize = 512;
 
 #[derive(Debug, Default)]
