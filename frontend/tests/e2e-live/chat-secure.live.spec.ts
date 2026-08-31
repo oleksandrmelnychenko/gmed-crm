@@ -93,7 +93,10 @@ async function waitForConversationContent(
     await expect(attachmentLink).toBeVisible();
     return;
   }
-  await expect(textBubbleLocator).toBeVisible({ timeout: 35_000 });
+  // The polling loop already spent the full delivery budget. Keep the final
+  // assertion short so a missing/decryption-failed message reports its real
+  // locator instead of consuming a second full timeout window.
+  await expect(textBubbleLocator).toBeVisible({ timeout: 1_000 });
 }
 
 async function refreshOwnChatKey(page: import("@playwright/test").Page) {
@@ -159,6 +162,11 @@ test.describe("secure chat live workflows", () => {
     browser,
     request,
   }) => {
+    // This single scenario provisions two isolated browser identities and
+    // verifies key onboarding, text, upload, download and deletion against a
+    // freshly compiled backend. Shared CI runners can legitimately exceed the
+    // suite's 120-second default without any individual operation timing out.
+    test.slow();
     const [scenario, patientContext, conciergeContext] = await Promise.all([
       bootstrapFullSmokeScenario(request),
       browser.newContext(),

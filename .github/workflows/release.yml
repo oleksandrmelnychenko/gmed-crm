@@ -322,10 +322,23 @@ jobs:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
+          sign_with_retry() {
+            local ref="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              if cosign sign --yes "$ref"; then
+                return 0
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                return 1
+              fi
+              sleep $((attempt * 5))
+            done
+          }
           for tag in $TAGS; do
             ref="${tag%%:*}@${DIGEST}"
             echo "::group::cosign sign $ref"
-            cosign sign --yes "$ref"
+            sign_with_retry "$ref"
             echo "::endgroup::"
           done
 

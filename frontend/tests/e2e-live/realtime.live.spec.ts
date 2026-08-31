@@ -111,7 +111,7 @@ test.describe("realtime live propagation", () => {
   }) => {
     const scenario = await bootstrapFullSmokeScenario(request);
     const password = scenario.credentials.password;
-    const actor = scenario.credentials.ceo;
+    const actor = scenario.credentials.pm;
 
     await setGermanLanguage(page);
     await loginViaApi(page, request, actor.email, password);
