@@ -220,7 +220,10 @@ test.describe("realtime live propagation", () => {
         patient_id: scenario.patient.id,
         provider_id: null,
         doctor_id: null,
-        owner_user_id: scenario.credentials.pm.user_id,
+        // Concierge visibility is owner/assignment scoped. Make the observing
+        // client the explicit owner so the refetch assertion tests realtime
+        // propagation rather than depending on bootstrap assignment details.
+        owner_user_id: operationsObserver.user_id,
         interpreter_id: null,
         order_id: scenario.order.id,
         appointment_type: "medical",

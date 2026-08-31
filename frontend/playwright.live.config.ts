@@ -23,7 +23,7 @@ export default defineConfig({
     : "./tests/e2e-live/support/global-teardown.ts",
   use: {
     baseURL: liveBaseUrl,
-    trace: "off",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
   },

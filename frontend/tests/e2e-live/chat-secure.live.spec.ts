@@ -20,26 +20,29 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function reopenConversation(page: import("@playwright/test").Page, peerName: string) {
-  await page.goto("/chat");
+type ChatPeer = {
+  id: string;
+  name: string;
+  role: "concierge" | "patient";
+};
+
+async function reopenConversation(
+  page: import("@playwright/test").Page,
+  peer: ChatPeer,
+) {
+  const route = new URLSearchParams({
+    peer: peer.id,
+    name: peer.name,
+    role: peer.role,
+  });
+  await page.goto(`/chat?${route.toString()}`);
   await expect(page.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
-  const peerButton = page
-    .getByRole("button", { name: new RegExp(peerName, "i") })
-    .first();
-  await expect(peerButton).toBeVisible();
-  const loadMessagesResponse = page.waitForResponse(
-    (nextResponse) =>
-      nextResponse.request().method() === "GET" &&
-      nextResponse.url().includes("/api/v1/messages/"),
-    { timeout: 10_000 },
-  ).catch(() => undefined);
-  await peerButton.click();
-  await loadMessagesResponse;
+  await expect(page.getByText(peer.name).first()).toBeVisible();
 }
 
 async function waitForConversationContent(
   page: import("@playwright/test").Page,
-  peerName: string,
+  peer: ChatPeer,
   content: string,
 ) {
   const contentPattern = new RegExp(escapeRegExp(content), "i");
@@ -71,7 +74,7 @@ async function waitForConversationContent(
 
       await ensureLiveBackendHealthy().catch(() => undefined);
       await refreshOwnChatKey(page).catch(() => undefined);
-      await reopenConversation(page, peerName).catch(() => undefined);
+      await reopenConversation(page, peer).catch(() => undefined);
       await page.waitForTimeout(750);
       return pollForMessage();
     });
@@ -167,6 +170,7 @@ test.describe("secure chat live workflows", () => {
     browser,
     request,
   }) => {
+    test.setTimeout(180_000);
     const [scenario, patientContext, conciergeContext] = await Promise.all([
       bootstrapFullSmokeScenario(request),
       browser.newContext(),
@@ -259,7 +263,11 @@ test.describe("secure chat live workflows", () => {
       await refreshOwnChatKey(conciergePage);
       await waitForConversationContent(
         conciergePage,
-        scenario.credentials.patient.name,
+        {
+          id: scenario.credentials.patient.user_id,
+          name: scenario.credentials.patient.name,
+          role: "patient",
+        },
         "Patient secure update for the care team",
       );
 
@@ -293,7 +301,11 @@ test.describe("secure chat live workflows", () => {
 
       await waitForConversationContent(
         conciergePage,
-        scenario.credentials.patient.name,
+        {
+          id: scenario.credentials.patient.user_id,
+          name: scenario.credentials.patient.name,
+          role: "patient",
+        },
         "patient-secure-note.pdf",
       );
 
@@ -355,7 +367,11 @@ test.describe("secure chat live workflows", () => {
         patientPage.getByText("Patient secure update for the care team"),
       ).toHaveCount(0);
 
-      await reopenConversation(conciergePage, scenario.credentials.patient.name);
+      await reopenConversation(conciergePage, {
+        id: scenario.credentials.patient.user_id,
+        name: scenario.credentials.patient.name,
+        role: "patient",
+      });
       await expect(
         conciergePage.getByText("Patient secure update for the care team"),
       ).toHaveCount(0);

@@ -169,6 +169,17 @@ jobs:
           tests/e2e-live/chat-secure.live.spec.ts
           tests/e2e-live/realtime.live.spec.ts
 
+      - name: Upload failed live browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-live-e2e-diagnostics
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+
   clinical-document-parser:
     runs-on: ubuntu-latest
     defaults:
