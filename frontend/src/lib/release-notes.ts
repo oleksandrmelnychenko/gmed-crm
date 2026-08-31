@@ -24,6 +24,61 @@ type ReleaseEnvironment = {
 
 const DAILY_RELEASE_NOTES: CustomerReleaseNote[] = [
   {
+    commit: "846b6f4",
+    title: {
+      ru: "Проекты и наглядный workflow",
+      de: "Projekte und visueller Workflow",
+    },
+    description: {
+      ru: "Добавлен единый раздел проектов с владельцем, командой, сроками и связанными задачами. На схеме workflow видны зависимости, блокирующие задачи, прогресс и просрочки.",
+      de: "Ein zentraler Projektbereich bündelt Projektleitung, Team, Termine und Aufgaben. Der visuelle Workflow zeigt Abhängigkeiten, blockierende Aufgaben, Fortschritt und Überfälligkeiten.",
+    },
+  },
+  {
+    commit: "846b6f4",
+    title: {
+      ru: "Обновлённое рабочее место Concierge",
+      de: "Aktualisierter Concierge-Arbeitsbereich",
+    },
+    description: {
+      ru: "Сервисные запросы и операционные задачи стали компактнее и обновляются в реальном времени. Доступные роли могут безопасно удалять ошибочно созданные запросы с проверкой актуальности данных.",
+      de: "Serviceanfragen und operative Aufgaben sind kompakter und werden in Echtzeit aktualisiert. Berechtigte Rollen können irrtümlich erstellte Anfragen mit Versionsprüfung sicher entfernen.",
+    },
+  },
+  {
+    commit: "846b6f4",
+    title: {
+      ru: "Несколько доверенных контактов пациента",
+      de: "Mehrere Vertrauenskontakte pro Patient",
+    },
+    description: {
+      ru: "В карточке пациента теперь можно хранить несколько доверенных и экстренных контактов с типом связи, телефоном и заметкой. Данные согласованно сохраняются при создании и редактировании профиля.",
+      de: "In der Patientenakte können mehrere Vertrauens- und Notfallkontakte mit Beziehung, Telefonnummer und Notiz gepflegt werden. Die Daten werden beim Erstellen und Bearbeiten konsistent gespeichert.",
+    },
+  },
+  {
+    commit: "f278135",
+    title: {
+      ru: "Защищённый чат и стабильные обновления",
+      de: "Geschützter Chat und stabile Aktualisierungen",
+    },
+    description: {
+      ru: "Усилена защита ключей, сообщений и вложений в чатах, добавлены лимиты метаданных и ранняя проверка подключений. Непрочитанные сообщения и события задач доставляются стабильнее.",
+      de: "Der Schutz von Schlüsseln, Nachrichten und Anhängen wurde verstärkt; Metadatenlimits und eine frühe Verbindungsprüfung wurden ergänzt. Ungelesene Nachrichten und Aufgabenereignisse werden zuverlässiger zugestellt.",
+    },
+  },
+  {
+    commit: "846b6f4",
+    title: {
+      ru: "Точнее управление пользователями и профилями",
+      de: "Präzisere Benutzer- und Profilverwaltung",
+    },
+    description: {
+      ru: "Формы пользователей и пациентов лучше контролируют несохранённые изменения, пароль и подтверждение. Новые разделы появляются в навигации только у сотрудников с подходящей ролью.",
+      de: "Benutzer- und Patientenformulare prüfen ungespeicherte Änderungen, Passwort und Bestätigung genauer. Neue Bereiche erscheinen nur für Mitarbeitende mit passender Rolle in der Navigation.",
+    },
+  },
+  {
     commit: "dfbe82d",
     title: {
       ru: "Импорт медицинских документов и анализов",
