@@ -455,18 +455,23 @@ compose_up_or_diagnose
 # still running the previously signed backend image. Apply the repository SQL
 # directly after Postgres is available; the statements are idempotent. A later
 # backend release will execute and record the same SQLx migration normally.
-login_preservation_migration="$REPO_DIR/migrations/20260831150000_preserve_existing_account_login.sql"
-if [[ -r "$login_preservation_migration" ]]; then
-  echo "Applying existing-account login preservation migration"
-  docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
-    psql \
-      --quiet \
-      --no-psqlrc \
-      -v ON_ERROR_STOP=1 \
-      -U "$POSTGRES_USER" \
-      -d "${POSTGRES_DB:-gmed}" \
-    < "$login_preservation_migration"
-fi
+login_preservation_migrations=(
+  "$REPO_DIR/migrations/20260831150000_preserve_existing_account_login.sql"
+  "$REPO_DIR/migrations/20260831151000_grandfather_existing_account_password_age.sql"
+)
+for login_preservation_migration in "${login_preservation_migrations[@]}"; do
+  if [[ -r "$login_preservation_migration" ]]; then
+    echo "Applying $(basename "$login_preservation_migration")"
+    docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+      psql \
+        --quiet \
+        --no-psqlrc \
+        -v ON_ERROR_STOP=1 \
+        -U "$POSTGRES_USER" \
+        -d "${POSTGRES_DB:-gmed}" \
+      < "$login_preservation_migration"
+  fi
+done
 
 if [[ "$sanitized_this_run" == "true" ]]; then
   verify_sanitized_production_database
