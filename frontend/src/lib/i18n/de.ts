@@ -19,6 +19,7 @@ export const de = {
   nav_dashboard: "Dashboard",
   nav_concierge_workspace: "Operationszentrale",
   nav_task_manager: "Aufgaben",
+  nav_projects: "Projekte",
   nav_notes: "Notizen",
   nav_main: "Haupt",
   nav_documents: "Dokumente",

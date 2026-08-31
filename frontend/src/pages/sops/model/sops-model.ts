@@ -55,22 +55,6 @@ export function formatDate(value: string | null | undefined, lang: Lang, transla
   }
 }
 
-export function reviewQueueCopy(role: string | undefined, translations: Translations) {
-  if (role === "patient_manager") {
-    return {
-      metric: translations.sops_review_queue_metric_pm,
-      title: translations.sops_review_queue_title_pm,
-      description: translations.sops_review_queue_description_pm,
-    };
-  }
-
-  return {
-    metric: translations.sops_review_queue_metric_ceo,
-    title: translations.sops_review_queue_title_ceo,
-    description: translations.sops_review_queue_description_ceo,
-  };
-}
-
 export function formDescription(role: string | undefined, translations: Translations) {
   if (role === "ceo") {
     return translations.sops_form_description_ceo;

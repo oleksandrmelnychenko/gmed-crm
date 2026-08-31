@@ -120,6 +120,7 @@ struct ListItemsQuery {
     audience: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     archive: Option<String>,
 }
 
@@ -147,6 +148,7 @@ struct CreateItemRequest {
     task_audience: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -172,6 +174,7 @@ struct UpdateItemRequest {
     task_audience: Option<String>,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -252,6 +255,7 @@ struct ValidatedItemFields {
     task_audience: String,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     external_assignee_type: Option<String>,
     external_assignee_name: Option<String>,
     external_assignee_phone: Option<String>,
@@ -270,6 +274,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
+          t.project_id, project.name AS project_name,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -291,6 +296,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
    LEFT JOIN patients patient ON patient.id = t.patient_id
    LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
+   LEFT JOIN crm_projects project ON project.id = t.project_id
    WHERE t.id = $1 AND t.task_scope = 'concierge_operational' AND t.deleted_at IS NULL"#;
 
 const COMMENT_RESPONSE_QUERY: &str = r#"SELECT comment.id, comment.body, comment.created_by,
@@ -355,6 +361,7 @@ async fn list_items(
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
+                  t.project_id, project.name AS project_name,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -376,6 +383,7 @@ async fn list_items(
            LEFT JOIN appointments linked_appointment ON linked_appointment.id = cs.appointment_id
            LEFT JOIN patients patient ON patient.id = t.patient_id
            LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
+           LEFT JOIN crm_projects project ON project.id = t.project_id
            WHERE t.task_scope = 'concierge_operational'
              AND t.deleted_at IS NULL
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
@@ -384,17 +392,32 @@ async fn list_items(
              AND ($4::text IS NULL OR t.task_audience = $4)
              AND ($5::uuid IS NULL OR t.patient_id = $5)
              AND ($6::uuid IS NULL OR t.provider_id = $6)
+             AND ($7::uuid IS NULL OR t.project_id = $7)
              AND (
-                 $7::text = 'all'
-                 OR ($7::text = 'active' AND t.archived_at IS NULL)
-                 OR ($7::text = 'archived' AND t.archived_at IS NOT NULL)
+                 $8::text = 'all'
+                 OR ($8::text = 'active' AND t.archived_at IS NULL)
+                 OR ($8::text = 'archived' AND t.archived_at IS NOT NULL)
              )
              AND (
-                 $9::text = 'ceo'
-                 OR t.assigned_to = $8
-                 OR t.assigned_by = $8
-                 OR ($9::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND assigner.role = 'concierge')
-                 OR ($9::text = 'teamlead_interpreter' AND assigner.role = 'interpreter')
+                 $10::text = 'ceo'
+                 OR t.assigned_to = $9
+                 OR t.assigned_by = $9
+                 OR (t.project_id IS NOT NULL AND EXISTS (
+                     SELECT 1
+                     FROM crm_projects visible_project
+                     WHERE visible_project.id = t.project_id
+                       AND visible_project.archived_at IS NULL
+                       AND (
+                           visible_project.owner_id = $9
+                           OR EXISTS (
+                               SELECT 1 FROM crm_project_members visible_member
+                               WHERE visible_member.project_id = visible_project.id
+                                 AND visible_member.user_id = $9
+                           )
+                       )
+                 ))
+                 OR ($10::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND assigner.role = 'concierge')
+                 OR ($10::text = 'teamlead_interpreter' AND assigner.role = 'interpreter')
              )
            ORDER BY
                CASE t.status
@@ -414,6 +437,7 @@ async fn list_items(
     .bind(query.audience)
     .bind(query.patient_id)
     .bind(query.provider_id)
+    .bind(query.project_id)
     .bind(archive)
     .bind(auth.user_id)
     .bind(actor_role)
@@ -536,6 +560,20 @@ async fn list_all_attachments(
                  $4::text = 'ceo'
                  OR task.assigned_to = $3
                  OR task.assigned_by = $3
+                 OR (task.project_id IS NOT NULL AND EXISTS (
+                     SELECT 1
+                     FROM crm_projects visible_project
+                     WHERE visible_project.id = task.project_id
+                       AND visible_project.archived_at IS NULL
+                       AND (
+                           visible_project.owner_id = $3
+                           OR EXISTS (
+                               SELECT 1 FROM crm_project_members visible_member
+                               WHERE visible_member.project_id = visible_project.id
+                                 AND visible_member.user_id = $3
+                           )
+                       )
+                 ))
                  OR ($4::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND task_creator.role = 'concierge')
                  OR ($4::text = 'teamlead_interpreter' AND task_creator.role = 'interpreter')
              )
@@ -985,6 +1023,7 @@ async fn create_item(
         body.task_audience.as_deref().unwrap_or("internal"),
         body.patient_id,
         body.provider_id,
+        body.project_id,
         body.external_assignee_type.as_deref(),
         body.external_assignee_name.as_deref(),
         body.external_assignee_phone.as_deref(),
@@ -1099,14 +1138,25 @@ async fn create_item(
             );
         }
     }
+    if let Some(project_id) = fields.project_id
+        && let Err(response) = ensure_project_access_in_transaction(
+            &mut tx,
+            project_id,
+            auth.user_id,
+            auth.role == Role::Ceo,
+        )
+        .await
+    {
+        return response;
+    }
     let item_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO tasks (
                title, description, assigned_to, assigned_by, due_date, priority,
                task_scope, task_kind, concierge_service_id, starts_at, ends_at, location,
                reminder_at, task_audience, patient_id, provider_id, external_assignee_type,
-               external_assignee_name, external_assignee_phone, external_assignee_email
+               external_assignee_name, external_assignee_phone, external_assignee_email, project_id
            ) VALUES ($1, $2, $3, $4, $5, $6, 'concierge_operational', $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18, $19)
+                     $13, $14, $15, $16, $17, $18, $19, $20)
            RETURNING id"#,
     )
     .bind(&fields.title)
@@ -1128,6 +1178,7 @@ async fn create_item(
     .bind(fields.external_assignee_name.as_deref())
     .bind(fields.external_assignee_phone.as_deref())
     .bind(fields.external_assignee_email.as_deref())
+    .bind(fields.project_id)
     .fetch_one(&mut *tx)
     .await
     {
@@ -1155,6 +1206,7 @@ async fn create_item(
         "task_audience": fields.task_audience.as_str(),
         "patient_id": fields.patient_id,
         "provider_id": fields.provider_id,
+        "project_id": fields.project_id,
     }))
     .execute(&mut *tx)
     .await
@@ -1344,6 +1396,7 @@ async fn update_item(
         body.task_audience.as_deref().unwrap_or("internal"),
         body.patient_id,
         body.provider_id,
+        body.project_id,
         body.external_assignee_type.as_deref(),
         body.external_assignee_name.as_deref(),
         body.external_assignee_phone.as_deref(),
@@ -1392,6 +1445,18 @@ async fn update_item(
         }
     }
 
+    if let Some(project_id) = fields.project_id
+        && let Err(response) = ensure_project_access_in_transaction(
+            &mut tx,
+            project_id,
+            auth.user_id,
+            auth.role == Role::Ceo,
+        )
+        .await
+    {
+        return response;
+    }
+
     let result = sqlx::query(
         r#"UPDATE tasks
            SET title = $2,
@@ -1418,6 +1483,7 @@ async fn update_item(
                external_assignee_name = $18,
                external_assignee_phone = $19,
                external_assignee_email = $20,
+               project_id = $21,
                updated_at = now()
            WHERE id = $1
              AND task_scope = 'concierge_operational'
@@ -1443,6 +1509,7 @@ async fn update_item(
     .bind(fields.external_assignee_name.as_deref())
     .bind(fields.external_assignee_phone.as_deref())
     .bind(fields.external_assignee_email.as_deref())
+    .bind(fields.project_id)
     .execute(&mut *tx)
     .await;
     match result {
@@ -1481,6 +1548,7 @@ async fn update_item(
         "task_audience": fields.task_audience.as_str(),
         "patient_id": fields.patient_id,
         "provider_id": fields.provider_id,
+        "project_id": fields.project_id,
     }))
     .execute(&mut *tx)
     .await
@@ -3210,14 +3278,42 @@ async fn lock_item_access(
     for_update: bool,
 ) -> Result<Uuid, axum::response::Response> {
     let query = if for_update {
-        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  EXISTS (
+                      SELECT 1
+                      FROM crm_projects visible_project
+                      WHERE visible_project.id = task.project_id
+                        AND visible_project.archived_at IS NULL
+                        AND (
+                            visible_project.owner_id = $2
+                            OR EXISTS (
+                                SELECT 1 FROM crm_project_members visible_member
+                                WHERE visible_member.project_id = visible_project.id
+                                  AND visible_member.user_id = $2
+                            )
+                        )
+                  ) AS project_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1 AND task.task_scope = 'concierge_operational'
              AND task.deleted_at IS NULL AND task.archived_at IS NULL
            FOR UPDATE OF task"#
     } else {
-        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  EXISTS (
+                      SELECT 1
+                      FROM crm_projects visible_project
+                      WHERE visible_project.id = task.project_id
+                        AND visible_project.archived_at IS NULL
+                        AND (
+                            visible_project.owner_id = $2
+                            OR EXISTS (
+                                SELECT 1 FROM crm_project_members visible_member
+                                WHERE visible_member.project_id = visible_project.id
+                                  AND visible_member.user_id = $2
+                            )
+                        )
+                  ) AS project_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
@@ -3225,6 +3321,7 @@ async fn lock_item_access(
     };
     let row = sqlx::query(query)
         .bind(item_id)
+        .bind(auth.user_id)
         .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
@@ -3241,10 +3338,13 @@ async fn lock_item_access(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role) {
+    let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
+    if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
+        && (for_update || !project_access)
+    {
         return Err(err(
             StatusCode::FORBIDDEN,
-            "Only the task assignee, creator, or a higher role can access this task",
+            "Only the task assignee, creator, project member, or a higher role can access this task",
         ));
     }
     Ok(assigned_to)
@@ -3256,12 +3356,27 @@ async fn ensure_operational_view_access(
     item_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  EXISTS (
+                      SELECT 1
+                      FROM crm_projects visible_project
+                      WHERE visible_project.id = task.project_id
+                        AND visible_project.archived_at IS NULL
+                        AND (
+                            visible_project.owner_id = $2
+                            OR EXISTS (
+                                SELECT 1 FROM crm_project_members visible_member
+                                WHERE visible_member.project_id = visible_project.id
+                                  AND visible_member.user_id = $2
+                            )
+                        )
+                  ) AS project_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL"#,
     )
     .bind(item_id)
+    .bind(auth.user_id)
     .fetch_optional(&state.db)
     .await
     .map_err(|error| {
@@ -3278,7 +3393,10 @@ async fn ensure_operational_view_access(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role) {
+    let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
+    if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
+        && !project_access
+    {
         return Err(err(StatusCode::FORBIDDEN, "Forbidden"));
     }
     Ok(())
@@ -3656,6 +3774,7 @@ fn validate_item_fields(
     task_audience: &str,
     patient_id: Option<Uuid>,
     provider_id: Option<Uuid>,
+    project_id: Option<Uuid>,
     external_assignee_type: Option<&str>,
     external_assignee_name: Option<&str>,
     external_assignee_phone: Option<&str>,
@@ -3780,11 +3899,46 @@ fn validate_item_fields(
         task_audience: task_audience.to_string(),
         patient_id,
         provider_id,
+        project_id,
         external_assignee_type,
         external_assignee_name,
         external_assignee_phone,
         external_assignee_email,
     })
+}
+
+async fn ensure_project_access_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    project_id: Uuid,
+    actor_id: Uuid,
+    is_ceo: bool,
+) -> Result<(), axum::response::Response> {
+    let accessible = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+             SELECT 1
+             FROM crm_projects project
+             WHERE project.id = $1
+               AND project.archived_at IS NULL
+               AND ($2::boolean OR project.owner_id = $3 OR EXISTS (
+                 SELECT 1 FROM crm_project_members member
+                 WHERE member.project_id = project.id AND member.user_id = $3
+               ))
+           )"#,
+    )
+    .bind(project_id)
+    .bind(is_ceo)
+    .bind(actor_id)
+    .fetch_one(&mut **tx)
+    .await
+    .unwrap_or(false);
+    if accessible {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "project_id must reference an accessible project",
+        ))
+    }
 }
 
 fn create_item_payload_fingerprint(assigned_to: Uuid, fields: &ValidatedItemFields) -> String {
@@ -3803,6 +3957,7 @@ fn create_item_payload_fingerprint(assigned_to: Uuid, fields: &ValidatedItemFiel
         "task_audience": fields.task_audience,
         "patient_id": fields.patient_id,
         "provider_id": fields.provider_id,
+        "project_id": fields.project_id,
         "external_assignee_type": fields.external_assignee_type,
         "external_assignee_name": fields.external_assignee_name,
         "external_assignee_phone": fields.external_assignee_phone,
@@ -3908,6 +4063,8 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "provider_phone": row.try_get::<Option<String>, _>("provider_phone").unwrap_or_default(),
         "provider_email": row.try_get::<Option<String>, _>("provider_email").unwrap_or_default(),
+        "project_id": row.try_get::<Option<Uuid>, _>("project_id").unwrap_or_default(),
+        "project_name": row.try_get::<Option<String>, _>("project_name").unwrap_or_default(),
         "external_assignee_type": row.try_get::<Option<String>, _>("external_assignee_type").unwrap_or_default(),
         "external_assignee_name": row.try_get::<Option<String>, _>("external_assignee_name").unwrap_or_default(),
         "external_assignee_phone": row.try_get::<Option<String>, _>("external_assignee_phone").unwrap_or_default(),
@@ -3972,6 +4129,7 @@ async fn publish_operational_event(
             "task_audience": fields.task_audience.as_str(),
             "patient_id": fields.patient_id,
             "provider_id": fields.provider_id,
+            "project_id": fields.project_id,
         }),
     )
     .await;

@@ -11,8 +11,8 @@ export async function upsertPatientRelation(
   patientId: string,
   payload: Record<string, unknown>,
   relationId?: string | null,
-) {
-  return apiFetch(
+): Promise<RelationItem> {
+  return apiFetch<RelationItem>(
     relationId
       ? `/patients/${patientId}/relations/${relationId}/update`
       : `/patients/${patientId}/relations`,

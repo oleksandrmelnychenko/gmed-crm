@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Circle,
   ExternalLink,
+  FolderKanban,
   ListChecks,
   LoaderCircle,
   MessageSquareText,
@@ -91,6 +92,7 @@ const copy = {
     external: "Extern",
     patient: "Patient / Kunde",
     provider: "Provider",
+    project: "Projekt",
     birthDate: "Geburtsdatum",
     externalAssignee: "Externer Ausführender",
     open: "Offen",
@@ -170,6 +172,7 @@ const copy = {
     external: "Внешняя",
     patient: "Пациент / клиент",
     provider: "Провайдер",
+    project: "Проект",
     birthDate: "Дата рождения",
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
@@ -796,7 +799,7 @@ export function ConciergeTaskDetailDialog({
                 </div>
               </TaskDetailSection>
 
-              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.provider_id && detail.item.provider_name) || detail.item.task_audience === "external" ? (
+              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
                 <TaskDetailSection title={labels.links}>
                   <div className="divide-y divide-border/60">
                     {detail.item.patient_id && detail.item.patient_name ? (
@@ -810,6 +813,13 @@ export function ConciergeTaskDetailDialog({
                       <StaffLink to={`/providers/${detail.item.provider_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><Building2 className="size-4" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.provider}</span><strong className="block truncate text-sm">{detail.item.provider_name}</strong><span className="block truncate text-xs text-muted-foreground">{[detail.item.provider_phone, detail.item.provider_email].filter(Boolean).join(" · ") || "—"}</span></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
+                    {detail.item.project_id && detail.item.project_name ? (
+                      <StaffLink to={`/projects?project=${detail.item.project_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><FolderKanban className="size-4" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.project}</span><strong className="block truncate text-sm">{detail.item.project_name}</strong></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}

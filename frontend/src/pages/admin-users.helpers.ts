@@ -49,6 +49,32 @@ export function isPasswordConfirmationMismatch(
   return confirmation.length > 0 && password !== confirmation;
 }
 
+export function canSaveAdminUserEdit({
+  profileDirty,
+  password,
+  confirmation,
+  passwordError,
+  saving,
+}: {
+  profileDirty: boolean;
+  password: string;
+  confirmation: string;
+  passwordError: string | null;
+  saving: boolean;
+}) {
+  const passwordDirty = password.length > 0 || confirmation.length > 0;
+  const passwordReady =
+    password.length > 0 &&
+    password === confirmation &&
+    passwordError === null;
+
+  return (
+    !saving &&
+    (profileDirty || passwordReady) &&
+    (!passwordDirty || passwordReady)
+  );
+}
+
 const PASSWORD_CHARACTER_GROUPS = [
   "ABCDEFGHJKLMNPQRSTUVWXYZ",
   "abcdefghijkmnopqrstuvwxyz",

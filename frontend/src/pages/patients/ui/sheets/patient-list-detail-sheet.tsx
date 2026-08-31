@@ -21,6 +21,12 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { updatePatient } from "../../data/patient-mutations";
+import {
+  deletePatientRelation,
+  fetchPatientRelations,
+  PATIENT_RELATIONS_UPDATED_EVENT,
+  upsertPatientRelation,
+} from "../../data/patient-detail-mutations";
 import { getPatientLegalStatusSummary, normalizePatientLegalStatus } from "../../model/legal-status";
 import {
   getPatientDisplayName,
@@ -34,6 +40,8 @@ import {
 import {
   blankPatientForm,
   patientContactFormsToPayload,
+  patientTrustedContactsFromRelations,
+  patientTrustedContactsToPayload,
   parseLanguages,
   patientToForm,
   toOptional,
@@ -41,6 +49,7 @@ import {
   type PatientContactFormState,
   type PatientDetail,
   type PatientFormState,
+  type PatientTrustedContactFormState,
   type PatientsDictionary,
   type StaffOption,
 } from "../../model/list-model";
@@ -180,6 +189,7 @@ type PatientProfileSectionProps = {
   canEdit: boolean;
   onChange: (field: keyof PatientFormState, value: string) => void;
   onContactsChange: (contacts: PatientContactFormState[]) => void;
+  onTrustedContactsChange: (contacts: PatientTrustedContactFormState[]) => void;
 };
 
 function PatientProfileSection({
@@ -188,6 +198,7 @@ function PatientProfileSection({
   canEdit,
   onChange,
   onContactsChange,
+  onTrustedContactsChange,
 }: PatientProfileSectionProps) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -222,6 +233,7 @@ function PatientProfileSection({
         form={form}
         onChange={canEdit ? onChange : () => undefined}
         onContactsChange={canEdit ? onContactsChange : undefined}
+        onTrustedContactsChange={canEdit ? onTrustedContactsChange : undefined}
         contactMode="multiple"
         readOnly={!canEdit}
       />
@@ -358,6 +370,7 @@ function PatientDetailSheet({
   } = detailControls;
   type PatientDetailSheetState = {
     form: PatientFormState;
+    initialTrustedContactIds: string[];
     busy: boolean;
     error: string;
   };
@@ -375,11 +388,12 @@ function PatientDetailSheet({
     undefined,
     () => ({
       form: blankPatientForm(),
+      initialTrustedContactIds: [],
       busy: false,
       error: "",
     }),
   );
-  const { form, busy, error } = detailSheetState;
+  const { form, initialTrustedContactIds, busy, error } = detailSheetState;
   const setForm = (nextValue: SetStateAction<PatientFormState>) => {
     dispatchDetailSheetState((current) => ({
       form:
@@ -393,6 +407,7 @@ function PatientDetailSheet({
     if (!open) {
       dispatchDetailSheetState({
         form: blankPatientForm(),
+        initialTrustedContactIds: [],
         busy: false,
         error: "",
       });
@@ -400,10 +415,35 @@ function PatientDetailSheet({
     }
 
     if (detail) {
+      let active = true;
       dispatchDetailSheetState({
         form: patientToForm(detail),
+        initialTrustedContactIds: [],
         error: "",
       });
+      void fetchPatientRelations(detail.id)
+        .then((relations) => {
+          if (!active) return;
+          const trustedContacts = patientTrustedContactsFromRelations(relations);
+          dispatchDetailSheetState((current) => ({
+            form: {
+              ...current.form,
+              trustedContacts:
+                trustedContacts.length > 0
+                  ? trustedContacts
+                  : current.form.trustedContacts,
+            },
+            initialTrustedContactIds: trustedContacts.flatMap((contact) => (
+              contact.persistedId ? [contact.persistedId] : []
+            )),
+          }));
+        })
+        .catch(() => {
+          // The legacy primary contact remains visible if relations cannot load.
+        });
+      return () => {
+        active = false;
+      };
     }
   }, [detail, open]);
 
@@ -418,6 +458,11 @@ function PatientDetailSheet({
 
     try {
       const contactPayload = patientContactFormsToPayload(form.contacts);
+      const trustedContacts = patientTrustedContactsToPayload(form.trustedContacts);
+      if (trustedContacts.some((contact) => !contact.name)) {
+        throw new Error("Укажите имя доверенного контакта");
+      }
+      const primaryTrustedContact = trustedContacts[0];
       await updatePatient(detail.id, {
         title: toOptional(form.title),
         first_name: toOptional(form.firstName),
@@ -437,11 +482,61 @@ function PatientDetailSheet({
         insurance_provider: toOptional(form.insuranceProvider),
         insurance_number: toOptional(form.insuranceNumber),
         insurance_type: toOptional(form.insuranceType),
-        emergency_contact_name: toOptional(form.emergencyContactName),
-        emergency_contact_phone: toOptional(form.emergencyContactPhone),
-        emergency_contact_relation: toOptional(form.emergencyContactRelation),
+        emergency_contact_name: toOptional(primaryTrustedContact?.name ?? ""),
+        emergency_contact_phone: toOptional(primaryTrustedContact?.phone ?? ""),
+        emergency_contact_relation: toOptional(primaryTrustedContact?.relation ?? ""),
         notes: toOptional(form.notes),
       });
+      const persistedTrustedContacts: PatientTrustedContactFormState[] = [];
+      for (const contact of trustedContacts) {
+        const persisted = await upsertPatientRelation(
+          detail.id,
+          {
+            related_patient_id: null,
+            related_name: contact.name,
+            relation_type: contact.relation,
+            is_emergency_contact: true,
+            phone: toOptional(contact.phone),
+            notes: toOptional(contact.notes),
+          },
+          contact.persistedId,
+        );
+        const persistedContact = {
+          ...contact,
+          id: persisted.id,
+          persistedId: persisted.id,
+        };
+        persistedTrustedContacts.push(persistedContact);
+        dispatchDetailSheetState((current) => ({
+          form: {
+            ...current.form,
+            trustedContacts: current.form.trustedContacts.map((currentContact) => (
+              currentContact.id === contact.id ? persistedContact : currentContact
+            )),
+          },
+          initialTrustedContactIds: Array.from(new Set([
+            ...current.initialTrustedContactIds,
+            persisted.id,
+          ])),
+        }));
+      }
+      const retainedIds = new Set(persistedTrustedContacts.flatMap((contact) => (
+        contact.persistedId ? [contact.persistedId] : []
+      )));
+      for (const relationId of initialTrustedContactIds) {
+        if (!retainedIds.has(relationId)) {
+          await deletePatientRelation(detail.id, relationId);
+        }
+      }
+      dispatchDetailSheetState((current) => ({
+        form: { ...current.form, trustedContacts: persistedTrustedContacts },
+        initialTrustedContactIds: persistedTrustedContacts.flatMap((contact) => (
+          contact.persistedId ? [contact.persistedId] : []
+        )),
+      }));
+      window.dispatchEvent(new CustomEvent(PATIENT_RELATIONS_UPDATED_EVENT, {
+        detail: { patientId: detail.id },
+      }));
       onRefresh();
     } catch (submitError) {
       dispatchDetailSheetState({
@@ -517,6 +612,9 @@ function PatientDetailSheet({
             }
             onContactsChange={(contacts) =>
               setForm((current) => ({ ...current, contacts }))
+            }
+            onTrustedContactsChange={(trustedContacts) =>
+              setForm((current) => ({ ...current, trustedContacts }))
             }
           />
           {canViewAssignments ? (

@@ -732,10 +732,33 @@ pub async fn publish_concierge_operational_task_event(
     assigned_to: Uuid,
     payload: Value,
 ) {
-    let target_user_ids = [actor_user_id, Some(assigned_to)]
+    let mut target_user_ids: Vec<Uuid> = [actor_user_id, Some(assigned_to)]
         .into_iter()
         .flatten()
         .collect();
+    if let Ok(Some(row)) = sqlx::query("SELECT assigned_by, project_id FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        if let Ok(assigned_by) = row.try_get::<Uuid, _>("assigned_by") {
+            target_user_ids.push(assigned_by);
+        }
+        if let Ok(Some(project_id)) = row.try_get::<Option<Uuid>, _>("project_id")
+            && let Ok(project_users) = sqlx::query_scalar::<_, Uuid>(
+                r#"SELECT owner_id FROM crm_projects WHERE id = $1 AND archived_at IS NULL
+                   UNION
+                   SELECT user_id FROM crm_project_members WHERE project_id = $1"#,
+            )
+            .bind(project_id)
+            .fetch_all(&state.db)
+            .await
+        {
+            target_user_ids.extend(project_users);
+        }
+    }
+    target_user_ids.sort_unstable();
+    target_user_ids.dedup();
     publish_event(
         state,
         RealtimeEvent::new(event_type, "task", task_id)

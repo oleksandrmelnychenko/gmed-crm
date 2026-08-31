@@ -3,10 +3,13 @@ import {
   Eye,
   EyeOff,
   Mail,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   Unlock,
+  UserRoundCheck,
+  UserRoundX,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -49,6 +52,7 @@ import {
   updateAdminUser,
 } from "@/pages/admin/data/admin-api";
 import {
+  canSaveAdminUserEdit,
   getOptionalAdminPasswordError,
   getRequiredAdminPasswordError,
   generateAdminPassword,
@@ -346,6 +350,13 @@ function useAdminUsersPageContent() {
         euEmail !== editUser.email ||
         euRole !== editUser.role),
   );
+  const editCanSave = canSaveAdminUserEdit({
+    profileDirty: editProfileDirty,
+    password: euPassword,
+    confirmation: euPasswordConfirm,
+    passwordError: euPasswordError,
+    saving: euSaving,
+  });
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -590,11 +601,36 @@ function useAdminUsersPageContent() {
 
   const saveUser = async () => {
     if (!editUser) return;
-    if (!editProfileDirty) return;
+    const passwordDirty =
+      euPassword.length > 0 || euPasswordConfirm.length > 0;
+    if (passwordDirty) {
+      const passwordError = getRequiredAdminPasswordError(euPassword, t);
+      if (passwordError) {
+        setEditError(passwordError);
+        return;
+      }
+      if (!euPasswordConfirmed) {
+        setEditError(t.users_password_mismatch);
+        return;
+      }
+    }
+    if (!editProfileDirty && !passwordDirty) return;
     setEuSaving(true);
     setEditError(null);
     try {
-      await updateAdminUser(editUser.id, { name: euName, email: euEmail, role: euRole });
+      if (editProfileDirty) {
+        await updateAdminUser(editUser.id, {
+          name: euName,
+          email: euEmail,
+          role: euRole,
+        });
+      }
+      if (passwordDirty) {
+        await resetAdminUserPassword(editUser.id, {
+          new_password: euPassword,
+        });
+      }
+      clearApiCache("/users");
       closeEditSheet();
       void loadUsers();
     } catch (e) {
@@ -839,7 +875,7 @@ function useAdminUsersPageContent() {
                   cancelLabel={t.common_cancel}
                   submitLabel={t.common_save}
                   submitting={euSaving}
-                  submitDisabled={!editProfileDirty || euSaving}
+                  submitDisabled={!editCanSave}
                   onCancel={closeEditSheet}
                   onSubmit={() => void saveUser()}
                 />
@@ -1018,37 +1054,51 @@ function useAdminUsersPageContent() {
                 {isUserLocked(user) ? (
                   <Button
                     type="button"
-                    variant="outline"
-                    size="xs"
-                    className="rounded-lg gap-1.5"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:bg-amber-50 hover:text-amber-700"
                     disabled={unlockingUserId === user.id}
                     onClick={() => void unlockUser(user.id)}
+                    aria-label={t.users_unlock}
+                    title={t.users_unlock}
                   >
                     <Unlock className="size-3.5" />
-                    {t.users_unlock}
                   </Button>
                 ) : null}
                 <Button
                   type="button"
-                  variant="outline"
-                  size="xs"
-                  className="rounded-lg"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
                   onClick={() => openEdit(user)}
+                  aria-label={t.patients_edit}
+                  title={t.patients_edit}
                 >
-                  {t.patients_edit}
+                  <Pencil className="size-3.5" />
                 </Button>
                 <Button
                   type="button"
-                  variant={user.is_active ? "destructive" : "outline"}
-                  size="xs"
-                  className="rounded-lg"
+                  variant="ghost"
+                  size="icon-sm"
+                  className={cn(
+                    "size-7 rounded-full text-muted-foreground",
+                    user.is_active
+                      ? "hover:bg-rose-50 hover:text-rose-600"
+                      : "hover:bg-emerald-50 hover:text-emerald-700",
+                  )}
                   onClick={() => void toggleActive(user.id, user.is_active)}
+                  aria-label={user.is_active ? t.users_deactivate : t.users_activate}
+                  title={user.is_active ? t.users_deactivate : t.users_activate}
                 >
-                  {user.is_active ? t.users_deactivate : t.users_activate}
+                  {user.is_active ? (
+                    <UserRoundX className="size-3.5" />
+                  ) : (
+                    <UserRoundCheck className="size-3.5" />
+                  )}
                 </Button>
               </>
             )}
-            rowActionsWidth={320}
+            rowActionsWidth={104}
             tableClassName="min-h-[420px]"
             footer={({ filteredCount, totalCount }) => (
               <span className="tabular-nums">

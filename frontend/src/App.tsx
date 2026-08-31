@@ -133,6 +133,12 @@ const LeadsPage = lazy(() =>
   })),
 );
 
+const ProjectsPage = lazy(() =>
+  import("@/pages/projects").then((module) => ({
+    default: module.ProjectsPage,
+  })),
+);
+
 const OrdersPage = lazy(() =>
   import("@/pages/orders").then((module) => ({
     default: module.OrdersPage,
@@ -387,6 +393,7 @@ function AppRoutes() {
             <Route path="reports" element={<ReportsPage />} />
             <Route path="sops" element={<SopsPage />} />
             <Route path="leads" element={<LeadsPage />} />
+            <Route path="projects" element={<ProjectsPage />} />
             <Route path="patients" element={<PatientsPage />} />
             <Route path="patients/:id" element={<PatientDetailPage />} />
             <Route path="recommendations" element={<PatientRecommendationsPage />} />

@@ -8,17 +8,12 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  BookOpen,
-  CheckCheck,
-  FileCheck2,
   LoaderCircle,
   Plus,
   RefreshCw,
-  ShieldCheck,
 } from "lucide-react";
 
 import {
-  AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
   SheetFormFooter,
@@ -55,7 +50,6 @@ import {
   emptyForm,
   formDescription,
   formatDate,
-  reviewQueueCopy,
   roleCanCreate,
   roleCanOpenLearning,
   roleCanReview,
@@ -310,9 +304,6 @@ function useSopsPageContent() {
       failAckRequest: t.sops_error_ack_request,
       failAck: t.sops_error_ack,
       failReview: t.sops_error_review,
-      metricsVisible: t.sops_metric_visible,
-      metricsApproved: t.sops_metric_approved,
-      metricsPendingAck: t.sops_metric_pending_ack,
       queueTitle: t.sops_queue_title,
       queueDescription: t.sops_queue_description,
       queueEmptyTitle: t.sops_queue_empty_title,
@@ -447,8 +438,6 @@ function useSopsPageContent() {
   const canCreate = roleCanCreate(user?.role);
   const canReviewQueue = roleCanReview(user?.role);
   const canOpenPage = roleCanOpenLearning(user?.role);
-  const queueCopy = useMemo(() => reviewQueueCopy(user?.role, t), [t, user?.role]);
-
   const roleLabel = useCallback(
     (role: string) => formatEnumLabelFromKeys(role, SOP_ROLE_LABEL_KEYS, t),
     [t],
@@ -518,12 +507,6 @@ function useSopsPageContent() {
       cancelled = true;
     };
   }, [canCreate, canOpenPage, canReviewQueue, text.failLoad, version]);
-
-  const visibleMetrics = useMemo(() => {
-    const approved = items.filter((item) => item.status === "approved").length;
-    const pendingAck = items.filter((item) => item.my_ack_status === "pending").length;
-    return { approved, pendingAck };
-  }, [items]);
 
   const filteredUsers = useMemo(() => {
     if (form.targetRoles.length === 0) return eligibleUsers;
@@ -868,33 +851,6 @@ function useSopsPageContent() {
 
         {notice ? <SuccessBanner>{notice}</SuccessBanner> : null}
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
-
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
-          <AdminInlineMetric
-            icon={BookOpen}
-            label={text.metricsVisible}
-            value={String(items.length)}
-            tone="sky"
-          />
-          <AdminInlineMetric
-            icon={FileCheck2}
-            label={text.metricsApproved}
-            value={String(visibleMetrics.approved)}
-            tone="emerald"
-          />
-          <AdminInlineMetric
-            icon={CheckCheck}
-            label={text.metricsPendingAck}
-            value={String(visibleMetrics.pendingAck)}
-            tone="amber"
-          />
-          <AdminInlineMetric
-            icon={ShieldCheck}
-            label={queueCopy.metric}
-            value={String(reviewQueue.length)}
-            tone="slate"
-          />
-        </div>
 
         {canReviewQueue ? (
           <AdminTableCard

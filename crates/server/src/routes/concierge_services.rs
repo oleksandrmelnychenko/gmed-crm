@@ -32,7 +32,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/concierge-services/{service_id}",
-            get(get_concierge_service),
+            get(get_concierge_service).delete(delete_concierge_service),
         )
         .route(
             "/concierge-services/{service_id}/update",
@@ -148,6 +148,11 @@ struct UpdateConciergeServiceRequest {
     currency: Option<String>,
     service_notes: NullablePatchValue,
     billing_notes: NullablePatchValue,
+}
+
+#[derive(Deserialize)]
+struct DeleteConciergeServiceRequest {
+    expected_updated_at: String,
 }
 
 #[derive(Deserialize)]
@@ -948,6 +953,131 @@ async fn get_concierge_service(
         Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
         Err(resp) => resp,
     }
+}
+
+async fn delete_concierge_service(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<DeleteConciergeServiceRequest>,
+) -> axum::response::Response {
+    if let Err(response) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge])
+    {
+        return response;
+    }
+
+    let expected_updated_at = match chrono::DateTime::parse_from_rfc3339(&body.expected_updated_at)
+    {
+        Ok(value) => value.with_timezone(&chrono::Utc),
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "expected_updated_at must be an RFC3339 timestamp",
+            );
+        }
+    };
+
+    let existing = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    let patient_id = match existing.try_get::<Uuid, _>("patient_id") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+    };
+    let assigned_concierge_id = existing
+        .try_get::<Option<Uuid>, _>("assigned_concierge_id")
+        .unwrap_or_default();
+    match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    let billing_status = existing
+        .try_get::<String, _>("billing_status")
+        .unwrap_or_else(|_| "draft".to_string());
+    if billing_status != "draft" {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service with financial activity cannot be deleted",
+        );
+    }
+
+    let has_expenses = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM concierge_expense_submissions WHERE concierge_service_id = $1)",
+    )
+    .bind(service_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "check concierge service expenses before delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if has_expenses {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service with expense history cannot be deleted",
+        );
+    }
+
+    let result = match sqlx::query(
+        r#"DELETE FROM concierge_services
+           WHERE id = $1
+             AND updated_at = $2"#,
+    )
+    .bind(service_id)
+    .bind(expected_updated_at)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) => result,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("23503") => {
+            return err(
+                StatusCode::CONFLICT,
+                "Concierge service has related financial records and cannot be deleted",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "delete concierge service");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if result.rows_affected() == 0 {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service changed since it was opened. Refresh and try again",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_concierge_service",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "assigned_concierge_id": assigned_concierge_id,
+        }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.deleted",
+        service_id,
+        serde_json::json!({
+            "patient_id": patient_id,
+            "assigned_concierge_id": assigned_concierge_id,
+        }),
+    )
+    .await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn book_concierge_service_provider(

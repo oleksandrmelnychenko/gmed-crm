@@ -15,6 +15,7 @@ import {
   blankPatientForm,
   computeAge,
   patientContactFormsToPayload,
+  patientTrustedContactsToPayload,
   parseLanguages,
   toOptional,
   type PatientFormState,
@@ -49,11 +50,6 @@ function createPatientSheetReducer(
     ...state,
     ...(typeof patch === "function" ? patch(state) : patch),
   };
-}
-
-function guardianRelationType(value: string) {
-  const trimmed = value.trim();
-  return trimmed === "parent" ? "parent" : "guardian";
 }
 
 function CreatePatientSheet({
@@ -101,17 +97,28 @@ function CreatePatientSheet({
     try {
       const age = computeAge(form.birthDate);
       const contactPayload = patientContactFormsToPayload(form.contacts);
-      const patientRelations =
-        age !== null && age < 18 && form.emergencyContactName.trim()
-          ? [
-              {
-                related_name: form.emergencyContactName.trim(),
-                relation_type: guardianRelationType(form.emergencyContactRelation),
-                is_emergency_contact: true,
-                phone: toOptional(form.emergencyContactPhone),
-              },
-            ]
-          : undefined;
+      const trustedContacts = patientTrustedContactsToPayload(form.trustedContacts);
+      const invalidTrustedContact = trustedContacts.find((contact) => !contact.name);
+      if (invalidTrustedContact) {
+        throw new Error("Укажите имя доверенного контакта");
+      }
+      const isMinor = age !== null && age < 18;
+      if (
+        isMinor &&
+        !trustedContacts.some((contact) =>
+          ["guardian", "parent"].includes(contact.relation) && Boolean(contact.phone)
+        )
+      ) {
+        throw new Error("Для несовершеннолетнего укажите родителя или опекуна и его телефон");
+      }
+      const primaryTrustedContact = trustedContacts[0];
+      const patientRelations = trustedContacts.map((contact) => ({
+        related_name: contact.name,
+        relation_type: contact.relation,
+        is_emergency_contact: true,
+        phone: toOptional(contact.phone),
+        notes: toOptional(contact.notes),
+      }));
       const created = await createPatient({
         title: toOptional(form.title),
         first_name: form.firstName.trim(),
@@ -133,9 +140,9 @@ function CreatePatientSheet({
         insurance_provider: toOptional(form.insuranceProvider),
         insurance_number: toOptional(form.insuranceNumber),
         insurance_type: toOptional(form.insuranceType),
-        emergency_contact_name: toOptional(form.emergencyContactName),
-        emergency_contact_phone: toOptional(form.emergencyContactPhone),
-        emergency_contact_relation: toOptional(form.emergencyContactRelation),
+        emergency_contact_name: toOptional(primaryTrustedContact?.name ?? ""),
+        emergency_contact_phone: toOptional(primaryTrustedContact?.phone ?? ""),
+        emergency_contact_relation: toOptional(primaryTrustedContact?.relation ?? ""),
         patient_relations: patientRelations,
         notes: toOptional(form.notes),
       });
@@ -189,6 +196,9 @@ function CreatePatientSheet({
         }
         onContactsChange={(contacts) =>
           setForm((current) => ({ ...current, contacts }))
+        }
+        onTrustedContactsChange={(trustedContacts) =>
+          setForm((current) => ({ ...current, trustedContacts }))
         }
         contactMode="multiple"
         includeBirthAndGender

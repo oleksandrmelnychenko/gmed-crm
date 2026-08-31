@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   collectPatientInsuranceTypeOptions,
   filterPatientsByInsuranceType,
+  patientTrustedContactsFromRelations,
+  patientTrustedContactsToPayload,
 } from "./list-model";
 
 const patients = [
@@ -43,5 +45,98 @@ describe("filterPatientsByInsuranceType", () => {
 
   it("returns nothing when no patient carries the selected insurance type", () => {
     expect(filterPatientsByInsuranceType(patients, "public")).toEqual([]);
+  });
+});
+
+describe("trusted patient contacts", () => {
+  it("loads every emergency relation and preserves its persisted id", () => {
+    expect(patientTrustedContactsFromRelations([
+      {
+        id: "relation-1",
+        related_name: "Olena Onboarding",
+        relation_type: "Sister",
+        is_emergency_contact: true,
+        phone: "+380 44 555 0101",
+        notes: "Email: olena@example.test",
+      },
+      {
+        id: "relation-2",
+        related_name: "Petro Onboarding",
+        related_display_name: "Petro O.",
+        relation_type: "Brother",
+        is_emergency_contact: true,
+        phone: "+380 44 555 0102",
+        notes: null,
+      },
+      {
+        id: "relation-3",
+        related_name: "Treating doctor",
+        relation_type: "other",
+        is_emergency_contact: false,
+      },
+    ])).toEqual([
+      {
+        id: "relation-1",
+        persistedId: "relation-1",
+        name: "Olena Onboarding",
+        phone: "+380 44 555 0101",
+        relation: "sibling",
+        notes: "Email: olena@example.test",
+      },
+      {
+        id: "relation-2",
+        persistedId: "relation-2",
+        name: "Petro O.",
+        phone: "+380 44 555 0102",
+        relation: "sibling",
+        notes: "",
+      },
+    ]);
+  });
+
+  it("keeps multiple filled contacts and drops a fully empty draft", () => {
+    expect(patientTrustedContactsToPayload([
+      {
+        id: "contact-1",
+        persistedId: "relation-1",
+        name: "  Olena  ",
+        phone: " +380 44 555 0101 ",
+        relation: "sibling",
+        notes: " primary ",
+      },
+      {
+        id: "contact-2",
+        persistedId: null,
+        name: "Petro",
+        phone: "",
+        relation: "",
+        notes: "",
+      },
+      {
+        id: "contact-empty",
+        persistedId: null,
+        name: "",
+        phone: "",
+        relation: "other",
+        notes: "",
+      },
+    ])).toEqual([
+      {
+        id: "contact-1",
+        persistedId: "relation-1",
+        name: "Olena",
+        phone: "+380 44 555 0101",
+        relation: "sibling",
+        notes: "primary",
+      },
+      {
+        id: "contact-2",
+        persistedId: null,
+        name: "Petro",
+        phone: "",
+        relation: "other",
+        notes: "",
+      },
+    ]);
   });
 });

@@ -89,6 +89,9 @@ const copy = {
     provider: "Provider",
     noProvider: "Ohne Providerzuordnung",
     searchProvider: "Provider suchen",
+    project: "Projekt",
+    noProject: "Ohne Projektbezug",
+    searchProject: "Projekt suchen",
     internalOwner: "Verantwortlich in GMED",
     externalType: "Externer Ausführender",
     searchExternalType: "Art des Ausführenden suchen",
@@ -160,6 +163,9 @@ const copy = {
     provider: "Провайдер",
     noProvider: "Без привязки к провайдеру",
     searchProvider: "Найти провайдера",
+    project: "Проект",
+    noProject: "Без привязки к проекту",
+    searchProject: "Найти проект",
     internalOwner: "Ответственный в GMED",
     externalType: "Внешний исполнитель",
     searchExternalType: "Найти тип исполнителя",
@@ -219,6 +225,7 @@ export type SaveConciergeOperationalItemInput = {
   task_audience: "internal" | "external";
   patient_id: string | null;
   provider_id: string | null;
+  project_id: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -235,6 +242,11 @@ export type ConciergeTaskProviderOption = {
   name: string;
   phone?: string | null;
   email?: string | null;
+};
+
+export type ConciergeTaskProjectOption = {
+  id: string;
+  name: string;
 };
 
 function localDateTimeValue(value: Date | string | null) {
@@ -282,11 +294,13 @@ export function ConciergeTaskEventDialog({
   serviceLinkRequired = false,
   patients = [],
   providers = [],
+  projects = [],
   initialTitle = "",
   initialServiceId = null,
   initialAssigneeId = null,
   initialPatientId = null,
   initialProviderId = null,
+  initialProjectId = null,
   initialDate = null,
   lang,
   open,
@@ -305,11 +319,13 @@ export function ConciergeTaskEventDialog({
   serviceLinkRequired?: boolean;
   patients?: ConciergeTaskPatientOption[];
   providers?: ConciergeTaskProviderOption[];
+  projects?: ConciergeTaskProjectOption[];
   initialTitle?: string;
   initialServiceId?: string | null;
   initialAssigneeId?: string | null;
   initialPatientId?: string | null;
   initialProviderId?: string | null;
+  initialProjectId?: string | null;
   initialDate?: Date | null;
   lang: Lang;
   open: boolean;
@@ -334,6 +350,7 @@ export function ConciergeTaskEventDialog({
   const [audience, setAudience] = useState<"internal" | "external">("internal");
   const [patientId, setPatientId] = useState("");
   const [providerId, setProviderId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [externalType, setExternalType] = useState("driver");
   const [externalName, setExternalName] = useState("");
   const [externalPhone, setExternalPhone] = useState("");
@@ -385,11 +402,12 @@ export function ConciergeTaskEventDialog({
     setAudience(item?.task_audience ?? "internal");
     setPatientId(item?.patient_id ?? initialPatientId ?? "");
     setProviderId(item?.provider_id ?? initialProviderId ?? "");
+    setProjectId(item?.project_id ?? initialProjectId ?? "");
     setExternalType(item?.external_assignee_type ?? "driver");
     setExternalName(item?.external_assignee_name ?? "");
     setExternalPhone(item?.external_assignee_phone ?? "");
     setExternalEmail(item?.external_assignee_email ?? "");
-  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialPatientId, initialProviderId, initialServiceId, initialTitle, item, open]);
+  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialPatientId, initialProjectId, initialProviderId, initialServiceId, initialTitle, item, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -480,6 +498,7 @@ export function ConciergeTaskEventDialog({
           task_audience: audience,
           patient_id: patientId || null,
           provider_id: providerId || null,
+          project_id: projectId || null,
           external_assignee_type: audience === "external" ? externalType : null,
           external_assignee_name: audience === "external" ? externalName.trim() || null : null,
           external_assignee_phone: audience === "external" ? externalPhone.trim() || null : null,
@@ -583,6 +602,12 @@ export function ConciergeTaskEventDialog({
                       <NativeComboboxSelect className={selectClass} value={providerId} searchPlaceholder={labels.searchProvider} onChange={(event) => setProviderId(event.target.value)}>
                         <option value="">{labels.noProvider}</option>
                         {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                      </NativeComboboxSelect>
+                    </ConciergeField>
+                    <ConciergeField label={labels.project} className="sm:col-span-2">
+                      <NativeComboboxSelect className={selectClass} value={projectId} searchPlaceholder={labels.searchProject} onChange={(event) => setProjectId(event.target.value)}>
+                        <option value="">{labels.noProject}</option>
+                        {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                       </NativeComboboxSelect>
                     </ConciergeField>
                     {audience === "external" ? (

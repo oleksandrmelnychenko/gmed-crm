@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AlertCircle, ClipboardPenLine, LoaderCircle } from "lucide-react";
+import { AlertCircle, ClipboardPenLine, LoaderCircle, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
 import type { Lang } from "@/lib/i18n";
@@ -45,6 +46,10 @@ const copy = {
     notes: "Operative Notiz",
     details: "Operative Details",
     cancel: "Abbrechen",
+    delete: "Löschen",
+    deleting: "Wird gelöscht",
+    deleteTitle: "Anfrage löschen?",
+    deleteMessage: "Die Anfrage wird dauerhaft entfernt. Verknüpfte Aufgaben bleiben ohne Anfragebezug erhalten.",
     save: "Speichern",
     saving: "Wird gespeichert",
   },
@@ -70,6 +75,10 @@ const copy = {
     notes: "Операционная заметка",
     details: "Операционные данные",
     cancel: "Отмена",
+    delete: "Удалить",
+    deleting: "Удаление",
+    deleteTitle: "Удалить запрос?",
+    deleteMessage: "Запрос будет удалён без возможности восстановления. Связанные задачи сохранятся без привязки к запросу.",
     save: "Сохранить",
     saving: "Сохранение",
   },
@@ -125,20 +134,26 @@ export function ConciergeServiceRequestDialog({
   lang,
   open,
   submitting,
+  deleting,
   error,
   canEditTitle,
+  canDelete,
   canReopen,
   onOpenChange,
+  onDelete,
   onSave,
 }: {
   service: ConciergeService | null;
   lang: Lang;
   open: boolean;
   submitting: boolean;
+  deleting: boolean;
   error: string;
   canEditTitle: boolean;
+  canDelete: boolean;
   canReopen: boolean;
   onOpenChange: (open: boolean) => void;
+  onDelete: () => Promise<void>;
   onSave: (input: UpdateConciergeServiceInput) => Promise<void>;
 }) {
   const labels = copy[lang];
@@ -151,6 +166,7 @@ export function ConciergeServiceRequestDialog({
   const [address, setAddress] = useState("");
   const [actualCost, setActualCost] = useState("");
   const [notes, setNotes] = useState("");
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !service) return;
@@ -163,6 +179,7 @@ export function ConciergeServiceRequestDialog({
     setAddress(service.service_address ?? "");
     setActualCost(service.actual_cost ?? "");
     setNotes(service.service_notes ?? "");
+    setDeleteConfirmationOpen(false);
   }, [open, service]);
 
   async function submit(event: FormEvent) {
@@ -184,16 +201,17 @@ export function ConciergeServiceRequestDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader
-          tone="dot"
-          title={labels.title}
-          meta={service ? <Badge variant="outline" className="rounded-full font-mono text-[10px]">#{service.id.slice(0, 8)}</Badge> : null}
-        />
-        <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
-          <ConciergeDialogBody>
-            <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className={conciergeDialogContentClassName}>
+          <ConciergeDialogHeader
+            tone="dot"
+            title={labels.title}
+            meta={service ? <Badge variant="outline" className="rounded-full font-mono text-[10px]">#{service.id.slice(0, 8)}</Badge> : null}
+          />
+          <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
+            <ConciergeDialogBody>
+              <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.7fr)_minmax(0,1.3fr)]">
               <ConciergeDialogSection title={labels.request} dot>
                 <div className="space-y-3">
                   <ConciergeField label={labels.patient}>
@@ -228,14 +246,43 @@ export function ConciergeServiceRequestDialog({
                 </div>
                 {error ? <p role="alert" className="mt-3 flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><AlertCircle className="mt-0.5 size-4 shrink-0" />{error}</p> : null}
               </ConciergeDialogSection>
-            </div>
-          </ConciergeDialogBody>
-          <ConciergeDialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
-            <Button type="submit" disabled={!service || !title.trim() || submitting}>{submitting ? <LoaderCircle className="animate-spin" /> : <ClipboardPenLine />}{submitting ? labels.saving : labels.save}</Button>
-          </ConciergeDialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              </div>
+            </ConciergeDialogBody>
+            <ConciergeDialogFooter>
+              {canDelete ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="sm:mr-auto"
+                  disabled={!service || submitting || deleting}
+                  onClick={() => setDeleteConfirmationOpen(true)}
+                >
+                  {deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+                  {deleting ? labels.deleting : labels.delete}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" disabled={deleting} onClick={() => onOpenChange(false)}>{labels.cancel}</Button>
+              <Button type="submit" disabled={!service || !title.trim() || submitting || deleting}>{submitting ? <LoaderCircle className="animate-spin" /> : <ClipboardPenLine />}{submitting ? labels.saving : labels.save}</Button>
+            </ConciergeDialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <DirtyDismissConfirmDialog
+        open={deleteConfirmationOpen}
+        title={labels.deleteTitle}
+        message={labels.deleteMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={deleting ? labels.deleting : labels.delete}
+        destructive
+        confirmDisabled={deleting}
+        onCancel={() => {
+          if (!deleting) setDeleteConfirmationOpen(false);
+        }}
+        onConfirm={() => {
+          setDeleteConfirmationOpen(false);
+          void onDelete();
+        }}
+      />
+    </>
   );
 }

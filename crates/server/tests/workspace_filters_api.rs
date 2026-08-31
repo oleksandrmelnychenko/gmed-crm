@@ -8496,6 +8496,75 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
 }
 
 #[tokio::test]
+async fn assigned_concierge_can_delete_draft_service_with_optimistic_lock() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-service-delete");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Germany").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "appointment_type": "non_medical",
+            "title": "Request to delete",
+            "date": "2026-05-05",
+            "time_start": "12:00",
+            "time_end": "13:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let appointment_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/concierge-services?appointment_id={appointment_id}"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let service_id = body[0]["id"].as_str().unwrap();
+    let expected_updated_at = body[0]["updated_at"].as_str().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/concierge-services/{service_id}"),
+        &concierge_bearer,
+        Some(json!({ "expected_updated_at": expected_updated_at })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(body.is_null());
+
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM concierge_services WHERE id = $1")
+            .bind(Uuid::parse_str(service_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
 async fn billing_can_only_update_financial_fields_on_concierge_service() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

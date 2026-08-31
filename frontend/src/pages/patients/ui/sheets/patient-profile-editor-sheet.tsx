@@ -37,13 +37,16 @@ import {
 import {
   computeAge,
   makePatientContactFormId,
+  makePatientTrustedContactForm,
   normalizePatientContactForms,
+  normalizePatientTrustedContactRelation,
   patientContactFormsToPayload,
+  patientTrustedContactsFromRelations,
   type PatientContactFormState,
   type PatientDetail,
+  type PatientTrustedContactFormState,
 } from "../../model/list-model";
 import { createPatientLeadOrigin } from "../../model/patient-lead-origin";
-import type { RelationItem } from "../../model/detail-tab-types";
 import {
   patientToEditForm,
   type PatientEditFormState,
@@ -71,26 +74,6 @@ type PatientProfileEditorSheetProps = {
 const contactAddButtonClassName =
   "h-8 rounded-lg border-[var(--brand)] bg-[var(--brand)] px-3 text-white shadow-sm hover:bg-[var(--brand)]/90 hover:text-white focus-visible:ring-[var(--brand)]/30";
 
-type TrustedContactFormState = {
-  id: string;
-  persistedId: string | null;
-  name: string;
-  phone: string;
-  relation: string;
-  notes: string;
-};
-
-function emptyTrustedContact(relation = "other"): TrustedContactFormState {
-  return {
-    id: makePatientContactFormId("trusted-contact"),
-    persistedId: null,
-    name: "",
-    phone: "",
-    relation,
-    notes: "",
-  };
-}
-
 function trustedContactRecordString(
   record: Record<string, unknown>,
   key: string,
@@ -99,20 +82,7 @@ function trustedContactRecordString(
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeTrustedContactRelation(value: string) {
-  const normalized = value.trim().toLocaleLowerCase();
-  if (/spouse|partner|ehe|супруг/.test(normalized)) return "spouse";
-  if (/parent|father|mother|vater|mutter|родител|мам|пап/.test(normalized)) return "parent";
-  if (/child|son|daughter|kind|ребен|сын|доч/.test(normalized)) return "child";
-  if (/sibling|brother|sister|bruder|schwester|брат|сестр/.test(normalized)) return "sibling";
-  if (/guardian|vormund|опек/.test(normalized)) return "guardian";
-  if (/caregiver|betreuung|сопровож/.test(normalized)) return "caregiver";
-  if (/friend|freund|друг/.test(normalized)) return "friend";
-  if (/relative|angehör|родствен/.test(normalized)) return "relative";
-  return "other";
-}
-
-function trustedContactsFromDetail(detail: PatientDetail): TrustedContactFormState[] {
+function trustedContactsFromDetail(detail: PatientDetail): PatientTrustedContactFormState[] {
   const leadOrigin = createPatientLeadOrigin(detail);
   const leadContacts = leadOrigin.records("trusted_contacts").flatMap((contact) => {
     const name = trustedContactRecordString(contact, "name");
@@ -133,7 +103,7 @@ function trustedContactsFromDetail(detail: PatientDetail): TrustedContactFormSta
       persistedId: null,
       name,
       phone: trustedContactRecordString(contact, "phone"),
-      relation: normalizeTrustedContactRelation(trustedContactRecordString(contact, "relation")),
+      relation: normalizePatientTrustedContactRelation(trustedContactRecordString(contact, "relation")),
       notes: extraNotes,
     }];
   });
@@ -144,23 +114,10 @@ function trustedContactsFromDetail(detail: PatientDetail): TrustedContactFormSta
   const legacyRelation = detail.emergency_contact_relation?.trim() ?? "";
   if (!legacyName && !legacyPhone && !legacyRelation) return [];
   return [{
-    ...emptyTrustedContact(normalizeTrustedContactRelation(legacyRelation)),
+    ...makePatientTrustedContactForm(normalizePatientTrustedContactRelation(legacyRelation)),
     name: legacyName,
     phone: legacyPhone,
   }];
-}
-
-function trustedContactsFromRelations(relations: RelationItem[]): TrustedContactFormState[] {
-  return relations
-    .filter((relation) => relation.is_emergency_contact)
-    .map((relation) => ({
-      id: relation.id,
-      persistedId: relation.id,
-      name: relation.related_display_name || relation.related_name,
-      phone: relation.phone ?? "",
-      relation: normalizeTrustedContactRelation(relation.relation_type),
-      notes: relation.notes ?? "",
-    }));
 }
 
 function contactAddLabel(
@@ -249,12 +206,12 @@ type PatientProfileEditorFormSectionsProps = {
   dictionary: Record<string, string> & { uiText?: Record<string, string> };
   lang: string;
   form: PatientEditFormState;
-  trustedContacts: TrustedContactFormState[];
+  trustedContacts: PatientTrustedContactFormState[];
   trustedContactsLoading: boolean;
   statusLabel: (status: string) => string;
   updateField: <K extends keyof PatientEditFormState>(field: K, value: PatientEditFormState[K]) => void;
   updateContacts: (contacts: PatientContactFormState[]) => void;
-  updateTrustedContacts: (contacts: TrustedContactFormState[]) => void;
+  updateTrustedContacts: (contacts: PatientTrustedContactFormState[]) => void;
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
 };
 
@@ -304,12 +261,12 @@ function PatientProfileEditorFormSections({
   const addTrustedContact = () => {
     updateTrustedContacts([
       ...trustedContacts,
-      emptyTrustedContact(isMinor ? "guardian" : "other"),
+      makePatientTrustedContactForm(isMinor ? "guardian" : "other"),
     ]);
   };
   const patchTrustedContact = (
     contactId: string,
-    patch: Partial<TrustedContactFormState>,
+    patch: Partial<PatientTrustedContactFormState>,
   ) => {
     updateTrustedContacts(trustedContacts.map((contact) => (
       contact.id === contactId ? { ...contact, ...patch } : contact
@@ -965,7 +922,7 @@ function PatientProfileEditorSheetContent({
         )
       : null,
   );
-  const [trustedContacts, setTrustedContacts] = useState<TrustedContactFormState[]>(() =>
+  const [trustedContacts, setTrustedContacts] = useState<PatientTrustedContactFormState[]>(() =>
     open && detail ? trustedContactsFromDetail(detail) : [],
   );
   const [initialTrustedContactIds, setInitialTrustedContactIds] = useState<string[]>([]);
@@ -982,7 +939,7 @@ function PatientProfileEditorSheetContent({
     fetchPatientRelations(patientId)
       .then((relations) => {
         if (!active) return;
-        const loadedContacts = trustedContactsFromRelations(relations);
+        const loadedContacts = patientTrustedContactsFromRelations(relations);
         if (loadedContacts.length > 0) setTrustedContacts(loadedContacts);
         setInitialTrustedContactIds(loadedContacts.flatMap((contact) => (
           contact.persistedId ? [contact.persistedId] : []
@@ -1092,8 +1049,9 @@ function PatientProfileEditorSheetContent({
           clinical_warnings: form.clinicalWarnings,
           notes: form.notes,
         });
+        const persistedTrustedContacts: PatientTrustedContactFormState[] = [];
         for (const contact of normalizedTrustedContacts) {
-          await upsertPatientRelation(
+          const persisted = await upsertPatientRelation(
             patientId,
             {
               related_patient_id: null,
@@ -1105,8 +1063,21 @@ function PatientProfileEditorSheetContent({
             },
             contact.persistedId,
           );
+          const persistedContact = {
+            ...contact,
+            id: persisted.id,
+            persistedId: persisted.id,
+          };
+          persistedTrustedContacts.push(persistedContact);
+          setTrustedContacts((current) => current.map((currentContact) => (
+            currentContact.id === contact.id ? persistedContact : currentContact
+          )));
+          setInitialTrustedContactIds((current) => Array.from(new Set([
+            ...current,
+            persisted.id,
+          ])));
         }
-        const retainedIds = new Set(normalizedTrustedContacts.flatMap((contact) => (
+        const retainedIds = new Set(persistedTrustedContacts.flatMap((contact) => (
           contact.persistedId ? [contact.persistedId] : []
         )));
         for (const relationId of initialTrustedContactIds) {

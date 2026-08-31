@@ -165,6 +165,8 @@ export type ConciergeTask = {
   provider_name: string | null;
   provider_phone: string | null;
   provider_email: string | null;
+  project_id: string | null;
+  project_name: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -769,6 +771,8 @@ export function filterConciergeTasks(
       task.assigned_to_name,
       task.assigned_by_name,
       task.patient_name,
+      task.provider_name,
+      task.project_name,
       task.external_assignee_name,
       task.external_assignee_phone,
       task.external_assignee_email,

@@ -151,6 +151,8 @@ const ROLES_TASK_MANAGER = [
   "interpreter",
 ] as const satisfies readonly StaffRole[];
 
+const ROLES_PROJECTS = ROLES_TASK_MANAGER;
+
 const ROLES_FILES = ROLES_TASK_MANAGER;
 
 type RouteRule = {
@@ -399,6 +401,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/leads",
     roles: ROLES_LEADS,
     nav: { section: "crm", labelKey: "leads_title" },
+  },
+  {
+    id: "projects",
+    match: "exact",
+    path: "/projects",
+    roles: ROLES_PROJECTS,
+    nav: { section: "crm", labelKey: "nav_projects", after: "leads" },
   },
   {
     id: "cases",

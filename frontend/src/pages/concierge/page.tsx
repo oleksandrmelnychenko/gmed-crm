@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   CalendarDays,
-  CheckCircle2,
   ClipboardPenLine,
   CircleDollarSign,
   Clock3,
@@ -37,7 +36,6 @@ import {
   conciergeServiceColumn,
   conciergeServiceDisplayTitle,
   conciergeServiceTaxonomyLabel,
-  conciergeWorkspaceStats,
   canModifyConciergeTask,
   conciergeOperationalItemsListPath,
   conciergeTaskErrorMessage,
@@ -104,6 +102,7 @@ const REALTIME_EVENTS = [
   "concierge_service.created",
   "concierge_service.updated",
   "concierge_service.cancelled",
+  "concierge_service.deleted",
   "concierge_service.billing_ready",
   "concierge_service.key_updated",
   "concierge_service.partner_interaction_recorded",
@@ -140,10 +139,7 @@ const text = {
     taskManager: "Aufgaben",
     taskManagerTitle: "Aufgabenmanager",
     taskManagerSubtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
-    active: "Aktive Services",
-    today: "Heute geplant",
     overdue: "Überfällig",
-    ready: "Bereit zur Abrechnung",
     requests: "Neue Anfragen",
     confirmed: "Bestätigt",
     in_service: "In Durchführung",
@@ -199,10 +195,7 @@ const text = {
     taskManager: "Задачи",
     taskManagerTitle: "Менеджер задач",
     taskManagerSubtitle: "Распределение задач, календарь событий и контроль сроков",
-    active: "Активные услуги",
-    today: "Запланировано сегодня",
     overdue: "Просрочено",
-    ready: "Готово к расчёту",
     requests: "Новые запросы",
     confirmed: "Подтверждено",
     in_service: "Выполняется",
@@ -528,30 +521,6 @@ function ServiceFact({
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  tone,
-  icon: Icon,
-}: {
-  label: string;
-  value: number;
-  tone?: "danger" | "success";
-  icon: typeof CalendarDays;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 shadow-sm">
-      <div className="min-w-0">
-        <p className="truncate text-[10px] font-medium text-muted-foreground sm:text-[11px]">{label}</p>
-        <p className={cn("mt-0.5 font-mono text-lg font-semibold tabular-nums text-foreground sm:text-xl", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>{value}</p>
-      </div>
-      <span className={cn("flex size-7 shrink-0 items-center justify-center text-muted-foreground sm:size-8", tone === "danger" && value > 0 && "text-rose-600", tone === "success" && value > 0 && "text-emerald-600")}>
-        <Icon className="size-3 sm:size-3.5" />
-      </span>
-    </div>
-  );
-}
-
 export function ConciergeWorkspacePage() {
   const { lang } = useLang();
   const { user } = useAuth();
@@ -577,6 +546,7 @@ export function ConciergeWorkspacePage() {
   const [taskError, setTaskError] = useState("");
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [deletingRequest, setDeletingRequest] = useState(false);
   const [requestError, setRequestError] = useState("");
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const createTaskRequestIdRef = useRef<string | null>(null);
@@ -712,7 +682,6 @@ export function ConciergeWorkspacePage() {
     () => conciergeTasksAssignedToActor(tasks, user?.id),
     [tasks, user?.id],
   );
-  const stats = useMemo(() => conciergeWorkspaceStats(services, now), [now, services]);
   const servicesByColumn = useMemo(() => {
     const groups = new Map<ConciergeBoardColumnId, ConciergeService[]>(
       CONCIERGE_BOARD_COLUMNS.map((column) => [column.id, []]),
@@ -1027,6 +996,26 @@ export function ConciergeWorkspacePage() {
     }
   }
 
+  async function deleteRequest() {
+    if (!editingRequest || deletingRequest) return;
+    setDeletingRequest(true);
+    setRequestError("");
+    setError("");
+    try {
+      await apiFetch<void>(`/concierge-services/${editingRequest.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expected_updated_at: editingRequest.updated_at }),
+      });
+      clearApiCache("/concierge-services");
+      setServices((current) => current.filter((service) => service.id !== editingRequest.id));
+      setEditingRequestId(null);
+    } catch (deleteError) {
+      setRequestError(deleteError instanceof Error ? deleteError.message : labels.updateFailed);
+    } finally {
+      setDeletingRequest(false);
+    }
+  }
+
   function selectViewMode(mode: ViewMode) {
     setViewMode(mode);
     const next = new URLSearchParams(searchParams);
@@ -1103,13 +1092,6 @@ export function ConciergeWorkspacePage() {
         title={labels.title}
         description={labels.subtitle}
       />
-
-      <section aria-label={labels.title} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <MetricCard label={labels.active} value={stats.active} icon={Columns3} />
-        <MetricCard label={labels.today} value={stats.today} icon={CalendarDays} />
-        <MetricCard label={labels.overdue} value={stats.overdue} tone="danger" icon={Clock3} />
-        <MetricCard label={labels.ready} value={stats.readyForBilling} tone="success" icon={CheckCircle2} />
-      </section>
 
       {error ? (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -1340,14 +1322,17 @@ export function ConciergeWorkspacePage() {
         lang={lang}
         open={Boolean(editingRequestId)}
         submitting={submittingRequest}
+        deleting={deletingRequest}
         error={requestError}
         canEditTitle={user?.role === "ceo" || user?.role === "patient_manager"}
+        canDelete={user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "concierge"}
         canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
         onOpenChange={(open) => {
           if (open) return;
           setEditingRequestId(null);
           setRequestError("");
         }}
+        onDelete={deleteRequest}
         onSave={saveRequest}
       />
       <ConciergeTaskEventDialog

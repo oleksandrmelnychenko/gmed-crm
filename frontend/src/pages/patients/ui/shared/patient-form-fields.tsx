@@ -1,4 +1,4 @@
-import { Mail, Phone, Trash2 } from "lucide-react";
+import { Mail, Phone, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -6,10 +6,15 @@ import { Input } from "@/components/ui/input";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-import type { PatientContactFormState, PatientFormState } from "../../model/list-model";
+import type {
+  PatientContactFormState,
+  PatientFormState,
+  PatientTrustedContactFormState,
+} from "../../model/list-model";
 import {
   computeAge,
   makePatientContactFormId,
+  makePatientTrustedContactForm,
   normalizePatientContactForms,
 } from "../../model/list-model";
 import {
@@ -31,6 +36,7 @@ type PatientFormFieldsProps = {
   form: PatientFormState;
   onChange: (field: keyof PatientFormState, value: string) => void;
   onContactsChange?: (contacts: PatientContactFormState[]) => void;
+  onTrustedContactsChange?: (contacts: PatientTrustedContactFormState[]) => void;
   contactMode?: "simple" | "multiple";
   includeBirthAndGender?: boolean;
   readOnly?: boolean;
@@ -61,6 +67,7 @@ export function PatientFormFields({
   form,
   onChange,
   onContactsChange,
+  onTrustedContactsChange,
   contactMode = "simple",
   includeBirthAndGender = false,
   readOnly = false,
@@ -70,20 +77,46 @@ export function PatientFormFields({
   const age = computeAge(form.birthDate);
   const isMinor = includeBirthAndGender && age !== null && age < 18;
   const notSetLabel = t.common_not_set;
-  const guardianLabel = t.patient_relation_type_guardian ?? l("patients_detail_guardian");
-  const parentLabel = t.patient_relation_type_parent ?? l("patients_detail_parent");
+  const trustedRelationOptions = [
+    ["spouse", t.patient_relation_type_spouse],
+    ["parent", t.patient_relation_type_parent],
+    ["child", t.patient_relation_type_child],
+    ["sibling", t.patient_relation_type_sibling],
+    ["relative", t.patient_relation_type_relative],
+    ["guardian", t.patient_relation_type_guardian],
+    ["caregiver", t.patient_relation_type_caregiver],
+    ["friend", t.patient_relation_type_friend],
+    ["other", t.patient_relation_type_other],
+  ] as const;
 
   function handleBirthDateChange(value: string) {
     onChange("birthDate", value);
-    const nextAge = computeAge(value);
-    if (
-      nextAge !== null &&
-      nextAge < 18 &&
-      !isGuardianOrParentRelation(form.emergencyContactRelation)
-    ) {
-      onChange("emergencyContactRelation", "guardian");
-    }
   }
+
+  const addTrustedContact = () => {
+    if (!onTrustedContactsChange || readOnly) return;
+    onTrustedContactsChange([
+      ...form.trustedContacts,
+      makePatientTrustedContactForm(isMinor ? "guardian" : "other"),
+    ]);
+  };
+
+  const updateTrustedContact = (
+    contactId: string,
+    patch: Partial<PatientTrustedContactFormState>,
+  ) => {
+    if (!onTrustedContactsChange || readOnly) return;
+    onTrustedContactsChange(form.trustedContacts.map((contact) => (
+      contact.id === contactId ? { ...contact, ...patch } : contact
+    )));
+  };
+
+  const removeTrustedContact = (contactId: string) => {
+    if (!onTrustedContactsChange || readOnly) return;
+    onTrustedContactsChange(
+      form.trustedContacts.filter((contact) => contact.id !== contactId),
+    );
+  };
 
   const updateContact = (
     contactId: string,
@@ -240,53 +273,113 @@ export function PatientFormFields({
             : l("patients_emergency_contact")
         }
       >
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label={t.patients_emergency_name} required={isMinor}>
-            <Input
-              value={form.emergencyContactName}
-              onChange={(event) => onChange("emergencyContactName", event.target.value)}
-              className={formInputClassName}
-              disabled={readOnly}
-              required={isMinor}
-            />
-          </Field>
-          <Field label={t.patients_emergency_phone} required={isMinor}>
-            <Input
-              value={form.emergencyContactPhone}
-              onChange={(event) => onChange("emergencyContactPhone", event.target.value)}
-              className={formInputClassName}
-              disabled={readOnly}
-              required={isMinor}
-            />
-          </Field>
-          <Field label={t.patients_emergency_relation} required={isMinor}>
-            {isMinor ? (
-              <NativeComboboxSelect
-                value={
-                  isGuardianOrParentRelation(form.emergencyContactRelation)
-                    ? form.emergencyContactRelation
-                    : "guardian"
-                }
-                onChange={(event) =>
-                  onChange("emergencyContactRelation", event.target.value ?? "guardian")
-                }
-                className={cn("w-full", formInputClassName)}
-                disabled={readOnly}
-                required
-              >
-                <option value="guardian">{guardianLabel}</option>
-                <option value="parent">{parentLabel}</option>
-              </NativeComboboxSelect>
-            ) : (
-              <Input
-                value={form.emergencyContactRelation}
-                onChange={(event) => onChange("emergencyContactRelation", event.target.value)}
-                className={formInputClassName}
-                disabled={readOnly}
-              />
-            )}
-          </Field>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {lang === "de"
+              ? "Mehrere Vertrauenskontakte können hinterlegt werden."
+              : "Можно добавить несколько доверенных контактов."}
+          </p>
+          {!readOnly ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 rounded-lg"
+              onClick={addTrustedContact}
+            >
+              <Plus className="size-3.5" />
+              {lang === "de" ? "Kontakt hinzufügen" : "Добавить контакт"}
+            </Button>
+          ) : null}
         </div>
+
+        {form.trustedContacts.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
+            {lang === "de"
+              ? "Noch keine Vertrauenskontakte hinzugefügt."
+              : "Доверенные контакты пока не добавлены."}
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {form.trustedContacts.map((contact, index) => {
+              const contactHasData = Boolean(
+                contact.name.trim() || contact.phone.trim() || contact.notes.trim(),
+              );
+              const relationOptions = isMinor
+                ? trustedRelationOptions.filter(([value]) => isGuardianOrParentRelation(value))
+                : trustedRelationOptions;
+              return (
+                <div key={contact.id} className="rounded-lg border border-border/70 bg-card p-3">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-foreground">
+                      {lang === "de" ? "Vertrauenskontakt" : "Доверенный контакт"} {index + 1}
+                    </p>
+                    {!readOnly ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground hover:text-destructive"
+                        aria-label={lang === "de" ? "Kontakt entfernen" : "Удалить контакт"}
+                        onClick={() => removeTrustedContact(contact.id)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <Field label={t.patients_emergency_name} required={isMinor || contactHasData}>
+                      <Input
+                        value={contact.name}
+                        onChange={(event) => updateTrustedContact(contact.id, { name: event.target.value })}
+                        className={formInputClassName}
+                        disabled={readOnly}
+                        required={isMinor || contactHasData}
+                      />
+                    </Field>
+                    <Field label={t.patients_emergency_phone} required={isMinor}>
+                      <Input
+                        value={contact.phone}
+                        onChange={(event) => updateTrustedContact(contact.id, { phone: event.target.value })}
+                        className={formInputClassName}
+                        disabled={readOnly}
+                        required={isMinor}
+                      />
+                    </Field>
+                    <Field label={t.patients_emergency_relation} required>
+                      <NativeComboboxSelect
+                        value={
+                          isMinor && !isGuardianOrParentRelation(contact.relation)
+                            ? "guardian"
+                            : contact.relation
+                        }
+                        onChange={(event) => updateTrustedContact(contact.id, {
+                          relation: event.target.value ?? (isMinor ? "guardian" : "other"),
+                        })}
+                        className={cn("w-full", formInputClassName)}
+                        disabled={readOnly}
+                        required
+                      >
+                        {relationOptions.map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </NativeComboboxSelect>
+                    </Field>
+                  </div>
+                  <Field label={t.patients_notes}>
+                    <textarea
+                      value={contact.notes}
+                      onChange={(event) => updateTrustedContact(contact.id, { notes: event.target.value })}
+                      className={cn(textareaClassName, "min-h-20")}
+                      disabled={readOnly}
+                      rows={2}
+                    />
+                  </Field>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </FormSection>
 
       <FormSection title={t.patients_notes}>

@@ -108,6 +108,15 @@ export type PatientContactPayload = {
   notes: string | null;
 };
 
+export type PatientTrustedContactFormState = {
+  id: string;
+  persistedId: string | null;
+  name: string;
+  phone: string;
+  relation: string;
+  notes: string;
+};
+
 export type PatientFilters = {
   search: string;
   activeOnly: string;
@@ -137,9 +146,7 @@ export type PatientFormState = {
   insuranceProvider: string;
   insuranceNumber: string;
   insuranceType: string;
-  emergencyContactName: string;
-  emergencyContactPhone: string;
-  emergencyContactRelation: string;
+  trustedContacts: PatientTrustedContactFormState[];
   notes: string;
 };
 
@@ -258,9 +265,7 @@ export function blankPatientForm(): PatientFormState {
     insuranceProvider: "",
     insuranceNumber: "",
     insuranceType: "",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    emergencyContactRelation: "",
+    trustedContacts: [],
     notes: "",
   };
 }
@@ -270,6 +275,73 @@ export function makePatientContactFormId(prefix = "patient-contact") {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function makePatientTrustedContactForm(
+  relation = "other",
+): PatientTrustedContactFormState {
+  return {
+    id: makePatientContactFormId("trusted-contact"),
+    persistedId: null,
+    name: "",
+    phone: "",
+    relation,
+    notes: "",
+  };
+}
+
+export function normalizePatientTrustedContactRelation(value: string) {
+  const normalized = value.trim().toLocaleLowerCase();
+  if (/spouse|partner|ehe|супруг/.test(normalized)) return "spouse";
+  if (/parent|father|mother|vater|mutter|родител|мам|пап/.test(normalized)) return "parent";
+  if (/child|son|daughter|kind|ребен|сын|доч/.test(normalized)) return "child";
+  if (/sibling|brother|sister|bruder|schwester|брат|сестр/.test(normalized)) return "sibling";
+  if (/guardian|vormund|опек/.test(normalized)) return "guardian";
+  if (/caregiver|betreuung|сопровож/.test(normalized)) return "caregiver";
+  if (/friend|freund|друг/.test(normalized)) return "friend";
+  if (/relative|angehör|родствен/.test(normalized)) return "relative";
+  return "other";
+}
+
+export function patientTrustedContactsFromRelations(
+  relations: ReadonlyArray<{
+    id: string;
+    related_name: string;
+    related_display_name?: string | null;
+    relation_type: string;
+    is_emergency_contact: boolean;
+    phone?: string | null;
+    notes?: string | null;
+  }>,
+): PatientTrustedContactFormState[] {
+  return relations
+    .filter((relation) => relation.is_emergency_contact)
+    .map((relation) => ({
+      id: relation.id,
+      persistedId: relation.id,
+      name: relation.related_display_name || relation.related_name,
+      phone: relation.phone ?? "",
+      relation: normalizePatientTrustedContactRelation(relation.relation_type),
+      notes: relation.notes ?? "",
+    }));
+}
+
+export function patientTrustedContactsToPayload(
+  contacts: PatientTrustedContactFormState[],
+) {
+  return contacts.flatMap((contact) => {
+    const name = contact.name.trim();
+    const phone = contact.phone.trim();
+    const notes = contact.notes.trim();
+    if (!name && !phone && !notes) return [];
+    return [{
+      ...contact,
+      name,
+      phone,
+      relation: contact.relation.trim() || "other",
+      notes,
+    }];
+  });
 }
 
 export function patientContactsToForm(detail: PatientDetail): PatientContactFormState[] {
@@ -406,9 +478,17 @@ export function patientToForm(detail: PatientDetail): PatientFormState {
     insuranceProvider: detail.insurance_provider ?? "",
     insuranceNumber: detail.insurance_number ?? "",
     insuranceType: detail.insurance_type ?? "",
-    emergencyContactName: detail.emergency_contact_name ?? "",
-    emergencyContactPhone: detail.emergency_contact_phone ?? "",
-    emergencyContactRelation: detail.emergency_contact_relation ?? "",
+    trustedContacts: detail.emergency_contact_name || detail.emergency_contact_phone
+      ? [{
+          ...makePatientTrustedContactForm(
+            normalizePatientTrustedContactRelation(
+              detail.emergency_contact_relation ?? "other",
+            ),
+          ),
+          name: detail.emergency_contact_name ?? "",
+          phone: detail.emergency_contact_phone ?? "",
+        }]
+      : [],
     notes: detail.notes ?? "",
   };
 }

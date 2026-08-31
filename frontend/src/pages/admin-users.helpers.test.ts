@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canSaveAdminUserEdit,
   getOptionalAdminPasswordError,
   getRequiredAdminPasswordError,
   generateAdminPassword,
@@ -62,5 +63,38 @@ describe("admin user password validation", () => {
 
     expect(password).toHaveLength(16);
     expect(getRequiredAdminPasswordError(password, messages)).toBeNull();
+  });
+
+  it("enables edit save for a valid password-only change", () => {
+    expect(
+      canSaveAdminUserEdit({
+        profileDirty: false,
+        password: "Password1!",
+        confirmation: "Password1!",
+        passwordError: null,
+        saving: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("blocks edit save when a password draft is incomplete or invalid", () => {
+    expect(
+      canSaveAdminUserEdit({
+        profileDirty: true,
+        password: "Password1!",
+        confirmation: "",
+        passwordError: null,
+        saving: false,
+      }),
+    ).toBe(false);
+    expect(
+      canSaveAdminUserEdit({
+        profileDirty: false,
+        password: "password",
+        confirmation: "password",
+        passwordError: messages.users_password_policy_complexity,
+        saving: false,
+      }),
+    ).toBe(false);
   });
 });

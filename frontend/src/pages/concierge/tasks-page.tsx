@@ -35,6 +35,8 @@ import { ConciergeTaskManager } from "./task-manager";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
+type TaskProjectOption = { id: string; name: string; status: string };
+
 const REALTIME_EVENTS = [
   "concierge_operational_item.created",
   "concierge_operational_item.updated",
@@ -56,8 +58,8 @@ const copy = {
     title: "Aufgabenmanager",
     subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
     newTask: "Aufgabe / Termin",
-    newServiceTask: "Serviceaufgabe",
-    serviceRequired: "Wählen Sie einen Service für die Serviceaufgabe aus.",
+    newServiceTask: "Concierge-Aufgabe",
+    serviceRequired: "Wählen Sie einen Service für die Concierge-Aufgabe aus.",
     refresh: "Aktualisieren",
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
@@ -77,8 +79,8 @@ const copy = {
     title: "Менеджер задач",
     subtitle: "Распределение задач, календарь событий и контроль сроков",
     newTask: "Задача / событие",
-    newServiceTask: "Сервисная задача",
-    serviceRequired: "Для сервисной задачи выберите связанный сервис.",
+    newServiceTask: "Консьерж-задача",
+    serviceRequired: "Для консьерж-задачи выберите связанный сервис.",
     refresh: "Обновить",
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
@@ -117,6 +119,7 @@ export function ConciergeTaskManagerPage() {
   const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [providers, setProviders] = useState<ConciergeProvider[]>([]);
   const [services, setServices] = useState<ConciergeService[]>([]);
+  const [projects, setProjects] = useState<TaskProjectOption[]>([]);
   const [initialTaskDate, setInitialTaskDate] = useState<Date | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
   const [serviceTaskMode, setServiceTaskMode] = useState(false);
@@ -137,6 +140,7 @@ export function ConciergeTaskManagerPage() {
     clearApiCache("/patients");
     clearApiCache("/providers");
     clearApiCache("/concierge-services");
+    clearApiCache("/projects");
     setVersion((current) => current + 1);
   }, []);
 
@@ -153,7 +157,7 @@ export function ConciergeTaskManagerPage() {
       if (!hasLoadedRef.current) setLoading(true);
       setError("");
       try {
-        const [taskRows, assigneeRows, patientRows, providerRows, serviceRows] = await Promise.all([
+        const [taskRows, assigneeRows, patientRows, providerRows, serviceRows, projectRows] = await Promise.all([
           apiFetch<ConciergeTask[]>(taskListPath, {
             cacheTtlMs: 10_000,
             forceFresh: version > 0,
@@ -182,6 +186,10 @@ export function ConciergeTaskManagerPage() {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,
           }).catch(() => []),
+          apiFetch<TaskProjectOption[]>("/projects", {
+            cacheTtlMs: 30_000,
+            forceFresh: version > 0,
+          }).catch(() => []),
         ]);
         if (!cancelled) {
           setTasks(conciergeTasksVisibleToActor(taskRows, user?.id, user?.role));
@@ -192,6 +200,7 @@ export function ConciergeTaskManagerPage() {
           })).sort((left, right) => left.name.localeCompare(right.name)));
           setProviders(providerRows.sort((left, right) => left.name.localeCompare(right.name)));
           setServices(serviceRows);
+          setProjects(projectRows.filter((project) => !["completed", "cancelled"].includes(project.status)));
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -402,7 +411,7 @@ export function ConciergeTaskManagerPage() {
               <Plus />{labels.newTask}
             </Button>
             {services.length > 0 ? (
-              <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask(null, true)}>
+              <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask(null, true)}>
                 <ClipboardPlus />{labels.newServiceTask}
               </Button>
             ) : null}
@@ -457,8 +466,10 @@ export function ConciergeTaskManagerPage() {
         serviceLinkRequired={serviceTaskMode}
         patients={patients}
         providers={providers}
+        projects={projects}
         initialPatientId={searchParams.get("patient")}
         initialProviderId={searchParams.get("provider")}
+        initialProjectId={searchParams.get("project")}
         initialDate={initialTaskDate}
         lang={lang}
         open={taskDialogOpen}
@@ -475,6 +486,7 @@ export function ConciergeTaskManagerPage() {
             next.delete("create");
             next.delete("patient");
             next.delete("provider");
+            next.delete("project");
             setSearchParams(next, { replace: true });
           }
         }}

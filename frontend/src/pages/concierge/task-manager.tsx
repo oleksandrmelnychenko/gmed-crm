@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  FolderKanban,
   List,
   ListChecks,
   MessageSquareText,
@@ -103,6 +104,7 @@ const copy = {
     showLess: "Weniger anzeigen",
     patient: "Patient",
     provider: "Anbieter",
+    project: "Projekt",
     expenses: "Ausgaben",
     addExpense: "Ausgabe / Beleg",
     linkServiceForExpense: "Service verknüpfen und Ausgabe erfassen",
@@ -166,6 +168,7 @@ const copy = {
     showLess: "Свернуть",
     patient: "Пациент",
     provider: "Провайдер",
+    project: "Проект",
     expenses: "Расходы",
     addExpense: "Расход / документ",
     linkServiceForExpense: "Привязать сервис и добавить расход",
@@ -298,6 +301,16 @@ function TaskCard({
             >
               <Building2 className="size-3 shrink-0" />
               <span className="truncate">{labels.provider}: {task.provider_name}</span>
+            </Badge>
+          ) : null}
+          {task.project_name ? (
+            <Badge
+              variant="outline"
+              className="max-w-full rounded-full border-orange-200 bg-orange-50 text-[10px] text-orange-800"
+              title={`${labels.project}: ${task.project_name}`}
+            >
+              <FolderKanban className="size-3 shrink-0" />
+              <span className="truncate">{task.project_name}</span>
             </Badge>
           ) : null}
           {task.concierge_service_id ? (

@@ -2355,3 +2355,148 @@ async fn assigned_concierge_task_grants_non_clinical_patient_access_only() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_after_archive}");
 }
+
+#[tokio::test]
+async fn project_members_can_read_project_tasks_but_cannot_mutate_unassigned_work() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner_id = seed_user(&ctx.pool, "concierge", &format!("project-owner-{tag}")).await;
+    let member_id = seed_user(&ctx.pool, "concierge", &format!("project-member-{tag}")).await;
+    let outsider_id = seed_user(&ctx.pool, "concierge", &format!("project-outsider-{tag}")).await;
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let member_bearer = auth_header_for(member_id, "concierge");
+    let outsider_bearer = auth_header_for(outsider_id, "concierge");
+
+    let (status, project) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/projects",
+        &ceo_bearer,
+        Some(json!({
+            "name": format!("Project {tag}"),
+            "description": "Shared operational work",
+            "status": "active",
+            "priority": "high",
+            "owner_id": owner_id,
+            "member_ids": [owner_id, member_id]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{project}");
+    let project_id = Uuid::parse_str(project["id"].as_str().expect("project id")).unwrap();
+
+    let (status, transferred_project) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/projects",
+        &member_bearer,
+        Some(json!({
+            "name": format!("Transferred project {tag}"),
+            "owner_id": outsider_id,
+            "member_ids": [outsider_id]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{transferred_project}");
+    assert!(
+        transferred_project["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == member_id.to_string()),
+        "project creator must retain read access after transferring ownership"
+    );
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &ceo_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Owner work visible to the project team",
+            "assigned_to": owner_id,
+            "project_id": project_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+
+    let (status, projects) =
+        json_request(&ctx.app, "GET", "/api/v1/projects", &member_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{projects}");
+    assert!(
+        projects
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == project_id.to_string())
+    );
+
+    let (status, tasks) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items?project_id={project_id}&archive=all"),
+        &member_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tasks}");
+    assert!(
+        tasks
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == task_id.to_string())
+    );
+
+    let (status, detail) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        &member_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["item"]["project_id"], project_id.to_string());
+
+    let (status, denied) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{task_id}/status"),
+        &member_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+
+    let (status, outsider_projects) =
+        json_request(&ctx.app, "GET", "/api/v1/projects", &outsider_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{outsider_projects}");
+    assert!(
+        !outsider_projects
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == project_id.to_string())
+    );
+
+    let (status, denied) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        &outsider_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+}
