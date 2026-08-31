@@ -170,7 +170,6 @@ test.describe("secure chat live workflows", () => {
     browser,
     request,
   }) => {
-    test.setTimeout(180_000);
     const [scenario, patientContext, conciergeContext] = await Promise.all([
       bootstrapFullSmokeScenario(request),
       browser.newContext(),
@@ -232,7 +231,7 @@ test.describe("secure chat live workflows", () => {
         .getByPlaceholder(/Benutzer suchen|Поиск пользователей/i)
         .fill(scenario.credentials.concierge.name);
       await patientPicker
-        .getByRole("button", { name: new RegExp(scenario.credentials.concierge.name, "i") })
+        .getByRole("option", { name: new RegExp(scenario.credentials.concierge.name, "i") })
         .click();
 
       await conciergePage
@@ -243,7 +242,7 @@ test.describe("secure chat live workflows", () => {
         .getByPlaceholder(/Benutzer suchen|Поиск пользователей/i)
         .fill(scenario.credentials.patient.name);
       await conciergePicker
-        .getByRole("button", { name: new RegExp(scenario.credentials.patient.name, "i") })
+        .getByRole("option", { name: new RegExp(scenario.credentials.patient.name, "i") })
         .click();
 
       const encryptedChatLabel = /End-to-end encrypted chat|Ende-zu-Ende verschlüsselt/i;

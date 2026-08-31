@@ -189,41 +189,31 @@ test.describe("realtime live propagation", () => {
       });
       await expect(page.getByText(lastName).first()).toBeVisible();
 
-      // The release workspace deliberately keeps patient-manager accounts on
-      // the task-only surface. Observe patient creation as CEO, then use the
-      // assigned concierge for patient-scoped appointment and task events.
-      await setGermanLanguage(operationsPage);
-      await loginViaApi(
-        operationsPage,
-        request,
-        operationsObserver.email,
-        password,
-      );
+      // Keep appointment observation on the already connected CEO page. A
+      // concierge without a current patient assignment intentionally receives
+      // a privacy-safe blocked slot even when named as appointment owner.
       const initialAppointmentsResponsePromise = waitForApiGet(
-        operationsPage,
+        page,
         "/appointments",
       );
-      await operationsPage.goto(`/appointments?patient=${scenario.patient.id}`);
+      await page.goto(`/appointments?patient=${scenario.patient.id}`);
       const initialAppointmentsResponse = await initialAppointmentsResponsePromise;
       expect(initialAppointmentsResponse.ok()).toBeTruthy();
       await expect(
-        operationsPage.getByRole("heading", { level: 1, name: "Termine" }),
+        page.getByRole("heading", { level: 1, name: "Termine" }),
       ).toBeVisible();
-      await waitForRealtime(operationsPage);
-      await expect(operationsPage.getByText(appointmentTitle)).toHaveCount(0);
+      await waitForRealtime(page);
+      await expect(page.getByText(appointmentTitle)).toHaveCount(0);
 
       const appointmentRefreshPromise = waitForApiGet(
-        operationsPage,
+        page,
         "/appointments",
       );
       await browserApiPost(mutatorPage, "/appointments", {
         patient_id: scenario.patient.id,
         provider_id: null,
         doctor_id: null,
-        // Concierge visibility is owner/assignment scoped. Make the observing
-        // client the explicit owner so the refetch assertion tests realtime
-        // propagation rather than depending on bootstrap assignment details.
-        owner_user_id: operationsObserver.user_id,
+        owner_user_id: creator.user_id,
         interpreter_id: null,
         order_id: scenario.order.id,
         appointment_type: "medical",
@@ -249,10 +239,17 @@ test.describe("realtime live propagation", () => {
         refreshedAppointments.some((item) => item.title === appointmentTitle),
       ).toBeTruthy();
 
-      await expect(operationsPage.getByText(appointmentTitle).first()).toBeVisible({
+      await expect(page.getByText(appointmentTitle).first()).toBeVisible({
         timeout: 30_000,
       });
 
+      await setGermanLanguage(operationsPage);
+      await loginViaApi(
+        operationsPage,
+        request,
+        operationsObserver.email,
+        password,
+      );
       const initialTasksResponsePromise = waitForApiGet(
         operationsPage,
         "/concierge-operational-items",
