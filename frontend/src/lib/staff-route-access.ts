@@ -136,11 +136,6 @@ const ROLES_SERVICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
-const ROLES_CONCIERGE_WORKSPACE = [
-  "ceo",
-  "concierge",
-] as const satisfies readonly StaffRole[];
-
 const ROLES_TASK_MANAGER = [
   "ceo",
   "ceo_assistant",
@@ -197,15 +192,14 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "concierge",
     match: "exact",
     path: "/concierge",
-    roles: ROLES_CONCIERGE_WORKSPACE,
-    nav: { section: "main", labelKey: "nav_concierge_workspace" },
+    roles: ROLES_TASK_MANAGER,
   },
   {
     id: "task-manager",
     match: "exact",
     path: "/task-manager",
     roles: ROLES_TASK_MANAGER,
-    nav: { section: "main", labelKey: "nav_task_manager", after: "concierge" },
+    nav: { section: "main", labelKey: "nav_task_manager" },
   },
   {
     id: "admin/access",
@@ -561,9 +555,6 @@ export function listStaffNavItems(role: string): StaffNavItem[] {
   const items: StaffNavItem[] = [];
   for (const rule of STAFF_ROUTE_RULES) {
     if (!rule.nav || !STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role)) {
-      continue;
-    }
-    if (rule.id === "task-manager" && (ROLES_CONCIERGE_WORKSPACE as readonly string[]).includes(role)) {
       continue;
     }
     if (rule.id === "projects" && role === "concierge") {

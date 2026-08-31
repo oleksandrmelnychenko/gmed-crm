@@ -35,6 +35,30 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/concierge-expenses", get(list_expense_review_queue))
         .route(
+            "/tasks/{task_id}/expense-context",
+            get(get_task_expense_context),
+        )
+        .route(
+            "/tasks/{task_id}/expenses",
+            get(list_task_expenses).post(submit_task_expense),
+        )
+        .route(
+            "/tasks/{task_id}/expenses/{expense_id}/receipt",
+            get(download_task_receipt),
+        )
+        .route(
+            "/tasks/{task_id}/expenses/{expense_id}/post",
+            post(post_task_expense),
+        )
+        .route(
+            "/tasks/{task_id}/expenses/{expense_id}/reject",
+            post(reject_task_expense),
+        )
+        .route(
+            "/tasks/{task_id}/expenses/{expense_id}/reverse",
+            post(reverse_task_expense),
+        )
+        .route(
             "/concierge-services/{service_id}/expense-context",
             get(get_expense_context),
         )
@@ -67,6 +91,49 @@ struct ServiceContext {
     assigned_concierge_id: Option<Uuid>,
     provider_id: Option<Uuid>,
     currency: String,
+    task_id: Option<Uuid>,
+}
+
+#[derive(Clone)]
+struct TaskContext {
+    patient_id: Option<Uuid>,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    provider_id: Option<Uuid>,
+    currency: String,
+    title: String,
+}
+
+#[derive(Clone, Copy)]
+enum ExpenseScope {
+    Service(Uuid),
+    Task(Uuid),
+}
+
+impl ExpenseScope {
+    fn service_id(self) -> Option<Uuid> {
+        match self {
+            Self::Service(id) => Some(id),
+            Self::Task(_) => None,
+        }
+    }
+
+    fn task_id(self) -> Option<Uuid> {
+        match self {
+            Self::Service(_) => None,
+            Self::Task(id) => Some(id),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FinancialContext {
+    patient_id: Option<Uuid>,
+    provider_id: Option<Uuid>,
+    currency: String,
+    assigned_to: Option<Uuid>,
+    assigned_by: Option<Uuid>,
+    task_id: Option<Uuid>,
 }
 
 #[derive(Default)]
@@ -238,6 +305,88 @@ async fn insert_concierge_decision_notifications(
         .collect())
 }
 
+async fn insert_task_decision_notifications(
+    transaction: &mut Transaction<'_, Postgres>,
+    expense_id: Uuid,
+    task_id: Uuid,
+    actor_user_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> Result<Vec<NotificationDelivery>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (
+               user_id, kind, title, body, entity_type, entity_id
+           )
+           SELECT DISTINCT target_user.id, $4, $5, $6, 'concierge_expense', $1
+           FROM concierge_expense_submissions submission
+           JOIN tasks task ON task.id = submission.task_id
+           JOIN users target_user
+             ON target_user.id IN (submission.submitted_by, task.assigned_to, task.assigned_by)
+           WHERE submission.id = $1
+             AND submission.task_id = $2
+             AND target_user.id <> $3
+             AND target_user.is_active = true
+           RETURNING id, user_id"#,
+    )
+    .bind(expense_id)
+    .bind(task_id)
+    .bind(actor_user_id)
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(NotificationDelivery {
+                notification_id: row.try_get("id").ok()?,
+                user_id: row.try_get("user_id").ok()?,
+            })
+        })
+        .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_decision_notifications_for_scope(
+    transaction: &mut Transaction<'_, Postgres>,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+    actor_user_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) -> Result<Vec<NotificationDelivery>, sqlx::Error> {
+    match scope {
+        ExpenseScope::Service(service_id) => {
+            insert_concierge_decision_notifications(
+                transaction,
+                expense_id,
+                service_id,
+                actor_user_id,
+                kind,
+                title,
+                body,
+            )
+            .await
+        }
+        ExpenseScope::Task(task_id) => {
+            insert_task_decision_notifications(
+                transaction,
+                expense_id,
+                task_id,
+                actor_user_id,
+                kind,
+                title,
+                body,
+            )
+            .await
+        }
+    }
+}
+
 async fn publish_notification_deliveries(
     state: &AppState,
     deliveries: Vec<NotificationDelivery>,
@@ -347,9 +496,23 @@ async fn load_service_context(
     service_id: Uuid,
 ) -> Result<ServiceContext, Response> {
     match sqlx::query(
-        r#"SELECT patient_id, assigned_concierge_id, provider_id, UPPER(currency) AS currency
-           FROM concierge_services
-           WHERE id = $1"#,
+        r#"SELECT COALESCE(task.patient_id, service.patient_id) AS patient_id,
+                  service.assigned_concierge_id,
+                  COALESCE(task.provider_id, service.provider_id) AS provider_id,
+                  UPPER(COALESCE(task.currency, service.currency)) AS currency,
+                  task.id AS task_id
+           FROM concierge_services service
+           LEFT JOIN LATERAL (
+               SELECT candidate.id, candidate.patient_id, candidate.provider_id,
+                      candidate.currency
+               FROM tasks candidate
+               WHERE candidate.concierge_service_id = service.id
+                 AND candidate.deleted_at IS NULL
+               ORDER BY (candidate.task_scope = 'concierge_operational') DESC,
+                        candidate.created_at, candidate.id
+               LIMIT 1
+           ) task ON true
+           WHERE service.id = $1"#,
     )
     .bind(service_id)
     .fetch_optional(&state.db)
@@ -367,6 +530,7 @@ async fn load_service_context(
             currency: row
                 .try_get("currency")
                 .unwrap_or_else(|_| "EUR".to_string()),
+            task_id: row.try_get("task_id").unwrap_or_default(),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Concierge service not found")),
         Err(error) => {
@@ -384,10 +548,24 @@ async fn lock_service_context(
     service_id: Uuid,
 ) -> Result<ServiceContext, Response> {
     match sqlx::query(
-        r#"SELECT patient_id, assigned_concierge_id, provider_id, UPPER(currency) AS currency
-           FROM concierge_services
-           WHERE id = $1
-           FOR UPDATE"#,
+        r#"SELECT COALESCE(task.patient_id, service.patient_id) AS patient_id,
+                  service.assigned_concierge_id,
+                  COALESCE(task.provider_id, service.provider_id) AS provider_id,
+                  UPPER(COALESCE(task.currency, service.currency)) AS currency,
+                  task.id AS task_id
+           FROM concierge_services service
+           LEFT JOIN LATERAL (
+               SELECT candidate.id, candidate.patient_id, candidate.provider_id,
+                      candidate.currency
+               FROM tasks candidate
+               WHERE candidate.concierge_service_id = service.id
+                 AND candidate.deleted_at IS NULL
+               ORDER BY (candidate.task_scope = 'concierge_operational') DESC,
+                        candidate.created_at, candidate.id
+               LIMIT 1
+           ) task ON true
+           WHERE service.id = $1
+           FOR UPDATE OF service"#,
     )
     .bind(service_id)
     .fetch_optional(&mut **transaction)
@@ -405,6 +583,7 @@ async fn lock_service_context(
             currency: row
                 .try_get("currency")
                 .unwrap_or_else(|_| "EUR".to_string()),
+            task_id: row.try_get("task_id").unwrap_or_default(),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Concierge service not found")),
         Err(error) => {
@@ -417,6 +596,150 @@ async fn lock_service_context(
     }
 }
 
+async fn load_task_context(state: &AppState, task_id: Uuid) -> Result<TaskContext, Response> {
+    match sqlx::query(
+        r#"SELECT patient_id, assigned_to, assigned_by, provider_id,
+                  UPPER(currency) AS currency, title
+           FROM tasks
+           WHERE id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => Ok(TaskContext {
+            patient_id: row.try_get("patient_id").unwrap_or_default(),
+            assigned_to: row
+                .try_get("assigned_to")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+            assigned_by: row
+                .try_get("assigned_by")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+            provider_id: row.try_get("provider_id").unwrap_or_default(),
+            currency: row
+                .try_get("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+            title: row.try_get("title").unwrap_or_default(),
+        }),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "Task not found")),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "load task expense context");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load task",
+            ))
+        }
+    }
+}
+
+async fn lock_task_context(
+    transaction: &mut Transaction<'_, Postgres>,
+    task_id: Uuid,
+) -> Result<TaskContext, Response> {
+    match sqlx::query(
+        r#"SELECT patient_id, assigned_to, assigned_by, provider_id,
+                  UPPER(currency) AS currency, title
+           FROM tasks
+           WHERE id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    {
+        Ok(Some(row)) => Ok(TaskContext {
+            patient_id: row.try_get("patient_id").unwrap_or_default(),
+            assigned_to: row
+                .try_get("assigned_to")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+            assigned_by: row
+                .try_get("assigned_by")
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+            provider_id: row.try_get("provider_id").unwrap_or_default(),
+            currency: row
+                .try_get("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+            title: row.try_get("title").unwrap_or_default(),
+        }),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "Task not found")),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "lock task expense context");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load task",
+            ))
+        }
+    }
+}
+
+impl From<ServiceContext> for FinancialContext {
+    fn from(value: ServiceContext) -> Self {
+        Self {
+            patient_id: Some(value.patient_id),
+            provider_id: value.provider_id,
+            currency: value.currency,
+            assigned_to: value.assigned_concierge_id,
+            assigned_by: None,
+            task_id: value.task_id,
+        }
+    }
+}
+
+impl From<TaskContext> for FinancialContext {
+    fn from(value: TaskContext) -> Self {
+        Self {
+            patient_id: value.patient_id,
+            provider_id: value.provider_id,
+            currency: value.currency,
+            assigned_to: Some(value.assigned_to),
+            assigned_by: Some(value.assigned_by),
+            task_id: None,
+        }
+    }
+}
+
+async fn load_financial_context(
+    state: &AppState,
+    scope: ExpenseScope,
+) -> Result<FinancialContext, Response> {
+    match scope {
+        ExpenseScope::Service(id) => load_service_context(state, id).await.map(Into::into),
+        ExpenseScope::Task(id) => load_task_context(state, id).await.map(|value| {
+            let mut context: FinancialContext = value.into();
+            context.task_id = Some(id);
+            context
+        }),
+    }
+}
+
+async fn lock_financial_context(
+    transaction: &mut Transaction<'_, Postgres>,
+    scope: ExpenseScope,
+) -> Result<FinancialContext, Response> {
+    match scope {
+        ExpenseScope::Service(id) => {
+            let service = lock_service_context(transaction, id).await?;
+            let Some(task_id) = service.task_id else {
+                return Ok(service.into());
+            };
+            let task = lock_task_context(transaction, task_id).await?;
+            Ok(FinancialContext {
+                patient_id: task.patient_id,
+                provider_id: task.provider_id,
+                currency: task.currency,
+                assigned_to: service.assigned_concierge_id,
+                assigned_by: None,
+                task_id: Some(task_id),
+            })
+        }
+        ExpenseScope::Task(id) => lock_task_context(transaction, id).await.map(|value| {
+            let mut context: FinancialContext = value.into();
+            context.task_id = Some(id);
+            context
+        }),
+    }
+}
+
 fn can_read_expenses(auth: &AuthUser, context: &ServiceContext) -> bool {
     auth.role == Role::Ceo
         || auth.role == Role::Billing
@@ -426,6 +749,36 @@ fn can_read_expenses(auth: &AuthUser, context: &ServiceContext) -> bool {
 fn can_submit_expense(auth: &AuthUser, context: &ServiceContext) -> bool {
     auth.role == Role::Ceo
         || (auth.role == Role::Concierge && context.assigned_concierge_id == Some(auth.user_id))
+}
+
+fn can_read_task_expenses(auth: &AuthUser, context: &TaskContext) -> bool {
+    matches!(auth.role, Role::Ceo | Role::Billing)
+        || context.assigned_to == auth.user_id
+        || context.assigned_by == auth.user_id
+}
+
+fn can_read_scope(auth: &AuthUser, scope: ExpenseScope, context: &FinancialContext) -> bool {
+    match scope {
+        ExpenseScope::Service(_) => {
+            matches!(auth.role, Role::Ceo | Role::Billing)
+                || (auth.role == Role::Concierge && context.assigned_to == Some(auth.user_id))
+        }
+        ExpenseScope::Task(_) => {
+            matches!(auth.role, Role::Ceo | Role::Billing)
+                || context.assigned_to == Some(auth.user_id)
+                || context.assigned_by == Some(auth.user_id)
+        }
+    }
+}
+
+fn can_submit_scope(auth: &AuthUser, scope: ExpenseScope, context: &FinancialContext) -> bool {
+    match scope {
+        ExpenseScope::Service(_) => {
+            auth.role == Role::Ceo
+                || (auth.role == Role::Concierge && context.assigned_to == Some(auth.user_id))
+        }
+        ExpenseScope::Task(_) => can_read_scope(auth, scope, context),
+    }
 }
 
 fn require_finance(auth: &AuthUser) -> Result<(), Response> {
@@ -562,6 +915,128 @@ async fn get_expense_context(
     .into_response()
 }
 
+async fn get_task_expense_context(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+) -> Response {
+    let context = match load_task_context(&state, task_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_read_task_expenses(&auth, &context) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let patient = if let Some(patient_id) = context.patient_id {
+        match sqlx::query(
+            r#"SELECT id, patient_id, first_name, last_name
+               FROM patients WHERE id = $1"#,
+        )
+        .bind(patient_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(row)) => json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "display_name": format!(
+                    "{} {}",
+                    row.try_get::<String, _>("first_name").unwrap_or_default(),
+                    row.try_get::<String, _>("last_name").unwrap_or_default(),
+                ).trim(),
+                "pid": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+            }),
+            Ok(None) => Value::Null,
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_id, "load task expense patient context");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load context");
+            }
+        }
+    } else {
+        Value::Null
+    };
+
+    let mut orders: Vec<Value> = Vec::new();
+    if matches!(auth.role, Role::Ceo | Role::Billing)
+        && let Some(patient_id) = context.patient_id
+    {
+        let rows = match sqlx::query(
+            r#"SELECT order_row.id AS order_id, order_row.order_number,
+                      UPPER(order_row.currency) AS currency, order_row.status,
+                      service.id AS service_id,
+                      COALESCE(service.agency_service_name_snapshot, service.description) AS service_name,
+                      COALESCE(service.agency_service_description_snapshot, service.description) AS service_description,
+                      service.provider_id
+               FROM orders order_row
+               LEFT JOIN order_leistungen service
+                 ON service.order_id = order_row.id
+                AND UPPER(service.currency) = UPPER(order_row.currency)
+               WHERE order_row.patient_id = $1
+                 AND order_row.status <> 'cancelled'
+               ORDER BY order_row.created_at DESC, service.created_at, service.id"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(error) => {
+                tracing::error!(error = %error, patient_id = %patient_id, "load task expense order context");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load context");
+            }
+        };
+        for row in rows {
+            let order_id = row.try_get::<Uuid, _>("order_id").unwrap_or_default();
+            let order_id_text = order_id.to_string();
+            if orders
+                .last()
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str)
+                != Some(order_id_text.as_str())
+            {
+                orders.push(json!({
+                    "id": order_id,
+                    "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                    "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "leistungen": [],
+                }));
+            }
+            if let Some(order_service_id) = row
+                .try_get::<Option<Uuid>, _>("service_id")
+                .unwrap_or_default()
+                && let Some(leistungen) = orders
+                    .last_mut()
+                    .and_then(|value| value.get_mut("leistungen"))
+                    .and_then(Value::as_array_mut)
+            {
+                leistungen.push(json!({
+                    "id": order_service_id,
+                    "name": row.try_get::<String, _>("service_name").unwrap_or_default(),
+                    "description": row.try_get::<String, _>("service_description").unwrap_or_default(),
+                    "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                }));
+            }
+        }
+    }
+
+    Json(json!({
+        "patient": patient,
+        "task": {
+            "id": task_id,
+            "title": context.title,
+            "currency": context.currency,
+            "provider_id": context.provider_id,
+            "assigned_to": context.assigned_to,
+            "assigned_by": context.assigned_by,
+        },
+        "service": Value::Null,
+        "mapped_order": Value::Null,
+        "eligible_orders": orders,
+    }))
+    .into_response()
+}
+
 async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMultipart, Response> {
     let mut input = ExpenseMultipart::default();
     loop {
@@ -678,11 +1153,29 @@ async fn submit_expense(
     Path(service_id): Path<Uuid>,
     multipart: Multipart,
 ) -> Response {
-    let initial_service = match load_service_context(&state, service_id).await {
+    submit_expense_for_scope(state, auth, ExpenseScope::Service(service_id), multipart).await
+}
+
+async fn submit_task_expense(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+    multipart: Multipart,
+) -> Response {
+    submit_expense_for_scope(state, auth, ExpenseScope::Task(task_id), multipart).await
+}
+
+async fn submit_expense_for_scope(
+    state: AppState,
+    auth: AuthUser,
+    scope: ExpenseScope,
+    multipart: Multipart,
+) -> Response {
+    let initial_context = match load_financial_context(&state, scope).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_submit_expense(&auth, &initial_service) {
+    if !can_submit_scope(&auth, scope, &initial_context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let mut input = match parse_expense_multipart(multipart).await {
@@ -815,7 +1308,8 @@ async fn submit_expense(
     };
     let receipt_sha256 = receipt.as_ref().map(|value| value.sha256.as_str());
     let payload_value = json!({
-        "service_id": service_id,
+        "concierge_service_id": scope.service_id(),
+        "task_id": scope.task_id(),
         "order_id": input.order_id,
         "order_leistung_id": input.order_leistung_id,
         "vendor": vendor,
@@ -844,34 +1338,52 @@ async fn submit_expense(
             );
         }
     };
-    let service = match lock_service_context(&mut transaction, service_id).await {
+    let context = match lock_financial_context(&mut transaction, scope).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_submit_expense(&auth, &service) {
+    if !can_submit_scope(&auth, scope, &context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    if service.currency != currency {
+    let patient_id = match context.patient_id {
+        Some(value) => value,
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Task must have a patient before expenses can be submitted",
+            );
+        }
+    };
+    let task_id = match context.task_id {
+        Some(value) => value,
+        None => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Concierge service must be linked to a task before expenses can be submitted",
+            );
+        }
+    };
+    if context.currency != currency {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Expense currency must match the Concierge service",
+            "Expense currency must match the task or Concierge service",
         );
     }
 
-    let existing = match sqlx::query(
+    let existing_result = sqlx::query(
         r#"SELECT id, payload_hash
            FROM concierge_expense_submissions
-           WHERE concierge_service_id = $1 AND request_id = $2
+           WHERE task_id = $1 AND request_id = $2
            FOR UPDATE"#,
     )
-    .bind(service_id)
+    .bind(task_id)
     .bind(request_id)
     .fetch_optional(&mut *transaction)
-    .await
-    {
+    .await;
+    let existing = match existing_result {
         Ok(value) => value,
         Err(error) => {
-            tracing::error!(error = %error, service_id = %service_id, "load expense submission replay");
+            tracing::error!(error = %error, "load expense submission replay");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to submit expense",
@@ -889,10 +1401,10 @@ async fn submit_expense(
                 "request_id was already used with different data",
             );
         }
-        return expense_mutation_response(
+        return expense_mutation_response_for_scope(
             &state,
             &auth,
-            service_id,
+            scope,
             expense_id,
             true,
             StatusCode::OK,
@@ -901,19 +1413,19 @@ async fn submit_expense(
     }
 
     if let Some(receipt_sha256) = receipt_sha256 {
-        let duplicate_receipt = match sqlx::query_scalar::<_, Uuid>(
+        let duplicate_result = sqlx::query_scalar::<_, Uuid>(
             r#"SELECT id FROM concierge_expense_submissions
-               WHERE concierge_service_id = $1 AND receipt_sha256 = $2
+               WHERE task_id = $1 AND receipt_sha256 = $2
                FOR UPDATE"#,
         )
-        .bind(service_id)
+        .bind(task_id)
         .bind(receipt_sha256)
         .fetch_optional(&mut *transaction)
-        .await
-        {
+        .await;
+        let duplicate_receipt = match duplicate_result {
             Ok(value) => value,
             Err(error) => {
-                tracing::error!(error = %error, service_id = %service_id, "check duplicate concierge receipt");
+                tracing::error!(error = %error, "check duplicate expense receipt");
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to submit expense",
@@ -923,7 +1435,7 @@ async fn submit_expense(
         if duplicate_receipt.is_some() {
             return err(
                 StatusCode::CONFLICT,
-                "This receipt was already submitted for the Concierge service",
+                "This receipt was already submitted for this task or Concierge service",
             );
         }
     }
@@ -947,7 +1459,7 @@ async fn submit_expense(
                 );
             }
         };
-        if order.try_get::<Uuid, _>("patient_id").ok() != Some(service.patient_id)
+        if order.try_get::<Uuid, _>("patient_id").ok() != Some(patient_id)
             || order.try_get::<String, _>("currency").unwrap_or_default() != currency
             || order.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
         {
@@ -1017,7 +1529,7 @@ async fn submit_expense(
                )"#,
         )
         .bind(document_id)
-        .bind(service.patient_id)
+        .bind(patient_id)
         .bind(input.order_id)
         .bind(format!("Receipt - {vendor}"))
         .bind(&original_filename)
@@ -1027,12 +1539,15 @@ async fn submit_expense(
         .bind(&vendor)
         .bind(input.note.as_deref())
         .bind(expense_date)
-        .bind(format!("Concierge service {service_id}"))
+        .bind(match scope {
+            ExpenseScope::Service(service_id) => format!("Concierge service {service_id}"),
+            ExpenseScope::Task(task_id) => format!("Task {task_id}"),
+        })
         .bind(auth.user_id)
         .execute(&mut *transaction)
         .await;
         if let Err(error) = document_insert {
-            tracing::error!(error = %error, service_id = %service_id, "insert concierge receipt document");
+            tracing::error!(error = %error, "insert expense receipt document");
             remove_document_blob(&storage_key).await;
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save receipt");
         }
@@ -1043,23 +1558,24 @@ async fn submit_expense(
 
     let expense_insert = sqlx::query(
         r#"INSERT INTO concierge_expense_submissions (
-               id, concierge_service_id, request_id, patient_id, order_id,
+               id, concierge_service_id, task_id, request_id, patient_id, order_id,
                order_leistung_id, receipt_document_id, vendor_name, expense_date,
                amount_net, amount_vat, amount_gross, currency, paid_by,
                service_delivered, note, payload_hash, receipt_sha256,
                submitted_by
            ) VALUES (
-               $1, $2, $3, $4, $5,
-               $6, $7, $8, $9,
-               $10, $11, $12, $13, $14,
-               $15, $16, $17, $18,
-               $19
+               $1, $2, $3, $4, $5, $6,
+               $7, $8, $9, $10,
+               $11, $12, $13, $14, $15,
+               $16, $17, $18, $19,
+               $20
            )"#,
     )
     .bind(expense_id)
-    .bind(service_id)
+    .bind(scope.service_id())
+    .bind(task_id)
     .bind(request_id)
-    .bind(service.patient_id)
+    .bind(patient_id)
     .bind(input.order_id)
     .bind(input.order_leistung_id)
     .bind(document_id)
@@ -1078,7 +1594,7 @@ async fn submit_expense(
     .execute(&mut *transaction)
     .await;
     if let Err(error) = expense_insert {
-        tracing::warn!(error = %error, service_id = %service_id, "insert concierge expense submission rejected");
+        tracing::warn!(error = %error, "insert expense submission rejected");
         if let Some(storage_key) = stored_blob_key.as_deref() {
             remove_document_blob(storage_key).await;
         }
@@ -1123,8 +1639,9 @@ async fn submit_expense(
         "concierge_expense",
         Some(expense_id),
         json!({
-            "concierge_service_id": service_id,
-            "patient_id": service.patient_id,
+            "concierge_service_id": scope.service_id(),
+            "task_id": task_id,
+            "patient_id": patient_id,
             "order_id": input.order_id,
             "receipt_document_id": document_id,
             "document_missing": document_missing,
@@ -1134,20 +1651,34 @@ async fn submit_expense(
             "status": "pending_review",
         }),
     ));
-    crate::realtime::publish_concierge_service_event(
-        &state,
-        Some(auth.user_id),
-        "concierge_expense.submitted",
-        service_id,
-        json!({ "expense_id": expense_id, "status": "pending_review" }),
-    )
-    .await;
+    match scope {
+        ExpenseScope::Service(service_id) => {
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_expense.submitted",
+                service_id,
+                json!({ "expense_id": expense_id, "status": "pending_review" }),
+            )
+            .await;
+        }
+        ExpenseScope::Task(task_id) => {
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.expense_submitted",
+                task_id,
+                json!({ "expense_id": expense_id, "status": "pending_review" }),
+            )
+            .await;
+        }
+    }
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
 
-    expense_mutation_response(
+    expense_mutation_response_for_scope(
         &state,
         &auth,
-        service_id,
+        scope,
         expense_id,
         false,
         StatusCode::CREATED,
@@ -1167,8 +1698,16 @@ async fn load_expense_item(
     service_id: Uuid,
     expense_id: Uuid,
 ) -> Result<Option<Value>, Response> {
+    load_expense_item_for_scope(state, ExpenseScope::Service(service_id), expense_id).await
+}
+
+async fn load_expense_item_for_scope(
+    state: &AppState,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+) -> Result<Option<Value>, Response> {
     let row = match sqlx::query(
-        r#"SELECT submission.id, submission.concierge_service_id,
+        r#"SELECT submission.id, submission.concierge_service_id, submission.task_id,
                   submission.patient_id, submission.order_id AS submitted_order_id,
                   submission.order_leistung_id AS submitted_order_leistung_id,
                   submission.vendor_name, submission.expense_date,
@@ -1224,10 +1763,12 @@ async fn load_expense_item(
              ON order_row.id = COALESCE(external.order_id, submission.order_id)
            LEFT JOIN order_leistungen service
              ON service.id = COALESCE(external.order_leistung_id, submission.order_leistung_id)
-           WHERE submission.concierge_service_id = $1
-             AND submission.id = $2"#,
+           WHERE submission.id = $3
+             AND (($1::uuid IS NOT NULL AND submission.concierge_service_id = $1)
+               OR ($2::uuid IS NOT NULL AND submission.task_id = $2))"#,
     )
-    .bind(service_id)
+    .bind(scope.service_id())
+    .bind(scope.task_id())
     .bind(expense_id)
     .fetch_optional(&state.db)
     .await
@@ -1347,12 +1888,16 @@ async fn load_expense_item(
             "original_filename": row.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
             "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
             "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
-            "download_url": format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/receipt"),
+            "download_url": match scope {
+                ExpenseScope::Service(service_id) => format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/receipt"),
+                ExpenseScope::Task(task_id) => format!("/api/v1/tasks/{task_id}/expenses/{expense_id}/receipt"),
+            },
         }));
 
     Ok(Some(json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-        "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
+        "concierge_service_id": row.try_get::<Option<Uuid>, _>("concierge_service_id").unwrap_or_default(),
+        "task_id": row.try_get::<Option<Uuid>, _>("task_id").unwrap_or_default(),
         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
         "order_id": row.try_get::<Option<Uuid>, _>("posted_order_id").unwrap_or_default()
             .or_else(|| row.try_get::<Option<Uuid>, _>("submitted_order_id").unwrap_or_default()),
@@ -1398,22 +1943,22 @@ async fn load_expense_item(
     })))
 }
 
-async fn expense_mutation_response(
+async fn expense_mutation_response_for_scope(
     state: &AppState,
     auth: &AuthUser,
-    service_id: Uuid,
+    scope: ExpenseScope,
     expense_id: Uuid,
     idempotent_replay: bool,
     status: StatusCode,
 ) -> Response {
-    let context = match load_service_context(state, service_id).await {
+    let context = match load_financial_context(state, scope).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_read_expenses(auth, &context) {
+    if !can_read_scope(auth, scope, &context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    match load_expense_item(state, service_id, expense_id).await {
+    match load_expense_item_for_scope(state, scope, expense_id).await {
         Ok(Some(item)) => (
             status,
             Json(json!({
@@ -1464,18 +2009,21 @@ async fn list_expense_review_queue(
     let rows = match sqlx::query(
         r#"SELECT submission.id AS expense_id,
                   submission.concierge_service_id,
-                  service.patient_id,
+                  submission.task_id,
+                  submission.patient_id,
                   trim(concat_ws(' ', patient.first_name, patient.last_name)) AS patient_name,
                   patient.patient_id AS patient_pid,
-                  service.title,
-                  service.status AS service_status,
-                  UPPER(service.currency) AS service_currency,
-                  service.provider_id,
+                  COALESCE(task.title, service.title) AS title,
+                  COALESCE(task.status, service.status) AS service_status,
+                  UPPER(submission.currency) AS service_currency,
+                  COALESCE(task.provider_id, service.provider_id) AS provider_id,
                   provider.name AS provider_name
            FROM concierge_expense_submissions submission
-           JOIN concierge_services service ON service.id = submission.concierge_service_id
-           JOIN patients patient ON patient.id = service.patient_id
-           LEFT JOIN providers provider ON provider.id = service.provider_id
+           JOIN tasks task ON task.id = submission.task_id
+           LEFT JOIN concierge_services service ON service.id = submission.concierge_service_id
+           JOIN patients patient ON patient.id = submission.patient_id
+           LEFT JOIN providers provider
+             ON provider.id = COALESCE(task.provider_id, service.provider_id)
            LEFT JOIN LATERAL (
                SELECT event.id, event.action
                FROM concierge_expense_review_events event
@@ -1522,10 +2070,12 @@ async fn list_expense_review_queue(
     for row in rows {
         let expense_id = row.try_get::<Uuid, _>("expense_id").unwrap_or_default();
         let service_id = row
-            .try_get::<Uuid, _>("concierge_service_id")
+            .try_get::<Option<Uuid>, _>("concierge_service_id")
             .unwrap_or_default();
+        let task_id = row.try_get::<Uuid, _>("task_id").unwrap_or_default();
         let service = json!({
             "id": service_id,
+            "task_id": task_id,
             "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
             "patient_name": row.try_get::<String, _>("patient_name").unwrap_or_default(),
             "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
@@ -1535,7 +2085,7 @@ async fn list_expense_review_queue(
             "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         });
-        match load_expense_item(&state, service_id, expense_id).await {
+        match load_expense_item_for_scope(&state, ExpenseScope::Task(task_id), expense_id).await {
             Ok(Some(mut item)) => {
                 if let Some(object) = item.as_object_mut() {
                     object.insert("service".to_string(), service);
@@ -1595,16 +2145,71 @@ async fn list_expenses(
     Json(json!({ "items": items })).into_response()
 }
 
+async fn list_task_expenses(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+) -> Response {
+    let context = match load_task_context(&state, task_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_read_task_expenses(&auth, &context) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let ids = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM concierge_expense_submissions
+           WHERE task_id = $1
+           ORDER BY created_at DESC, id DESC"#,
+    )
+    .bind(task_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "list task expense ids");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list expenses");
+        }
+    };
+    let mut items = Vec::with_capacity(ids.len());
+    for expense_id in ids {
+        match load_expense_item_for_scope(&state, ExpenseScope::Task(task_id), expense_id).await {
+            Ok(Some(item)) => items.push(item),
+            Ok(None) => {}
+            Err(response) => return response,
+        }
+    }
+    Json(json!({ "items": items })).into_response()
+}
+
 async fn download_receipt(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((service_id, expense_id)): Path<(Uuid, Uuid)>,
 ) -> Response {
-    let context = match load_service_context(&state, service_id).await {
+    download_receipt_for_scope(state, auth, ExpenseScope::Service(service_id), expense_id).await
+}
+
+async fn download_task_receipt(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((task_id, expense_id)): Path<(Uuid, Uuid)>,
+) -> Response {
+    download_receipt_for_scope(state, auth, ExpenseScope::Task(task_id), expense_id).await
+}
+
+async fn download_receipt_for_scope(
+    state: AppState,
+    auth: AuthUser,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+) -> Response {
+    let context = match load_financial_context(&state, scope).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    if !can_read_expenses(&auth, &context) {
+    if !can_read_scope(&auth, scope, &context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let row = match sqlx::query(
@@ -1612,9 +2217,12 @@ async fn download_receipt(
                   document.original_filename, document.auto_name
            FROM concierge_expense_submissions submission
            JOIN documents document ON document.id = submission.receipt_document_id
-           WHERE submission.concierge_service_id = $1 AND submission.id = $2"#,
+           WHERE submission.id = $3
+             AND (($1::uuid IS NOT NULL AND submission.concierge_service_id = $1)
+               OR ($2::uuid IS NOT NULL AND submission.task_id = $2))"#,
     )
-    .bind(service_id)
+    .bind(scope.service_id())
+    .bind(scope.task_id())
     .bind(expense_id)
     .fetch_optional(&state.db)
     .await
@@ -1668,9 +2276,9 @@ async fn download_receipt(
         .into_response()
 }
 
-async fn lock_expense(
+async fn lock_expense_for_scope(
     transaction: &mut Transaction<'_, Postgres>,
-    service_id: Uuid,
+    scope: ExpenseScope,
     expense_id: Uuid,
 ) -> Result<LockedExpense, Response> {
     match sqlx::query(
@@ -1678,11 +2286,14 @@ async fn lock_expense(
                   expense_date, amount_net, amount_vat, amount_gross,
                   currency, paid_by, service_delivered, note
            FROM concierge_expense_submissions
-           WHERE id = $1 AND concierge_service_id = $2
+           WHERE id = $3
+             AND (($1::uuid IS NOT NULL AND concierge_service_id = $1)
+               OR ($2::uuid IS NOT NULL AND task_id = $2))
            FOR UPDATE"#,
     )
+    .bind(scope.service_id())
+    .bind(scope.task_id())
     .bind(expense_id)
-    .bind(service_id)
     .fetch_optional(&mut **transaction)
     .await
     {
@@ -1782,6 +2393,32 @@ async fn post_expense(
     Path((service_id, expense_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PostExpenseRequest>,
 ) -> Response {
+    post_expense_for_scope(
+        state,
+        auth,
+        ExpenseScope::Service(service_id),
+        expense_id,
+        body,
+    )
+    .await
+}
+
+async fn post_task_expense(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((task_id, expense_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<PostExpenseRequest>,
+) -> Response {
+    post_expense_for_scope(state, auth, ExpenseScope::Task(task_id), expense_id, body).await
+}
+
+async fn post_expense_for_scope(
+    state: AppState,
+    auth: AuthUser,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+    body: PostExpenseRequest,
+) -> Response {
     if let Err(response) = require_finance(&auth) {
         return response;
     }
@@ -1806,14 +2443,20 @@ async fn post_expense(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
         }
     };
-    let service = match lock_service_context(&mut transaction, service_id).await {
+    let context = match lock_financial_context(&mut transaction, scope).await {
         Ok(value) => value,
         Err(response) => return response,
     };
-    let expense = match lock_expense(&mut transaction, service_id, expense_id).await {
+    let expense = match lock_expense_for_scope(&mut transaction, scope, expense_id).await {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if context.patient_id != Some(expense.patient_id) || context.currency != expense.currency {
+        return err(
+            StatusCode::CONFLICT,
+            "Task financial context changed after the expense was submitted",
+        );
+    }
     let agency_paid_on = if expense.paid_by == "agency" {
         match body.paid_on {
             Some(value) if value >= expense.expense_date && value <= Utc::now().date_naive() => {
@@ -1846,10 +2489,10 @@ async fn post_expense(
     {
         Ok(Some(true)) => {
             drop(transaction);
-            return expense_mutation_response(
+            return expense_mutation_response_for_scope(
                 &state,
                 &auth,
-                service_id,
+                scope,
                 expense_id,
                 true,
                 StatusCode::OK,
@@ -1946,16 +2589,16 @@ async fn post_expense(
     } else {
         None
     };
-    if service.provider_id.is_some()
+    if context.provider_id.is_some()
         && line_provider_id.is_some()
-        && service.provider_id != line_provider_id
+        && context.provider_id != line_provider_id
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Concierge partner and order service provider must match",
         );
     }
-    let provider_id = line_provider_id.or(service.provider_id);
+    let provider_id = line_provider_id.or(context.provider_id);
     if expense.paid_by != "patient" && provider_id.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2230,10 +2873,10 @@ async fn post_expense(
         tracing::warn!(error = %error, expense_id = %expense_id, "insert Concierge expense post review");
         return err(StatusCode::CONFLICT, "Expense review was rejected");
     }
-    let notification_deliveries = match insert_concierge_decision_notifications(
+    let notification_deliveries = match insert_decision_notifications_for_scope(
         &mut transaction,
+        scope,
         expense_id,
-        service_id,
         auth.user_id,
         "concierge_expense_posted",
         "Concierge expense approved",
@@ -2266,6 +2909,8 @@ async fn post_expense(
         "concierge_expense",
         Some(expense_id),
         json!({
+            "concierge_service_id": scope.service_id(),
+            "task_id": scope.task_id(),
             "review_event_id": review_event_id,
             "external_invoice_id": external_invoice_id,
             "provider_payment_transaction_id": provider_payment_transaction_id,
@@ -2276,20 +2921,39 @@ async fn post_expense(
             "paid_by": expense.paid_by,
         }),
     ));
-    crate::realtime::publish_concierge_service_event(
-        &state,
-        Some(auth.user_id),
-        "concierge_expense.posted",
-        service_id,
-        json!({
-            "expense_id": expense_id,
-            "external_invoice_id": external_invoice_id,
-            "status": "posted",
-        }),
-    )
-    .await;
+    match scope {
+        ExpenseScope::Service(service_id) => {
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_expense.posted",
+                service_id,
+                json!({
+                    "expense_id": expense_id,
+                    "external_invoice_id": external_invoice_id,
+                    "status": "posted",
+                }),
+            )
+            .await;
+        }
+        ExpenseScope::Task(task_id) => {
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.expense_posted",
+                task_id,
+                json!({
+                    "expense_id": expense_id,
+                    "external_invoice_id": external_invoice_id,
+                    "status": "posted",
+                }),
+            )
+            .await;
+        }
+    }
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
+    expense_mutation_response_for_scope(&state, &auth, scope, expense_id, false, StatusCode::OK)
+        .await
 }
 
 fn validate_reason(value: &str) -> Result<String, Response> {
@@ -2309,6 +2973,32 @@ async fn reject_expense(
     Path((service_id, expense_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<RejectExpenseRequest>,
 ) -> Response {
+    reject_expense_for_scope(
+        state,
+        auth,
+        ExpenseScope::Service(service_id),
+        expense_id,
+        body,
+    )
+    .await
+}
+
+async fn reject_task_expense(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((task_id, expense_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<RejectExpenseRequest>,
+) -> Response {
+    reject_expense_for_scope(state, auth, ExpenseScope::Task(task_id), expense_id, body).await
+}
+
+async fn reject_expense_for_scope(
+    state: AppState,
+    auth: AuthUser,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+    body: RejectExpenseRequest,
+) -> Response {
     if let Err(response) = require_finance(&auth) {
         return response;
     }
@@ -2327,10 +3017,10 @@ async fn reject_expense(
             );
         }
     };
-    if let Err(response) = lock_service_context(&mut transaction, service_id).await {
+    if let Err(response) = lock_financial_context(&mut transaction, scope).await {
         return response;
     }
-    if let Err(response) = lock_expense(&mut transaction, service_id, expense_id).await {
+    if let Err(response) = lock_expense_for_scope(&mut transaction, scope, expense_id).await {
         return response;
     }
     match review_request_replay(
@@ -2344,10 +3034,10 @@ async fn reject_expense(
     {
         Ok(Some(true)) => {
             drop(transaction);
-            return expense_mutation_response(
+            return expense_mutation_response_for_scope(
                 &state,
                 &auth,
-                service_id,
+                scope,
                 expense_id,
                 true,
                 StatusCode::OK,
@@ -2386,10 +3076,10 @@ async fn reject_expense(
         tracing::warn!(error = %error, expense_id = %expense_id, "insert Concierge expense rejection");
         return err(StatusCode::CONFLICT, "Expense review was rejected");
     }
-    let notification_deliveries = match insert_concierge_decision_notifications(
+    let notification_deliveries = match insert_decision_notifications_for_scope(
         &mut transaction,
+        scope,
         expense_id,
-        service_id,
         auth.user_id,
         "concierge_expense_rejected",
         "Concierge expense rejected",
@@ -2418,18 +3108,38 @@ async fn reject_expense(
         Some(auth.user_id),
         "concierge_expense",
         Some(expense_id),
-        json!({ "review_event_id": event_id, "reason": reason }),
+        json!({
+            "concierge_service_id": scope.service_id(),
+            "task_id": scope.task_id(),
+            "review_event_id": event_id,
+            "reason": reason,
+        }),
     ));
-    crate::realtime::publish_concierge_service_event(
-        &state,
-        Some(auth.user_id),
-        "concierge_expense.rejected",
-        service_id,
-        json!({ "expense_id": expense_id, "status": "rejected" }),
-    )
-    .await;
+    match scope {
+        ExpenseScope::Service(service_id) => {
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_expense.rejected",
+                service_id,
+                json!({ "expense_id": expense_id, "status": "rejected" }),
+            )
+            .await;
+        }
+        ExpenseScope::Task(task_id) => {
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.expense_rejected",
+                task_id,
+                json!({ "expense_id": expense_id, "status": "rejected" }),
+            )
+            .await;
+        }
+    }
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
+    expense_mutation_response_for_scope(&state, &auth, scope, expense_id, false, StatusCode::OK)
+        .await
 }
 
 async fn reverse_expense(
@@ -2437,6 +3147,32 @@ async fn reverse_expense(
     Extension(auth): Extension<AuthUser>,
     Path((service_id, expense_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReverseExpenseRequest>,
+) -> Response {
+    reverse_expense_for_scope(
+        state,
+        auth,
+        ExpenseScope::Service(service_id),
+        expense_id,
+        body,
+    )
+    .await
+}
+
+async fn reverse_task_expense(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((task_id, expense_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<ReverseExpenseRequest>,
+) -> Response {
+    reverse_expense_for_scope(state, auth, ExpenseScope::Task(task_id), expense_id, body).await
+}
+
+async fn reverse_expense_for_scope(
+    state: AppState,
+    auth: AuthUser,
+    scope: ExpenseScope,
+    expense_id: Uuid,
+    body: ReverseExpenseRequest,
 ) -> Response {
     if let Err(response) = require_finance(&auth) {
         return response;
@@ -2466,10 +3202,10 @@ async fn reverse_expense(
             );
         }
     };
-    if let Err(response) = lock_service_context(&mut transaction, service_id).await {
+    if let Err(response) = lock_financial_context(&mut transaction, scope).await {
         return response;
     }
-    let expense = match lock_expense(&mut transaction, service_id, expense_id).await {
+    let expense = match lock_expense_for_scope(&mut transaction, scope, expense_id).await {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -2490,10 +3226,10 @@ async fn reverse_expense(
     {
         Ok(Some(true)) => {
             drop(transaction);
-            return expense_mutation_response(
+            return expense_mutation_response_for_scope(
                 &state,
                 &auth,
-                service_id,
+                scope,
                 expense_id,
                 true,
                 StatusCode::OK,
@@ -2905,10 +3641,10 @@ async fn reverse_expense(
             "Expense reversal could not cancel its financial record",
         );
     }
-    let notification_deliveries = match insert_concierge_decision_notifications(
+    let notification_deliveries = match insert_decision_notifications_for_scope(
         &mut transaction,
+        scope,
         expense_id,
-        service_id,
         auth.user_id,
         "concierge_expense_reversed",
         "Concierge expense reversed",
@@ -2938,6 +3674,8 @@ async fn reverse_expense(
         "concierge_expense",
         Some(expense_id),
         json!({
+            "concierge_service_id": scope.service_id(),
+            "task_id": scope.task_id(),
             "review_event_id": reversal_event_id,
             "reverses_review_event_id": posted_event_id,
             "external_invoice_id": external_invoice_id,
@@ -2946,14 +3684,29 @@ async fn reverse_expense(
             "reversed_on": body.reversed_on,
         }),
     ));
-    crate::realtime::publish_concierge_service_event(
-        &state,
-        Some(auth.user_id),
-        "concierge_expense.reversed",
-        service_id,
-        json!({ "expense_id": expense_id, "status": "reversed" }),
-    )
-    .await;
+    match scope {
+        ExpenseScope::Service(service_id) => {
+            crate::realtime::publish_concierge_service_event(
+                &state,
+                Some(auth.user_id),
+                "concierge_expense.reversed",
+                service_id,
+                json!({ "expense_id": expense_id, "status": "reversed" }),
+            )
+            .await;
+        }
+        ExpenseScope::Task(task_id) => {
+            crate::realtime::publish_task_event(
+                &state,
+                Some(auth.user_id),
+                "task.expense_reversed",
+                task_id,
+                json!({ "expense_id": expense_id, "status": "reversed" }),
+            )
+            .await;
+        }
+    }
     publish_notification_deliveries(&state, notification_deliveries, expense_id).await;
-    expense_mutation_response(&state, &auth, service_id, expense_id, false, StatusCode::OK).await
+    expense_mutation_response_for_scope(&state, &auth, scope, expense_id, false, StatusCode::OK)
+        .await
 }

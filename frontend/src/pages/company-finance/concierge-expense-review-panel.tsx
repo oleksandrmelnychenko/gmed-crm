@@ -94,17 +94,17 @@ const emptyForm: ExpensePostForm = {
 
 const textByLanguage = {
   ru: {
-    title: "Расходы Concierge",
+    title: "Расходы по задачам",
     subtitle: "Проверка чеков и отражение подтвержденных расходов в финансовом учете.",
     refresh: "Обновить",
-    search: "Пациент, услуга, партнёр или заказ",
+    search: "Пациент, задача, партнёр или заказ",
     all: "Все",
     pending: "Ожидают проверки",
     posted: "Проведены",
     rejected: "Отклонены",
     reversed: "Сторнированы",
     patient: "Пациент",
-    service: "Услуга",
+    service: "Задача",
     vendor: "Партнёр или исполнитель",
     expenseDate: "Дата расхода",
     submittedAt: "Передано",
@@ -210,17 +210,17 @@ const textByLanguage = {
     },
   },
   de: {
-    title: "Concierge-Auslagen",
+    title: "Aufgabenausgaben",
     subtitle: "Belege prüfen und bestätigte Auslagen in die Finanzbuchhaltung übernehmen.",
     refresh: "Aktualisieren",
-    search: "Patient, Leistung, Partner oder Auftrag",
+    search: "Patient, Aufgabe, Partner oder Auftrag",
     all: "Alle",
     pending: "Zur Prüfung",
     posted: "Gebucht",
     rejected: "Abgelehnt",
     reversed: "Storniert",
     patient: "Patient",
-    service: "Leistung",
+    service: "Aufgabe",
     vendor: "Partner oder Leistungserbringer",
     expenseDate: "Auslagendatum",
     submittedAt: "Eingereicht",
@@ -585,7 +585,7 @@ export function ConciergeExpenseReviewPanel({
       financialAccountId: row.paid_by === "agency" ? defaultAccount?.id ?? "" : "",
     });
     try {
-      const result = await fetchCompanyConciergeExpenseContext(row.concierge_service_id);
+      const result = await fetchCompanyConciergeExpenseContext(row.task_id);
       if (contextRequestRef.current === request) setContext(result);
     } catch (error) {
       if (contextRequestRef.current === request) {
@@ -632,7 +632,7 @@ export function ConciergeExpenseReviewPanel({
     setReceiptError(null);
     try {
       const result = await fetchCompanyConciergeExpenseReceipt(
-        selected.concierge_service_id,
+        selected.task_id,
         selected.id,
       );
       if (previewRequestRef.current !== request) return;
@@ -659,7 +659,7 @@ export function ConciergeExpenseReviewPanel({
     setReceiptError(null);
     try {
       await downloadCompanyConciergeExpenseReceipt(
-        selected.concierge_service_id,
+        selected.task_id,
         selected.id,
         receipt.original_filename || "receipt",
       );
@@ -701,7 +701,7 @@ export function ConciergeExpenseReviewPanel({
     setSuccessMessage(null);
     try {
       const response = await postCompanyConciergeExpense(
-        selected.concierge_service_id,
+        selected.task_id,
         selected.id,
         { ...draft, request_id: requestId },
       );
@@ -734,7 +734,7 @@ export function ConciergeExpenseReviewPanel({
     setSuccessMessage(null);
     try {
       const response = await rejectCompanyConciergeExpense(
-        selected.concierge_service_id,
+        selected.task_id,
         selected.id,
         { request_id: requestId, reason },
       );
@@ -771,7 +771,7 @@ export function ConciergeExpenseReviewPanel({
     setSuccessMessage(null);
     try {
       const response = await reverseCompanyConciergeExpense(
-        selected.concierge_service_id,
+        selected.task_id,
         selected.id,
         { request_id: requestId, reason, reversed_on: reversedOn },
       );

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ClipboardPlus, LoaderCircle, Plus, RefreshCw } from "lucide-react";
+import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
@@ -9,7 +9,6 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
-import { canAccessStaffRoute } from "@/lib/staff-route-access";
 
 import {
   assignableConciergeTaskUsers,
@@ -33,7 +32,6 @@ import {
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
 import { ConciergeTaskManager } from "./task-manager";
-import { OperationsWorkspaceTabs } from "./operations-workspace-tabs";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
@@ -57,13 +55,9 @@ const REALTIME_EVENTS = [
 
 const copy = {
   de: {
-    title: "Aufgabenmanager",
-    subtitle: "Aufgaben verteilen, Termine planen und Fristen im Blick behalten",
-    operationsTitle: "Operationszentrale",
-    operationsSubtitle: "Anfragen, Services und Aufgaben in einem gemeinsamen Arbeitsbereich",
+    title: "Arbeitszentrale",
+    subtitle: "Aufgaben, Termine und Ausgaben in einem gemeinsamen Arbeitsbereich",
     newTask: "Aufgabe / Termin",
-    newServiceTask: "Concierge-Aufgabe",
-    serviceRequired: "Wählen Sie einen Service für die Concierge-Aufgabe aus.",
     refresh: "Aktualisieren",
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
@@ -76,17 +70,11 @@ const copy = {
     retry: "Erneut laden",
     archiveFailed: "Die Aufgabe konnte nicht archiviert werden.",
     restoreFailed: "Die Aufgabe konnte nicht wiederhergestellt werden.",
-    myTitle: "Meine Aufgaben",
-    mySubtitle: "Persönliche Aufgaben, Termine und Fristen",
   },
   ru: {
-    title: "Менеджер задач",
-    subtitle: "Распределение задач, календарь событий и контроль сроков",
-    operationsTitle: "Операционный центр",
-    operationsSubtitle: "Запросы, услуги и задачи в едином рабочем пространстве",
+    title: "Рабочий центр",
+    subtitle: "Задачи, события и расходы в едином рабочем пространстве",
     newTask: "Задача / событие",
-    newServiceTask: "Консьерж-задача",
-    serviceRequired: "Для консьерж-задачи выберите связанный сервис.",
     refresh: "Обновить",
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
@@ -99,8 +87,6 @@ const copy = {
     retry: "Повторить",
     archiveFailed: "Не удалось переместить задачу в архив.",
     restoreFailed: "Не удалось восстановить задачу из архива.",
-    myTitle: "Мои задачи",
-    mySubtitle: "Личные задачи, события и сроки",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
 
@@ -128,18 +114,12 @@ export function ConciergeTaskManagerPage() {
   const [projects, setProjects] = useState<TaskProjectOption[]>([]);
   const [initialTaskDate, setInitialTaskDate] = useState<Date | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<string | null>(() => searchParams.get("task"));
-  const [serviceTaskMode, setServiceTaskMode] = useState(false);
   const [detailExpenseRequested, setDetailExpenseRequested] = useState(false);
   const hasLoadedRef = useRef(false);
   const createTaskRequestIdRef = useRef<string | null>(null);
   const taskParam = searchParams.get("task");
   const now = useMemo(() => new Date(), [tasks, version]);
   const isPersonalConcierge = user?.role === "concierge" || user?.role === "interpreter";
-  const showOperationsWorkspace = Boolean(
-    user
-    && canAccessStaffRoute(user.role, "/concierge")
-    && canAccessStaffRoute(user.role, "/task-manager"),
-  );
   const taskListPath = useMemo(
     () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
     [user?.id, user?.role],
@@ -261,21 +241,19 @@ export function ConciergeTaskManagerPage() {
     }
   }
 
-  function openCreateTask(date: Date | null = null, requireService = false) {
+  function openCreateTask(date: Date | null = null) {
     setTaskError("");
     setEditingTask(null);
     createTaskRequestIdRef.current = crypto.randomUUID();
     setInitialTaskDate(date);
-    setServiceTaskMode(requireService);
     setTaskDialogOpen(true);
   }
 
-  function openEditTask(task: ConciergeTask, requireService = false) {
+  function openEditTask(task: ConciergeTask) {
     if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
     setInitialTaskDate(null);
-    setServiceTaskMode(requireService);
     setTaskDialogOpen(true);
   }
 
@@ -292,9 +270,18 @@ export function ConciergeTaskManagerPage() {
     setSearchParams(next, { replace: true });
   }
 
+  function canUseTaskExpenses(task: ConciergeTask) {
+    return Boolean(
+      user
+      && (user.role === "ceo"
+        || user.role === "billing"
+        || task.assigned_to === user.id
+        || task.assigned_by === user.id),
+    );
+  }
+
   function openTaskExpense(task: ConciergeTask) {
-    if (!task.concierge_service_id) return;
-    if (user?.role !== "ceo" && !(user?.role === "concierge" && task.assigned_to === user.id)) return;
+    if (!canUseTaskExpenses(task)) return;
     setDetailExpenseRequested(true);
     setDetailTaskId(task.id);
     const next = new URLSearchParams(searchParams);
@@ -309,11 +296,6 @@ export function ConciergeTaskManagerPage() {
     setTaskError("");
     setError("");
     try {
-      if (serviceTaskMode && !input.concierge_service_id) {
-        const validationError = new Error(labels.serviceRequired);
-        setTaskError(labels.serviceRequired);
-        throw validationError;
-      }
       const { status, ...fields } = input;
       const createRequestId = createTaskRequestIdRef.current ?? crypto.randomUUID();
       if (!editingTask) createTaskRequestIdRef.current = createRequestId;
@@ -340,13 +322,6 @@ export function ConciergeTaskManagerPage() {
           ? current.map((item) => item.id === saved.id ? saved : item)
           : [...current, saved];
       });
-      if (serviceTaskMode && editingTask) {
-        setDetailExpenseRequested(true);
-        setDetailTaskId(saved.id);
-        const next = new URLSearchParams(searchParams);
-        next.set("task", saved.id);
-        setSearchParams(next, { replace: true });
-      }
       return saved;
     } catch (saveError) {
       setTaskError(conciergeTaskErrorMessage(saveError, lang, labels.updateFailed));
@@ -414,22 +389,14 @@ export function ConciergeTaskManagerPage() {
   return (
     <div className="space-y-3" data-testid="concierge-task-manager-page">
       <PageHeader
-        title={showOperationsWorkspace ? labels.operationsTitle : isPersonalConcierge ? labels.myTitle : labels.title}
-        description={showOperationsWorkspace ? labels.operationsSubtitle : isPersonalConcierge ? labels.mySubtitle : labels.subtitle}
+        title={labels.title}
+        description={labels.subtitle}
         actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
-              <Plus />{labels.newTask}
-            </Button>
-            {services.length > 0 ? (
-              <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask(null, true)}>
-                <ClipboardPlus />{labels.newServiceTask}
-              </Button>
-            ) : null}
-          </div>
+          <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => openCreateTask()}>
+            <Plus />{labels.newTask}
+          </Button>
         )}
       />
-      {showOperationsWorkspace ? <OperationsWorkspaceTabs lang={lang} /> : null}
 
       {error ? (
         <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:flex-row sm:items-center sm:justify-between">
@@ -452,10 +419,7 @@ export function ConciergeTaskManagerPage() {
         canModifyTask={(task) => canModifyConciergeTask(task, user?.id, user?.role)}
         canDeleteTask={(task) => canDeleteConciergeTask(task, user?.id, user?.role)}
         canChangeTaskStatus={(task) => canChangeConciergeTaskStatus(task, user?.id, user?.role)}
-        canAddExpenseToTask={(task) => Boolean(
-          task.concierge_service_id
-          && (user?.role === "ceo" || (user?.role === "concierge" && task.assigned_to === user.id)),
-        )}
+        canAddExpenseToTask={canUseTaskExpenses}
         availableStatusesForTask={(task) => availableConciergeTaskStatuses(task, user?.id, user?.role)}
         onEdit={openEditTask}
         onDelete={setPendingDeleteTask}
@@ -474,8 +438,7 @@ export function ConciergeTaskManagerPage() {
         currentUserId={user?.id ?? null}
         canAssign={assignees.length > 0}
         canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
-        showServiceLink={services.length > 0 || Boolean(editingTask?.concierge_service_id)}
-        serviceLinkRequired={serviceTaskMode}
+        showServiceLink={Boolean(editingTask?.concierge_service_id)}
         patients={patients}
         providers={providers}
         projects={projects}
@@ -492,7 +455,6 @@ export function ConciergeTaskManagerPage() {
           if (!open) {
             setEditingTask(null);
             setInitialTaskDate(null);
-            setServiceTaskMode(false);
             createTaskRequestIdRef.current = null;
             const next = new URLSearchParams(searchParams);
             next.delete("create");

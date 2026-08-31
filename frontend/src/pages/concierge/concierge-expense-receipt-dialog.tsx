@@ -31,7 +31,6 @@ import {
   type ConciergeExpenseSubmitInput,
   type ReceiptFileValidationError,
 } from "./expense-receipt-model";
-import type { ConciergeService } from "./model";
 import {
   ConciergeDialogBody,
   ConciergeDialogHeader,
@@ -194,6 +193,16 @@ function fileErrorText(error: ReceiptFileValidationError | null, labels: (typeof
   return "";
 }
 
+export type ConciergeExpenseSubject = {
+  id: string;
+  patient_name: string;
+  patient_pid: string;
+  provider_name: string | null;
+  vendor_name: string | null;
+  currency: string;
+  status: string;
+};
+
 export function ConciergeExpenseReceiptDialog({
   service,
   lang,
@@ -209,7 +218,7 @@ export function ConciergeExpenseReceiptDialog({
   onSubmit,
   onDownload,
 }: {
-  service: ConciergeService | null;
+  service: ConciergeExpenseSubject | null;
   lang: Lang;
   open: boolean;
   context: ConciergeExpenseContext | null;
@@ -264,8 +273,9 @@ export function ConciergeExpenseReceiptDialog({
     ? calculateConciergeExpenseVatFromGross(grossInput, vatRate)
     : calculateConciergeExpenseVat(netInput, vatRate);
   const consequence = conciergeExpenseConsequencePreview(paidBy, serviceDelivered, amountGross);
-  const currency = context?.service.currency || service?.currency || "EUR";
-  const providerMissing = paidBy !== "patient" && !context?.service.provider_id;
+  const currency = context?.task?.currency || context?.service?.currency || service?.currency || "EUR";
+  const providerMissing = paidBy !== "patient"
+    && !(context?.task?.provider_id || context?.service?.provider_id);
   const netMinor = moneyStringToMinorUnits(amountNet);
   const vatMinor = moneyStringToMinorUnits(amountVat);
   const grossMinor = moneyStringToMinorUnits(amountGross);
@@ -419,10 +429,10 @@ export function ConciergeExpenseReceiptDialog({
                       <span className="text-xs text-muted-foreground">{labels.patient}</span>
                       <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
                         <span className="truncate text-sm font-medium text-foreground">
-                          {context?.patient.display_name || service.patient_name}
+                          {context?.patient?.display_name || service.patient_name || "—"}
                         </span>
                         <Badge variant="outline" className="rounded-full font-mono text-[10px]">
-                          {context?.patient.pid || service.patient_pid}
+                          {context?.patient?.pid || service.patient_pid || "—"}
                         </Badge>
                       </div>
                     </div>
@@ -490,7 +500,7 @@ export function ConciergeExpenseReceiptDialog({
                               <div className="flex items-center gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(item.status))}>{labels[item.status]}</Badge><span className="text-xs font-medium">{item.vendor}</span></div>
                               <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency, lang)}</span>
                             </div>
-                            <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient.display_name || service.patient_name} · {formatDate(item.submitted_at, lang)}</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient?.display_name || service.patient_name || "—"} · {formatDate(item.submitted_at, lang)}</p>
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                               <p className="text-[10px] text-muted-foreground">{labels.submittedBy.replace("{name}", item.submitted_by.display_name)}</p>
                               {item.receipt ? (

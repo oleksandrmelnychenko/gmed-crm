@@ -187,6 +187,20 @@ async fn seed_financial_fixture(
     .fetch_one(pool)
     .await
     .unwrap();
+    sqlx::query(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, patient_id, provider_id,
+               concierge_service_id, currency
+           ) VALUES ('Airport transfer', $1, $2, $3, $4, $5, 'EUR')"#,
+    )
+    .bind(concierge_id)
+    .bind(admin_id)
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(service_id)
+    .execute(pool)
+    .await
+    .unwrap();
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (
                order_number, patient_id, phase, status, currency, created_by
@@ -273,6 +287,244 @@ async fn submit_fixture_expense(
         &pdf_receipt(receipt_tag),
     )
     .await
+}
+
+async fn linked_task_id(pool: &PgPool, service_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        r#"SELECT id FROM tasks
+           WHERE concierge_service_id = $1 AND deleted_at IS NULL
+           ORDER BY created_at, id
+           LIMIT 1"#,
+    )
+    .bind(service_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn task_expense_endpoints_use_task_context_and_owner_permissions() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let assignee_id = seed_user(&context.pool, "concierge", &format!("task-owner-{tag}")).await;
+    let outsider_id = seed_user(&context.pool, "concierge", &format!("task-other-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("task-billing-{tag}")).await;
+    let (patient_id, provider_id, service_id, _order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, assignee_id, &tag).await;
+    let task_id = linked_task_id(&context.pool, service_id).await;
+    let assignee = auth_header(assignee_id, "concierge");
+    let outsider = auth_header(outsider_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+
+    let (status, expense_context) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/tasks/{task_id}/expense-context"),
+        &assignee,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{expense_context}");
+    assert_eq!(expense_context["task"]["id"], task_id.to_string());
+    assert_eq!(
+        expense_context["task"]["provider_id"],
+        provider_id.to_string()
+    );
+    assert_eq!(expense_context["task"]["currency"], "EUR");
+    assert_eq!(expense_context["patient"]["id"], patient_id.to_string());
+
+    let (status, forbidden) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/tasks/{task_id}/expenses"),
+        &outsider,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let fields = submission_fields(
+        Uuid::new_v4(),
+        "unpaid",
+        false,
+        Utc::now().date_naive() - Duration::days(1),
+    );
+    let (status, created) = multipart_request(
+        &context.app,
+        &format!("/api/v1/tasks/{task_id}/expenses"),
+        &assignee,
+        &fields,
+        "task-receipt.pdf",
+        "application/pdf",
+        &pdf_receipt(&format!("task-{tag}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["item"]["task_id"], task_id.to_string());
+    assert!(created["item"]["concierge_service_id"].is_null());
+    let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
+    let stored = sqlx::query(
+        r#"SELECT task_id, concierge_service_id
+           FROM concierge_expense_submissions WHERE id = $1"#,
+    )
+    .bind(expense_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.try_get::<Uuid, _>("task_id").unwrap(), task_id);
+    assert!(
+        stored
+            .try_get::<Option<Uuid>, _>("concierge_service_id")
+            .unwrap()
+            .is_none()
+    );
+
+    let receipt_request = Request::builder()
+        .method("GET")
+        .uri(format!(
+            "/api/v1/tasks/{task_id}/expenses/{expense_id}/receipt"
+        ))
+        .header("Authorization", &assignee)
+        .body(Body::empty())
+        .unwrap();
+    let receipt_response = context.app.clone().oneshot(receipt_request).await.unwrap();
+    assert_eq!(receipt_response.status(), StatusCode::OK);
+
+    let (status, listed) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/tasks/{task_id}/expenses"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
+
+    let reject_path = format!("/api/v1/tasks/{task_id}/expenses/{expense_id}/reject");
+    let rejection = json!({
+        "request_id": Uuid::new_v4(),
+        "reason": "Task receipt does not match"
+    });
+    let (status, forbidden) = json_request(
+        &context.app,
+        "POST",
+        &reject_path,
+        &assignee,
+        Some(rejection.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+    let (status, rejected) = json_request(
+        &context.app,
+        "POST",
+        &reject_path,
+        &billing,
+        Some(rejection),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rejected}");
+    assert_eq!(rejected["item"]["status"], "rejected");
+}
+
+#[tokio::test]
+async fn legacy_service_submission_resolves_and_persists_the_linked_task() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("legacy-task-{tag}")).await;
+    let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    let task_id = linked_task_id(&context.pool, service_id).await;
+    let bearer = auth_header(concierge_id, "concierge");
+    let mut fields = submission_fields(
+        Uuid::new_v4(),
+        "unpaid",
+        false,
+        Utc::now().date_naive() - Duration::days(1),
+    );
+    fields.push(("document_missing".to_string(), "true".to_string()));
+
+    let (status, created) = multipart_fields_request(
+        &context.app,
+        &format!("/api/v1/concierge-services/{service_id}/expenses"),
+        &bearer,
+        &fields,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(
+        created["item"]["concierge_service_id"],
+        service_id.to_string()
+    );
+    assert_eq!(created["item"]["task_id"], task_id.to_string());
+
+    let (status, listed) = json_request(
+        &context.app,
+        "GET",
+        &format!("/api/v1/concierge-services/{service_id}/expenses"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
+}
+
+#[tokio::test]
+async fn finance_can_post_and_reverse_a_task_native_expense() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("task-post-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("task-review-{tag}")).await;
+    let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    let task_id = linked_task_id(&context.pool, service_id).await;
+    let assignee = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let mut fields = submission_fields(Uuid::new_v4(), "patient", true, expense_date);
+    fields.push(("document_missing".to_string(), "true".to_string()));
+    let (status, created) = multipart_fields_request(
+        &context.app,
+        &format!("/api/v1/tasks/{task_id}/expenses"),
+        &assignee,
+        &fields,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
+
+    let (status, posted) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/tasks/{task_id}/expenses/{expense_id}/post"),
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posted}");
+    assert_eq!(posted["item"]["status"], "posted");
+
+    let (status, reversed) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/tasks/{task_id}/expenses/{expense_id}/reverse"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "reason": "Task settlement correction",
+            "reversed_on": Utc::now().date_naive(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed}");
+    assert_eq!(reversed["item"]["status"], "reversed");
 }
 
 #[tokio::test]

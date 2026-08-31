@@ -267,7 +267,8 @@ export type CompanyConciergeExpenseStatus =
 export type CompanyConciergeExpensePaidBy = "patient" | "agency" | "unpaid";
 
 export type CompanyConciergeServiceSummary = {
-  id: string;
+  id: string | null;
+  task_id: string;
   patient_id: string;
   patient_name: string;
   patient_pid: string;
@@ -292,7 +293,8 @@ export type CompanyConciergeExpenseHistoryEvent = {
 
 export type CompanyConciergeExpenseItem = {
   id: string;
-  concierge_service_id: string;
+  concierge_service_id: string | null;
+  task_id: string;
   patient_id: string;
   order_id: string | null;
   order_number: string | null;
@@ -362,13 +364,21 @@ export type CompanyConciergeExpenseContext = {
     id: string;
     display_name: string;
     pid: string;
-  };
+  } | null;
   service: {
     id: string;
     title: string;
     currency: string;
     provider_id: string | null;
-  };
+  } | null;
+  task: {
+    id: string;
+    title: string;
+    currency: string;
+    provider_id: string | null;
+    assigned_to: string;
+    assigned_by: string;
+  } | null;
   mapped_order: CompanyConciergeExpenseOrder | null;
   eligible_orders: CompanyConciergeExpenseOrder[];
 };

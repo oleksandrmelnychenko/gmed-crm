@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   MapPinned,
   MessageSquareText,
+  Plus,
   ReceiptText,
   Search,
   UserRound,
@@ -30,7 +31,6 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
-import { OperationsWorkspaceTabs } from "./operations-workspace-tabs";
 
 import {
   CONCIERGE_BOARD_COLUMNS,
@@ -129,7 +129,7 @@ const REALTIME_EVENTS = [
 
 const text = {
   de: {
-    title: "Operationszentrale",
+    title: "Arbeitszentrale",
     subtitle: "Anfragen, Services und Aufgaben in einem gemeinsamen Arbeitsbereich",
     searchLabel: "Suche",
     search: "Service, Patient, Anbieter oder Referenz suchen",
@@ -185,7 +185,7 @@ const text = {
     status: "Status",
   },
   ru: {
-    title: "Операционный центр",
+    title: "Рабочий центр",
     subtitle: "Запросы, услуги и задачи в едином рабочем пространстве",
     searchLabel: "Поиск",
     search: "Поиск по услуге, пациенту, поставщику или номеру",
@@ -967,6 +967,14 @@ export function ConciergeWorkspacePage() {
     }
   }
 
+  function openCreateTask() {
+    setTaskError("");
+    setEditingTask(null);
+    setTaskSourceService(null);
+    createTaskRequestIdRef.current = crypto.randomUUID();
+    setTaskDialogOpen(true);
+  }
+
   function openCreateTaskFromRequest(service: ConciergeService) {
     setTaskError("");
     setEditingTask(null);
@@ -1102,9 +1110,12 @@ export function ConciergeWorkspacePage() {
       <PageHeader
         title={labels.title}
         description={labels.subtitle}
+        actions={(
+          <Button type="button" className="h-9 rounded-lg px-3.5" onClick={openCreateTask}>
+            <Plus />{labels.newTask}
+          </Button>
+        )}
       />
-      <OperationsWorkspaceTabs lang={lang} />
-
       {error ? (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
@@ -1354,6 +1365,7 @@ export function ConciergeWorkspacePage() {
         currentUserId={user?.id ?? null}
         canAssign={user?.role === "ceo"}
         canModifyAttachments={Boolean(editingTask && canModifyConciergeTask(editingTask, user?.id, user?.role))}
+        showServiceLink={Boolean(editingTask?.concierge_service_id)}
         patients={taskPatients}
         providers={taskProviders}
         initialTitle={taskSourceService ? `${lang === "ru" ? "Запрос" : "Anfrage"}: ${conciergeServiceDisplayTitle(taskSourceService, lang)}` : ""}

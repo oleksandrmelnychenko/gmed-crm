@@ -216,59 +216,75 @@ export async function fetchCompanyConciergeExpenseQueue(
   };
 }
 
-export function fetchCompanyConciergeExpenseContext(serviceId: string) {
+export function buildCompanyTaskExpenseContextPath(taskId: string) {
+  return `/tasks/${taskId}/expense-context`;
+}
+
+export function buildCompanyTaskExpenseActionPath(
+  taskId: string,
+  expenseId: string,
+  action: "post" | "reject" | "reverse",
+) {
+  return `/tasks/${taskId}/expenses/${expenseId}/${action}`;
+}
+
+export function buildCompanyTaskExpenseReceiptPath(taskId: string, expenseId: string) {
+  return `/tasks/${taskId}/expenses/${expenseId}/receipt`;
+}
+
+export function fetchCompanyConciergeExpenseContext(taskId: string) {
   return apiFetch<CompanyConciergeExpenseContext>(
-    `/concierge-services/${serviceId}/expense-context`,
+    buildCompanyTaskExpenseContextPath(taskId),
     { forceFresh: true },
   );
 }
 
 export function postCompanyConciergeExpense(
-  serviceId: string,
+  taskId: string,
   expenseId: string,
   payload: CompanyConciergeExpensePostPayload,
 ) {
   return apiFetch<CompanyConciergeExpenseMutationResponse>(
-    `/concierge-services/${serviceId}/expenses/${expenseId}/post`,
+    buildCompanyTaskExpenseActionPath(taskId, expenseId, "post"),
     { method: "POST", body: JSON.stringify(payload) },
   );
 }
 
 export function rejectCompanyConciergeExpense(
-  serviceId: string,
+  taskId: string,
   expenseId: string,
   payload: { request_id: string; reason: string },
 ) {
   return apiFetch<CompanyConciergeExpenseMutationResponse>(
-    `/concierge-services/${serviceId}/expenses/${expenseId}/reject`,
+    buildCompanyTaskExpenseActionPath(taskId, expenseId, "reject"),
     { method: "POST", body: JSON.stringify(payload) },
   );
 }
 
 export function reverseCompanyConciergeExpense(
-  serviceId: string,
+  taskId: string,
   expenseId: string,
   payload: CompanyConciergeExpenseReversePayload,
 ) {
   return apiFetch<CompanyConciergeExpenseMutationResponse>(
-    `/concierge-services/${serviceId}/expenses/${expenseId}/reverse`,
+    buildCompanyTaskExpenseActionPath(taskId, expenseId, "reverse"),
     { method: "POST", body: JSON.stringify(payload) },
   );
 }
 
-export function fetchCompanyConciergeExpenseReceipt(serviceId: string, expenseId: string) {
+export function fetchCompanyConciergeExpenseReceipt(taskId: string, expenseId: string) {
   return apiFetchFile(
-    `/concierge-services/${serviceId}/expenses/${expenseId}/receipt`,
+    buildCompanyTaskExpenseReceiptPath(taskId, expenseId),
   );
 }
 
 export function downloadCompanyConciergeExpenseReceipt(
-  serviceId: string,
+  taskId: string,
   expenseId: string,
   fallbackFilename: string,
 ) {
   return downloadApiFile(
-    `/concierge-services/${serviceId}/expenses/${expenseId}/receipt`,
+    buildCompanyTaskExpenseReceiptPath(taskId, expenseId),
     fallbackFilename,
   );
 }

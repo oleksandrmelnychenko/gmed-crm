@@ -199,12 +199,6 @@ const ServicesPage = lazy(() =>
   })),
 );
 
-const ConciergeWorkspacePage = lazy(() =>
-  import("@/pages/concierge").then((module) => ({
-    default: module.ConciergeWorkspacePage,
-  })),
-);
-
 const ConciergeTaskManagerPage = lazy(() =>
   import("@/pages/concierge").then((module) => ({
     default: module.ConciergeTaskManagerPage,
@@ -416,7 +410,7 @@ function AppRoutes() {
             <Route path="documents/:documentId" element={<DocumentsPage />} />
             <Route path="files" element={<FilesPage />} />
             <Route path="specializations" element={<SpecializationsPage />} />
-            <Route path="concierge" element={<ConciergeWorkspacePage />} />
+            <Route path="concierge" element={<StaffRouteRedirect to="/task-manager" />} />
             <Route path="task-manager" element={<ConciergeTaskManagerPage />} />
             <Route path="services" element={<ServicesPage />} />
             <Route path="feedback" element={<FeedbackPage />} />

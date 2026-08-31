@@ -51,12 +51,15 @@ import {
   ConciergeDialogFooter,
   ConciergeDialogHeader,
 } from "./dialog-layout";
-import { ConciergeExpenseReceiptDialog } from "./concierge-expense-receipt-dialog";
 import {
-  downloadConciergeExpenseReceipt,
-  getConciergeExpenseContext,
-  getConciergeExpenses,
-  uploadConciergeExpense,
+  ConciergeExpenseReceiptDialog,
+  type ConciergeExpenseSubject,
+} from "./concierge-expense-receipt-dialog";
+import {
+  downloadTaskExpenseReceipt,
+  getTaskExpenseContext,
+  getTaskExpenses,
+  uploadTaskExpense,
 } from "./expense-receipt-api";
 import type {
   ConciergeExpenseContext,
@@ -64,7 +67,6 @@ import type {
   ConciergeExpenseMutationResponse,
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
-import type { ConciergeService } from "./model";
 import { ConciergeTaskAttachments } from "./task-attachments";
 
 const copy = {
@@ -129,8 +131,8 @@ const copy = {
     links: "Verknüpfungen",
     expenses: "Ausgaben",
     addExpense: "Ausgabe erfassen",
-    emptyExpenses: "Für diesen Service wurden noch keine Ausgaben erfasst.",
-    expenseLoadFailed: "Die Ausgaben des verknüpften Services konnten nicht geladen werden.",
+    emptyExpenses: "Für diese Aufgabe wurden noch keine Ausgaben erfasst.",
+    expenseLoadFailed: "Die Ausgaben dieser Aufgabe konnten nicht geladen werden.",
     pending_review: "Zur Prüfung",
     posted: "Bestätigt",
     rejected: "Abgelehnt",
@@ -209,8 +211,8 @@ const copy = {
     links: "Связи",
     expenses: "Расходы",
     addExpense: "Добавить расход",
-    emptyExpenses: "По связанному сервису расходы ещё не добавлены.",
-    expenseLoadFailed: "Не удалось загрузить расходы связанного сервиса.",
+    emptyExpenses: "Для этой задачи ещё не добавляли расходы.",
+    expenseLoadFailed: "Не удалось загрузить расходы этой задачи.",
     pending_review: "На проверке",
     posted: "Подтверждено",
     rejected: "Отклонено",
@@ -355,7 +357,7 @@ export function ConciergeTaskDetailDialog({
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [expenseService, setExpenseService] = useState<ConciergeService | null>(null);
+  const [expenseSubject, setExpenseSubject] = useState<ConciergeExpenseSubject | null>(null);
   const [expenseContext, setExpenseContext] = useState<ConciergeExpenseContext | null>(null);
   const [expenseItems, setExpenseItems] = useState<ConciergeExpenseItem[]>([]);
   const [expenseLoading, setExpenseLoading] = useState(false);
@@ -374,15 +376,15 @@ export function ConciergeTaskDetailDialog({
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
   const expenseLoadSequenceRef = useRef(0);
   const autoExpenseOpenedRef = useRef(false);
-  const canReadLinkedExpenses = Boolean(
-    detail?.item.concierge_service_id
-    && (user?.role === "ceo" || user?.role === "billing" || user?.role === "concierge"),
+  const canReadTaskExpenses = Boolean(
+    detail
+    && user
+    && (user.role === "ceo"
+      || user.role === "billing"
+      || detail.item.assigned_to === user.id
+      || detail.item.assigned_by === user.id),
   );
-  const canSubmitLinkedExpense = Boolean(
-    expenseService
-    && (user?.role === "ceo"
-      || (user?.role === "concierge" && expenseService.assigned_concierge_id === user.id)),
-  );
+  const canSubmitTaskExpense = canReadTaskExpenses;
   const statusDirty = Boolean(detail && pendingStatus && pendingStatus !== detail.item.status);
 
   const load = useCallback(async () => {
@@ -425,48 +427,71 @@ export function ConciergeTaskDetailDialog({
   }, [load, open]);
 
   useEffect(() => {
-    const serviceId = detail?.item.concierge_service_id;
+    const task = detail?.item;
     const loadSequence = expenseLoadSequenceRef.current + 1;
     expenseLoadSequenceRef.current = loadSequence;
     setExpenseDialogOpen(false);
-    setExpenseService(null);
+    setExpenseSubject(null);
     setExpenseContext(null);
     setExpenseItems([]);
     setExpenseError("");
     setExpenseProgress(0);
 
-    if (!open || !serviceId || !canReadLinkedExpenses) {
+    if (!open || !task || !canReadTaskExpenses) {
       setExpenseLoading(false);
       return;
     }
 
+    // Keep the expense action responsive even while its server context is
+    // loading (or temporarily unavailable). Otherwise the detail dialog is
+    // hidden by openExpenseOnLoad and the click appears to do nothing.
+    setExpenseSubject({
+      id: task.id,
+      patient_name: task.patient_name || "",
+      patient_pid: "",
+      provider_name: task.provider_name,
+      vendor_name: task.external_assignee_name,
+      currency: "EUR",
+      status: task.status,
+    });
     setExpenseLoading(true);
-    void Promise.all([
-      apiFetch<ConciergeService>(`/concierge-services/${serviceId}`, { forceFresh: true }),
-      getConciergeExpenseContext(serviceId),
-      getConciergeExpenses(serviceId),
+    void Promise.allSettled([
+      getTaskExpenseContext(task.id),
+      getTaskExpenses(task.id),
     ])
-      .then(([service, context, history]) => {
+      .then(([contextResult, historyResult]) => {
         if (expenseLoadSequenceRef.current !== loadSequence) return;
-        setExpenseService(service);
-        setExpenseContext(context);
-        setExpenseItems(history.items);
-      })
-      .catch(() => {
-        if (expenseLoadSequenceRef.current !== loadSequence) return;
-        setExpenseError(labels.expenseLoadFailed);
+        if (contextResult.status === "fulfilled") {
+          const context = contextResult.value;
+          setExpenseSubject({
+            id: task.id,
+            patient_name: context.patient?.display_name || task.patient_name || "",
+            patient_pid: context.patient?.pid || "",
+            provider_name: task.provider_name,
+            vendor_name: task.external_assignee_name,
+            currency: context.task?.currency || context.service?.currency || "EUR",
+            status: task.status,
+          });
+          setExpenseContext(context);
+        }
+        if (historyResult.status === "fulfilled") {
+          setExpenseItems(historyResult.value.items);
+        }
+        if (contextResult.status === "rejected" || historyResult.status === "rejected") {
+          setExpenseError(labels.expenseLoadFailed);
+        }
       })
       .finally(() => {
         if (expenseLoadSequenceRef.current === loadSequence) setExpenseLoading(false);
       });
-  }, [canReadLinkedExpenses, detail?.item.concierge_service_id, labels.expenseLoadFailed, open]);
+  }, [canReadTaskExpenses, detail?.item, labels.expenseLoadFailed, open]);
 
   useEffect(() => {
-    if (!open || !openExpenseOnLoad || expenseLoading || !canSubmitLinkedExpense || !expenseService) return;
+    if (!open || !openExpenseOnLoad || expenseLoading || !canSubmitTaskExpense || !expenseSubject) return;
     if (autoExpenseOpenedRef.current) return;
     autoExpenseOpenedRef.current = true;
     setExpenseDialogOpen(true);
-  }, [canSubmitLinkedExpense, expenseLoading, expenseService, open, openExpenseOnLoad]);
+  }, [canSubmitTaskExpense, expenseLoading, expenseSubject, open, openExpenseOnLoad]);
 
   async function addComment() {
     if (!taskId || !comment.trim() || busy) return;
@@ -704,15 +729,15 @@ export function ConciergeTaskDetailDialog({
   async function submitLinkedExpense(
     input: ConciergeExpenseSubmitInput,
   ): Promise<ConciergeExpenseMutationResponse> {
-    if (!expenseService || submittingExpense || !canSubmitLinkedExpense) {
+    if (!taskId || !expenseSubject || submittingExpense || !canSubmitTaskExpense) {
       throw new Error(labels.expenseLoadFailed);
     }
     setSubmittingExpense(true);
     setExpenseError("");
     setExpenseProgress(0);
     try {
-      const response = await uploadConciergeExpense(
-        expenseService.id,
+      const response = await uploadTaskExpense(
+        taskId,
         input,
         setExpenseProgress,
       );
@@ -720,7 +745,7 @@ export function ConciergeTaskDetailDialog({
         response.item,
         ...current.filter((item) => item.id !== response.item.id),
       ]);
-      clearApiCache(`/concierge-services/${expenseService.id}/expenses`);
+      clearApiCache(`/tasks/${taskId}/expenses`);
       onChanged();
       return response;
     } catch (submitError) {
@@ -734,11 +759,11 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function downloadLinkedExpenseReceipt(item: ConciergeExpenseItem) {
-    if (!expenseService || !item.receipt) return;
+    if (!taskId || !item.receipt) return;
     setExpenseError("");
     try {
-      await downloadConciergeExpenseReceipt(
-        expenseService.id,
+      await downloadTaskExpenseReceipt(
+        taskId,
         item.id,
         item.receipt.original_filename,
       );
@@ -828,15 +853,15 @@ export function ConciergeTaskDetailDialog({
                 </TaskDetailSection>
               ) : null}
 
-              {canReadLinkedExpenses ? (
+              {canReadTaskExpenses ? (
                 <TaskDetailSection
                   title={labels.expenses}
-                  action={canSubmitLinkedExpense ? (
+                  action={canSubmitTaskExpense ? (
                     <Button
                       type="button"
                       size="sm"
                       className="h-8"
-                      disabled={expenseLoading || submittingExpense || Boolean(detail.item.archived_at)}
+                      disabled={expenseLoading || submittingExpense || !expenseSubject || Boolean(detail.item.archived_at)}
                       onClick={() => setExpenseDialogOpen(true)}
                     >
                       {expenseLoading ? <LoaderCircle className="animate-spin" /> : <ReceiptText />}
@@ -1044,7 +1069,7 @@ export function ConciergeTaskDetailDialog({
       />
       </Dialog>
       <ConciergeExpenseReceiptDialog
-        service={expenseService}
+        service={expenseSubject}
         lang={lang}
         open={expenseDialogOpen}
         context={expenseContext}

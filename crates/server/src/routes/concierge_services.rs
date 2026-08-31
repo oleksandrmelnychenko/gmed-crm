@@ -55,6 +55,22 @@ pub fn router() -> Router<AppState> {
             "/concierge-services/{service_id}/partner-interactions/{interaction_id}/apply-cost-estimate",
             post(apply_partner_quote_as_cost_estimate),
         )
+        .route(
+            "/tasks/{task_id}/book-provider",
+            post(book_task_provider),
+        )
+        .route(
+            "/tasks/{task_id}/key-events",
+            get(list_task_key_events).post(record_task_key_event),
+        )
+        .route(
+            "/tasks/{task_id}/partner-interactions",
+            get(list_task_partner_interactions).post(record_task_partner_interaction),
+        )
+        .route(
+            "/tasks/{task_id}/partner-interactions/{interaction_id}/apply-cost-estimate",
+            post(apply_task_partner_quote_as_cost_estimate),
+        )
 }
 
 #[derive(Deserialize)]
@@ -219,6 +235,18 @@ struct ProviderServicePricing {
     provider_id: Uuid,
     taxonomy_node_id: Option<Uuid>,
     unit_price: Option<f64>,
+    currency: String,
+}
+
+struct TaskServiceContext {
+    id: Uuid,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    provider_id: Option<Uuid>,
+    concierge_service_id: Option<Uuid>,
+    status: String,
+    service_status: Option<String>,
+    billing_status: String,
     currency: String,
 }
 
@@ -1501,7 +1529,7 @@ async fn list_concierge_service_key_events(
     }
 
     match sqlx::query(
-        r#"SELECT e.id, e.concierge_service_id, e.action, e.responsible_user_id,
+        r#"SELECT e.id, e.task_id, e.concierge_service_id, e.action, e.responsible_user_id,
                   responsible.name AS responsible_user_name, e.occurred_at, e.note,
                   e.recorded_by, recorder.name AS recorded_by_name, e.created_at
            FROM concierge_service_key_events e
@@ -1790,7 +1818,7 @@ async fn list_concierge_service_partner_interactions(
     }
 
     match sqlx::query(
-        r#"SELECT i.id, i.concierge_service_id, i.provider_id, p.name AS provider_name,
+        r#"SELECT i.id, i.task_id, i.concierge_service_id, i.provider_id, p.name AS provider_name,
                   i.channel, i.direction, i.outcome, i.occurred_at, i.contact_person,
                   i.note, i.quoted_cost, i.quoted_currency,
                   decision.applied_at AS applied_as_cost_estimate_at,
@@ -2260,6 +2288,1184 @@ async fn apply_partner_quote_as_cost_estimate(
         "interaction_id": interaction_id,
         "cost_estimate": quoted_cost.round_dp(2).to_string(),
         "currency": service_currency,
+        "applied_as_cost_estimate_at": applied_at.to_rfc3339(),
+        "applied_by": auth.user_id,
+        "applied_by_name": applied_by_name,
+    }))
+    .into_response()
+}
+
+async fn book_task_provider(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+    Json(body): Json<BookConciergeServiceProviderRequest>,
+) -> axum::response::Response {
+    if !matches!(body.booking_state.as_str(), "requested" | "confirmed") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "booking_state must be requested or confirmed",
+        );
+    }
+    if !is_valid_partner_channel(&body.channel) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction channel",
+        );
+    }
+    let starts_at = match parse_optional_datetime(Some(&body.starts_at)) {
+        Ok(Some(value)) => value,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "starts_at is required (RFC3339)",
+            );
+        }
+    };
+    let ends_at = match parse_optional_datetime(body.ends_at.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if ends_at.as_ref().is_some_and(|value| value <= &starts_at) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ends_at must be later than starts_at",
+        );
+    }
+    let contact_person = normalize_optional_text(body.contact_person.as_deref());
+    if contact_person
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contact_person must not exceed 160 characters",
+        );
+    }
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 2000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 2000 characters",
+        );
+    }
+    let booking_reference = normalize_optional_text(body.booking_reference.as_deref());
+    if booking_reference
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "booking_reference must not exceed 160 characters",
+        );
+    }
+    if body.booking_state == "confirmed"
+        && booking_reference.is_none()
+        && contact_person.is_none()
+        && note.is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Confirmed booking requires a reference, contact person, or note",
+        );
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "begin task provider booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let task_row = match sqlx::query(
+        r#"SELECT id, assigned_to, assigned_by, provider_id, concierge_service_id,
+                  status, service_status, billing_status, currency
+           FROM tasks
+           WHERE id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "lock task for provider booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if matches!(task.status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::CONFLICT,
+            "Completed or cancelled task cannot be booked",
+        );
+    }
+    if matches!(
+        task.billing_status.as_str(),
+        "billed" | "settled" | "waived"
+    ) {
+        return err(StatusCode::CONFLICT, "Closed billing task cannot be booked");
+    }
+
+    let expected_outcome = if body.booking_state == "confirmed" {
+        "booking_confirmed"
+    } else {
+        "booking_requested"
+    };
+    let existing_request = match sqlx::query(
+        r#"SELECT id, provider_id, outcome
+           FROM concierge_service_partner_interactions
+           WHERE task_id = $1 AND request_id = $2"#,
+    )
+    .bind(task_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, request_id = %body.request_id, "load task booking request");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Some(existing) = existing_request {
+        if existing.try_get::<Uuid, _>("provider_id").ok() != Some(body.provider_id)
+            || existing.try_get::<String, _>("outcome").unwrap_or_default() != expected_outcome
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another booking operation",
+            );
+        }
+        let interaction_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        if let Err(error) = transaction.commit().await {
+            tracing::error!(error = %error, task_id = %task_id, "finish idempotent task booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        return match load_task_service_row(&state, task_id).await {
+            Ok(Some(row)) => Json(serde_json::json!({
+                "task": build_task_service_json(&row),
+                "interaction_id": interaction_id,
+            }))
+            .into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Task not found"),
+            Err(response) => response,
+        };
+    }
+
+    let current_service_status = task.service_status.as_deref().unwrap_or("planned");
+    if !matches!(current_service_status, "planned" | "booked") {
+        return err(
+            StatusCode::CONFLICT,
+            "Only planned or booked tasks can enter the booking flow",
+        );
+    }
+    if current_service_status == "booked" && body.booking_state == "requested" {
+        return err(
+            StatusCode::CONFLICT,
+            "Booking was already requested; confirm it instead",
+        );
+    }
+    if task
+        .provider_id
+        .is_some_and(|value| value != body.provider_id)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Task is already linked to a different provider",
+        );
+    }
+
+    let provider = match sqlx::query(
+        r#"SELECT name, phone, email, address_street, address_city, address_country
+           FROM providers
+           WHERE id = $1 AND provider_type = 'non_medical' AND is_active = true
+           FOR SHARE"#,
+    )
+    .bind(body.provider_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "provider_id must reference an active non-medical provider",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, provider_id = %body.provider_id, "load task booking provider");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let provider_name = provider.try_get::<String, _>("name").unwrap_or_default();
+    let provider_contact = provider
+        .try_get::<Option<String>, _>("phone")
+        .unwrap_or_default()
+        .or_else(|| {
+            provider
+                .try_get::<Option<String>, _>("email")
+                .unwrap_or_default()
+        });
+    let vendor_contact = normalize_optional_text(body.vendor_contact.as_deref())
+        .or_else(|| provider_contact.and_then(|value| normalize_optional_text(Some(&value))));
+    if vendor_contact
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 255)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "vendor_contact must not exceed 255 characters",
+        );
+    }
+    let provider_address = [
+        provider
+            .try_get::<Option<String>, _>("address_street")
+            .unwrap_or_default(),
+        provider
+            .try_get::<Option<String>, _>("address_city")
+            .unwrap_or_default(),
+        provider
+            .try_get::<Option<String>, _>("address_country")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|value| normalize_optional_text(Some(&value)))
+    .collect::<Vec<_>>()
+    .join(", ");
+    let service_address = normalize_optional_text(body.service_address.as_deref())
+        .or_else(|| normalize_optional_text(Some(&provider_address)));
+    let Some(service_address) = service_address else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_address is required when provider address is unavailable",
+        );
+    };
+    if service_address.chars().count() > 500 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "service_address must not exceed 500 characters",
+        );
+    }
+
+    let next_service_status = if body.booking_state == "confirmed" {
+        "confirmed"
+    } else {
+        "booked"
+    };
+    if let Err(error) = sqlx::query(
+        r#"UPDATE tasks
+           SET provider_id = $2,
+               vendor_name = $3,
+               vendor_contact = $4,
+               booking_reference = $5,
+               task_kind = 'event',
+               due_date = NULL,
+               starts_at = $6,
+               ends_at = $7,
+               location = $8,
+               service_address = $8,
+               service_status = $9,
+               status = 'in_progress',
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(task_id)
+    .bind(body.provider_id)
+    .bind(&provider_name)
+    .bind(vendor_contact.as_deref())
+    .bind(booking_reference.as_deref())
+    .bind(starts_at)
+    .bind(ends_at)
+    .bind(&service_address)
+    .bind(next_service_status)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, "update task provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Some(service_id) = task.concierge_service_id
+        && let Err(error) = sqlx::query(
+            r#"UPDATE concierge_services
+               SET provider_id = $2, vendor_name = $3, vendor_contact = $4,
+                   booking_reference = $5, starts_at = $6, ends_at = $7,
+                   service_address = $8, status = $9, updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(service_id)
+        .bind(body.provider_id)
+        .bind(&provider_name)
+        .bind(vendor_contact.as_deref())
+        .bind(booking_reference.as_deref())
+        .bind(starts_at)
+        .bind(ends_at)
+        .bind(&service_address)
+        .bind(next_service_status)
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, service_id = %service_id, "sync legacy service booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let interaction_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO concierge_service_partner_interactions (
+               task_id, concierge_service_id, provider_id, request_id, channel,
+               direction, outcome, occurred_at, contact_person, note, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, 'outbound', $6, now(), $7, $8, $9)
+           RETURNING id"#,
+    )
+    .bind(task_id)
+    .bind(task.concierge_service_id)
+    .bind(body.provider_id)
+    .bind(body.request_id)
+    .bind(&body.channel)
+    .bind(expected_outcome)
+    .bind(contact_person.as_deref())
+    .bind(note.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "record task booking interaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(error = %error, task_id = %task_id, "commit task provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "book_task_provider",
+        Some(auth.user_id),
+        "task",
+        Some(task_id),
+        serde_json::json!({
+            "provider_id": body.provider_id,
+            "booking_state": body.booking_state,
+            "service_status": next_service_status,
+            "interaction_id": interaction_id,
+        }),
+    ));
+    crate::realtime::publish_task_event(
+        &state,
+        Some(auth.user_id),
+        if next_service_status == "confirmed" {
+            "task.booking_confirmed"
+        } else {
+            "task.booking_requested"
+        },
+        task_id,
+        serde_json::json!({
+            "provider_id": body.provider_id,
+            "service_status": next_service_status,
+            "interaction_id": interaction_id,
+        }),
+    )
+    .await;
+
+    match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => Json(serde_json::json!({
+            "task": build_task_service_json(&row),
+            "interaction_id": interaction_id,
+        }))
+        .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => response,
+    }
+}
+
+async fn list_task_key_events(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+) -> axum::response::Response {
+    let task_row = match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => return response,
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if !is_key_task_row(&task_row) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Key custody is available only for key-related tasks",
+        );
+    }
+    match sqlx::query(
+        r#"SELECT event.id, event.task_id, event.concierge_service_id, event.action,
+                  event.responsible_user_id, responsible.name AS responsible_user_name,
+                  event.occurred_at, event.note, event.recorded_by,
+                  recorder.name AS recorded_by_name, event.created_at
+           FROM concierge_service_key_events event
+           JOIN users responsible ON responsible.id = event.responsible_user_id
+           JOIN users recorder ON recorder.id = event.recorded_by
+           WHERE event.task_id = $1
+           ORDER BY event.occurred_at, event.created_at, event.id"#,
+    )
+    .bind(task_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(rows.iter().map(build_key_event_json).collect::<Vec<_>>()).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "list task key events");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load key custody history",
+            )
+        }
+    }
+}
+
+async fn record_task_key_event(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+    Json(body): Json<RecordConciergeServiceKeyEventRequest>,
+) -> axum::response::Response {
+    if !is_valid_key_action(&body.action) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid key action");
+    }
+    let task_row = match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => return response,
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if !is_key_task_row(&task_row) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Key custody is available only for key-related tasks",
+        );
+    }
+    let responsible_user_id = body.responsible_user_id.unwrap_or(auth.user_id);
+    if auth.role == Role::Concierge && responsible_user_id != auth.user_id {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge can only record their own key custody",
+        );
+    }
+    let responsible_user_name = match load_active_task_staff_name(&state, responsible_user_id).await
+    {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "responsible_user_id must reference active staff",
+            );
+        }
+        Err(response) => return response,
+    };
+    let recorded_by_name = if responsible_user_id == auth.user_id {
+        responsible_user_name.clone()
+    } else {
+        match load_active_task_staff_name(&state, auth.user_id).await {
+            Ok(Some(name)) => name,
+            Ok(None) => return err(StatusCode::FORBIDDEN, "Recorder is not active staff"),
+            Err(response) => return response,
+        }
+    };
+    let occurred_at = match body.occurred_at.as_deref() {
+        Some(value) => match parse_optional_datetime(Some(value)) {
+            Ok(Some(value)) => value,
+            Ok(None) => chrono::Utc::now(),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => chrono::Utc::now(),
+    };
+    if occurred_at > chrono::Utc::now() + chrono::Duration::minutes(5) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "occurred_at cannot be in the future",
+        );
+    }
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 1000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 1000 characters",
+        );
+    }
+    let current_status = task_row
+        .try_get::<Option<String>, _>("key_status")
+        .unwrap_or_default();
+    let current_status_at = task_row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("key_status_at")
+        .unwrap_or_default();
+    if !is_valid_key_transition(current_status.as_deref(), &body.action) {
+        return err(
+            StatusCode::CONFLICT,
+            "Key custody transition is not allowed",
+        );
+    }
+    if current_status_at
+        .as_ref()
+        .is_some_and(|value| &occurred_at < value)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "occurred_at must not precede the current key status",
+        );
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "begin task key event");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    };
+    let update = sqlx::query(
+        r#"UPDATE tasks
+           SET key_status = $2, key_responsible_user_id = $3,
+               key_status_at = $4, updated_at = now()
+           WHERE id = $1 AND deleted_at IS NULL
+             AND key_status IS NOT DISTINCT FROM $5
+             AND key_status_at IS NOT DISTINCT FROM $6"#,
+    )
+    .bind(task_id)
+    .bind(&body.action)
+    .bind(responsible_user_id)
+    .bind(occurred_at)
+    .bind(current_status.as_deref())
+    .bind(current_status_at)
+    .execute(&mut *transaction)
+    .await;
+    match update {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Key custody changed; refresh before recording another action",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "update task key state");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    }
+    if let Some(service_id) = task.concierge_service_id
+        && let Err(error) = sqlx::query(
+            r#"UPDATE concierge_services
+               SET key_status = $2, key_responsible_user_id = $3,
+                   key_status_at = $4, updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(service_id)
+        .bind(&body.action)
+        .bind(responsible_user_id)
+        .bind(occurred_at)
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, service_id = %service_id, "sync legacy service key state");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record key custody",
+        );
+    }
+    let event = match sqlx::query(
+        r#"INSERT INTO concierge_service_key_events (
+               task_id, concierge_service_id, action, responsible_user_id,
+               occurred_at, note, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id, created_at"#,
+    )
+    .bind(task_id)
+    .bind(task.concierge_service_id)
+    .bind(&body.action)
+    .bind(responsible_user_id)
+    .bind(occurred_at)
+    .bind(note.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "insert task key event");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record key custody",
+            );
+        }
+    };
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(error = %error, task_id = %task_id, "commit task key event");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record key custody",
+        );
+    }
+    let event_id = event.try_get::<Uuid, _>("id").unwrap_or_default();
+    let created_at = event
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    state.audit_sender.try_send(audit::domain_event(
+        "record_task_key_event",
+        Some(auth.user_id),
+        "task",
+        Some(task_id),
+        serde_json::json!({
+            "event_id": event_id,
+            "action": &body.action,
+            "responsible_user_id": responsible_user_id,
+            "occurred_at": occurred_at.to_rfc3339(),
+        }),
+    ));
+    crate::realtime::publish_task_event(
+        &state,
+        Some(auth.user_id),
+        "task.key_updated",
+        task_id,
+        serde_json::json!({
+            "key_status": &body.action,
+            "key_responsible_user_id": responsible_user_id,
+            "key_status_at": occurred_at.to_rfc3339(),
+        }),
+    )
+    .await;
+    Json(serde_json::json!({
+        "event": {
+            "id": event_id,
+            "task_id": task_id,
+            "concierge_service_id": task.concierge_service_id,
+            "action": &body.action,
+            "responsible_user_id": responsible_user_id,
+            "responsible_user_name": responsible_user_name,
+            "occurred_at": occurred_at.to_rfc3339(),
+            "note": note,
+            "recorded_by": auth.user_id,
+            "recorded_by_name": recorded_by_name,
+            "created_at": created_at.to_rfc3339(),
+        },
+        "key_status": &body.action,
+        "key_responsible_user_id": responsible_user_id,
+        "key_responsible_user_name": responsible_user_name,
+        "key_status_at": occurred_at.to_rfc3339(),
+    }))
+    .into_response()
+}
+
+async fn list_task_partner_interactions(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+) -> axum::response::Response {
+    let task_row = match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => return response,
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(response) = load_task_non_medical_partner_id(&state, &task).await {
+        return response;
+    }
+    match sqlx::query(
+        r#"SELECT interaction.id, interaction.task_id,
+                  interaction.concierge_service_id, interaction.provider_id,
+                  provider.name AS provider_name, interaction.channel,
+                  interaction.direction, interaction.outcome, interaction.occurred_at,
+                  interaction.contact_person, interaction.note, interaction.quoted_cost,
+                  interaction.quoted_currency,
+                  decision.applied_at AS applied_as_cost_estimate_at,
+                  decision.applied_by, applier.name AS applied_by_name,
+                  interaction.recorded_by, recorder.name AS recorded_by_name,
+                  interaction.created_at
+           FROM concierge_service_partner_interactions interaction
+           JOIN providers provider
+             ON provider.id = interaction.provider_id
+            AND provider.provider_type = 'non_medical'
+            AND provider.is_active = true
+           JOIN users recorder ON recorder.id = interaction.recorded_by
+           LEFT JOIN concierge_service_cost_estimate_decisions decision
+             ON decision.partner_interaction_id = interaction.id
+           LEFT JOIN users applier ON applier.id = decision.applied_by
+           WHERE interaction.task_id = $1
+           ORDER BY interaction.occurred_at, interaction.created_at, interaction.id"#,
+    )
+    .bind(task_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(build_partner_interaction_json)
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "list task partner interactions");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load partner interaction history",
+            )
+        }
+    }
+}
+
+async fn record_task_partner_interaction(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(task_id): Path<Uuid>,
+    Json(body): Json<RecordConciergeServicePartnerInteractionRequest>,
+) -> axum::response::Response {
+    if !is_valid_partner_channel(&body.channel) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction channel",
+        );
+    }
+    if !matches!(body.direction.as_str(), "outbound" | "inbound") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction direction",
+        );
+    }
+    if !is_valid_partner_outcome(&body.outcome) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid interaction outcome",
+        );
+    }
+    if matches!(
+        body.outcome.as_str(),
+        "booking_requested" | "booking_confirmed"
+    ) {
+        return err(
+            StatusCode::CONFLICT,
+            "Use the provider booking endpoint for booking lifecycle outcomes",
+        );
+    }
+    let task_row = match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => return response,
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let provider_id = match load_task_non_medical_partner_id(&state, &task).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let occurred_at = match body.occurred_at.as_deref() {
+        Some(value) => match parse_optional_datetime(Some(value)) {
+            Ok(Some(value)) => value,
+            Ok(None) => chrono::Utc::now(),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => chrono::Utc::now(),
+    };
+    if occurred_at > chrono::Utc::now() + chrono::Duration::minutes(5) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "occurred_at cannot be in the future",
+        );
+    }
+    let contact_person = normalize_optional_text(body.contact_person.as_deref());
+    if contact_person
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 160)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "contact_person must not exceed 160 characters",
+        );
+    }
+    let note = normalize_optional_text(body.note.as_deref());
+    if note
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 2000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "note must not exceed 2000 characters",
+        );
+    }
+    let quoted_cost = match normalize_optional_non_negative(body.quoted_cost, "quoted_cost") {
+        Ok(value) => value.map(round_money),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    if quoted_cost.is_none() && body.quoted_currency.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "quoted_currency requires quoted_cost",
+        );
+    }
+    let quoted_currency = if quoted_cost.is_some() {
+        let value = body
+            .quoted_currency
+            .unwrap_or_else(|| task.currency.clone());
+        let normalized = value.trim().to_uppercase();
+        if normalized.len() != 3
+            || !normalized
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "quoted_currency must be 3 letters",
+            );
+        }
+        Some(normalized)
+    } else {
+        None
+    };
+    let recorder_name = match load_active_task_staff_name(&state, auth.user_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => return err(StatusCode::FORBIDDEN, "Recorder is not active staff"),
+        Err(response) => return response,
+    };
+    let request_id = body.request_id.unwrap_or_else(Uuid::new_v4);
+    let interaction = match sqlx::query(
+        r#"INSERT INTO concierge_service_partner_interactions (
+               task_id, concierge_service_id, provider_id, request_id, channel,
+               direction, outcome, occurred_at, contact_person, note,
+               quoted_cost, quoted_currency, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           ON CONFLICT (task_id, request_id)
+           DO UPDATE SET request_id = EXCLUDED.request_id
+           RETURNING id, created_at"#,
+    )
+    .bind(task_id)
+    .bind(task.concierge_service_id)
+    .bind(provider_id)
+    .bind(request_id)
+    .bind(&body.channel)
+    .bind(&body.direction)
+    .bind(&body.outcome)
+    .bind(occurred_at)
+    .bind(contact_person.as_deref())
+    .bind(note.as_deref())
+    .bind(quoted_cost)
+    .bind(quoted_currency.as_deref())
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, provider_id = %provider_id, "record task partner interaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record partner interaction",
+            );
+        }
+    };
+    let interaction_id = interaction.try_get::<Uuid, _>("id").unwrap_or_default();
+    let created_at = interaction
+        .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let provider_name = task_row
+        .try_get::<Option<String>, _>("provider_name")
+        .unwrap_or_default()
+        .unwrap_or_default();
+    state.audit_sender.try_send(audit::domain_event(
+        "record_task_partner_interaction",
+        Some(auth.user_id),
+        "task",
+        Some(task_id),
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "channel": &body.channel,
+            "direction": &body.direction,
+            "outcome": &body.outcome,
+            "occurred_at": occurred_at.to_rfc3339(),
+            "quoted_cost": quoted_cost,
+            "quoted_currency": quoted_currency,
+        }),
+    ));
+    crate::realtime::publish_task_event(
+        &state,
+        Some(auth.user_id),
+        "task.partner_interaction_recorded",
+        task_id,
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "outcome": &body.outcome,
+        }),
+    )
+    .await;
+    Json(serde_json::json!({
+        "id": interaction_id,
+        "task_id": task_id,
+        "concierge_service_id": task.concierge_service_id,
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "channel": &body.channel,
+        "direction": &body.direction,
+        "outcome": &body.outcome,
+        "occurred_at": occurred_at.to_rfc3339(),
+        "contact_person": contact_person,
+        "note": note,
+        "quoted_cost": quoted_cost.map(|value| format!("{value:.2}")),
+        "quoted_currency": quoted_currency,
+        "applied_as_cost_estimate_at": serde_json::Value::Null,
+        "applied_by": serde_json::Value::Null,
+        "applied_by_name": serde_json::Value::Null,
+        "recorded_by": auth.user_id,
+        "recorded_by_name": recorder_name,
+        "created_at": created_at.to_rfc3339(),
+    }))
+    .into_response()
+}
+
+async fn apply_task_partner_quote_as_cost_estimate(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((task_id, interaction_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    let task_row = match load_task_service_row(&state, task_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
+        Err(response) => return response,
+    };
+    let task = match task_service_context(&task_row) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_access_task_service(&auth, &task) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let provider_id = match load_task_non_medical_partner_id(&state, &task).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let applied_by_name = match load_active_task_staff_name(&state, auth.user_id).await {
+        Ok(Some(name)) => name,
+        Ok(None) => return err(StatusCode::FORBIDDEN, "User is not active staff"),
+        Err(response) => return response,
+    };
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, interaction_id = %interaction_id, "begin task partner quote application");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    };
+    let quote = match sqlx::query(
+        r#"SELECT interaction.provider_id, interaction.quoted_cost,
+                  interaction.quoted_currency, interaction.concierge_service_id,
+                  decision.id AS decision_id, task.currency,
+                  task.billing_status, task.status
+           FROM concierge_service_partner_interactions interaction
+           JOIN tasks task ON task.id = interaction.task_id
+           LEFT JOIN concierge_service_cost_estimate_decisions decision
+             ON decision.partner_interaction_id = interaction.id
+           WHERE interaction.id = $1 AND interaction.task_id = $2
+             AND task.deleted_at IS NULL
+           FOR UPDATE OF interaction, task"#,
+    )
+    .bind(interaction_id)
+    .bind(task_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Partner quote not found"),
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, interaction_id = %interaction_id, "lock task partner quote");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    };
+    if quote.try_get::<Uuid, _>("provider_id").ok() != Some(provider_id) {
+        return err(
+            StatusCode::CONFLICT,
+            "Partner quote does not match the task provider",
+        );
+    }
+    let Some(quoted_cost) = quote
+        .try_get::<Option<rust_decimal::Decimal>, _>("quoted_cost")
+        .unwrap_or_default()
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Interaction has no quoted cost",
+        );
+    };
+    let quoted_currency = quote
+        .try_get::<Option<String>, _>("quoted_currency")
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let task_currency = quote
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    if quoted_currency != task_currency {
+        return err(
+            StatusCode::CONFLICT,
+            "Partner quote currency must match the task currency",
+        );
+    }
+    if quote
+        .try_get::<Option<Uuid>, _>("decision_id")
+        .unwrap_or_default()
+        .is_some()
+    {
+        return err(StatusCode::CONFLICT, "Partner quote was already applied");
+    }
+    if quote.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
+        || matches!(
+            quote
+                .try_get::<String, _>("billing_status")
+                .unwrap_or_default()
+                .as_str(),
+            "billed" | "settled" | "waived"
+        )
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Closed or billed task costs cannot be changed",
+        );
+    }
+    let applied_at = chrono::Utc::now();
+    match sqlx::query(
+        r#"INSERT INTO concierge_service_cost_estimate_decisions (
+               task_id, concierge_service_id, partner_interaction_id,
+               amount_gross, currency, applied_by, applied_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+    )
+    .bind(task_id)
+    .bind(task.concierge_service_id)
+    .bind(interaction_id)
+    .bind(quoted_cost)
+    .bind(&task_currency)
+    .bind(auth.user_id)
+    .bind(applied_at)
+    .execute(&mut *transaction)
+    .await
+    {
+        Ok(_) => {}
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("23505") => {
+            return err(StatusCode::CONFLICT, "Partner quote was already applied");
+        }
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, interaction_id = %interaction_id, "mark task partner quote applied");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply partner quote",
+            );
+        }
+    }
+    if let Err(error) =
+        sqlx::query("UPDATE tasks SET cost_estimate = $2, updated_at = now() WHERE id = $1")
+            .bind(task_id)
+            .bind(quoted_cost)
+            .execute(&mut *transaction)
+            .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, interaction_id = %interaction_id, "apply partner quote to task");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+    if let Some(service_id) = task.concierge_service_id
+        && let Err(error) = sqlx::query(
+            "UPDATE concierge_services SET cost_estimate = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(service_id)
+        .bind(quoted_cost)
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, service_id = %service_id, "sync legacy service cost estimate");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(error = %error, task_id = %task_id, interaction_id = %interaction_id, "commit task partner quote application");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "apply_task_partner_quote_as_cost_estimate",
+        Some(auth.user_id),
+        "task",
+        Some(task_id),
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "provider_id": provider_id,
+            "cost_estimate": quoted_cost,
+            "currency": task_currency,
+        }),
+    ));
+    crate::realtime::publish_task_event(
+        &state,
+        Some(auth.user_id),
+        "task.cost_estimate_applied",
+        task_id,
+        serde_json::json!({
+            "interaction_id": interaction_id,
+            "cost_estimate": quoted_cost,
+            "currency": task_currency,
+        }),
+    )
+    .await;
+    Json(serde_json::json!({
+        "interaction_id": interaction_id,
+        "cost_estimate": quoted_cost.round_dp(2).to_string(),
+        "currency": task_currency,
         "applied_as_cost_estimate_at": applied_at.to_rfc3339(),
         "applied_by": auth.user_id,
         "applied_by_name": applied_by_name,
@@ -3072,6 +4278,160 @@ async fn load_service_row(
     })
 }
 
+async fn load_task_service_row(
+    state: &AppState,
+    task_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
+    sqlx::query(
+        r#"SELECT task.id, task.title, task.patient_id, task.appointment_id,
+                  task.assigned_to, task.assigned_by, task.provider_id,
+                  task.concierge_service_id, task.status, task.service_status,
+                  task.billing_status, task.currency, task.booking_reference,
+                  task.vendor_name, task.vendor_contact, task.service_address,
+                  task.starts_at, task.ends_at, task.cost_estimate,
+                  task.key_status, task.key_responsible_user_id, task.key_status_at,
+                  task.taxonomy_node_id, task.updated_at,
+                  provider.name AS provider_name,
+                  provider.provider_type AS linked_provider_type,
+                  provider.is_active AS linked_provider_active,
+                  taxonomy.code AS taxonomy_node_code,
+                  taxonomy.name_de AS taxonomy_node_name_de,
+                  taxonomy.name_ru AS taxonomy_node_name_ru,
+                  responsible.name AS key_responsible_user_name
+           FROM tasks task
+           LEFT JOIN providers provider ON provider.id = task.provider_id
+           LEFT JOIN provider_taxonomy_nodes taxonomy ON taxonomy.id = task.taxonomy_node_id
+           LEFT JOIN users responsible ON responsible.id = task.key_responsible_user_id
+           WHERE task.id = $1 AND task.deleted_at IS NULL"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, task_id = %task_id, "load task service context");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load task")
+    })
+}
+
+fn task_service_context(
+    row: &sqlx::postgres::PgRow,
+) -> Result<TaskServiceContext, axum::response::Response> {
+    Ok(TaskServiceContext {
+        id: row
+            .try_get("id")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+        assigned_to: row
+            .try_get("assigned_to")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+        assigned_by: row
+            .try_get("assigned_by")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
+        provider_id: row.try_get("provider_id").unwrap_or_default(),
+        concierge_service_id: row.try_get("concierge_service_id").unwrap_or_default(),
+        status: row.try_get("status").unwrap_or_default(),
+        service_status: row.try_get("service_status").unwrap_or_default(),
+        billing_status: row.try_get("billing_status").unwrap_or_default(),
+        currency: row
+            .try_get("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+    })
+}
+
+fn can_access_task_service(auth: &AuthUser, task: &TaskServiceContext) -> bool {
+    matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager
+    ) || task.assigned_to == auth.user_id
+        || task.assigned_by == auth.user_id
+}
+
+async fn load_task_non_medical_partner_id(
+    state: &AppState,
+    task: &TaskServiceContext,
+) -> Result<Uuid, axum::response::Response> {
+    let Some(provider_id) = task.provider_id else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Task has no linked non-medical partner",
+        ));
+    };
+    let valid = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM providers
+               WHERE id = $1
+                 AND provider_type = 'non_medical'
+                 AND is_active = true
+           )"#,
+    )
+    .bind(provider_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, provider_id = %provider_id, "validate task partner");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate task partner",
+        )
+    })?;
+    if valid {
+        Ok(provider_id)
+    } else {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Task has no linked active non-medical partner",
+        ))
+    }
+}
+
+fn is_key_task_row(row: &sqlx::postgres::PgRow) -> bool {
+    let searchable = [
+        row.try_get::<String, _>("title").unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_code")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_name_de")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        row.try_get::<Option<String>, _>("taxonomy_node_name_ru")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    ]
+    .join(" ")
+    .to_lowercase();
+    ["key", "schlüssel", "schluessel", "ключ"]
+        .iter()
+        .any(|marker| searchable.contains(marker))
+}
+
+fn build_task_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "title": row.try_get::<String, _>("title").unwrap_or_default(),
+        "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
+        "assigned_to": row.try_get::<Uuid, _>("assigned_to").unwrap_or_default(),
+        "assigned_by": row.try_get::<Uuid, _>("assigned_by").unwrap_or_default(),
+        "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+        "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "service_status": row.try_get::<Option<String>, _>("service_status").unwrap_or_default(),
+        "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        "booking_reference": row.try_get::<Option<String>, _>("booking_reference").unwrap_or_default(),
+        "vendor_name": row.try_get::<Option<String>, _>("vendor_name").unwrap_or_default(),
+        "vendor_contact": row.try_get::<Option<String>, _>("vendor_contact").unwrap_or_default(),
+        "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
+        "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "key_status": row.try_get::<Option<String>, _>("key_status").unwrap_or_default(),
+        "key_responsible_user_id": row.try_get::<Option<Uuid>, _>("key_responsible_user_id").unwrap_or_default(),
+        "key_responsible_user_name": row.try_get::<Option<String>, _>("key_responsible_user_name").unwrap_or_default(),
+        "key_status_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("key_status_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+    })
+}
+
 async fn load_non_medical_appointment_context(
     state: &AppState,
     appointment_id: Uuid,
@@ -3243,6 +4603,27 @@ async fn load_active_operational_user_name(
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to validate operational user",
+        )
+    })
+}
+
+async fn load_active_task_staff_name(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<Option<String>, axum::response::Response> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT name
+           FROM users
+           WHERE id = $1 AND is_active = true AND role <> 'patient'"#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, user_id = %user_id, "validate active task staff");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate task staff",
         )
     })
 }
@@ -3937,7 +5318,8 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
 fn build_key_event_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-        "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
+        "task_id": row.try_get::<Uuid, _>("task_id").unwrap_or_default(),
+        "concierge_service_id": row.try_get::<Option<Uuid>, _>("concierge_service_id").unwrap_or_default(),
         "action": row.try_get::<String, _>("action").unwrap_or_default(),
         "responsible_user_id": row.try_get::<Uuid, _>("responsible_user_id").unwrap_or_default(),
         "responsible_user_name": row.try_get::<String, _>("responsible_user_name").unwrap_or_default(),
@@ -3952,7 +5334,8 @@ fn build_key_event_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
 fn build_partner_interaction_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-        "concierge_service_id": row.try_get::<Uuid, _>("concierge_service_id").unwrap_or_default(),
+        "task_id": row.try_get::<Uuid, _>("task_id").unwrap_or_default(),
+        "concierge_service_id": row.try_get::<Option<Uuid>, _>("concierge_service_id").unwrap_or_default(),
         "provider_id": row.try_get::<Uuid, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<String, _>("provider_name").unwrap_or_default(),
         "channel": row.try_get::<String, _>("channel").unwrap_or_default(),

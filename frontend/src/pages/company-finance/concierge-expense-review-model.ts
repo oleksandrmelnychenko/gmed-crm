@@ -73,7 +73,7 @@ export function eligibleExpenseOrderServices(
   context: CompanyConciergeExpenseContext,
   orderId: string,
 ) {
-  const serviceProviderId = context.service.provider_id;
+  const serviceProviderId = context.task?.provider_id ?? context.service?.provider_id ?? null;
   const order = eligibleExpenseOrders(expense, context).find((candidate) => candidate.id === orderId);
   return (order?.leistungen ?? []).filter((service) => (
     (!expense.order_leistung_id || service.id === expense.order_leistung_id)
@@ -101,7 +101,7 @@ export function validateExpensePostForm(
   }
   if (
     expense.paid_by !== "patient"
-    && !context.service.provider_id
+    && !(context.task?.provider_id ?? context.service?.provider_id)
     && !orderService?.provider_id
   ) {
     errors.push("provider_required");

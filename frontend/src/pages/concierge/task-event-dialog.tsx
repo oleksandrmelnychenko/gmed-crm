@@ -41,7 +41,6 @@ import {
 const copy = {
   de: {
     createTitle: "Aufgabe oder Termin anlegen",
-    createServiceTitle: "Serviceaufgabe anlegen",
     editTitle: "Aufgabe oder Termin bearbeiten",
     task: "Aufgabe",
     event: "Termin",
@@ -54,7 +53,6 @@ const copy = {
     chooseAssignee: "Zuständige Person auswählen",
     searchAssignee: "Zuständige Person suchen",
     noService: "Ohne Servicebezug",
-    serviceRequired: "Wählen Sie den Service aus, damit Patient, Anfrage und Ausgabenbelege zusammenbleiben.",
     dueAt: "Fällig am",
     startsAt: "Beginn",
     endsAt: "Ende",
@@ -115,7 +113,6 @@ const copy = {
   },
   ru: {
     createTitle: "Создать задачу или событие",
-    createServiceTitle: "Создать сервисную задачу",
     editTitle: "Изменить задачу или событие",
     task: "Задача",
     event: "Событие",
@@ -128,7 +125,6 @@ const copy = {
     chooseAssignee: "Выберите исполнителя",
     searchAssignee: "Найти исполнителя",
     noService: "Без привязки к услуге",
-    serviceRequired: "Выберите сервис — тогда пациент, запрос и расходные документы останутся связаны.",
     dueAt: "Срок",
     startsAt: "Начало",
     endsAt: "Окончание",
@@ -304,7 +300,6 @@ export function ConciergeTaskEventDialog({
   canAssign,
   canModifyAttachments = false,
   showServiceLink = true,
-  serviceLinkRequired = false,
   patients = [],
   providers = [],
   projects = [],
@@ -329,7 +324,6 @@ export function ConciergeTaskEventDialog({
   canAssign: boolean;
   canModifyAttachments?: boolean;
   showServiceLink?: boolean;
-  serviceLinkRequired?: boolean;
   patients?: ConciergeTaskPatientOption[];
   providers?: ConciergeTaskProviderOption[];
   projects?: ConciergeTaskProjectOption[];
@@ -568,7 +562,7 @@ export function ConciergeTaskEventDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
-        <ConciergeDialogHeader tone="dot" title={item ? labels.editTitle : serviceLinkRequired ? labels.createServiceTitle : labels.createTitle} />
+        <ConciergeDialogHeader tone="dot" title={item ? labels.editTitle : labels.createTitle} />
 
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
@@ -599,11 +593,10 @@ export function ConciergeTaskEventDialog({
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                         {showServiceLink ? (
                           <ConciergeField label={labels.linkedService}>
-                            <select className={selectClass} value={serviceId} required={serviceLinkRequired} onChange={(event) => setServiceId(event.target.value)}>
-                              <option value="" disabled={serviceLinkRequired}>{labels.noService}</option>
+                            <select className={selectClass} value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
+                              <option value="">{labels.noService}</option>
                               {sortedServices.map((service) => <option key={service.id} value={service.id}>{conciergeServiceDisplayTitle(service, lang)}</option>)}
                             </select>
-                            {serviceLinkRequired ? <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{labels.serviceRequired}</p> : null}
                           </ConciergeField>
                         ) : null}
                         {canAssign ? (

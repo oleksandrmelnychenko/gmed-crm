@@ -48,14 +48,14 @@ function parseUploadError(xhr: XMLHttpRequest) {
 }
 
 function uploadExpenseAttempt(
-  serviceId: string,
+  path: string,
   input: ConciergeExpenseSubmitInput,
   token: string | null,
   onProgress: (progress: number) => void,
 ) {
   return new Promise<ConciergeExpenseMutationResponse>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", buildApiUrl(`/concierge-services/${serviceId}/expenses`));
+    xhr.open("POST", buildApiUrl(path));
     xhr.timeout = 120_000;
     xhr.responseType = "json";
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
@@ -107,13 +107,55 @@ export async function uploadConciergeExpense(
 ) {
   let token = getAccessToken();
   try {
-    return await uploadExpenseAttempt(serviceId, input, token, onProgress);
+    return await uploadExpenseAttempt(`/concierge-services/${serviceId}/expenses`, input, token, onProgress);
   } catch (error) {
     if (!(error instanceof ApiRequestError) || error.status !== 401 || !token) throw error;
     token = await refreshAuthSession(20_000);
     if (!token) throw error;
-    return uploadExpenseAttempt(serviceId, input, token, onProgress);
+    return uploadExpenseAttempt(`/concierge-services/${serviceId}/expenses`, input, token, onProgress);
   }
+}
+
+export function getTaskExpenseContext(taskId: string) {
+  return apiFetch<ConciergeExpenseContext>(
+    `/tasks/${taskId}/expense-context`,
+    { forceFresh: true },
+  );
+}
+
+export function getTaskExpenses(taskId: string) {
+  return apiFetch<ConciergeExpenseListResponse>(
+    `/tasks/${taskId}/expenses`,
+    { forceFresh: true },
+  );
+}
+
+export async function uploadTaskExpense(
+  taskId: string,
+  input: ConciergeExpenseSubmitInput,
+  onProgress: (progress: number) => void,
+) {
+  let token = getAccessToken();
+  const path = `/tasks/${taskId}/expenses`;
+  try {
+    return await uploadExpenseAttempt(path, input, token, onProgress);
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || error.status !== 401 || !token) throw error;
+    token = await refreshAuthSession(20_000);
+    if (!token) throw error;
+    return uploadExpenseAttempt(path, input, token, onProgress);
+  }
+}
+
+export function downloadTaskExpenseReceipt(
+  taskId: string,
+  expenseId: string,
+  fallbackFilename: string,
+) {
+  return downloadApiFile(
+    `/tasks/${taskId}/expenses/${expenseId}/receipt`,
+    fallbackFilename,
+  );
 }
 
 export function downloadConciergeExpenseReceipt(

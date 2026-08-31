@@ -80,13 +80,21 @@ export type ConciergeExpenseContext = {
     id: string;
     display_name: string;
     pid: string;
-  };
+  } | null;
   service: {
     id: string;
     title: string;
     currency: string;
     provider_id: string | null;
-  };
+  } | null;
+  task?: {
+    id: string;
+    title: string;
+    currency: string;
+    provider_id: string | null;
+    assigned_to: string;
+    assigned_by: string;
+  } | null;
   mapped_order: ConciergeExpenseMappedOrder | null;
 };
 

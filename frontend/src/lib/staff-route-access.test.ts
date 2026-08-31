@@ -150,7 +150,16 @@ describe("first-release staff RBAC", () => {
         "teamlead_interpreter",
         "interpreter",
       ],
-      "/concierge": ["ceo", "concierge"],
+      "/concierge": [
+        "ceo",
+        "ceo_assistant",
+        "patient_manager",
+        "sales",
+        "concierge",
+        "billing",
+        "teamlead_interpreter",
+        "interpreter",
+      ],
       "/company-finance": ["ceo", "billing"],
     } as const;
 
@@ -159,8 +168,7 @@ describe("first-release staff RBAC", () => {
         expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(
           (allowedRoles as readonly string[]).includes(role),
         );
-        const hiddenFromCombinedNavigation = path === "/task-manager"
-          && (role === "ceo" || role === "concierge");
+        const hiddenFromCombinedNavigation = path === "/concierge";
         expect(listStaffNavItems(role).map((item) => item.to).includes(path), `${role} nav -> ${path}`).toBe(
           (allowedRoles as readonly string[]).includes(role) && !hiddenFromCombinedNavigation,
         );
@@ -176,8 +184,8 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/leads");
     expect(concierge).toContain("/appointments");
     expect(concierge).toContain("/employees");
-    expect(concierge).toContain("/concierge");
-    expect(concierge).not.toContain("/task-manager");
+    expect(concierge).not.toContain("/concierge");
+    expect(concierge).toContain("/task-manager");
     expect(concierge).not.toContain("/projects");
     expect(concierge).toContain("/files");
     expect(concierge).toContain("/documents");
@@ -194,8 +202,8 @@ describe("first-release staff RBAC", () => {
     expect(billing).toContain("/task-manager");
     expect(billing).not.toContain("/appointments");
 
-    expect(ceo).toContain("/concierge");
-    expect(ceo).not.toContain("/task-manager");
+    expect(ceo).not.toContain("/concierge");
+    expect(ceo).toContain("/task-manager");
     expect(ceo).toContain("/projects");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([

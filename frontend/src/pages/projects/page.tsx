@@ -504,7 +504,6 @@ export function ProjectsPage() {
         canAssign={taskAssignees.length > 0}
         canModifyAttachments={false}
         showServiceLink={false}
-        serviceLinkRequired={false}
         patients={taskPatients}
         providers={[]}
         projects={projects}

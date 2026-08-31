@@ -18,7 +18,8 @@ import type {
 function expense(overrides: Partial<CompanyConciergeExpenseItem> = {}): CompanyConciergeExpenseItem {
   return {
     id: "expense-1",
-    concierge_service_id: "service-1",
+    concierge_service_id: null,
+    task_id: "task-1",
     patient_id: "patient-1",
     order_id: null,
     order_number: null,
@@ -59,7 +60,8 @@ function expense(overrides: Partial<CompanyConciergeExpenseItem> = {}): CompanyC
 }
 
 const service: CompanyConciergeServiceSummary = {
-  id: "service-1",
+  id: null,
+  task_id: "task-1",
   patient_id: "patient-1",
   patient_name: "Anna Patient",
   patient_pid: "P-001",
@@ -72,7 +74,15 @@ const service: CompanyConciergeServiceSummary = {
 
 const context: CompanyConciergeExpenseContext = {
   patient: { id: "patient-1", display_name: "Anna Patient", pid: "P-001" },
-  service: { id: "service-1", title: "Transfer", currency: "EUR", provider_id: "provider-1" },
+  service: null,
+  task: {
+    id: "task-1",
+    title: "Transfer",
+    currency: "EUR",
+    provider_id: "provider-1",
+    assigned_to: "user-1",
+    assigned_by: "user-2",
+  },
   mapped_order: null,
   eligible_orders: [
     {

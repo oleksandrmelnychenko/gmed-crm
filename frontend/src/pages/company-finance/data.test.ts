@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCompanyTaskExpenseActionPath,
+  buildCompanyTaskExpenseContextPath,
+  buildCompanyTaskExpenseReceiptPath,
   buildCompanyFinancialPositionPath,
   buildCompanyProviderFinancialSummaryPath,
   buildCompanyProviderStatementPath,
 } from "./data";
 
 describe("company financial position filters", () => {
+  it("builds task-native expense review paths", () => {
+    expect(buildCompanyTaskExpenseContextPath("task-1"))
+      .toBe("/tasks/task-1/expense-context");
+    expect(buildCompanyTaskExpenseActionPath("task-1", "expense-1", "post"))
+      .toBe("/tasks/task-1/expenses/expense-1/post");
+    expect(buildCompanyTaskExpenseActionPath("task-1", "expense-1", "reject"))
+      .toBe("/tasks/task-1/expenses/expense-1/reject");
+    expect(buildCompanyTaskExpenseActionPath("task-1", "expense-1", "reverse"))
+      .toBe("/tasks/task-1/expenses/expense-1/reverse");
+    expect(buildCompanyTaskExpenseReceiptPath("task-1", "expense-1"))
+      .toBe("/tasks/task-1/expenses/expense-1/receipt");
+  });
+
   it("serializes currency, period, movement and trimmed search", () => {
     expect(buildCompanyFinancialPositionPath({
       from: "2026-01-01",

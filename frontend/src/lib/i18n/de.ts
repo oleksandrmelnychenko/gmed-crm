@@ -19,8 +19,8 @@ export const de = {
     "Diese Route existiert nicht oder ist fuer die aktuelle Sitzung nicht verfuegbar.",
 
   nav_dashboard: "Dashboard",
-  nav_concierge_workspace: "Operationszentrale",
-  nav_task_manager: "Aufgaben",
+  nav_concierge_workspace: "Arbeitszentrale",
+  nav_task_manager: "Arbeitszentrale",
   nav_projects: "Projekte",
   nav_notes: "Notizen",
   nav_main: "Haupt",
