@@ -16,6 +16,7 @@ const DOC_LABEL_MAP: Record<string, string> = {
   gdpr_consent: "required_doc_gdpr_consent",
   identity: "required_doc_identity",
   passport_scan: "required_doc_passport_scan",
+  uploaded_document: "required_doc_uploaded_document",
   medical_report: "required_doc_medical_report",
   discharge_summary: "required_doc_discharge_summary",
   prescription: "required_doc_prescription",

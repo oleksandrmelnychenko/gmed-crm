@@ -5476,7 +5476,7 @@ function StaffDocumentsPage({
                     />
                   </Field>
                   <Field label={t.operations_document_type} required>
-                    <Input
+                    <NativeComboboxSelect
                       value={editForm.art}
                       onChange={(event) =>
                         setEditForm((current) =>
@@ -5485,9 +5485,16 @@ function StaffDocumentsPage({
                             : current,
                         )
                       }
-                      list="documents-art-options"
-                      className={shellInputClassName}
-                    />
+                      className={selectClassName}
+                    >
+                      {[...new Set([editForm.art, ...arts])]
+                        .filter(Boolean)
+                        .map((art) => (
+                          <option key={art} value={art}>
+                            {localizeDocumentCode(art, l)}
+                          </option>
+                        ))}
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={t.documents_category}>
                     <NativeComboboxSelect
@@ -7137,8 +7144,8 @@ function StaffDocumentsPage({
                         </div>
                       ) : null}
                       <div className="grid gap-4 md:grid-cols-2">
-                        <Field label={t.documents_category} required>
-                          <Input
+                        <Field label={t.operations_document_type} required>
+                          <NativeComboboxSelect
                             value={editForm.art}
                             onChange={(event) =>
                               setEditForm((current) =>
@@ -7147,9 +7154,16 @@ function StaffDocumentsPage({
                                   : current,
                               )
                             }
-                            list="documents-art-options"
-                            className={shellInputClassName}
-                          />
+                            className={selectClassName}
+                          >
+                            {[...new Set([editForm.art, ...arts])]
+                              .filter(Boolean)
+                              .map((art) => (
+                                <option key={art} value={art}>
+                                  {localizeDocumentCode(art, l)}
+                                </option>
+                              ))}
+                          </NativeComboboxSelect>
                         </Field>
                         <Field label={t.documents_classification_category}>
                           <NativeComboboxSelect
