@@ -140,6 +140,7 @@ async function sendEncryptedTextWithRetry(
           nextResponse.request().method() === "POST"
         );
       },
+      { timeout: 15_000 },
     );
     await page.locator("form button[type='submit']").click();
     const response = await textSendResponse;
@@ -166,11 +167,6 @@ test.describe("secure chat live workflows", () => {
     browser,
     request,
   }) => {
-    // This single scenario provisions two isolated browser identities and
-    // verifies key onboarding, text, upload, download and deletion against a
-    // freshly compiled backend. Shared CI runners can legitimately exceed the
-    // suite's 120-second default without any individual operation timing out.
-    test.slow();
     const [scenario, patientContext, conciergeContext] = await Promise.all([
       bootstrapFullSmokeScenario(request),
       browser.newContext(),
@@ -206,6 +202,7 @@ test.describe("secure chat live workflows", () => {
         (nextResponse) =>
           nextResponse.url().includes("/api/v1/messages/e2e-key") &&
           nextResponse.request().method() === "POST",
+        { timeout: 15_000 },
       );
       await patientPage.goto("/chat");
       await expect(
@@ -217,6 +214,7 @@ test.describe("secure chat live workflows", () => {
         (nextResponse) =>
           nextResponse.url().includes("/api/v1/messages/e2e-key") &&
           nextResponse.request().method() === "POST",
+        { timeout: 15_000 },
       );
       await conciergePage.goto("/chat");
       await expect(conciergePage.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
@@ -283,6 +281,7 @@ test.describe("secure chat live workflows", () => {
           nextResponse
             .url()
             .includes(`/api/v1/messages/${scenario.credentials.concierge.user_id}/upload`),
+        { timeout: 15_000 },
       );
       await patientPage.locator("form button[type='submit']").click();
       const uploadResponse = await uploadResponsePromise;
@@ -341,6 +340,7 @@ test.describe("secure chat live workflows", () => {
           nextResponse
             .url()
             .includes(`/api/v1/messages/${scenario.credentials.concierge.user_id}/`),
+        { timeout: 15_000 },
       );
       await patientPage
         .getByRole("button", { name: /Nachricht löschen|Удалить сообщение/i })
