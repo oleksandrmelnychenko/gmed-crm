@@ -472,7 +472,7 @@ async fn create_profile(
     {
         Ok(row) => match row.try_get::<Uuid, _>("id") {
             Ok(id) => id,
-            Err(error) => return database_error("Failed to decode access profile", error.into()),
+            Err(error) => return database_error("Failed to decode access profile", error),
         },
         Err(error) if is_unique_violation(&error) => {
             return err(
@@ -569,7 +569,7 @@ async fn update_profile(
     };
     let current_version = match current.try_get::<i64, _>("version") {
         Ok(version) => version,
-        Err(error) => return database_error("Failed to decode access profile", error.into()),
+        Err(error) => return database_error("Failed to decode access profile", error),
     };
     if current_version != body.expected_version {
         return err(
@@ -774,7 +774,7 @@ async fn clone_profile(
     {
         Ok(row) => match row.try_get::<Uuid, _>("id") {
             Ok(id) => id,
-            Err(error) => return database_error("Failed to decode cloned profile", error.into()),
+            Err(error) => return database_error("Failed to decode cloned profile", error),
         },
         Err(error) if is_unique_violation(&error) => {
             return err(
@@ -1074,7 +1074,7 @@ async fn update_user_access(
     {
         Ok(Some(row)) => match row.try_get::<i64, _>("access_revision") {
             Ok(revision) => revision,
-            Err(error) => return database_error("Failed to decode access revision", error.into()),
+            Err(error) => return database_error("Failed to decode access revision", error),
         },
         Ok(None) => {
             return err(

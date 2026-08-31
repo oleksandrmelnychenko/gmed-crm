@@ -239,7 +239,6 @@ struct ProviderServicePricing {
 }
 
 struct TaskServiceContext {
-    id: Uuid,
     assigned_to: Uuid,
     assigned_by: Uuid,
     provider_id: Option<Uuid>,
@@ -4537,9 +4536,6 @@ fn task_service_context(
     row: &sqlx::postgres::PgRow,
 ) -> Result<TaskServiceContext, axum::response::Response> {
     Ok(TaskServiceContext {
-        id: row
-            .try_get("id")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,
         assigned_to: row
             .try_get("assigned_to")
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to decode task"))?,

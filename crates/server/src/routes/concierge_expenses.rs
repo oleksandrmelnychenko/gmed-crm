@@ -746,11 +746,6 @@ fn can_read_expenses(auth: &AuthUser, context: &ServiceContext) -> bool {
         || (auth.role == Role::Concierge && context.assigned_concierge_id == Some(auth.user_id))
 }
 
-fn can_submit_expense(auth: &AuthUser, context: &ServiceContext) -> bool {
-    auth.role == Role::Ceo
-        || (auth.role == Role::Concierge && context.assigned_concierge_id == Some(auth.user_id))
-}
-
 fn can_read_task_expenses(auth: &AuthUser, context: &TaskContext) -> bool {
     matches!(auth.role, Role::Ceo | Role::Billing)
         || context.assigned_to == auth.user_id

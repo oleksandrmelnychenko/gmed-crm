@@ -21183,10 +21183,10 @@ async fn update_document(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if auth.role == Role::TeamleadInterpreter {
-        if let Err(resp) = validate_teamlead_document_review_update(&body) {
-            return resp;
-        }
+    if auth.role == Role::TeamleadInterpreter
+        && let Err(resp) = validate_teamlead_document_review_update(&body)
+    {
+        return resp;
     }
 
     let current_patient_id: Option<Uuid> = current.try_get("patient_id").unwrap_or_default();
@@ -23114,6 +23114,8 @@ async fn list_document_categories(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use super::create_private_ocr_temp_file;
     use super::{
         AdminSignatureParty, AgencyContractSettings, AmlEnhancedDueDiligenceBindings,
         DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
@@ -23127,11 +23129,10 @@ mod tests {
         build_framework_contract_pdf, build_manual_generated_text_pdf,
         build_order_cost_estimate_pdf, build_patient_sticker_pdf, build_single_order_pdf,
         compute_line_item_totals, consent_type_for_compliance_kind, cost_coverage_money_cell,
-        cost_estimate_price_text, create_private_ocr_temp_file, document_attachment_response,
-        document_satisfies_compliance_kind, document_template_by_id, finalize_admin_pdf,
-        generated_binding_snapshot, generated_cost_estimate_document_number,
-        generated_document_number_for_template, generated_typed_document_number,
-        german_document_country, is_fixed_legal_document_template,
+        cost_estimate_price_text, document_attachment_response, document_satisfies_compliance_kind,
+        document_template_by_id, finalize_admin_pdf, generated_binding_snapshot,
+        generated_cost_estimate_document_number, generated_document_number_for_template,
+        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
         is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
         localized_estimate_work_type_sections, new_admin_pdf, parse_document_ocr_max_concurrency,
         parse_document_ocr_timeout_seconds, patient_sticker_agency_line, pdf_mm_to_pt,
