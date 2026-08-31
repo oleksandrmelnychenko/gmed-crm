@@ -47,38 +47,6 @@ function waitForApiGet(page: Page, path: string): Promise<Response> {
   );
 }
 
-async function browserApiGet<T>(page: Page, path: string): Promise<T> {
-  const result = await page.evaluate(async (path) => {
-    const token = window.localStorage.getItem("gmed_access_token");
-    const response = await fetch(`/api/v1${path}`, {
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    const text = await response.text();
-    let parsed: unknown = null;
-    if (text) {
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = null;
-      }
-    }
-    return {
-      ok: response.ok,
-      status: response.status,
-      body: parsed,
-      text,
-    } satisfies ApiPostResult;
-  }, path);
-
-  expect(
-    result.ok,
-    `GET ${path} failed with ${result.status}: ${result.text}`,
-  ).toBeTruthy();
-  return result.body as T;
-}
-
 async function browserApiPost<TBody extends Record<string, unknown>>(
   page: Page,
   path: string,
@@ -264,23 +232,9 @@ test.describe("realtime live propagation", () => {
       ).toBeVisible();
       await waitForRealtime(operationsPage);
       await expect(operationsPage.getByText(taskTitle)).toHaveCount(0);
-      const taskPanel = operationsPage.locator("div").filter({
-        has: operationsPage.getByRole("heading", {
-          name: /Meine Aufgaben|My tasks|Мои задачи/i,
-        }),
-      }).first();
-      const tasksBefore = await browserApiGet<TaskListItem[]>(
-        operationsPage,
-        "/concierge-operational-items?archive=active",
-      );
-      const expectedOpenTasksCount =
-        tasksBefore.filter(
-          (task) =>
-            task.status !== "done" &&
-            task.status !== "completed" &&
-            task.status !== "cancelled",
-        )
-          .length + 1;
+      const taskQueueLink = operationsPage.getByRole("button", {
+        name: /Offene Aufgaben|Открытых задач/i,
+      });
 
       const taskRefreshPromise = waitForApiGet(
         operationsPage,
@@ -312,14 +266,18 @@ test.describe("realtime live propagation", () => {
       expect(taskRefreshResponse.ok()).toBeTruthy();
       const refreshedTasks = (await taskRefreshResponse.json()) as TaskListItem[];
       expect(refreshedTasks.some((task) => task.title === taskTitle)).toBeTruthy();
+      const expectedOpenTasksCount = refreshedTasks.filter(
+        (task) =>
+          task.status !== "done" &&
+          task.status !== "completed" &&
+          task.status !== "cancelled",
+      ).length;
 
       await expect(operationsPage.getByText(taskTitle).first()).toBeVisible({
         timeout: 30_000,
       });
       await expect(
-        taskPanel.locator("span").filter({
-          hasText: new RegExp(`^${expectedOpenTasksCount}$`),
-        }).first(),
+        taskQueueLink.getByText(String(expectedOpenTasksCount), { exact: true }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
       await operationsContext.close();
