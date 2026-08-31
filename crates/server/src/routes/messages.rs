@@ -2090,12 +2090,16 @@ async fn upload_file(
                 "Mixed plaintext and E2E payloads are not allowed",
             );
         }
-        if !is_allowed_e2e_attachment_filename(&file_name) {
+        let Some(plaintext_mime_type) = e2e_attachment_mime_type(&file_name) else {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Encrypted attachment type is not allowed",
             );
-        }
+        };
+        // The uploaded multipart body is ciphertext and therefore correctly
+        // uses application/octet-stream. Derive the post-decryption MIME from
+        // the already allowlisted filename instead of trusting client input.
+        mime_type = plaintext_mime_type.to_string();
 
         let Some(attachment_algorithm) = attachment_e2e_algorithm
             .as_deref()
@@ -2928,31 +2932,30 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
-fn is_allowed_e2e_attachment_filename(name: &str) -> bool {
+fn e2e_attachment_mime_type(name: &str) -> Option<&'static str> {
     let extension = std::path::Path::new(name)
         .extension()
         .and_then(|value| value.to_str())
         .map(str::to_ascii_lowercase);
-    matches!(
-        extension.as_deref(),
-        Some(
-            "pdf"
-                | "png"
-                | "jpg"
-                | "jpeg"
-                | "gif"
-                | "webp"
-                | "heic"
-                | "heif"
-                | "txt"
-                | "csv"
-                | "doc"
-                | "docx"
-                | "xls"
-                | "xlsx"
-                | "dcm"
-        )
-    )
+    match extension.as_deref() {
+        Some("pdf") => Some("application/pdf"),
+        Some("png") => Some("image/png"),
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        Some("heic") => Some("image/heic"),
+        Some("heif") => Some("image/heif"),
+        Some("txt") => Some("text/plain"),
+        Some("csv") => Some("text/csv"),
+        Some("doc") => Some("application/msword"),
+        Some("docx") => {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        }
+        Some("xls") => Some("application/vnd.ms-excel"),
+        Some("xlsx") => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        Some("dcm") => Some("application/dicom"),
+        _ => None,
+    }
 }
 
 fn parse_role_name(value: &str) -> Option<Role> {
@@ -3334,5 +3337,16 @@ mod tests {
         assert!(!is_valid_message_key_fingerprint(&"A".repeat(64)));
         assert!(!is_valid_message_key_fingerprint(&"a".repeat(63)));
         assert!(!is_valid_message_key_fingerprint(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn encrypted_attachment_mime_is_derived_from_allowlisted_extension() {
+        assert_eq!(
+            e2e_attachment_mime_type("patient-note.PDF"),
+            Some("application/pdf")
+        );
+        assert_eq!(e2e_attachment_mime_type("scan.jpeg"), Some("image/jpeg"));
+        assert_eq!(e2e_attachment_mime_type("payload.html"), None);
+        assert_eq!(e2e_attachment_mime_type("no-extension"), None);
     }
 }

@@ -336,11 +336,11 @@ async fn can_receive_event(
                 can_receive_concierge_service_event(state, auth, event.entity_id).await
             }
         }
+        "task" => can_receive_task_event(state, auth, event).await,
         "document"
         | "invoice"
         | "privacy_request"
         | "feedback"
-        | "task"
         | "workflow_checklist_item"
         | "appointment_checklist"
         | "reminder" => {
@@ -418,6 +418,39 @@ async fn can_receive_patient_event(
         }
         _ => Ok(false),
     }
+}
+
+async fn can_receive_task_event(
+    state: &AppState,
+    auth: &AuthUser,
+    event: &RealtimeEvent,
+) -> Result<bool, axum::response::Response> {
+    if let Some(patient_id) = event.patient_id {
+        return can_receive_patient_event(state, auth, patient_id).await;
+    }
+    if auth.role == Role::Ceo {
+        return Ok(true);
+    }
+
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM tasks
+               WHERE id = $1
+                 AND (assigned_to = $2 OR assigned_by = $2)
+           )"#,
+    )
+    .bind(event.entity_id)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, task_id = %event.entity_id, "check realtime task access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate event access",
+        )
+    })
 }
 
 async fn can_receive_appointment_event(
@@ -662,14 +695,10 @@ mod tests {
     }
 
     #[test]
-    fn operational_targeted_replay_keeps_direct_target_routing() {
-        let mut event = RealtimeEvent::new(
-            "concierge_operational_item.updated",
-            "concierge_operational_item",
-            Uuid::new_v4(),
-        );
-        event.patient_id = Some(Uuid::new_v4());
+    fn operational_task_replay_requires_current_task_authorization() {
+        let event =
+            RealtimeEvent::new("concierge_operational_item.updated", "task", Uuid::new_v4());
 
-        assert!(!requires_current_entity_authorization(&event));
+        assert!(requires_current_entity_authorization(&event));
     }
 }
