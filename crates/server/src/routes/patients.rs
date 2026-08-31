@@ -11,12 +11,15 @@ use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::access;
+use crate::access::{self, resolve_explicit_resource_access};
 use crate::audit;
 use crate::auth::{middleware::AuthUser, password};
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::documents::is_iso_country_code;
 use crate::state::AppState;
+use gmed_domain::access::resource_access::{
+    AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
+};
 use gmed_domain::role::Role;
 use printpdf::{
     Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rect,

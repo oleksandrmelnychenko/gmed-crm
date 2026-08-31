@@ -104,6 +104,342 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_staff_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}-{}@example.com", Uuid::new_v4().simple()))
+    .bind(format!("{role} {tag}"))
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_direct_provider_rule(
+    pool: &PgPool,
+    user_id: Uuid,
+    granted_by: Uuid,
+    provider_id: Uuid,
+    capability: &str,
+    effect: &str,
+) {
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type,
+                resource_id, capability, effect, granted_by
+           ) VALUES ($1, 'concierge', 'provider', 'record', $2, $3, $4, $5)"#,
+    )
+    .bind(user_id)
+    .bind(provider_id)
+    .bind(capability)
+    .bind(effect)
+    .bind(granted_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn assign_provider_profile(
+    pool: &PgPool,
+    user_id: Uuid,
+    admin_id: Uuid,
+    tag: &str,
+    rules: &[(Uuid, &str, &str)],
+) {
+    let profile_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO staff_access_profiles (name, created_by)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Provider ACL {tag}"))
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO staff_access_profile_roles (profile_id, role)
+           VALUES ($1, 'concierge')"#,
+    )
+    .bind(profile_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    for (provider_id, capability, effect) in rules {
+        sqlx::query(
+            r#"INSERT INTO staff_access_profile_rules (
+                    profile_id, resource_type, scope_type, resource_id,
+                    capability, effect, created_by
+               ) VALUES ($1, 'provider', 'record', $2, $3, $4, $5)"#,
+        )
+        .bind(profile_id)
+        .bind(provider_id)
+        .bind(capability)
+        .bind(effect)
+        .bind(admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        r#"INSERT INTO staff_access_profile_assignments (
+                user_id, profile_id, assigned_for_role, assigned_by
+           ) VALUES ($1, $2, 'concierge', $3)"#,
+    )
+    .bind(user_id)
+    .bind(profile_id)
+    .bind(admin_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn provider_update_payload(name: &str, provider_type: &str) -> Value {
+    json!({
+        "name": name,
+        "provider_type": provider_type,
+    })
+}
+
+fn response_contains_provider(body: &Value, provider_id: Uuid) -> bool {
+    body.as_array()
+        .is_some_and(|rows| rows.iter().any(|row| row["id"] == provider_id.to_string()))
+}
+
+#[tokio::test]
+async fn concierge_only_sees_medical_providers_with_explicit_view_access() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-view");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let allowed_id =
+        seed_provider_with_type(&pool, &format!("{tag}-allowed"), "medical", "Germany").await;
+    let hidden_id =
+        seed_provider_with_type(&pool, &format!("{tag}-hidden"), "medical", "Germany").await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!response_contains_provider(&body, allowed_id));
+    assert!(!response_contains_provider(&body, hidden_id));
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{allowed_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_provider_rule(&pool, concierge_id, admin_id, allowed_id, "view", "allow").await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response_contains_provider(&body, allowed_id));
+    assert!(!response_contains_provider(&body, hidden_id));
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{allowed_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["id"], allowed_id.to_string());
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{hidden_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn concierge_medical_provider_edit_requires_separate_edit_access() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-edit");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical", "Germany").await;
+    seed_direct_provider_rule(&pool, concierge_id, admin_id, provider_id, "view", "allow").await;
+
+    let denied_name = format!("Denied edit {tag}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/update"),
+        &bearer,
+        Some(provider_update_payload(&denied_name, "medical")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    seed_direct_provider_rule(&pool, concierge_id, admin_id, provider_id, "edit", "allow").await;
+    let updated_name = format!("Allowed edit {tag}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{provider_id}/update"),
+        &bearer,
+        Some(provider_update_payload(&updated_name, "medical")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let stored_name: String = sqlx::query_scalar("SELECT name FROM providers WHERE id = $1")
+        .bind(provider_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_name, updated_name);
+}
+
+#[tokio::test]
+async fn concierge_direct_view_deny_overrides_profile_and_non_medical_baseline() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-deny");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let medical_id =
+        seed_provider_with_type(&pool, &format!("{tag}-medical"), "medical", "Germany").await;
+    let non_medical_id = seed_provider_with_type(
+        &pool,
+        &format!("{tag}-non-medical"),
+        "non_medical",
+        "Germany",
+    )
+    .await;
+    assign_provider_profile(
+        &pool,
+        concierge_id,
+        admin_id,
+        &tag,
+        &[
+            (medical_id, "view", "allow"),
+            (non_medical_id, "view", "allow"),
+        ],
+    )
+    .await;
+    seed_direct_provider_rule(&pool, concierge_id, admin_id, medical_id, "view", "deny").await;
+    seed_direct_provider_rule(
+        &pool,
+        concierge_id,
+        admin_id,
+        non_medical_id,
+        "view",
+        "deny",
+    )
+    .await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!response_contains_provider(&body, medical_id));
+    assert!(!response_contains_provider(&body, non_medical_id));
+    for provider_id in [medical_id, non_medical_id] {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/providers/{provider_id}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
+
+#[tokio::test]
+async fn concierge_cannot_convert_provider_type_in_either_direction() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-acl-type");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+    let medical_id =
+        seed_provider_with_type(&pool, &format!("{tag}-medical"), "medical", "Germany").await;
+    let non_medical_id = seed_provider_with_type(
+        &pool,
+        &format!("{tag}-non-medical"),
+        "non_medical",
+        "Germany",
+    )
+    .await;
+    for capability in ["view", "edit"] {
+        seed_direct_provider_rule(
+            &pool,
+            concierge_id,
+            admin_id,
+            medical_id,
+            capability,
+            "allow",
+        )
+        .await;
+    }
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{medical_id}/update"),
+        &bearer,
+        Some(provider_update_payload("Converted medical", "non_medical")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/{non_medical_id}/update"),
+        &bearer,
+        Some(provider_update_payload("Converted non-medical", "medical")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let types: Vec<String> = sqlx::query_scalar(
+        "SELECT provider_type FROM providers WHERE id = ANY($1) ORDER BY provider_type",
+    )
+    .bind(vec![medical_id, non_medical_id])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(types, vec!["medical", "non_medical"]);
+}
+
 #[tokio::test]
 async fn insurance_provider_options_include_patient_insurance_names() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {

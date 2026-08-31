@@ -7,4 +7,5 @@
 
 pub mod data_sensitivity;
 pub mod policy;
+pub mod resource_access;
 pub mod share_status;

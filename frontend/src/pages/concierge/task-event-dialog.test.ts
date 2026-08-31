@@ -44,4 +44,10 @@ describe("isConciergeServiceSelectableForTask", () => {
   it("keeps an existing service link when the task assignee is changed", () => {
     expect(isConciergeServiceSelectableForTask(service, "concierge-2", service.id)).toBe(true);
   });
+
+  it("does not offer a request that has already been converted to another task", () => {
+    const converted = { ...service, linked_task_id: "task-1" };
+    expect(isConciergeServiceSelectableForTask(converted, "concierge-1")).toBe(false);
+    expect(isConciergeServiceSelectableForTask(converted, "concierge-2", service.id)).toBe(true);
+  });
 });

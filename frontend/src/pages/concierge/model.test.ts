@@ -41,6 +41,7 @@ import {
   sortConciergeServices,
   sortConciergeTasks,
   conciergeTaskWorkload,
+  unconvertedConciergeServices,
   type ConciergeProvider,
   type ConciergeService,
   type ConciergeTask,
@@ -116,6 +117,13 @@ describe("filterConciergeTaskAssignees", () => {
         "fallback",
       ),
     ).toBe("Выбранный сервис не подходит для этой задачи. Выберите немедицинский сервис, назначенный текущему исполнителю.");
+    expect(
+      conciergeTaskErrorMessage(
+        new Error("Concierge service request already converted to a task"),
+        "ru",
+        "fallback",
+      ),
+    ).toBe("Этот запрос уже преобразован в задачу. Откройте созданную задачу в менеджере задач.");
   });
 
   it("keeps concierge and interpreter assignment branches separate", () => {
@@ -495,6 +503,14 @@ describe("concierge workspace model", () => {
         "terminal 1",
       ),
     ).toHaveLength(1);
+  });
+
+  it("removes a converted request from the service intake workspace", () => {
+    const rows = [
+      service({ id: "new-request", linked_task_id: null }),
+      service({ id: "converted-request", linked_task_id: "task-1" }),
+    ];
+    expect(unconvertedConciergeServices(rows).map((item) => item.id)).toEqual(["new-request"]);
   });
 
   it("redacts appointment-linked service titles while retaining their service category", () => {

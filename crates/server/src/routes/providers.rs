@@ -12,9 +12,13 @@ use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
+use crate::access::resolve_explicit_resource_access;
 use crate::audit::{self as audit_mod};
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::resource_access::{
+    AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
+};
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -395,6 +399,138 @@ struct UpsertProviderTemplateRequest {
     auto_send_on_confirmed_appointment: Option<bool>,
 }
 
+#[derive(Default)]
+struct ConciergeProviderRuleScope {
+    record_rule_ids: HashSet<Uuid>,
+    record_allow_ids: HashSet<Uuid>,
+    has_all_rule: bool,
+}
+
+async fn load_concierge_provider_rule_scope(
+    state: &AppState,
+    user_id: Uuid,
+    capability: AccessCapability,
+) -> Result<ConciergeProviderRuleScope, axum::response::Response> {
+    let rows = match sqlx::query(
+        r#"SELECT scope_type, resource_id, effect
+           FROM (
+               SELECT direct.scope_type, direct.resource_id, direct.effect
+               FROM staff_user_access_rules direct
+               WHERE direct.user_id = $1
+                 AND direct.granted_for_role = 'concierge'
+                 AND direct.resource_type = 'provider'
+                 AND direct.capability = $2
+                 AND direct.revoked_at IS NULL
+                 AND direct.valid_from <= now()
+                 AND (direct.valid_until IS NULL OR direct.valid_until > now())
+
+               UNION
+
+               SELECT rule.scope_type, rule.resource_id, rule.effect
+               FROM staff_access_profile_assignments assignment
+               JOIN staff_access_profiles profile
+                 ON profile.id = assignment.profile_id
+                AND profile.is_active = true
+               JOIN staff_access_profile_roles profile_role
+                 ON profile_role.profile_id = profile.id
+                AND profile_role.role = 'concierge'
+               JOIN staff_access_profile_rules rule
+                 ON rule.profile_id = profile.id
+               WHERE assignment.user_id = $1
+                 AND assignment.assigned_for_role = 'concierge'
+                 AND assignment.revoked_at IS NULL
+                 AND assignment.valid_from <= now()
+                 AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+                 AND rule.resource_type = 'provider'
+                 AND rule.capability = $2
+           ) candidates"#,
+    )
+    .bind(user_id)
+    .bind(capability.as_str())
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %user_id, "Failed to load concierge provider access candidates");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to authorize provider access",
+            ));
+        }
+    };
+
+    let mut scope = ConciergeProviderRuleScope::default();
+    for row in rows {
+        let scope_type = row.try_get::<String, _>("scope_type").unwrap_or_default();
+        if scope_type == "all" {
+            scope.has_all_rule = true;
+            continue;
+        }
+        let Ok(provider_id) = row.try_get::<Uuid, _>("resource_id") else {
+            continue;
+        };
+        scope.record_rule_ids.insert(provider_id);
+        if matches!(row.try_get::<String, _>("effect").as_deref(), Ok("allow")) {
+            scope.record_allow_ids.insert(provider_id);
+        }
+    }
+    Ok(scope)
+}
+
+async fn resolve_concierge_provider_access(
+    state: &AppState,
+    auth: &AuthUser,
+    provider_id: Uuid,
+    provider_type: &str,
+    capability: AccessCapability,
+) -> Result<bool, axum::response::Response> {
+    let decision = resolve_explicit_resource_access(
+        &state.db,
+        auth.user_id,
+        auth.role,
+        ResourceAccessRequest {
+            resource_type: ResourceType::Provider,
+            resource_id: provider_id,
+            capability,
+            // A provider directory record is metadata, including when the
+            // provider itself is medical. Clinical content is protected by
+            // its own resource checks.
+            is_medical: false,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            error = %e,
+            user_id = %auth.user_id,
+            provider_id = %provider_id,
+            ?capability,
+            "Failed to resolve concierge provider access"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to authorize provider access",
+        )
+    })?;
+
+    Ok(match decision {
+        ResourceAccessDecision::Allow(_) => true,
+        ResourceAccessDecision::DenySystemBoundary | ResourceAccessDecision::Deny(_) => false,
+        ResourceAccessDecision::NoExplicitRule => provider_type == "non_medical",
+    })
+}
+
+async fn concierge_can_access_provider(
+    state: &AppState,
+    auth: &AuthUser,
+    provider_id: Uuid,
+    provider_type: &str,
+    capability: AccessCapability,
+) -> Result<bool, axum::response::Response> {
+    resolve_concierge_provider_access(state, auth, provider_id, provider_type, capability).await
+}
+
 async fn list_providers(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -438,11 +574,7 @@ async fn list_providers(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid provider type");
     }
-    let provider_type = if auth.role == Role::Concierge {
-        Some("non_medical".to_string())
-    } else {
-        requested_provider_type
-    };
+    let provider_type = requested_provider_type;
     if internal_rating_gte.is_some_and(|value| !value.is_finite() || !(0.0..=5.0).contains(&value))
     {
         return err(
@@ -459,6 +591,23 @@ async fn list_providers(
             "taxonomy_attribute_key is too long",
         );
     }
+
+    let concierge_view_scope = if auth.role == Role::Concierge {
+        match load_concierge_provider_rule_scope(&state, auth.user_id, AccessCapability::View).await
+        {
+            Ok(scope) => Some(scope),
+            Err(resp) => return resp,
+        }
+    } else {
+        None
+    };
+    let concierge_medical_provider_ids = concierge_view_scope
+        .as_ref()
+        .map(|scope| scope.record_allow_ids.iter().copied().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let concierge_has_all_view_rule = concierge_view_scope
+        .as_ref()
+        .is_some_and(|scope| scope.has_all_rule);
 
     let rows = match sqlx::query(
         r#"SELECT p.id, p.name, p.provider_type, p.legal_name, p.tax_id,
@@ -539,6 +688,12 @@ async fn list_providers(
            WHERE ($20::bool IS NULL OR p.is_active = $20)
              AND ($20::bool IS NOT NULL OR $1::bool = false OR p.is_active = true)
              AND ($2::text IS NULL OR p.provider_type = $2)
+             AND (
+                $22::bool = false
+                OR p.provider_type = 'non_medical'
+                OR $24::bool = true
+                OR p.id = ANY($23::uuid[])
+             )
              AND (
                 $3::text = '%%'
                 OR de_normalize(concat_ws(' ',
@@ -954,6 +1109,9 @@ async fn list_providers(
     .bind(search_term)
     .bind(is_active_filter)
     .bind(insurance_provider_filters)
+    .bind(auth.role == Role::Concierge)
+    .bind(&concierge_medical_provider_ids)
+    .bind(concierge_has_all_view_rule)
     .fetch_all(&state.db)
     .await
     {
@@ -965,6 +1123,56 @@ async fn list_providers(
                 "Failed to list providers",
             );
         }
+    };
+
+    let rows = if auth.role == Role::Concierge {
+        let mut visible_rows = Vec::with_capacity(rows.len());
+        for row in rows {
+            let provider_id = match row.try_get::<Uuid, _>("id") {
+                Ok(value) => value,
+                Err(_) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to decode provider",
+                    );
+                }
+            };
+            let provider_type = match row.try_get::<String, _>("provider_type") {
+                Ok(value) => value,
+                Err(_) => {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to decode provider",
+                    );
+                }
+            };
+            let view_scope = concierge_view_scope
+                .as_ref()
+                .expect("concierge view scope must be loaded");
+            let needs_explicit_resolution = provider_type == "medical"
+                || view_scope.has_all_rule
+                || view_scope.record_rule_ids.contains(&provider_id);
+            if !needs_explicit_resolution {
+                visible_rows.push(row);
+                continue;
+            }
+            match resolve_concierge_provider_access(
+                &state,
+                &auth,
+                provider_id,
+                &provider_type,
+                AccessCapability::View,
+            )
+            .await
+            {
+                Ok(true) => visible_rows.push(row),
+                Ok(false) => {}
+                Err(resp) => return resp,
+            }
+        }
+        visible_rows
+    } else {
+        rows
     };
 
     // The per-provider enrichment used to issue 4+ queries per row, which
@@ -1352,7 +1560,24 @@ async fn list_providers_by_specializations(
         );
     }
 
-    match sqlx::query(
+    let concierge_view_scope = if auth.role == Role::Concierge {
+        match load_concierge_provider_rule_scope(&state, auth.user_id, AccessCapability::View).await
+        {
+            Ok(scope) => Some(scope),
+            Err(resp) => return resp,
+        }
+    } else {
+        None
+    };
+    let concierge_medical_provider_ids = concierge_view_scope
+        .as_ref()
+        .map(|scope| scope.record_allow_ids.iter().copied().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let concierge_has_all_view_rule = concierge_view_scope
+        .as_ref()
+        .is_some_and(|scope| scope.has_all_rule);
+
+    let rows = match sqlx::query(
         r#"SELECT
                p.id,
                p.name,
@@ -1367,6 +1592,10 @@ async fn list_providers_by_specializations(
            JOIN provider_specializations ps
              ON ps.provider_id = p.id
             AND ps.specialization_id = ANY($1)
+           WHERE $2::bool = false
+              OR p.provider_type = 'non_medical'
+              OR $4::bool = true
+              OR p.id = ANY($3::uuid[])
            GROUP BY
                p.id,
                p.name,
@@ -1376,38 +1605,81 @@ async fn list_providers_by_specializations(
            ORDER BY p.is_active DESC, p.name, p.id"#,
     )
     .bind(&specialization_ids)
+    .bind(auth.role == Role::Concierge)
+    .bind(&concierge_medical_provider_ids)
+    .bind(concierge_has_all_view_rule)
     .fetch_all(&state.db)
     .await
     {
-        Ok(rows) => Json(
-            rows.into_iter()
-                .filter_map(|row| {
-                    Some(json!({
-                        "id": row.try_get::<Uuid, _>("id").ok()?,
-                        "name": row.try_get::<String, _>("name").unwrap_or_default(),
-                        "provider_type": row
-                            .try_get::<String, _>("provider_type")
-                            .unwrap_or_default(),
-                        "address_city": row
-                            .try_get::<Option<String>, _>("address_city")
-                            .unwrap_or_default(),
-                        "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
-                        "specialization_ids": row
-                            .try_get::<Vec<Uuid>, _>("specialization_ids")
-                            .unwrap_or_default(),
-                    }))
-                })
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, "Failed to load providers by specializations");
-            err(
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load providers by specializations",
-            )
+            );
         }
+    };
+
+    let mut providers = Vec::with_capacity(rows.len());
+    for row in rows {
+        let Some(provider_id) = row.try_get::<Uuid, _>("id").ok() else {
+            continue;
+        };
+        let provider_type = row
+            .try_get::<String, _>("provider_type")
+            .unwrap_or_default();
+        if auth.role == Role::Concierge {
+            let view_scope = concierge_view_scope
+                .as_ref()
+                .expect("concierge view scope must be loaded");
+            let needs_explicit_resolution = provider_type == "medical"
+                || view_scope.has_all_rule
+                || view_scope.record_rule_ids.contains(&provider_id);
+            if !needs_explicit_resolution {
+                providers.push(json!({
+                    "id": provider_id,
+                    "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                    "provider_type": provider_type,
+                    "address_city": row
+                        .try_get::<Option<String>, _>("address_city")
+                        .unwrap_or_default(),
+                    "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                    "specialization_ids": row
+                        .try_get::<Vec<Uuid>, _>("specialization_ids")
+                        .unwrap_or_default(),
+                }));
+                continue;
+            }
+            match resolve_concierge_provider_access(
+                &state,
+                &auth,
+                provider_id,
+                &provider_type,
+                AccessCapability::View,
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(resp) => return resp,
+            }
+        }
+        providers.push(json!({
+            "id": provider_id,
+            "name": row.try_get::<String, _>("name").unwrap_or_default(),
+            "provider_type": provider_type,
+            "address_city": row
+                .try_get::<Option<String>, _>("address_city")
+                .unwrap_or_default(),
+            "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+            "specialization_ids": row
+                .try_get::<Vec<Uuid>, _>("specialization_ids")
+                .unwrap_or_default(),
+        }));
     }
+
+    Json(providers).into_response()
 }
 
 async fn list_specializations(
@@ -2547,8 +2819,22 @@ async fn get_provider(
     let provider_type = provider
         .try_get::<String, _>("provider_type")
         .unwrap_or_default();
-    if auth.role == Role::Concierge && provider_type != "non_medical" {
-        return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
+    if auth.role == Role::Concierge {
+        match concierge_can_access_provider(
+            &state,
+            &auth,
+            provider_id,
+            &provider_type,
+            AccessCapability::View,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
+            }
+            Err(resp) => return resp,
+        }
     }
 
     let (
@@ -2690,11 +2976,34 @@ async fn update_provider(
         Ok(payload) => payload,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    if auth.role == Role::Concierge && provider.provider_type != "non_medical" {
-        return err(
-            StatusCode::FORBIDDEN,
-            "Concierge can only update non-medical providers",
-        );
+    if auth.role == Role::Concierge {
+        let current_provider_type = match load_provider_type(&state, provider_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        if current_provider_type != provider.provider_type {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Concierge cannot change provider type",
+            );
+        }
+        for capability in [AccessCapability::View, AccessCapability::Edit] {
+            match concierge_can_access_provider(
+                &state,
+                &auth,
+                provider_id,
+                &current_provider_type,
+                capability,
+            )
+            .await
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    return err(StatusCode::FORBIDDEN, "Provider is outside concierge scope");
+                }
+                Err(resp) => return resp,
+            }
+        }
     }
     if let Err(resp) =
         validate_provider_parent(&state, Some(provider_id), provider.parent_provider_id).await
@@ -2742,12 +3051,12 @@ async fn update_provider(
             }
         };
 
-        match current_provider_type.as_deref() {
-            Some("non_medical") => {}
+        match current_provider_type {
+            Some(current_provider_type) if current_provider_type == provider_type => {}
             Some(_) => {
                 return err(
                     StatusCode::FORBIDDEN,
-                    "Concierge can only update non-medical providers",
+                    "Concierge cannot change provider type",
                 );
             }
             None => return err(StatusCode::NOT_FOUND, "Provider not found"),

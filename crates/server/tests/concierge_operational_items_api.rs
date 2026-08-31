@@ -238,6 +238,42 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     assert!(task.get("description").is_none());
     let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
 
+    let (status, service_list) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/concierge-services?mine_only=true",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{service_list}");
+    let converted_service = service_list
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["id"] == service_id.to_string()))
+        .expect("converted service");
+    assert_eq!(converted_service["linked_task_id"], task_id.to_string());
+
+    let (status, duplicate_conversion) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": "Duplicate driver task",
+            "concierge_service_id": service_id,
+            "due_at": "2026-08-20T09:30:00Z",
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate_conversion}");
+    assert_eq!(
+        duplicate_conversion["message"],
+        "Concierge service request already converted to a task"
+    );
+
     let (status, event) = json_request(
         &ctx.app,
         "POST",

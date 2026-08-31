@@ -210,6 +210,7 @@ export function isConciergeServiceSelectableForTask(
   existingServiceId: string | null = null,
 ) {
   if (service.task_eligible === false) return false;
+  if (service.linked_task_id && service.id !== existingServiceId) return false;
   return service.id === existingServiceId
     || !assigneeId
     || !service.assigned_concierge_id

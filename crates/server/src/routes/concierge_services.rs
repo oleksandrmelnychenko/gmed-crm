@@ -838,7 +838,14 @@ async fn list_concierge_services(
                   a.title AS appointment_title,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
-                      AS task_eligible
+                      AS task_eligible,
+                  (SELECT linked_task.id
+                     FROM tasks linked_task
+                    WHERE linked_task.concierge_service_id = cs.id
+                      AND linked_task.task_scope = 'concierge_operational'
+                      AND linked_task.deleted_at IS NULL
+                    ORDER BY linked_task.created_at, linked_task.id
+                    LIMIT 1) AS linked_task_id
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
@@ -3038,7 +3045,14 @@ async fn load_service_row(
                   a.title AS appointment_title,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
-                      AS task_eligible
+                      AS task_eligible,
+                  (SELECT linked_task.id
+                     FROM tasks linked_task
+                    WHERE linked_task.concierge_service_id = cs.id
+                      AND linked_task.task_scope = 'concierge_operational'
+                      AND linked_task.deleted_at IS NULL
+                    ORDER BY linked_task.created_at, linked_task.id
+                    LIMIT 1) AS linked_task_id
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
@@ -3826,6 +3840,7 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "task_eligible": row.try_get::<bool, _>("task_eligible").unwrap_or(false),
+        "linked_task_id": row.try_get::<Option<Uuid>, _>("linked_task_id").unwrap_or_default(),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "provider_service_id": row.try_get::<Option<Uuid>, _>("provider_service_id").unwrap_or_default(),

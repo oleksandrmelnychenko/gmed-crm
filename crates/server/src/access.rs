@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
 use gmed_db::DbPool;
+use gmed_domain::access::resource_access::{
+    AccessEffect, AccessRuleSource, ResourceAccessDecision, ResourceAccessRequest,
+    passes_absolute_resource_boundary,
+};
 use gmed_domain::role::Role;
 use sqlx::Row;
 use uuid::Uuid;
@@ -159,6 +163,109 @@ pub async fn load_active_concierge_task_patient_access_set(
         .into_iter()
         .filter_map(|row| row.try_get::<Uuid, _>("patient_id").ok())
         .collect())
+}
+
+/// Resolve only explicit reusable-profile and per-user resource rules.
+///
+/// `NoExplicitRule` deliberately leaves the existing role/assignment policy in
+/// control. Direct user rules override profile rules; record-specific rules
+/// override `all` rules; a deny wins when candidates are otherwise equal.
+pub async fn resolve_explicit_resource_access(
+    pool: &DbPool,
+    user_id: Uuid,
+    role: Role,
+    request: ResourceAccessRequest,
+) -> Result<ResourceAccessDecision, sqlx::Error> {
+    if role == Role::Ceo {
+        return Ok(ResourceAccessDecision::Allow(AccessRuleSource::Ceo));
+    }
+    if !passes_absolute_resource_boundary(role, &request) {
+        return Ok(ResourceAccessDecision::DenySystemBoundary);
+    }
+
+    let Some(role_name) = role_db_name(role) else {
+        return Ok(ResourceAccessDecision::NoExplicitRule);
+    };
+
+    let candidate = sqlx::query(
+        r#"WITH candidates AS (
+               SELECT direct.effect,
+                      'user'::text AS source,
+                      2::int AS source_priority,
+                      CASE direct.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+               FROM staff_user_access_rules direct
+               WHERE direct.user_id = $1
+                 AND direct.granted_for_role = $2
+                 AND direct.resource_type = $3
+                 AND direct.capability = $4
+                 AND direct.revoked_at IS NULL
+                 AND direct.valid_from <= now()
+                 AND (direct.valid_until IS NULL OR direct.valid_until > now())
+                 AND (
+                      direct.scope_type = 'all'
+                      OR (direct.scope_type = 'record' AND direct.resource_id = $5)
+                 )
+
+               UNION ALL
+
+               SELECT rule.effect,
+                      'profile'::text AS source,
+                      1::int AS source_priority,
+                      CASE rule.scope_type WHEN 'record' THEN 2 ELSE 1 END AS specificity
+               FROM staff_access_profile_assignments assignment
+               JOIN staff_access_profiles profile
+                 ON profile.id = assignment.profile_id
+                AND profile.is_active = true
+               JOIN staff_access_profile_roles profile_role
+                 ON profile_role.profile_id = profile.id
+                AND profile_role.role = $2
+               JOIN staff_access_profile_rules rule
+                 ON rule.profile_id = profile.id
+               WHERE assignment.user_id = $1
+                 AND assignment.assigned_for_role = $2
+                 AND assignment.revoked_at IS NULL
+                 AND assignment.valid_from <= now()
+                 AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+                 AND rule.resource_type = $3
+                 AND rule.capability = $4
+                 AND (
+                      rule.scope_type = 'all'
+                      OR (rule.scope_type = 'record' AND rule.resource_id = $5)
+                 )
+           )
+           SELECT effect, source
+           FROM candidates
+           ORDER BY source_priority DESC,
+                    specificity DESC,
+                    CASE effect WHEN 'deny' THEN 1 ELSE 0 END DESC
+           LIMIT 1"#,
+    )
+    .bind(user_id)
+    .bind(role_name)
+    .bind(request.resource_type.as_str())
+    .bind(request.capability.as_str())
+    .bind(request.resource_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(candidate) = candidate else {
+        return Ok(ResourceAccessDecision::NoExplicitRule);
+    };
+    let effect = candidate
+        .try_get::<String, _>("effect")
+        .ok()
+        .and_then(|value| AccessEffect::from_db(&value));
+    let source = match candidate.try_get::<String, _>("source").as_deref() {
+        Ok("user") => Some(AccessRuleSource::UserRule),
+        Ok("profile") => Some(AccessRuleSource::ProfileRule),
+        _ => None,
+    };
+
+    Ok(match (effect, source) {
+        (Some(AccessEffect::Allow), Some(source)) => ResourceAccessDecision::Allow(source),
+        (Some(AccessEffect::Deny), Some(source)) => ResourceAccessDecision::Deny(source),
+        _ => ResourceAccessDecision::NoExplicitRule,
+    })
 }
 
 pub fn mask_email(value: &str) -> String {

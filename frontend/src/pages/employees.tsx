@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, UsersRound } from "lucide-react";
+import { KeyRound, Search, ShieldCheck, UsersRound } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import { Banner, PageHeader, StatusBadge, TabLoader } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
+
+import { canManageStaffAccess } from "./employees/staff-access-model";
+import { StaffAccessSheet } from "./employees/staff-access-sheet";
 
 type StaffDirectoryEntry = {
   id: string;
@@ -19,11 +24,16 @@ type StaffDirectoryEntry = {
 
 export function EmployeesPage() {
   const { t, lang } = useLang();
+  const { user } = useAuth();
   const tr = t as unknown as Record<string, string>;
   const [items, setItems] = useState<StaffDirectoryEntry[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [accessEmployee, setAccessEmployee] = useState<StaffDirectoryEntry | null>(null);
+  const canManageAccess = canManageStaffAccess(user?.role);
+  const accessLabel = lang === "de" ? "Zugriffe" : "Доступи";
+  const fullAccessLabel = lang === "de" ? "Vollständiger Systemzugriff" : "Повний системний доступ";
 
   useEffect(() => {
     let cancelled = false;
@@ -85,15 +95,52 @@ export function EmployeesPage() {
         width: 320,
         render: (row) => <span className="font-mono text-xs text-foreground">{row.email}</span>,
       },
+      {
+        id: "access",
+        label: accessLabel,
+        accessor: (row) => row.role === "ceo" ? fullAccessLabel : "",
+        sortable: false,
+        width: 240,
+        render: (row) => {
+          if (row.role === "ceo") {
+            return (
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                <ShieldCheck className="size-3.5" />
+                {fullAccessLabel}
+              </span>
+            );
+          }
+          if (!canManageAccess) return <span className="text-muted-foreground">—</span>;
+          return (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-lg"
+              onClick={(event) => {
+                event.stopPropagation();
+                setAccessEmployee(row);
+              }}
+            >
+              <KeyRound className="size-3.5" />
+              {accessLabel}
+            </Button>
+          );
+        },
+      },
     ],
-    [t, tr],
+    [accessLabel, canManageAccess, fullAccessLabel, t, tr],
   );
 
   const title = tr.nav_interpreters ?? (lang === "de" ? "Mitarbeiter" : "Сотрудники");
   const description =
     lang === "de"
-      ? "Arbeitskontakte für die operative Koordination. Nur Lesen."
-      : "Рабочие контакты для оперативной координации. Только просмотр.";
+      ? canManageAccess
+        ? "Arbeitskontakte und individuelle Ressourcenzugriffe."
+        : "Arbeitskontakte für die operative Koordination. Nur Lesen."
+      : canManageAccess
+        ? "Робочі контакти та індивідуальні доступи до ресурсів."
+        : "Рабочие контакты для оперативной координации. Только просмотр.";
 
   return (
     <div className="space-y-4">
@@ -132,6 +179,13 @@ export function EmployeesPage() {
             }
           />
         </AdminTableCard>
+      ) : null}
+      {canManageAccess ? (
+        <StaffAccessSheet
+          open={Boolean(accessEmployee)}
+          employee={accessEmployee}
+          onClose={() => setAccessEmployee(null)}
+        />
       ) : null}
     </div>
   );

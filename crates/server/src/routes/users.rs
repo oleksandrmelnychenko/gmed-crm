@@ -427,8 +427,14 @@ async fn update_user(
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
     }
 
-    let current = sqlx::query!("SELECT name, role, email FROM users WHERE id = $1", user_id)
-        .fetch_optional(&state.db)
+    let mut tx = state.db.begin().await.map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to start user update transaction");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+    })?;
+
+    let current = sqlx::query("SELECT name, role, email FROM users WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "DB error");
@@ -436,84 +442,180 @@ async fn update_user(
         })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
-    let new_name = body.name.as_deref().unwrap_or(&current.name);
-    let new_role = body.role.as_deref().unwrap_or(&current.role);
-    let new_email = body.email.as_deref().unwrap_or(&current.email);
-    let role_changed = new_role != current.role.as_str();
+    let current_name: String = current
+        .try_get("name")
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?;
+    let current_role: String = current
+        .try_get("role")
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?;
+    let current_email: String = current
+        .try_get("email")
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?;
+    let new_name = body.name.as_deref().unwrap_or(&current_name);
+    let new_role = body.role.as_deref().unwrap_or(&current_role);
+    let new_email = body.email.as_deref().unwrap_or(&current_email);
+    let role_changed = new_role != current_role.as_str();
 
-    match sqlx::query!(
-        "UPDATE users SET name = $2, role = $3, email = $4 WHERE id = $1
-         RETURNING id, email, name, role, is_active, created_at, updated_at",
-        user_id,
-        new_name,
-        new_role,
-        new_email
+    let row = sqlx::query(
+        r#"UPDATE users
+           SET name = $2,
+               role = $3,
+               email = $4,
+               access_revision = access_revision + CASE WHEN $5 THEN 1 ELSE 0 END
+           WHERE id = $1
+           RETURNING id, email, name, role, is_active, created_at, updated_at"#,
     )
-    .fetch_one(&state.db)
+    .bind(user_id)
+    .bind(new_name)
+    .bind(new_role)
+    .bind(new_email)
+    .bind(role_changed)
+    .fetch_one(&mut *tx)
     .await
-    {
-        Ok(r) => {
-            if role_changed {
-                let _ = sqlx::query(
-                    "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
-                     WHERE user_id = $1 AND status IN ('pending', 'approved')",
-                )
-                .bind(user_id)
-                .execute(&state.db)
-                .await;
-                crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_role_changed")
-                    .await;
-            }
-            state.audit_sender.try_send(audit::domain_diff_event(
-                "update_user",
-                Some(auth.user_id),
-                "user",
-                Some(user_id),
-                serde_json::json!({
-                    "name": current.name,
-                    "role": current.role,
-                    "email": current.email,
-                }),
-                serde_json::json!({
-                    "name": new_name,
-                    "role": new_role,
-                    "email": new_email,
-                }),
-            ));
-            crate::realtime::publish_admin_event(
-                &state,
-                Some(auth.user_id),
-                "user.updated",
-                "user",
-                user_id,
-                serde_json::json!({
-                    "role": r.role.clone(),
-                    "email": r.email.clone(),
-                }),
-            )
-            .await;
+    .map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to update user");
+        if e.to_string().contains("unique") {
+            err(StatusCode::CONFLICT, "Email already exists")
+        } else {
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+        }
+    })?;
 
-            Ok(Json(UserResponse {
-                id: r.id,
-                email: r.email,
-                name: r.name,
-                role: r.role,
-                is_active: r.is_active,
-                failed_login_attempts: 0,
-                locked_until: None,
-                password_changed_at: None,
-                created_at: r.created_at,
-                updated_at: r.updated_at,
-            }))
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to update user");
-            Err(err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update user",
-            ))
-        }
+    let mut revoked_profile_assignments = 0_u64;
+    let mut revoked_direct_rules = 0_u64;
+    if role_changed {
+        sqlx::query(
+            "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+             WHERE user_id = $1 AND status IN ('pending', 'approved')",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "Failed to reject pending logins after role change");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+        })?;
+
+        revoked_profile_assignments = sqlx::query(
+            r#"UPDATE staff_access_profile_assignments
+               SET revoked_at = now(), revoked_by = $2
+               WHERE user_id = $1 AND revoked_at IS NULL"#,
+        )
+        .bind(user_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "Failed to revoke access profile after role change");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+        })?
+        .rows_affected();
+
+        revoked_direct_rules = sqlx::query(
+            r#"UPDATE staff_user_access_rules
+               SET revoked_at = now(), revoked_by = $2
+               WHERE user_id = $1 AND revoked_at IS NULL"#,
+        )
+        .bind(user_id)
+        .bind(auth.user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "Failed to revoke direct access after role change");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+        })?
+        .rows_affected();
+
+        sqlx::query(
+            r#"INSERT INTO audit_log (
+                    user_id, action, entity_type, entity_id, context, old_value, new_value
+               ) VALUES (
+                    $1, 'revoke_user_resource_access_on_role_change', 'user', $2, $3, $4, $5
+               )"#,
+        )
+        .bind(auth.user_id)
+        .bind(user_id)
+        .bind(serde_json::json!({
+            "revoked_profile_assignments": revoked_profile_assignments,
+            "revoked_direct_rules": revoked_direct_rules,
+        }))
+        .bind(serde_json::json!({ "role": current_role }))
+        .bind(serde_json::json!({ "role": new_role }))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, user_id = %user_id, "Failed to audit access revocation after role change");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+        })?;
     }
+
+    let response = UserResponse {
+        id: row
+            .try_get("id")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        email: row
+            .try_get("email")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        name: row
+            .try_get("name")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        role: row
+            .try_get("role")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        is_active: row
+            .try_get("is_active")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        failed_login_attempts: 0,
+        locked_until: None,
+        password_changed_at: None,
+        created_at: row
+            .try_get("created_at")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+        updated_at: row
+            .try_get("updated_at")
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
+    };
+
+    tx.commit().await.map_err(|e| {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to commit user update");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+    })?;
+
+    if role_changed {
+        crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_role_changed").await;
+    }
+    state.audit_sender.try_send(audit::domain_diff_event(
+        "update_user",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({
+            "name": current_name,
+            "role": current_role,
+            "email": current_email,
+        }),
+        serde_json::json!({
+            "name": response.name,
+            "role": response.role,
+            "email": response.email,
+            "revoked_profile_assignments": revoked_profile_assignments,
+            "revoked_direct_rules": revoked_direct_rules,
+        }),
+    ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "user.updated",
+        "user",
+        user_id,
+        serde_json::json!({
+            "role": response.role.clone(),
+            "email": response.email.clone(),
+        }),
+    )
+    .await;
+
+    Ok(Json(response))
 }
 
 async fn deactivate_user(

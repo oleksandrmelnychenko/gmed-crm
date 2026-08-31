@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, UsersRound, Workflow, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -14,7 +14,12 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
-import type { ConciergeAssignee, ConciergeTask } from "@/pages/concierge/model";
+import { assignableConciergeTaskUsers, conciergeTaskErrorMessage, type ConciergeAssignee, type ConciergeTask } from "@/pages/concierge/model";
+import {
+  ConciergeTaskEventDialog,
+  type ConciergeTaskPatientOption,
+  type SaveConciergeOperationalItemInput,
+} from "@/pages/concierge/task-event-dialog";
 
 import type { Project, ProjectFormValue, ProjectPriority, ProjectStatus, ProjectWorkflowDependency } from "./model";
 import { ProjectWorkflowView } from "./workflow-view";
@@ -61,6 +66,7 @@ const copy = {
     loading: "Загрузка проектов",
     loadFailed: "Не удалось загрузить проекты.",
     saveFailed: "Не удалось сохранить проект.",
+    taskSaveFailed: "Не удалось создать задачу.",
     apiUnavailable: "Раздел проектов ещё не доступен на этом сервере.",
     tasks: "Задачи проекта",
     newTask: "Создать задачу",
@@ -116,6 +122,7 @@ const copy = {
     loading: "Projekte werden geladen",
     loadFailed: "Projekte konnten nicht geladen werden.",
     saveFailed: "Projekt konnte nicht gespeichert werden.",
+    taskSaveFailed: "Aufgabe konnte nicht erstellt werden.",
     apiUnavailable: "Der Projektbereich ist auf diesem Server noch nicht verfügbar.",
     tasks: "Projektaufgaben",
     newTask: "Aufgabe erstellen",
@@ -190,9 +197,21 @@ export function ProjectsPage() {
   const [editing, setEditing] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
+  const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [taskDialogError, setTaskDialogError] = useState("");
+  const createTaskRequestIdRef = useRef<string | null>(null);
   const selectedId = searchParams.get("project");
   const selected = projects.find((project) => project.id === selectedId) ?? null;
   const activeView = searchParams.get("view") === "workflow" ? "workflow" : "overview";
+  const taskPatients = useMemo<ConciergeTaskPatientOption[]>(() => patients.map((patient) => ({
+    id: patient.id,
+    name: [patient.first_name, patient.last_name].filter(Boolean).join(" ") || patient.patient_id,
+  })).sort((left, right) => left.name.localeCompare(right.name)), [patients]);
+  const taskAssignees = useMemo(
+    () => assignableConciergeTaskUsers(assignees, user?.id, user?.role),
+    [assignees, user?.id, user?.role],
+  );
 
   useDebouncedRealtimeSubscription([
     "crm_project.created",
@@ -313,6 +332,13 @@ export function ProjectsPage() {
   function openCreate() { setDialogError(""); setEditing(null); setDialogOpen(true); }
   function openEdit(project: Project) { setDialogError(""); setEditing(project); setDialogOpen(true); }
 
+  function openCreateTask() {
+    if (!selected) return;
+    setTaskDialogError("");
+    createTaskRequestIdRef.current = crypto.randomUUID();
+    setTaskDialogOpen(true);
+  }
+
   async function saveProject(input: ProjectFormValue) {
     if (saving) return;
     setSaving(true);
@@ -333,6 +359,34 @@ export function ProjectsPage() {
       setDialogError(displayApiError(saveError, labels.saveFailed, labels.apiUnavailable));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveProjectTask(input: SaveConciergeOperationalItemInput): Promise<ConciergeTask> {
+    if (taskSubmitting) throw new Error(labels.taskSaveFailed);
+    setTaskSubmitting(true);
+    setTaskDialogError("");
+    try {
+      const { status, ...fields } = input;
+      void status;
+      const requestId = createTaskRequestIdRef.current ?? crypto.randomUUID();
+      createTaskRequestIdRef.current = requestId;
+      const saved = await apiFetch<ConciergeTask>("/concierge-operational-items", {
+        method: "POST",
+        body: JSON.stringify({ ...fields, request_id: requestId }),
+      });
+      clearApiCache("/concierge-operational-items");
+      clearApiCache("/projects");
+      setTasks((current) => current.some((task) => task.id === saved.id)
+        ? current.map((task) => task.id === saved.id ? saved : task)
+        : [...current, saved]);
+      void loadProjects(true);
+      return saved;
+    } catch (saveError) {
+      setTaskDialogError(conciergeTaskErrorMessage(saveError, lang, labels.taskSaveFailed));
+      throw saveError;
+    } finally {
+      setTaskSubmitting(false);
     }
   }
 
@@ -389,7 +443,7 @@ export function ProjectsPage() {
           canManage={canEditSelected}
           onSelectProject={selectWorkflowProject}
           onCreateProject={openCreate}
-          onCreateTask={() => selected ? staffGo(`/task-manager?create=1&project=${selected.id}${selected.patient_id ? `&patient=${selected.patient_id}` : ""}`) : undefined}
+          onCreateTask={openCreateTask}
           onOpenTask={(taskId) => staffGo(`/task-manager?task=${taskId}`)}
           onAddDependency={addWorkflowDependency}
           onRemoveDependency={removeWorkflowDependency}
@@ -432,7 +486,7 @@ export function ProjectsPage() {
             {selected.starts_on || selected.due_on ? <div className="mt-2 rounded-lg border px-3 py-2 text-sm"><span className="text-muted-foreground">{labels.period}: </span><span className="font-medium">{dateLabel(selected.starts_on, lang) ?? "—"} – {dateLabel(selected.due_on, lang) ?? labels.noDeadline}</span></div> : null}
             {selected.patient_name ? <button type="button" className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:border-orange-300 hover:bg-orange-50/40" onClick={() => staffGo(`/patients/${selected.patient_id}`)}><span className="text-muted-foreground">{labels.patient}: </span><span className="font-medium">{selected.patient_name}</span></button> : null}
             <div className="mt-4"><h3 className="text-sm font-semibold">{labels.team} <Badge variant="secondary">{selected.member_count}</Badge></h3><div className="mt-2 flex flex-wrap gap-1.5">{selected.members?.length ? selected.members.map((member) => <Badge key={member.id} variant="outline" className={member.id === selected.owner_id ? "border-orange-200 bg-orange-50 text-orange-700" : "bg-background"}><UsersRound className="mr-1 size-3" />{member.name}</Badge>) : <span className="text-sm text-muted-foreground">—</span>}</div></div>
-            <div className="mt-5 flex items-center justify-between"><h3 className="font-semibold">{labels.tasks} <Badge variant="secondary">{selected.task_total}</Badge></h3><Button size="sm" onClick={() => staffGo(`/task-manager?create=1&project=${selected.id}${selected.patient_id ? `&patient=${selected.patient_id}` : ""}`)}><Plus />{labels.newTask}</Button></div>
+            <div className="mt-5 flex items-center justify-between"><h3 className="font-semibold">{labels.tasks} <Badge variant="secondary">{selected.task_total}</Badge></h3><Button size="sm" onClick={openCreateTask}><Plus />{labels.newTask}</Button></div>
             <div className="mt-3 space-y-2">{detailLoading ? <div className="py-8 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></div> : tasks.length ? tasks.map((task) => <button key={task.id} type="button" className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:border-orange-300" onClick={() => staffGo(`/task-manager?task=${task.id}`)}><CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${task.status === "completed" ? "text-emerald-600" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1"><span className="block font-medium text-foreground">{task.title}</span><span className="mt-1 block text-xs text-muted-foreground">{task.assigned_to_name}{task.due_at ? ` · ${new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(new Date(task.due_at))}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[10px] ${taskStatusClass(task.status)}`}>{labels[task.status as keyof typeof labels] ?? task.status}</Badge></button>) : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{labels.noTasks}</p>}</div>
             <p className="mt-4 text-xs text-muted-foreground">{labels.createdBy}: {selected.created_by_name}</p>
           </> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center text-sm text-muted-foreground"><FolderKanban className="mb-3 size-9 text-orange-400" />{labels.selectHint}</div>}
@@ -442,6 +496,33 @@ export function ProjectsPage() {
       )}
 
       <ProjectDialog open={dialogOpen} editing={editing} assignees={assignees} patients={patients} lang={lang} saving={saving} error={dialogError} onOpenChange={(open) => { setDialogOpen(open); if (!open) setDialogError(""); }} onSave={saveProject} currentUserId={user?.id ?? ""} />
+      <ConciergeTaskEventDialog
+        item={null}
+        services={[]}
+        assignees={taskAssignees}
+        currentUserId={user?.id ?? null}
+        canAssign={taskAssignees.length > 0}
+        canModifyAttachments={false}
+        showServiceLink={false}
+        serviceLinkRequired={false}
+        patients={taskPatients}
+        providers={[]}
+        projects={projects}
+        initialPatientId={selected?.patient_id ?? null}
+        initialProjectId={selected?.id ?? null}
+        lang={lang}
+        open={taskDialogOpen}
+        submitting={taskSubmitting}
+        error={taskDialogError}
+        onOpenChange={(open) => {
+          setTaskDialogOpen(open);
+          if (!open) {
+            setTaskDialogError("");
+            createTaskRequestIdRef.current = null;
+          }
+        }}
+        onSave={saveProjectTask}
+      />
     </div>
   );
 }

@@ -49,6 +49,7 @@ pub mod providers;
 pub mod realtime;
 pub mod service_packages;
 pub mod sops;
+pub mod staff_access;
 pub mod stats;
 pub mod tasks;
 pub mod tax_profiles;
@@ -102,6 +103,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(bmp_imports::router())
         .merge(tasks::router())
         .merge(stats::router())
+        .merge(staff_access::router())
         .merge(invoices::router())
         .merge(admin_settings::router())
         .merge(admin_security::router())

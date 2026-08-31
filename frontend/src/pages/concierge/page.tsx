@@ -48,6 +48,7 @@ import {
   isConciergeKeyService,
   isConciergeServiceOverdue,
   sortConciergeServices,
+  unconvertedConciergeServices,
   type ApplyPartnerQuoteResponse,
   type ConciergeAssignee,
   type ConciergeBoardColumnId,
@@ -677,7 +678,7 @@ export function ConciergeWorkspacePage() {
   }, [labels.loadFailed, taskListPath, user, version]);
 
   const visibleServices = useMemo(
-    () => sortConciergeServices(filterConciergeServices(services, query)),
+    () => sortConciergeServices(filterConciergeServices(unconvertedConciergeServices(services), query)),
     [query, services],
   );
   const workspaceTasks = useMemo(
@@ -1070,6 +1071,12 @@ export function ConciergeWorkspacePage() {
           ? current.map((item) => item.id === saved.id ? saved : item)
           : [...current, saved];
       });
+      if (taskSourceService) {
+        setServices((current) => current.map((service) => service.id === taskSourceService.id
+          ? { ...service, linked_task_id: saved.id }
+          : service));
+        clearApiCache("/concierge-services");
+      }
       return saved;
     } catch (saveError) {
       setTaskError(conciergeTaskErrorMessage(saveError, lang, labels.taskUpdateFailed));

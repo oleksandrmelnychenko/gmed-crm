@@ -198,6 +198,105 @@ async fn create_user_rejects_external_standalone_staff_email() {
 }
 
 #[tokio::test]
+async fn changing_user_role_revokes_profile_and_direct_resource_access() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let target_id = seed_user(&pool, "users-api-role-access-reset", "concierge").await;
+    let profile_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO staff_access_profiles (name, created_by)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Role reset profile {}", Uuid::new_v4().simple()))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO staff_access_profile_roles (profile_id, role) VALUES ($1, 'concierge')",
+    )
+    .bind(profile_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO staff_access_profile_assignments (
+                user_id, profile_id, assigned_for_role, assigned_by
+           ) VALUES ($1, $2, 'concierge', $3)"#,
+    )
+    .bind(target_id)
+    .bind(profile_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO staff_user_access_rules (
+                user_id, granted_for_role, resource_type, scope_type,
+                resource_id, capability, effect, granted_by
+           ) VALUES ($1, 'concierge', 'provider', 'record', $2, 'view', 'allow', $3)"#,
+    )
+    .bind(target_id)
+    .bind(Uuid::new_v4())
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{target_id}/update"),
+        &bearer,
+        json!({ "role": "billing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["role"], "billing");
+
+    let (role, access_revision): (String, i64) =
+        sqlx::query_as("SELECT role, access_revision FROM users WHERE id = $1")
+            .bind(target_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(role, "billing");
+    assert_eq!(access_revision, 1);
+
+    let active_profile_assignments: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM staff_access_profile_assignments WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let active_direct_rules: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM staff_user_access_rules WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active_profile_assignments, 0);
+    assert_eq!(active_direct_rules, 0);
+
+    let access_revocation_audit: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM audit_log
+           WHERE action = 'revoke_user_resource_access_on_role_change'
+             AND entity_type = 'user'
+             AND entity_id = $1"#,
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(access_revocation_audit, 1);
+}
+
+#[tokio::test]
 async fn reset_password_rejects_password_without_required_character_classes() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

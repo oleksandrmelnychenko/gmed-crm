@@ -26,6 +26,7 @@ export type ConciergeService = {
   appointment_id: string | null;
   appointment_title: string | null;
   task_eligible?: boolean;
+  linked_task_id?: string | null;
   provider_id: string | null;
   provider_name: string | null;
   assigned_concierge_id: string | null;
@@ -346,6 +347,7 @@ const TASK_TRANSITION_ERROR = "Invalid task status transition";
 const TASK_DELETE_ERROR = "Only an untouched open task can be deleted; cancel or archive it instead";
 const TASK_ACCESS_ERROR = "Only the task assignee, creator, or a higher role can access this task";
 const TASK_SERVICE_ERROR = "concierge_service_id must reference an assigned non-medical service";
+const TASK_SERVICE_CONVERTED_ERROR = "Concierge service request already converted to a task";
 
 export function conciergeTaskErrorMessage(
   error: unknown,
@@ -393,6 +395,12 @@ export function conciergeTaskErrorMessage(
     return lang === "ru"
       ? "Выбранный сервис не подходит для этой задачи. Выберите немедицинский сервис, назначенный текущему исполнителю."
       : "Der ausgewählte Service kann für diese Aufgabe nicht verwendet werden. Wählen Sie einen nicht-medizinischen Service, der der zuständigen Person zugewiesen ist.";
+  }
+
+  if (message === TASK_SERVICE_CONVERTED_ERROR) {
+    return lang === "ru"
+      ? "Этот запрос уже преобразован в задачу. Откройте созданную задачу в менеджере задач."
+      : "Diese Anfrage wurde bereits in eine Aufgabe umgewandelt. Öffnen Sie die erstellte Aufgabe im Aufgabenmanager.";
   }
 
   if (message.startsWith(TASK_PERMISSION_ERROR_PREFIX)) {
@@ -727,6 +735,11 @@ export function filterConciergeServices(
       service.taxonomy_node_name_ru,
     ].some((value) => value?.toLocaleLowerCase().includes(needle)),
   );
+}
+
+/** A request leaves the service intake workspace after it is converted into an operational task. */
+export function unconvertedConciergeServices(services: ConciergeService[]): ConciergeService[] {
+  return services.filter((service) => !service.linked_task_id);
 }
 
 export function sortConciergeServices(services: ConciergeService[]): ConciergeService[] {

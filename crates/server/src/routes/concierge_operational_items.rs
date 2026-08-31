@@ -1099,16 +1099,22 @@ async fn create_item(
     {
         return response;
     }
-    if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) = ensure_service_assignment_in_transaction(
+    if let Some(service_id) = fields.concierge_service_id {
+        if let Err(response) = ensure_service_assignment_in_transaction(
             &mut tx,
             service_id,
             assigned_to,
             auth.role == Role::Ceo,
         )
         .await
-    {
-        return response;
+        {
+            return response;
+        }
+        if let Err(response) =
+            ensure_service_not_converted_in_transaction(&mut tx, service_id, None).await
+        {
+            return response;
+        }
     }
     if let Some(patient_id) = fields.patient_id {
         let exists =
@@ -1405,16 +1411,22 @@ async fn update_item(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if let Some(service_id) = fields.concierge_service_id
-        && let Err(response) = ensure_service_assignment_in_transaction(
+    if let Some(service_id) = fields.concierge_service_id {
+        if let Err(response) = ensure_service_assignment_in_transaction(
             &mut tx,
             service_id,
             assigned_to,
             existing_service_id == Some(service_id),
         )
         .await
-    {
-        return response;
+        {
+            return response;
+        }
+        if let Err(response) =
+            ensure_service_not_converted_in_transaction(&mut tx, service_id, Some(item_id)).await
+        {
+            return response;
+        }
     }
     if let Some(patient_id) = fields.patient_id {
         let exists =
@@ -3755,6 +3767,38 @@ async fn ensure_service_assignment_in_transaction(
         tracing::error!(error = %error, service_id = %service_id, assigned_to = %assigned_to, "synchronize operational service assignee");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
+    Ok(())
+}
+
+async fn ensure_service_not_converted_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    service_id: Uuid,
+    current_task_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let already_converted = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM tasks task
+               WHERE task.concierge_service_id = $1
+                 AND task.task_scope = 'concierge_operational'
+                 AND task.deleted_at IS NULL
+                 AND ($2::uuid IS NULL OR task.id <> $2)
+           )"#,
+    )
+    .bind(service_id)
+    .bind(current_task_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "check concierge service task conversion");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if already_converted {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Concierge service request already converted to a task",
+        ));
+    }
     Ok(())
 }
 
