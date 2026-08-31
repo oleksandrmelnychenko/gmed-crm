@@ -451,6 +451,23 @@ fi
 # --build: production pulls cosign-verified images and never builds locally.
 compose_up_or_diagnose
 
+# The 2026-08-31 authentication correction must also take effect when PROD is
+# still running the previously signed backend image. Apply the repository SQL
+# directly after Postgres is available; the statements are idempotent. A later
+# backend release will execute and record the same SQLx migration normally.
+login_preservation_migration="$REPO_DIR/migrations/20260831150000_preserve_existing_account_login.sql"
+if [[ -r "$login_preservation_migration" ]]; then
+  echo "Applying existing-account login preservation migration"
+  docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+    psql \
+      --quiet \
+      --no-psqlrc \
+      -v ON_ERROR_STOP=1 \
+      -U "$POSTGRES_USER" \
+      -d "${POSTGRES_DB:-gmed}" \
+    < "$login_preservation_migration"
+fi
+
 if [[ "$sanitized_this_run" == "true" ]]; then
   verify_sanitized_production_database
 fi

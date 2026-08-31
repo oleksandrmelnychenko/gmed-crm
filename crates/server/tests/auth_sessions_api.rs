@@ -754,6 +754,45 @@ async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_i
 }
 
 #[tokio::test]
+async fn legacy_account_without_password_changed_at_can_sign_in() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-legacy-password-{tag}@example.com");
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "legacy-password-1!",
+        true,
+        false,
+        None,
+    )
+    .await;
+    sqlx::query(
+        "UPDATE users
+         SET password_changed_at = NULL, password_reset_required = false
+         WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "legacy-password-1!" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["access_token"].as_str().is_some());
+}
+
+#[tokio::test]
 async fn expired_password_cannot_start_a_new_session() {
     let Some((app, pool)) = test_context().await else {
         return;

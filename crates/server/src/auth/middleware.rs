@@ -208,7 +208,7 @@ pub async fn revalidate_auth_user(state: &AppState, auth: &AuthUser) -> Result<A
     let password_changed_at: Option<DateTime<Utc>> =
         row.try_get("password_changed_at").unwrap_or_default();
     if settings.password_expire_days > 0
-        && password_changed_at.is_none_or(|changed_at| {
+        && password_changed_at.is_some_and(|changed_at| {
             changed_at + chrono::Duration::days(settings.password_expire_days) <= Utc::now()
         })
     {

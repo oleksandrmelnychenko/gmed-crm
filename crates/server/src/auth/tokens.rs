@@ -79,7 +79,7 @@ async fn create_session_record(
     })?
     .ok_or(TokenError::FamilyRevoked)?;
     let password_expired = settings.password_expire_days > 0
-        && account.password_changed_at.is_none_or(|changed_at| {
+        && account.password_changed_at.is_some_and(|changed_at| {
             changed_at + Duration::days(settings.password_expire_days) <= Utc::now()
         });
     let credentials_changed = expected_password_changed_at
@@ -303,7 +303,7 @@ pub async fn rotate_refresh_token(
     }
 
     let password_expired = settings.password_expire_days > 0
-        && row.password_changed_at.is_none_or(|changed_at| {
+        && row.password_changed_at.is_some_and(|changed_at| {
             changed_at + Duration::days(settings.password_expire_days) <= Utc::now()
         });
     if !row.is_active || row.password_reset_required || password_expired {

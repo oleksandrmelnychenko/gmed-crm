@@ -353,7 +353,7 @@ async fn login(
 
     let settings = state.settings.get().await;
     let password_expired = settings.password_expire_days > 0
-        && user.password_changed_at.is_none_or(|changed_at| {
+        && user.password_changed_at.is_some_and(|changed_at| {
             changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
         });
     if user.password_reset_required || password_expired {
@@ -739,11 +739,11 @@ async fn check_pending(
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed"),
     };
     let password_expired = settings.password_expire_days > 0
-        && password_changed_at.is_none_or(|changed_at| {
+        && password_changed_at.is_some_and(|changed_at| {
             changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
         });
     let credentials_changed =
-        password_changed_at.is_none_or(|changed_at| changed_at > pending_created_at);
+        password_changed_at.is_some_and(|changed_at| changed_at > pending_created_at);
 
     if consumed_at.is_some()
         || expires_at <= chrono::Utc::now()
