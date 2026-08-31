@@ -374,7 +374,8 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{generic}");
+    assert_eq!(status, StatusCode::OK, "{generic}");
+    assert_eq!(generic["id"], task_id.to_string());
 
     let row: (String, Option<Uuid>, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
         "SELECT task_scope, patient_id, order_id, appointment_id FROM tasks WHERE id = $1",
@@ -383,7 +384,7 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(row.0, "concierge_operational");
+    assert_eq!(row.0, "general");
     assert_eq!((row.1, row.2, row.3), (None, None, None));
 }
 
@@ -791,7 +792,7 @@ async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency(
     let created_task_rows: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM tasks
-           WHERE id IN ($1, $2) AND task_scope = 'concierge_operational'"#,
+           WHERE id IN ($1, $2) AND task_scope = 'general'"#,
     )
     .bind(first_task_id)
     .bind(
@@ -2535,4 +2536,143 @@ async fn project_members_can_read_project_tasks_but_cannot_mutate_unassigned_wor
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied}");
+}
+
+#[tokio::test]
+async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_scope() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner_id = seed_user(&ctx.pool, "concierge", &format!("work-owner-{tag}")).await;
+    let patient_user_id = seed_user(&ctx.pool, "concierge", &format!("work-patient-{tag}")).await;
+    let outsider_id = seed_user(&ctx.pool, "concierge", &format!("work-outsider-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("work-{tag}")).await;
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
+    let general_task_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, patient_id, task_scope, task_kind
+           ) VALUES ($1, $2, $3, $4, 'general', 'task')
+           RETURNING id"#,
+    )
+    .bind(format!("Lead workflow task {tag}"))
+    .bind(owner_id)
+    .bind(ctx.admin_id)
+    .bind(patient_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let legacy_task_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, task_scope, task_kind
+           ) VALUES ($1, $2, $3, 'concierge_operational', 'task')
+           RETURNING id"#,
+    )
+    .bind(format!("Legacy operational task {tag}"))
+    .bind(owner_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let base_path = "/api/v1/concierge-operational-items";
+    let owner_bearer = auth_header_for(owner_id, "concierge");
+    let patient_bearer = auth_header_for(patient_user_id, "concierge");
+    let outsider_bearer = auth_header_for(outsider_id, "concierge");
+
+    let (status, owner_items) = json_request(&ctx.app, "GET", base_path, &owner_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{owner_items}");
+    let owner_items = owner_items.as_array().expect("owner task list");
+    assert!(
+        owner_items
+            .iter()
+            .any(|item| item["id"] == general_task_id.to_string())
+    );
+    assert!(
+        owner_items
+            .iter()
+            .any(|item| item["id"] == legacy_task_id.to_string())
+    );
+
+    let (status, patient_items) =
+        json_request(&ctx.app, "GET", base_path, &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{patient_items}");
+    let patient_items = patient_items.as_array().expect("patient-scoped task list");
+    assert!(
+        patient_items
+            .iter()
+            .any(|item| item["id"] == general_task_id.to_string())
+    );
+    assert!(
+        !patient_items
+            .iter()
+            .any(|item| item["id"] == legacy_task_id.to_string())
+    );
+
+    let general_path = format!("{base_path}/{general_task_id}");
+    let (status, patient_detail) =
+        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{patient_detail}");
+    assert_eq!(patient_detail["item"]["id"], general_task_id.to_string());
+
+    let (status, comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{general_path}/comments"),
+        &owner_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "body": "Canonical task comment"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{comment}");
+
+    let (status, patient_detail) =
+        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{patient_detail}");
+    assert_eq!(
+        patient_detail["comments"]
+            .as_array()
+            .expect("patient-scoped comments")
+            .len(),
+        1
+    );
+
+    let (status, denied_status) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{general_path}/status"),
+        &patient_bearer,
+        Some(json!({
+            "expected_updated_at": patient_detail["item"]["updated_at"],
+            "status": "in_progress"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_status}");
+
+    let (status, outsider_items) =
+        json_request(&ctx.app, "GET", base_path, &outsider_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{outsider_items}");
+    assert!(
+        !outsider_items
+            .as_array()
+            .expect("outsider task list")
+            .iter()
+            .any(|item| item["id"] == general_task_id.to_string())
+    );
+    let (status, denied_detail) =
+        json_request(&ctx.app, "GET", &general_path, &outsider_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{denied_detail}");
 }

@@ -801,6 +801,15 @@ async fn get_expense_context(
     if !can_read_expenses(&auth, &context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    if let Err(response) =
+        crate::routes::concierge_services::ensure_task_for_service(&state, service_id).await
+    {
+        return response;
+    }
+    let context = match load_service_context(&state, service_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
 
     let patient = match sqlx::query(
         r#"SELECT id, patient_id, first_name, last_name
@@ -1177,6 +1186,12 @@ async fn submit_expense_for_scope(
     };
     if !can_submit_scope(&auth, scope, &initial_context) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let ExpenseScope::Service(service_id) = scope
+        && let Err(response) =
+            crate::routes::concierge_services::ensure_task_for_service(&state, service_id).await
+    {
+        return response;
     }
     let mut input = match parse_expense_multipart(multipart).await {
         Ok(value) => value,

@@ -590,6 +590,11 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     let billing_id = seed_user(&context.pool, "billing", &format!("review-{tag}")).await;
     let (patient_id, provider_id, service_id, order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    sqlx::query("DELETE FROM tasks WHERE concierge_service_id = $1")
+        .bind(service_id)
+        .execute(&context.pool)
+        .await
+        .unwrap();
     let owner = auth_header(concierge_id, "concierge");
     let other = auth_header(other_concierge_id, "concierge");
     let request_id = Uuid::new_v4();
@@ -634,6 +639,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     .await;
     assert_eq!(status, StatusCode::OK, "{private_context}");
     assert_eq!(private_context["service"]["id"], service_id.to_string());
+    let canonical_task_id = linked_task_id(&context.pool, service_id).await;
     assert!(private_context["mapped_order"].is_null());
     assert_eq!(
         private_context["eligible_orders"].as_array().unwrap().len(),
@@ -678,6 +684,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(created["item"]["status"], "pending_review");
+    assert_eq!(created["item"]["task_id"], canonical_task_id.to_string());
     assert!(created["item"]["order_id"].is_null());
     assert_eq!(
         created["item"]["balance_consequence"]["patient_receivable_gross"],

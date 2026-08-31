@@ -107,6 +107,29 @@ async fn seed_service(
     .unwrap()
 }
 
+async fn seed_general_task(
+    pool: &PgPool,
+    patient_id: Uuid,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, patient_id, task_scope,
+               task_kind, status, service_status, currency
+           ) VALUES ($1, $2, $3, $4, 'general', 'task', 'open', 'planned', 'EUR')
+           RETURNING id"#,
+    )
+    .bind(format!("Airport transfer task {tag}"))
+    .bind(assigned_to)
+    .bind(assigned_by)
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 fn booking_body(request_id: Uuid, provider_id: Uuid, booking_state: &str) -> Value {
     json!({
         "request_id": request_id,
@@ -121,6 +144,113 @@ fn booking_body(request_id: Uuid, provider_id: Uuid, booking_state: &str) -> Val
         "service_address": "Terminal 1, Munich Airport",
         "note": "Meet at arrivals"
     })
+}
+
+#[tokio::test]
+async fn general_task_booking_is_task_native_and_manager_accessible() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let assignee_id = seed_user(&ctx.pool, "concierge", &format!("task-owner-{tag}")).await;
+    let other_id = seed_user(&ctx.pool, "concierge", &format!("task-other-{tag}")).await;
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("task-manager-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("task-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("task-{tag}")).await;
+    let task_id = seed_general_task(&ctx.pool, patient_id, assignee_id, ctx.admin_id, &tag).await;
+    let path = format!("/api/v1/tasks/{task_id}/book-provider");
+    let request_id = Uuid::new_v4();
+
+    let (status, requested) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(assignee_id, "concierge"),
+        Some(booking_body(request_id, provider_id, "requested")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{requested}");
+    assert_eq!(requested["task"]["id"], task_id.to_string());
+    assert_eq!(requested["task"]["service_status"], "booked");
+    assert_eq!(requested["task"]["provider_id"], provider_id.to_string());
+
+    let interaction_id = requested["interaction_id"].clone();
+    let (status, replayed) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(assignee_id, "concierge"),
+        Some(booking_body(request_id, provider_id, "requested")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed["interaction_id"], interaction_id);
+
+    let (status, confirmed) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(manager_id, "patient_manager"),
+        Some(booking_body(Uuid::new_v4(), provider_id, "confirmed")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(confirmed["task"]["service_status"], "confirmed");
+
+    let (status, forbidden) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(other_id, "concierge"),
+        Some(booking_body(Uuid::new_v4(), provider_id, "confirmed")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let persisted: (String, String, Option<Uuid>, i64) = sqlx::query_as(
+        r#"SELECT task_scope, service_status, concierge_service_id,
+                  (SELECT count(*) FROM concierge_service_partner_interactions interaction
+                   WHERE interaction.task_id = task.id
+                     AND interaction.concierge_service_id IS NULL)
+           FROM tasks task WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(persisted.0, "general");
+    assert_eq!(persisted.1, "confirmed");
+    assert_eq!(persisted.2, None);
+    assert_eq!(persisted.3, 2);
+
+    let inactive_provider_id =
+        seed_provider(&ctx.pool, "non_medical", &format!("inactive-{tag}")).await;
+    sqlx::query("UPDATE providers SET is_active = false WHERE id = $1")
+        .bind(inactive_provider_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let inactive_task_id = seed_general_task(
+        &ctx.pool,
+        patient_id,
+        assignee_id,
+        ctx.admin_id,
+        &format!("inactive-{tag}"),
+    )
+    .await;
+    let (status, inactive) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/tasks/{inactive_task_id}/book-provider"),
+        &auth_header_for(assignee_id, "concierge"),
+        Some(booking_body(
+            Uuid::new_v4(),
+            inactive_provider_id,
+            "requested",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{inactive}");
 }
 
 #[tokio::test]

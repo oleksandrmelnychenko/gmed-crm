@@ -109,6 +109,134 @@ async fn seed_concierge_service(
     .unwrap()
 }
 
+async fn seed_general_partner_task(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, patient_id, provider_id,
+               task_scope, task_kind, status, currency
+           ) VALUES ($1, $2, $3, $4, $5, 'general', 'task', 'open', 'EUR')
+           RETURNING id"#,
+    )
+    .bind(format!("Partner coordination {tag}"))
+    .bind(assigned_to)
+    .bind(assigned_by)
+    .bind(patient_id)
+    .bind(provider_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn general_task_owns_partner_history_and_applied_quote() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let assignee_id = seed_user(&ctx.pool, "concierge", &format!("task-owner-{tag}")).await;
+    let other_id = seed_user(&ctx.pool, "concierge", &format!("task-other-{tag}")).await;
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("task-manager-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("task-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("task-{tag}")).await;
+    let task_id = seed_general_partner_task(
+        &ctx.pool,
+        patient_id,
+        provider_id,
+        assignee_id,
+        ctx.admin_id,
+        &tag,
+    )
+    .await;
+    let path = format!("/api/v1/tasks/{task_id}/partner-interactions");
+
+    let (status, interaction) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(assignee_id, "concierge"),
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "channel": "email",
+            "direction": "inbound",
+            "outcome": "quote_received",
+            "quoted_cost": 125.40,
+            "quoted_currency": "eur"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{interaction}");
+    assert_eq!(interaction["task_id"], task_id.to_string());
+    assert!(interaction["concierge_service_id"].is_null());
+    let interaction_id = Uuid::parse_str(
+        interaction["id"]
+            .as_str()
+            .expect("task partner interaction id"),
+    )
+    .unwrap();
+
+    let apply_path = format!(
+        "/api/v1/tasks/{task_id}/partner-interactions/{interaction_id}/apply-cost-estimate"
+    );
+    let (status, applied) = json_request(
+        &ctx.app,
+        "POST",
+        &apply_path,
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{applied}");
+    assert_eq!(applied["cost_estimate"], "125.40");
+    assert_eq!(applied["currency"], "EUR");
+
+    let (status, history) = json_request(
+        &ctx.app,
+        "GET",
+        &path,
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    assert_eq!(history.as_array().map(Vec::len), Some(1));
+    assert_eq!(history[0]["task_id"], task_id.to_string());
+    assert!(history[0]["applied_as_cost_estimate_at"].is_string());
+
+    let (status, forbidden) = json_request(
+        &ctx.app,
+        "GET",
+        &path,
+        &auth_header_for(other_id, "concierge"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let row: (rust_decimal::Decimal, Option<Uuid>, Uuid, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT task.cost_estimate, task.concierge_service_id,
+                  decision.task_id, decision.concierge_service_id
+           FROM tasks task
+           JOIN concierge_service_cost_estimate_decisions decision
+             ON decision.task_id = task.id
+           WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0.to_string(), "125.40");
+    assert_eq!(row.1, None);
+    assert_eq!(row.2, task_id);
+    assert_eq!(row.3, None);
+}
+
 #[tokio::test]
 async fn assigned_concierge_records_non_medical_partner_booking_history() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

@@ -870,7 +870,7 @@ async fn list_concierge_services(
                   (SELECT linked_task.id
                      FROM tasks linked_task
                     WHERE linked_task.concierge_service_id = cs.id
-                      AND linked_task.task_scope = 'concierge_operational'
+                      AND linked_task.task_scope IN ('general', 'concierge_operational')
                       AND linked_task.deleted_at IS NULL
                     ORDER BY linked_task.created_at, linked_task.id
                     LIMIT 1) AS linked_task_id
@@ -1201,6 +1201,22 @@ async fn book_concierge_service_provider(
         );
     }
 
+    let service_for_access = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) =
+        ensure_operational_service_access(&state, &auth, &service_for_access).await
+    {
+        return response;
+    }
+
+    let task_id = match ensure_task_for_service(&state, service_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
     let mut transaction = match state.db.begin().await {
         Ok(value) => value,
         Err(error) => {
@@ -1245,10 +1261,10 @@ async fn book_concierge_service_provider(
     let existing_request = match sqlx::query(
         r#"SELECT id, provider_id, outcome
            FROM concierge_service_partner_interactions
-           WHERE concierge_service_id = $1
+           WHERE task_id = $1
              AND request_id = $2"#,
     )
-    .bind(service_id)
+    .bind(task_id)
     .bind(body.request_id)
     .fetch_optional(&mut *transaction)
     .await
@@ -1433,14 +1449,48 @@ async fn book_concierge_service_provider(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
+    if let Err(error) = sqlx::query(
+        r#"UPDATE tasks
+           SET provider_id = $2,
+               vendor_name = $3,
+               vendor_contact = $4,
+               booking_reference = $5,
+               task_kind = 'event',
+               due_date = NULL,
+               starts_at = $6,
+               ends_at = $7,
+               location = $8,
+               service_address = $8,
+               service_status = $9,
+               status = 'in_progress',
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(task_id)
+    .bind(body.provider_id)
+    .bind(&provider_name)
+    .bind(vendor_contact.as_deref())
+    .bind(booking_reference.as_deref())
+    .bind(starts_at)
+    .bind(ends_at)
+    .bind(&service_address)
+    .bind(next_status)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "sync task provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
     let outcome = expected_outcome;
     let interaction_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_service_partner_interactions (
-               concierge_service_id, provider_id, request_id, channel, direction, outcome,
-               occurred_at, contact_person, note, recorded_by
-           ) VALUES ($1, $2, $3, $4, 'outbound', $5, now(), $6, $7, $8)
+               task_id, concierge_service_id, provider_id, request_id, channel,
+               direction, outcome, occurred_at, contact_person, note, recorded_by
+           ) VALUES ($1, $2, $3, $4, $5, 'outbound', $6, now(), $7, $8, $9)
            RETURNING id"#,
     )
+    .bind(task_id)
     .bind(service_id)
     .bind(body.provider_id)
     .bind(body.request_id)
@@ -1586,6 +1636,11 @@ async fn record_concierge_service_key_event(
         );
     }
 
+    let task_id = match ensure_task_for_service(&state, service_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
     let responsible_user_id = body.responsible_user_id.unwrap_or(auth.user_id);
     if auth.role == Role::Concierge && responsible_user_id != auth.user_id {
         return err(
@@ -1712,13 +1767,37 @@ async fn record_concierge_service_key_event(
         }
     }
 
+    if let Err(e) = sqlx::query(
+        r#"UPDATE tasks
+           SET key_status = $2,
+               key_responsible_user_id = $3,
+               key_status_at = $4,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(task_id)
+    .bind(&body.action)
+    .bind(responsible_user_id)
+    .bind(occurred_at)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, service_id = %service_id, task_id = %task_id, "sync task key state");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record key custody",
+        );
+    }
+
     let event = match sqlx::query(
         r#"INSERT INTO concierge_service_key_events (
-               concierge_service_id, action, responsible_user_id, occurred_at, note, recorded_by
+               task_id, concierge_service_id, action, responsible_user_id,
+               occurred_at, note, recorded_by
            )
-           VALUES ($1, $2, $3, $4, $5, $6)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING id, created_at"#,
     )
+    .bind(task_id)
     .bind(service_id)
     .bind(&body.action)
     .bind(responsible_user_id)
@@ -1909,6 +1988,10 @@ async fn record_concierge_service_partner_interaction(
         Ok(provider_id) => provider_id,
         Err(resp) => return resp,
     };
+    let task_id = match ensure_task_for_service(&state, service_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
 
     let occurred_at = match body.occurred_at.as_deref() {
         Some(value) => match parse_optional_datetime(Some(value)) {
@@ -1992,14 +2075,16 @@ async fn record_concierge_service_partner_interaction(
     let request_id = body.request_id.unwrap_or_else(Uuid::new_v4);
     let interaction = match sqlx::query(
         r#"INSERT INTO concierge_service_partner_interactions (
-               concierge_service_id, provider_id, request_id, channel, direction, outcome,
-               occurred_at, contact_person, note, quoted_cost, quoted_currency, recorded_by
+               task_id, concierge_service_id, provider_id, request_id, channel,
+               direction, outcome, occurred_at, contact_person, note,
+               quoted_cost, quoted_currency, recorded_by
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           ON CONFLICT (concierge_service_id, request_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+           ON CONFLICT (task_id, request_id)
            DO UPDATE SET request_id = EXCLUDED.request_id
            RETURNING id, created_at"#,
     )
+    .bind(task_id)
     .bind(service_id)
     .bind(provider_id)
     .bind(request_id)
@@ -2064,6 +2149,7 @@ async fn record_concierge_service_partner_interaction(
     .await;
     Json(serde_json::json!({
         "id": interaction_id,
+        "task_id": task_id,
         "concierge_service_id": service_id,
         "provider_id": provider_id,
         "provider_name": provider_name,
@@ -2105,6 +2191,10 @@ async fn apply_partner_quote_as_cost_estimate(
     let provider_id = match load_service_non_medical_partner_id(&state, &service).await {
         Ok(provider_id) => provider_id,
         Err(resp) => return resp,
+    };
+    let task_id = match ensure_task_for_service(&state, service_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
     };
     let applied_by_name = match load_active_operational_user_name(&state, auth.user_id).await {
         Ok(Some(name)) => name,
@@ -2209,10 +2299,11 @@ async fn apply_partner_quote_as_cost_estimate(
     let applied_at = chrono::Utc::now();
     match sqlx::query(
         r#"INSERT INTO concierge_service_cost_estimate_decisions (
-               concierge_service_id, partner_interaction_id, amount_gross,
-               currency, applied_by, applied_at
-           ) VALUES ($1, $2, $3, $4, $5, $6)"#,
+               task_id, concierge_service_id, partner_interaction_id,
+               amount_gross, currency, applied_by, applied_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
     )
+    .bind(task_id)
     .bind(service_id)
     .bind(interaction_id)
     .bind(quoted_cost)
@@ -2246,6 +2337,19 @@ async fn apply_partner_quote_as_cost_estimate(
     .await
     {
         tracing::error!(error = %e, service_id = %service_id, interaction_id = %interaction_id, "apply partner quote to service");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply partner quote",
+        );
+    }
+    if let Err(e) =
+        sqlx::query("UPDATE tasks SET cost_estimate = $2, updated_at = now() WHERE id = $1")
+            .bind(task_id)
+            .bind(quoted_cost)
+            .execute(&mut *transaction)
+            .await
+    {
+        tracing::error!(error = %e, service_id = %service_id, task_id = %task_id, interaction_id = %interaction_id, "apply partner quote to task");
         return err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to apply partner quote",
@@ -4255,7 +4359,7 @@ async fn load_service_row(
                   (SELECT linked_task.id
                      FROM tasks linked_task
                     WHERE linked_task.concierge_service_id = cs.id
-                      AND linked_task.task_scope = 'concierge_operational'
+                      AND linked_task.task_scope IN ('general', 'concierge_operational')
                       AND linked_task.deleted_at IS NULL
                     ORDER BY linked_task.created_at, linked_task.id
                     LIMIT 1) AS linked_task_id
@@ -4311,6 +4415,122 @@ async fn load_task_service_row(
         tracing::error!(error = %error, task_id = %task_id, "load task service context");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load task")
     })
+}
+
+pub(crate) async fn ensure_task_for_service(
+    state: &AppState,
+    service_id: Uuid,
+) -> Result<Uuid, axum::response::Response> {
+    let mut transaction = state.db.begin().await.map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "begin service task resolution");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve service task",
+        )
+    })?;
+    sqlx::query(
+        r#"SELECT id FROM concierge_services
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "lock service task source");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve service task",
+        )
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Concierge service not found"))?;
+
+    if let Some(task_id) = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM tasks
+           WHERE concierge_service_id = $1 AND deleted_at IS NULL
+           ORDER BY (task_scope = 'concierge_operational') DESC, created_at, id
+           LIMIT 1"#,
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "load linked service task");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve service task",
+        )
+    })? {
+        transaction.commit().await.map_err(|error| {
+            tracing::error!(error = %error, service_id = %service_id, "commit service task lookup");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve service task",
+            )
+        })?;
+        return Ok(task_id);
+    }
+
+    let task_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO tasks (
+               title, description, assigned_to, assigned_by, patient_id,
+               appointment_id, provider_id, due_date, priority, status,
+               completed_at, task_scope, task_kind, concierge_service_id,
+               starts_at, ends_at, location, task_audience, service_kind,
+               service_status, provider_service_id, taxonomy_node_id,
+               request_source, booking_reference, vendor_name, vendor_contact,
+               service_address, quantity, unit_price, currency, cost_estimate,
+               actual_cost, billing_status, service_notes, billing_notes,
+               billed_at, key_status, key_responsible_user_id, key_status_at,
+               created_at, updated_at
+           )
+           SELECT title, service_notes,
+                  COALESCE(assigned_concierge_id, created_by), created_by,
+                  patient_id, appointment_id, provider_id,
+                  CASE WHEN starts_at IS NULL THEN ends_at ELSE NULL END,
+                  'normal',
+                  CASE status
+                      WHEN 'completed' THEN 'completed'
+                      WHEN 'cancelled' THEN 'cancelled'
+                      WHEN 'planned' THEN 'open'
+                      ELSE 'in_progress'
+                  END,
+                  CASE WHEN status = 'completed'
+                       THEN COALESCE(completed_at, updated_at) ELSE NULL END,
+                  'general',
+                  CASE WHEN starts_at IS NOT NULL THEN 'event' ELSE 'task' END,
+                  $1, starts_at,
+                  CASE WHEN starts_at IS NOT NULL AND ends_at > starts_at
+                       THEN ends_at ELSE NULL END,
+                  service_address, 'internal', service_kind, status,
+                  provider_service_id, taxonomy_node_id, request_source,
+                  booking_reference, vendor_name, vendor_contact,
+                  service_address, quantity, unit_price,
+                  CASE WHEN upper(btrim(currency)) ~ '^[A-Z]{3}$'
+                       THEN upper(btrim(currency)) ELSE 'EUR' END,
+                  cost_estimate, actual_cost, billing_status, service_notes,
+                  billing_notes, billed_at, key_status,
+                  key_responsible_user_id, key_status_at, created_at, updated_at
+           FROM concierge_services
+           WHERE id = $1
+           RETURNING id"#,
+    )
+    .bind(service_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "create canonical service task");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve service task",
+        )
+    })?;
+    transaction.commit().await.map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "commit canonical service task");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to resolve service task")
+    })?;
+    Ok(task_id)
 }
 
 fn task_service_context(
@@ -4561,6 +4781,7 @@ async fn load_service_non_medical_partner_id(
                FROM providers
                WHERE id = $1
                  AND provider_type = 'non_medical'
+                 AND is_active = true
            )"#,
     )
     .bind(provider_id)

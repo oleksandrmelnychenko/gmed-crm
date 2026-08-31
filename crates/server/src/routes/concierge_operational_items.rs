@@ -297,7 +297,9 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    LEFT JOIN patients patient ON patient.id = t.patient_id
    LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
    LEFT JOIN crm_projects project ON project.id = t.project_id
-   WHERE t.id = $1 AND t.task_scope = 'concierge_operational' AND t.deleted_at IS NULL"#;
+   WHERE t.id = $1
+     AND t.task_scope IN ('general', 'concierge_operational')
+     AND t.deleted_at IS NULL"#;
 
 const COMMENT_RESPONSE_QUERY: &str = r#"SELECT comment.id, comment.body, comment.created_by,
           author.name AS created_by_name, comment.created_at, comment.updated_at, comment.edited_at
@@ -384,7 +386,7 @@ async fn list_items(
            LEFT JOIN patients patient ON patient.id = t.patient_id
            LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
            LEFT JOIN crm_projects project ON project.id = t.project_id
-           WHERE t.task_scope = 'concierge_operational'
+           WHERE t.task_scope IN ('general', 'concierge_operational')
              AND t.deleted_at IS NULL
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
              AND ($2::text IS NULL OR t.status = $2)
@@ -414,7 +416,14 @@ async fn list_items(
                                WHERE visible_member.project_id = visible_project.id
                                  AND visible_member.user_id = $9
                            )
-                       )
+                     )
+                 ))
+                 OR (t.patient_id IS NOT NULL AND EXISTS (
+                     SELECT 1
+                     FROM patient_assignments visible_assignment
+                     WHERE visible_assignment.patient_id = t.patient_id
+                       AND visible_assignment.user_id = $9
+                       AND visible_assignment.revoked_at IS NULL
                  ))
                  OR ($10::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND assigner.role = 'concierge')
                  OR ($10::text = 'teamlead_interpreter' AND assigner.role = 'interpreter')
@@ -547,7 +556,7 @@ async fn list_all_attachments(
            LEFT JOIN patients patient ON patient.id = task.patient_id
            LEFT JOIN providers provider ON provider.id = task.provider_id
            WHERE attachment.deleted_at IS NULL
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
              AND ($1::text IS NULL OR task.task_kind = $1)
              AND ($2::text IS NULL
@@ -572,7 +581,14 @@ async fn list_all_attachments(
                                WHERE visible_member.project_id = visible_project.id
                                  AND visible_member.user_id = $3
                            )
-                       )
+                     )
+                 ))
+                 OR (task.patient_id IS NOT NULL AND EXISTS (
+                     SELECT 1
+                     FROM patient_assignments visible_assignment
+                     WHERE visible_assignment.patient_id = task.patient_id
+                       AND visible_assignment.user_id = $3
+                       AND visible_assignment.revoked_at IS NULL
                  ))
                  OR ($4::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND task_creator.role = 'concierge')
                  OR ($4::text = 'teamlead_interpreter' AND task_creator.role = 'interpreter')
@@ -843,7 +859,8 @@ async fn download_attachment(
            JOIN tasks task ON task.id = attachment.task_id
            WHERE attachment.id = $1 AND attachment.task_id = $2
              AND attachment.deleted_at IS NULL
-             AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL"#,
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL"#,
     )
     .bind(attachment_id)
     .bind(item_id)
@@ -1161,7 +1178,7 @@ async fn create_item(
                task_scope, task_kind, concierge_service_id, starts_at, ends_at, location,
                reminder_at, task_audience, patient_id, provider_id, external_assignee_type,
                external_assignee_name, external_assignee_phone, external_assignee_email, project_id
-           ) VALUES ($1, $2, $3, $4, $5, $6, 'concierge_operational', $7, $8, $9, $10, $11, $12,
+           ) VALUES ($1, $2, $3, $4, $5, $6, 'general', $7, $8, $9, $10, $11, $12,
                      $13, $14, $15, $16, $17, $18, $19, $20)
            RETURNING id"#,
     )
@@ -1323,7 +1340,9 @@ async fn update_item(
                   task.updated_at, creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
-           WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
            FOR UPDATE"#,
     )
     .bind(item_id)
@@ -1498,7 +1517,7 @@ async fn update_item(
                project_id = $21,
                updated_at = now()
            WHERE id = $1
-             AND task_scope = 'concierge_operational'
+             AND task_scope IN ('general', 'concierge_operational')
              AND deleted_at IS NULL"#,
     )
     .bind(item_id)
@@ -1666,7 +1685,7 @@ async fn update_item_status(
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
            FOR UPDATE OF task"#,
     )
@@ -1742,7 +1761,7 @@ async fn update_item_status(
                END,
                updated_at = now()
            WHERE id = $1
-             AND task_scope = 'concierge_operational'
+             AND task_scope IN ('general', 'concierge_operational')
              AND deleted_at IS NULL"#,
     )
     .bind(item_id)
@@ -1864,7 +1883,7 @@ async fn change_item_archive_state(
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
            FOR UPDATE OF task"#,
     )
@@ -1924,7 +1943,7 @@ async fn change_item_archive_state(
                archived_by = CASE WHEN $2 THEN $3 ELSE NULL END,
                updated_at = now()
            WHERE id = $1
-             AND task_scope = 'concierge_operational'
+             AND task_scope IN ('general', 'concierge_operational')
              AND deleted_at IS NULL"#,
     )
     .bind(item_id)
@@ -2053,7 +2072,7 @@ async fn delete_item(
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
            FOR UPDATE OF task"#,
     )
@@ -2124,7 +2143,9 @@ async fn delete_item(
     let result = sqlx::query(
         r#"UPDATE tasks
            SET deleted_at = now(), deleted_by = $2, status = 'cancelled', updated_at = now()
-           WHERE id = $1 AND task_scope = 'concierge_operational' AND deleted_at IS NULL"#,
+           WHERE id = $1
+             AND task_scope IN ('general', 'concierge_operational')
+             AND deleted_at IS NULL"#,
     )
     .bind(item_id)
     .bind(auth.user_id)
@@ -2292,7 +2313,8 @@ async fn get_item_detail(
            JOIN users uploader ON uploader.id = attachment.uploaded_by
            JOIN tasks task ON task.id = attachment.task_id
            WHERE attachment.task_id = $1 AND attachment.deleted_at IS NULL
-             AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
            ORDER BY attachment.created_at, attachment.id"#,
     )
     .bind(item_id)
@@ -2350,7 +2372,7 @@ async fn add_comment(
     let (assigned_by, task_title) = match sqlx::query_as::<_, (Uuid, String)>(
         r#"SELECT assigned_by, title
            FROM tasks
-           WHERE id = $1 AND task_scope = 'concierge_operational'
+           WHERE id = $1 AND task_scope IN ('general', 'concierge_operational')
              AND deleted_at IS NULL AND archived_at IS NULL"#,
     )
     .bind(item_id)
@@ -3304,10 +3326,18 @@ async fn lock_item_access(
                                   AND visible_member.user_id = $2
                             )
                         )
-                  ) AS project_access
+                  ) AS project_access,
+                  EXISTS (
+                      SELECT 1
+                      FROM patient_assignments visible_assignment
+                      WHERE visible_assignment.patient_id = task.patient_id
+                        AND visible_assignment.user_id = $2
+                        AND visible_assignment.revoked_at IS NULL
+                  ) AS patient_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
-           WHERE task.id = $1 AND task.task_scope = 'concierge_operational'
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL AND task.archived_at IS NULL
            FOR UPDATE OF task"#
     } else {
@@ -3325,10 +3355,19 @@ async fn lock_item_access(
                                   AND visible_member.user_id = $2
                             )
                         )
-                  ) AS project_access
+                  ) AS project_access,
+                  EXISTS (
+                      SELECT 1
+                      FROM patient_assignments visible_assignment
+                      WHERE visible_assignment.patient_id = task.patient_id
+                        AND visible_assignment.user_id = $2
+                        AND visible_assignment.revoked_at IS NULL
+                  ) AS patient_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
-           WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
            FOR SHARE OF task"#
     };
     let row = sqlx::query(query)
@@ -3351,8 +3390,9 @@ async fn lock_item_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
     if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
-        && (for_update || !project_access)
+        && (for_update || (!project_access && !patient_access))
     {
         return Err(err(
             StatusCode::FORBIDDEN,
@@ -3382,10 +3422,19 @@ async fn ensure_operational_view_access(
                                   AND visible_member.user_id = $2
                             )
                         )
-                  ) AS project_access
+                  ) AS project_access,
+                  EXISTS (
+                      SELECT 1
+                      FROM patient_assignments visible_assignment
+                      WHERE visible_assignment.patient_id = task.patient_id
+                        AND visible_assignment.user_id = $2
+                        AND visible_assignment.revoked_at IS NULL
+                  ) AS patient_access
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
-           WHERE task.id = $1 AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL"#,
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL"#,
     )
     .bind(item_id)
     .bind(auth.user_id)
@@ -3406,8 +3455,10 @@ async fn ensure_operational_view_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
     if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
         && !project_access
+        && !patient_access
     {
         return Err(err(StatusCode::FORBIDDEN, "Forbidden"));
     }
@@ -3424,7 +3475,7 @@ async fn ensure_operational_mutation_access(
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
              AND task.archived_at IS NULL"#,
     )
@@ -3462,7 +3513,7 @@ async fn lock_task_mutation_context(
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
-             AND task.task_scope = 'concierge_operational'
+             AND task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
              AND task.archived_at IS NULL
            FOR UPDATE OF task"#,
@@ -3508,7 +3559,8 @@ async fn load_attachments(
            JOIN users uploader ON uploader.id = attachment.uploaded_by
            JOIN tasks task ON task.id = attachment.task_id
            WHERE attachment.task_id = $1 AND attachment.deleted_at IS NULL
-             AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
            ORDER BY attachment.created_at, attachment.id"#,
     )
     .bind(item_id)
@@ -3538,7 +3590,8 @@ async fn load_attachment(
            JOIN tasks task ON task.id = attachment.task_id
            WHERE attachment.id = $1 AND attachment.task_id = $2
              AND attachment.deleted_at IS NULL
-             AND task.task_scope = 'concierge_operational' AND task.deleted_at IS NULL"#,
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL"#,
     )
     .bind(attachment_id)
     .bind(item_id)
@@ -3780,7 +3833,7 @@ async fn ensure_service_not_converted_in_transaction(
                SELECT 1
                FROM tasks task
                WHERE task.concierge_service_id = $1
-                 AND task.task_scope = 'concierge_operational'
+                 AND task.task_scope IN ('general', 'concierge_operational')
                  AND task.deleted_at IS NULL
                  AND ($2::uuid IS NULL OR task.id <> $2)
            )"#,
@@ -4240,7 +4293,7 @@ pub async fn run_concierge_task_reminder_scheduler_once(state: &AppState) -> i64
         r#"SELECT task.id
            FROM tasks task
            JOIN users assignee ON assignee.id = task.assigned_to
-           WHERE task.task_scope = 'concierge_operational'
+           WHERE task.task_scope IN ('general', 'concierge_operational')
              AND task.deleted_at IS NULL
              AND task.status IN ('open', 'in_progress')
              AND task.reminder_at IS NOT NULL
@@ -4268,7 +4321,7 @@ pub async fn run_concierge_task_reminder_scheduler_once(state: &AppState) -> i64
                    UPDATE tasks task
                    SET reminder_sent_at = now(), updated_at = now()
                    WHERE task.id = $1
-                     AND task.task_scope = 'concierge_operational'
+                     AND task.task_scope IN ('general', 'concierge_operational')
                      AND task.deleted_at IS NULL
                      AND task.status IN ('open', 'in_progress')
                      AND task.reminder_at IS NOT NULL

@@ -70,6 +70,107 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_general_key_task(
+    pool: &PgPool,
+    patient_id: Uuid,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO tasks (
+               title, assigned_to, assigned_by, patient_id,
+               task_scope, task_kind, status
+           ) VALUES ($1, $2, $3, $4, 'general', 'task', 'open')
+           RETURNING id"#,
+    )
+    .bind(format!("Key handover {tag}"))
+    .bind(assigned_to)
+    .bind(assigned_by)
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn general_task_keeps_task_native_key_custody_history() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let assignee_id = seed_user(&ctx.pool, "concierge", &format!("task-owner-{tag}")).await;
+    let other_id = seed_user(&ctx.pool, "concierge", &format!("task-other-{tag}")).await;
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("task-manager-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("task-{tag}")).await;
+    let task_id =
+        seed_general_key_task(&ctx.pool, patient_id, assignee_id, ctx.admin_id, &tag).await;
+    let path = format!("/api/v1/tasks/{task_id}/key-events");
+
+    let (status, received) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(assignee_id, "concierge"),
+        Some(json!({ "action": "received", "note": "Task-native custody" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{received}");
+    assert_eq!(received["event"]["task_id"], task_id.to_string());
+    assert!(received["event"]["concierge_service_id"].is_null());
+    assert_eq!(received["key_status"], "received");
+
+    let (status, stored) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(manager_id, "patient_manager"),
+        Some(json!({
+            "action": "stored",
+            "responsible_user_id": assignee_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+
+    let (status, history) = json_request(
+        &ctx.app,
+        "GET",
+        &path,
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    assert_eq!(history.as_array().map(Vec::len), Some(2));
+    assert!(history[0]["concierge_service_id"].is_null());
+
+    let (status, forbidden) = json_request(
+        &ctx.app,
+        "GET",
+        &path,
+        &auth_header_for(other_id, "concierge"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
+
+    let row: (String, Option<Uuid>, i64) = sqlx::query_as(
+        r#"SELECT task.key_status, task.concierge_service_id,
+                  (SELECT count(*) FROM concierge_service_key_events event
+                   WHERE event.task_id = task.id
+                     AND event.concierge_service_id IS NULL)
+           FROM tasks task WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(row.0, "stored");
+    assert_eq!(row.1, None);
+    assert_eq!(row.2, 2);
+}
+
 #[tokio::test]
 async fn assigned_concierge_records_ordered_key_custody_history() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
