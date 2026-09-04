@@ -409,6 +409,7 @@ function useLeadsPageContent() {
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
+  const isConciergeReadOnly = user?.role === "concierge";
   useEffect(() => {
     if (!permissions.canConvert) return;
     preloadLeadWizard();
@@ -1301,6 +1302,11 @@ function useLeadsPageContent() {
             {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
           </h2>
           <div className="flex shrink-0 items-center gap-2">
+            {isConciergeReadOnly ? (
+              <StatusBadge tone="neutral">
+                {lang === "de" ? "Nur ansehen" : "Только просмотр"}
+              </StatusBadge>
+            ) : null}
             {detail && permissions.canConvert && detailWizardIncomplete ? (
               <Button
                 type="button"
@@ -2717,20 +2723,39 @@ function useLeadsPageContent() {
           />
         </AdminTableCard>
 
-        <Sheet
-          open={detailOpen}
-          onOpenChange={(open) => {
-            setDetailOpen(open);
-            if (!open) syncLeadQuery(undefined, { replace: false });
-          }}
-        >
-          <SheetContent
-            side="right"
-            className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl xl:max-w-4xl"
+        {isConciergeReadOnly ? (
+          <Dialog
+            open={detailOpen}
+            onOpenChange={(open) => {
+              setDetailOpen(open);
+              if (!open) syncLeadQuery(undefined, { replace: false });
+            }}
           >
-            {detailPaneNode}
-          </SheetContent>
-        </Sheet>
+            <DialogContent className="flex h-[min(92dvh,56rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,52rem)] sm:w-[min(92vw,76rem)] sm:max-w-[76rem]">
+              <DialogTitle className="sr-only">
+                {detail
+                  ? `${detail.first_name} ${detail.last_name}`
+                  : t.leads_title}
+              </DialogTitle>
+              {detailPaneNode}
+            </DialogContent>
+          </Dialog>
+        ) : (
+          <Sheet
+            open={detailOpen}
+            onOpenChange={(open) => {
+              setDetailOpen(open);
+              if (!open) syncLeadQuery(undefined, { replace: false });
+            }}
+          >
+            <SheetContent
+              side="right"
+              className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl xl:max-w-4xl"
+            >
+              {detailPaneNode}
+            </SheetContent>
+          </Sheet>
+        )}
       </div>
 
       <Sheet open={createOpen} onOpenChange={setCreateOpen}>
