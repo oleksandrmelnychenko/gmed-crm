@@ -124,6 +124,29 @@ describe("lead errors", () => {
     );
   });
 
+  it("localizes structured backend validation messages without leaking field keys", () => {
+    const prepaymentError = Object.assign(
+      new Error("prepayment_amount must be a non-negative decimal"),
+      { status: 422 },
+    );
+
+    expect(leadErrorMessage(prepaymentError, ru)).toBe(
+      "Сумма необходимой предоплаты: укажите число не меньше нуля",
+    );
+    expect(leadErrorMessage(prepaymentError, de)).toBe(
+      "Erforderlicher Vorauszahlungsbetrag: eine Zahl größer oder gleich null eingeben",
+    );
+    expect(leadErrorMessage(new Error("Service quantity must be greater than zero"), ru)).toBe(
+      "Количество услуги: укажите число больше нуля",
+    );
+    expect(leadErrorMessage(new Error("VAT rate must be between 0 and 100"), de)).toBe(
+      "Mehrwertsteuersatz: einen Wert zwischen 0 und 100 eingeben",
+    );
+    expect(leadErrorMessage(new Error("unknown_amount must be a valid number"), ru)).toBe(
+      "укажите корректное число",
+    );
+  });
+
   it("keeps every structured blocking reason returned by a lead gate", () => {
     const error = Object.assign(new Error("Lead is not qualification-ready"), {
       status: 422,

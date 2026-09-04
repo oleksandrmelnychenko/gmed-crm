@@ -40,6 +40,7 @@ export interface RevenueTranslations {
   finance_catalog_price_versions_count: string;
   finance_catalog_open_ended: string;
   finance_catalog_price_current: string;
+  finance_catalog_price_active: string;
   finance_catalog_price_future: string;
   finance_catalog_price_past: string;
   finance_catalog_price_history_hint: string;
@@ -94,6 +95,9 @@ export interface RevenueTranslations {
   finance_catalog_error_agency_service_required: string;
   finance_catalog_error_agency_service_unit_price: string;
   finance_catalog_error_agency_service_vat_rate: string;
+  finance_catalog_remove_agency_service_title: string;
+  finance_catalog_delete_agency_service_message: string;
+  finance_catalog_archive_agency_service_message: string;
   finance_catalog_error_vat_rate: string;
   finance_catalog_error_package_required: string;
   finance_catalog_error_package_item_description: string;
@@ -828,10 +832,11 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_edit_price_version: "Изменить цену",
   finance_catalog_price_period: "Цена: {from} — {to}",
   finance_catalog_price_versions_count: "Цены: {count}",
-  finance_catalog_open_ended: "без окончания",
+  finance_catalog_open_ended: "бессрочно",
   finance_catalog_price_current: "Текущая",
+  finance_catalog_price_active: "Активна",
   finance_catalog_price_future: "Будущая",
-  finance_catalog_price_past: "Архивная",
+  finance_catalog_price_past: "Предыдущая",
   finance_catalog_price_history_hint:
     "Периоды выстраиваются по датам автоматически. Предыдущая цена сохраняется в истории и применяется к услугам за соответствующий период.",
   finance_catalog_confirm_delete_price_version:
@@ -891,6 +896,11 @@ export const revenueRu: RevenueTranslations = {
     "Цена за единицу должна быть неотрицательным числом.",
   finance_catalog_error_agency_service_vat_rate:
     "НДС позиции должен быть числом от 0 до 100.",
+  finance_catalog_remove_agency_service_title: "Удаление позиции каталога",
+  finance_catalog_delete_agency_service_message:
+    "Позиция не используется и будет удалена без возможности восстановления.",
+  finance_catalog_archive_agency_service_message:
+    "Позиция уже используется в системе, поэтому она будет деактивирована. Существующие связи и документы сохранятся.",
   finance_catalog_error_vat_rate: "Ставка НДС должна быть неотрицательным числом.",
   finance_catalog_error_package_required: "Укажите ключ пакета и название.",
   finance_catalog_error_package_item_description:
@@ -1176,10 +1186,11 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_edit_price_version: "Preis bearbeiten",
   finance_catalog_price_period: "Preis: {from} – {to}",
   finance_catalog_price_versions_count: "Preise: {count}",
-  finance_catalog_open_ended: "ohne Enddatum",
+  finance_catalog_open_ended: "unbefristet",
   finance_catalog_price_current: "Aktuell",
+  finance_catalog_price_active: "Aktiv",
   finance_catalog_price_future: "Zukünftig",
-  finance_catalog_price_past: "Archiviert",
+  finance_catalog_price_past: "Vorherige",
   finance_catalog_price_history_hint:
     "Die Zeiträume werden automatisch nach Datum geordnet. Frühere Preise bleiben erhalten und gelten für Leistungen im jeweiligen Zeitraum.",
   finance_catalog_confirm_delete_price_version:
@@ -1240,6 +1251,11 @@ export const revenueDe: RevenueTranslations = {
     "Der Einzelpreis muss eine nicht negative Zahl sein.",
   finance_catalog_error_agency_service_vat_rate:
     "Die USt. der Position muss eine Zahl zwischen 0 und 100 sein.",
+  finance_catalog_remove_agency_service_title: "Katalogposition entfernen",
+  finance_catalog_delete_agency_service_message:
+    "Die Position wird nicht verwendet und dauerhaft gelöscht.",
+  finance_catalog_archive_agency_service_message:
+    "Die Position wird bereits im System verwendet und deshalb deaktiviert. Bestehende Verknüpfungen und Dokumente bleiben erhalten.",
   finance_catalog_error_vat_rate:
     "Der USt.-Satz muss eine nicht negative Zahl sein.",
   finance_catalog_error_package_required: "Paketschlüssel und Name sind erforderlich.",

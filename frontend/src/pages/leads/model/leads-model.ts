@@ -50,6 +50,63 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "date_to cannot be earlier than date_from": ["Дата окончания программы не может быть раньше даты начала", "Das Programmende darf nicht vor dem Programmbeginn liegen"],
 };
 
+const VALIDATION_FIELD_LABELS: Record<string, LeadErrorTranslation> = {
+  prepayment_amount: ["Сумма необходимой предоплаты", "Erforderlicher Vorauszahlungsbetrag"],
+  paid_amount: ["Полученная предоплата", "Erhaltener Vorauszahlungsbetrag"],
+  total_estimated: ["Итоговая сумма заказа", "Geschätzter Gesamtbetrag des Auftrags"],
+  unit_price: ["Цена за единицу", "Einzelpreis"],
+  line_item_unit_price: ["Цена позиции", "Positionspreis"],
+  service_unit_price: ["Цена услуги", "Leistungspreis"],
+  quantity: ["Количество", "Menge"],
+  line_item_quantity: ["Количество позиции", "Positionsmenge"],
+  service_quantity: ["Количество услуги", "Leistungsmenge"],
+  vat_rate: ["Ставка НДС", "Mehrwertsteuersatz"],
+  service_vat_rate: ["Ставка НДС услуги", "Mehrwertsteuersatz der Leistung"],
+  delta_amount: ["Сумма изменения", "Änderungsbetrag"],
+  allocation_amount: ["Сумма распределения", "Zuordnungsbetrag"],
+  service_key: ["Код услуги", "Leistungsschlüssel"],
+  service_name: ["Название услуги", "Leistungsname"],
+  service_description: ["Описание услуги", "Leistungsbeschreibung"],
+  line_item_description: ["Описание позиции", "Positionsbeschreibung"],
+  valid_from: ["Дата начала действия", "Gültig ab"],
+  valid_to: ["Дата окончания действия", "Gültig bis"],
+  date_from: ["Дата начала", "Startdatum"],
+  date_to: ["Дата окончания", "Enddatum"],
+};
+
+function validationFieldLabel(subject: string, tx: LeadErrorTranslator) {
+  const normalized = subject
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .replace(/[-\s]+/g, "_")
+    .replace(/^the_/, "");
+  const translation = VALIDATION_FIELD_LABELS[normalized];
+  return translation ? tx(translation[0], translation[1]) : "";
+}
+
+function localizedFieldValidationMessage(
+  message: string,
+  tx: LeadErrorTranslator,
+) {
+  const rules: Array<readonly [pattern: RegExp, instruction: LeadErrorTranslation]> = [
+    [/^(.+?) must be (?:a )?(?:valid )?non-negative (?:decimal|number)$/i, ["укажите число не меньше нуля", "eine Zahl größer oder gleich null eingeben"]],
+    [/^(.+?) (?:must be non-negative|cannot be negative|amounts cannot be negative)$/i, ["укажите число не меньше нуля", "eine Zahl größer oder gleich null eingeben"]],
+    [/^(.+?) (?:must be (?:a )?positive (?:decimal|number)|must be greater than zero)$/i, ["укажите число больше нуля", "eine Zahl größer als null eingeben"]],
+    [/^(.+?) must be (?:a )?(?:valid )?(?:decimal|number|amount|finite amount)$/i, ["укажите корректное число", "eine gültige Zahl eingeben"]],
+    [/^(.+?) must be between 0 and 100$/i, ["укажите значение от 0 до 100", "einen Wert zwischen 0 und 100 eingeben"]],
+    [/^(.+?) (?:is required|cannot be empty|is missing)$/i, ["заполните обязательное поле", "Pflichtfeld ausfüllen"]],
+  ];
+
+  for (const [pattern, instruction] of rules) {
+    const match = message.match(pattern);
+    if (!match) continue;
+    const label = validationFieldLabel(match[1] ?? "", tx);
+    const localizedInstruction = tx(instruction[0], instruction[1]);
+    return label ? `${label}: ${localizedInstruction}` : localizedInstruction;
+  }
+  return null;
+}
+
 const LEAD_ERROR_PATTERNS: Array<readonly [pattern: RegExp, translation: LeadErrorTranslation]> = [
   [/(?:payload|file|request body).*(?:too large|exceeds)|413\b/i, ["Файл слишком большой. Максимальный размер — 25 МБ", "Die Datei ist zu groß. Maximal sind 25 MB erlaubt"]],
   [/(?:networkerror|failed to fetch|network request|connection (?:failed|refused))/i, ["Нет соединения с сервером. Проверьте интернет и повторите попытку", "Keine Verbindung zum Server. Internetverbindung prüfen und erneut versuchen"]],
@@ -126,6 +183,9 @@ export function leadErrorMessage(
   const normalized = message.toLocaleLowerCase("en-US");
   const exact = LEAD_ERROR_MESSAGES[normalized];
   if (exact) return tx(exact[0], exact[1]);
+
+  const localizedValidation = localizedFieldValidationMessage(message, tx);
+  if (localizedValidation) return localizedValidation;
 
   for (const [pattern, translation] of LEAD_ERROR_PATTERNS) {
     if (pattern.test(message)) return tx(translation[0], translation[1]);

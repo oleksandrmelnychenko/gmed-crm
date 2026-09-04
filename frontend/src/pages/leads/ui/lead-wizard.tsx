@@ -485,6 +485,7 @@ const MEDICAL_ANAMNESE_ID = "lead-wizard-anamnese";
 const ORDER_DATE_FROM_ID = "lead-wizard-program-date-from";
 const ORDER_DATE_TO_ID = "lead-wizard-program-date-to";
 const ORDER_SERVICE_SELECT_ID = "lead-wizard-order-service-select";
+const PREPAYMENT_AMOUNT_ID = "lead-wizard-prepayment-amount";
 const PRIVACY_CONSENT_ID = "lead-wizard-privacy-consent";
 const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
@@ -2631,7 +2632,10 @@ export function LeadWizard({
     tone: "error" | "success" | "warning";
     message: string;
   } | null>(null);
-  const [costEstimateError, setCostEstimateError] = useState("");
+  const [commercialDocumentErrors, setCommercialDocumentErrors] = useState<
+    Partial<Record<CommercialDocumentKind, string>>
+  >({});
+  const [commercialQuoteError, setCommercialQuoteError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -3145,7 +3149,8 @@ export function LeadWizard({
     setPaidAmount("");
     setLoading(false);
     setError("");
-    setCostEstimateError("");
+    setCommercialDocumentErrors({});
+    setCommercialQuoteError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
     setTouchedMasterFields(new Set());
@@ -3194,7 +3199,8 @@ export function LeadWizard({
     setOrders([]);
     setQuotes([]);
     setError("");
-    setCostEstimateError("");
+    setCommercialDocumentErrors({});
+    setCommercialQuoteError("");
     setAutosaveError("");
     setAutosaveStatus("idle");
     setMedicalLookupsLoading(false);
@@ -3378,6 +3384,69 @@ export function LeadWizard({
         : prepayment && (!requiredPrepaymentValid || persistedPrepayment + 0.005 < requiredPrepayment)
           ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
           : tx("Смета и предоплата актуальны", "Kostenvoranschlag und Vorauszahlung sind aktuell");
+
+  const commercialDocumentTitle = (templateId: CommercialDocumentKind) => ({
+    framework_contract: tx("Рамочный договор", "Rahmenvertrag"),
+    single_order: tx("Документ заказа", "Einzelauftrag"),
+    order_cost_estimate: tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag"),
+    cost_estimate: tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation"),
+  })[templateId];
+
+  const renderCommercialDocumentError = (templateId: CommercialDocumentKind) => {
+    const message = commercialDocumentErrors[templateId];
+    if (!message) return null;
+    const clientName = lead
+      ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
+      : "";
+    const totalLabel = templateId === "cost_estimate" && selectedCostEstimateWorkTypes.length > 0
+      ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
+      : `${formatMoneyValue(estimate.gross, lang)} EUR`;
+    const prepaymentLabel = !prepayment
+      ? tx("не требуется", "nicht erforderlich")
+      : prepaymentAmount.trim()
+        ? `${formatMoneyValue(money(prepaymentAmount), lang)} EUR`
+        : tx("требуется, сумма не указана", "erforderlich, Betrag fehlt");
+
+    return (
+      <div
+        role="alert"
+        aria-live="polite"
+        className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
+      >
+        <div className="flex items-start gap-2">
+          <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold">
+              {tx("Не удалось создать", "Erstellung fehlgeschlagen")}: {commercialDocumentTitle(templateId)}
+            </p>
+            <p className="mt-0.5">{message}</p>
+          </div>
+        </div>
+        <dl className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-foreground/80">
+          {clientName ? (
+            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
+              <dt className="sr-only">{tx("Клиент", "Kunde")}</dt>
+              <dd>{tx("Клиент", "Kunde")}: {clientName}</dd>
+            </div>
+          ) : null}
+          <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
+            <dt className="sr-only">{tx("Заказ", "Auftrag")}</dt>
+            <dd>{tx("Заказ", "Auftrag")}: {order?.order_number || tx("ещё не создан", "noch nicht erstellt")}</dd>
+          </div>
+          <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
+            <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
+            <dd>{tx("Итого", "Gesamt")}: {totalLabel}</dd>
+          </div>
+          {templateId !== "cost_estimate" ? (
+            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
+              <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
+              <dd>{tx("Предоплата", "Vorauszahlung")}: {prepaymentLabel}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </div>
+    );
+  };
   const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
@@ -4467,14 +4536,18 @@ ${serviceCommentLines.join("\n")}`
         currentServiceLines.map((item) => item.clientReference),
       );
     }
+    const requestedPrepaymentAmount = flags.prepayment_amount
+      ?? (prepayment ? prepaymentAmount : undefined);
+    const normalizedPrepaymentAmount = requestedPrepaymentAmount?.trim();
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
       ...(syncOrderServiceLines
         ? { total_estimated: estimate.gross.toFixed(2) }
         : {}),
       prepayment_required: flags.prepayment_required ?? prepayment,
-      prepayment_amount: flags.prepayment_amount
-        ?? (prepayment && validMoneyInput(prepaymentAmount) ? prepaymentAmount : undefined),
+      ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
+        ? { prepayment_amount: normalizedPrepaymentAmount }
+        : {}),
       signed_patient: flags.signed_patient ?? signedPatient,
       signed_agency: flags.signed_agency ?? signedAgency,
       needs_description: needsDescription,
@@ -4529,7 +4602,8 @@ ${serviceCommentLines.join("\n")}`
       }
     } catch (nextError) {
       setCommercialSaveFeedback({ tone: "error", message: errorText(nextError, tx) });
-      showWizardError(nextError);
+      setValidationContext(null);
+      setError("");
     } finally {
       setBusy(null);
     }
@@ -4537,13 +4611,19 @@ ${serviceCommentLines.join("\n")}`
 
   async function signContract(documentId?: string) {
     setBusy("contract");
+    setError("");
+    setCommercialDocumentErrors((current) => ({ ...current, framework_contract: "" }));
     try {
       const result = await ensureCommercial();
       await updateContractStatus(result.contractId, { status: "signed" });
       if (documentId) await markDocumentSigned(documentId, "framework_contract");
       await reload(false, true);
     } catch (nextError) {
-      showWizardError(nextError);
+      setValidationContext(null);
+      setCommercialDocumentErrors((current) => ({
+        ...current,
+        framework_contract: errorText(nextError, tx),
+      }));
     } finally {
       setBusy(null);
     }
@@ -4609,28 +4689,32 @@ ${serviceCommentLines.join("\n")}`
 
   async function createOrAcceptQuote(accept: boolean) {
     if (accept && (!quote || !quoteIsCurrent)) {
-      setError(tx(
+      setError("");
+      setCommercialQuoteError(tx(
         "Сначала пересчитайте смету по текущим услугам",
         "Berechnen Sie zuerst den Kostenvoranschlag für die aktuellen Leistungen neu",
       ));
       return;
     }
     if (prepayment && !validMoneyInput(paidAmount)) {
-      setError(tx(
+      setError("");
+      setCommercialQuoteError(tx(
         "Предоплата должна быть числом не меньше нуля",
         "Die Vorauszahlung muss eine Zahl größer oder gleich null sein",
       ));
       return;
     }
     if (prepayment && !requiredPrepaymentValid) {
-      setError(tx(
+      setError("");
+      setCommercialQuoteError(tx(
         "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
         "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
       ));
       return;
     }
     if (accept && prepayment && enteredPrepayment > quoteTotal + 0.005) {
-      setError(tx(
+      setError("");
+      setCommercialQuoteError(tx(
         "Предоплата не может превышать сумму сметы",
         "Die Vorauszahlung darf den Betrag des Kostenvoranschlags nicht überschreiten",
       ));
@@ -4639,6 +4723,7 @@ ${serviceCommentLines.join("\n")}`
 
     setBusy(accept ? "accept" : "quote");
     setError("");
+    setCommercialQuoteError("");
     try {
       const result = await ensureCommercial();
       if (!accept) {
@@ -4686,7 +4771,8 @@ ${serviceCommentLines.join("\n")}`
       }
       await reload(false, true);
     } catch (nextError) {
-      showWizardError(nextError);
+      setValidationContext(null);
+      setCommercialQuoteError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -4702,16 +4788,38 @@ ${serviceCommentLines.join("\n")}`
       && validServiceLines.length === 0
     ) {
       setError("");
-      setCostEstimateError(tx(
-        "Добавьте хотя бы одну позицию заказа или выберите вид работы на этапе «Оформление заказа».",
-        "Fügen Sie mindestens eine Auftragsposition hinzu oder wählen Sie im Schritt „Auftragserfassung“ eine Leistungsart aus.",
-      ));
+      setCommercialDocumentErrors((current) => ({
+        ...current,
+        cost_estimate: tx(
+          "Добавьте хотя бы одну позицию заказа или выберите вид работы на этапе «Оформление заказа».",
+          "Fügen Sie mindestens eine Auftragsposition hinzu oder wählen Sie im Schritt „Auftragserfassung“ eine Leistungsart aus.",
+        ),
+      }));
+      return;
+    }
+    const normalizedPrepaymentAmount = prepaymentAmount.trim();
+    const invalidRequiredPrepayment = prepayment && (
+      !normalizedPrepaymentAmount
+      || !validMoneyInput(normalizedPrepaymentAmount)
+      || money(normalizedPrepaymentAmount) <= 0
+      || Boolean(quote && money(normalizedPrepaymentAmount) > quoteTotal + 0.005)
+    );
+    if (invalidRequiredPrepayment) {
+      setValidationContext(null);
+      setError("");
+      setCommercialDocumentErrors((current) => ({
+        ...current,
+        [templateId]: tx(
+          "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
+          "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
+        ),
+      }));
       return;
     }
     commercialGenerationInFlightRef.current = true;
     setBusy(`generate-${templateId}`);
     setError("");
-    if (templateId === "cost_estimate") setCostEstimateError("");
+    setCommercialDocumentErrors((current) => ({ ...current, [templateId]: "" }));
     try {
       const documentLanguage = templateId === "cost_estimate"
         ? costEstimateDocumentLanguage(draft.costEstimateAdditionalLanguage)
@@ -4788,8 +4896,10 @@ ${serviceCommentLines.join("\n")}`
           "Документ создан, но список документов не обновился. Закройте и снова откройте обращение.",
           "Das Dokument wurde erstellt, die Dokumentenliste konnte jedoch nicht aktualisiert werden. Schließen und öffnen Sie den Lead erneut.",
         );
-        if (templateId === "cost_estimate") setCostEstimateError(message);
-        else setError(message);
+        setCommercialDocumentErrors((current) => ({
+          ...current,
+          [templateId]: message,
+        }));
         return;
       }
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
@@ -4801,16 +4911,17 @@ ${serviceCommentLines.join("\n")}`
           "Документ создан, но пока не появился в списке. Обновите обращение и откройте его из документов.",
           "Das Dokument wurde erstellt, ist aber noch nicht in der Liste verfügbar. Aktualisieren Sie den Lead und öffnen Sie es über die Dokumente.",
         );
-        if (templateId === "cost_estimate") setCostEstimateError(message);
-        else setError(message);
+        setCommercialDocumentErrors((current) => ({
+          ...current,
+          [templateId]: message,
+        }));
       }
     } catch (nextError) {
-      if (templateId === "cost_estimate") {
-        setValidationContext(null);
-        setCostEstimateError(errorText(nextError, tx));
-      } else {
-        showWizardError(nextError);
-      }
+      setValidationContext(null);
+      setCommercialDocumentErrors((current) => ({
+        ...current,
+        [templateId]: errorText(nextError, tx),
+      }));
     } finally {
       commercialGenerationInFlightRef.current = false;
       setBusy(null);
@@ -6694,6 +6805,7 @@ ${serviceCommentLines.join("\n")}`
                   onSign={(document) => void signContract(document.id)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {renderCommercialDocumentError("framework_contract")}
                 </Section>
               </div>
               <Section
@@ -6885,6 +6997,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {renderCommercialDocumentError("single_order")}
                 </Section>
               </div>
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
@@ -6995,6 +7108,7 @@ ${serviceCommentLines.join("\n")}`
                   {prepayment ? (
                     <Field label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
                       <Input
+                        id={PREPAYMENT_AMOUNT_ID}
                         className={cn(inputClass, "font-mono tabular-nums")}
                         inputMode="decimal"
                         min="0.01"
@@ -7003,9 +7117,10 @@ ${serviceCommentLines.join("\n")}`
                         value={prepaymentAmount}
                         onChange={(event) => setPrepaymentAmount(event.target.value)}
                         onBlur={() => {
-                          if (order?.id && validMoneyInput(prepaymentAmount)) {
+                          const normalizedAmount = prepaymentAmount.trim();
+                          if (order?.id && normalizedAmount && validMoneyInput(normalizedAmount)) {
                             void saveFlags(
-                              { prepayment_amount: prepaymentAmount },
+                              { prepayment_amount: normalizedAmount },
                               { prepayment_amount: String(order.prepayment_amount ?? "") },
                             );
                           }
@@ -7051,6 +7166,43 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 ) : null}
                 <StateMark done={quoteAndPrepaymentReady} label={quoteStateLabel} />
+                {commercialQuoteError ? (
+                  <div
+                    role="alert"
+                    aria-live="polite"
+                    className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
+                  >
+                    <div className="flex items-start gap-2">
+                      <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-semibold">
+                          {tx("Не удалось обновить смету", "Kostenvoranschlag konnte nicht aktualisiert werden")}
+                        </p>
+                        <p className="mt-0.5">{commercialQuoteError}</p>
+                      </div>
+                    </div>
+                    <dl className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-foreground/80">
+                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
+                        <dt className="sr-only">{tx("Смета", "Kostenvoranschlag")}</dt>
+                        <dd>{tx("Смета", "Kostenvoranschlag")}: {quote?.quote_number || tx("ещё не создана", "noch nicht erstellt")}</dd>
+                      </div>
+                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
+                        <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
+                        <dd>{tx("Итого", "Gesamt")}: {formatMoneyValue(quote ? quoteTotal : estimate.gross, lang)} EUR</dd>
+                      </div>
+                      <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
+                        <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
+                        <dd>
+                          {tx("Предоплата", "Vorauszahlung")}: {prepayment
+                            ? prepaymentAmount.trim()
+                              ? `${formatMoneyValue(money(prepaymentAmount), lang)} EUR`
+                              : tx("сумма не указана", "Betrag fehlt")
+                            : tx("не требуется", "nicht erforderlich")}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ) : null}
               </Section>
               <div id={ORDER_COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
@@ -7074,6 +7226,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {renderCommercialDocumentError("order_cost_estimate")}
                 </Section>
               </div>
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
@@ -7104,17 +7257,8 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
-                {costEstimateError ? (
-                  <div
-                    role="alert"
-                    aria-live="polite"
-                    className="mt-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-                  >
-                    <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-                    <span>{costEstimateError}</span>
-                  </div>
-                ) : null}
-                {!costEstimateError
+                {renderCommercialDocumentError("cost_estimate")}
+                {!commercialDocumentErrors.cost_estimate
                   && selectedCostEstimateWorkTypes.length === 0
                   && lines.some(validLine) ? (
                     <p className="mt-3 text-xs text-muted-foreground">

@@ -10,7 +10,6 @@ import {
 import {
   BadgeEuro,
   ChevronDown,
-  ClipboardPlus,
   CornerDownRight,
   Pencil,
   Plus,
@@ -24,13 +23,22 @@ import {
   DataTablePager,
   useDataTablePagination,
 } from "@/components/data-table/data-table-pager";
+import { DataTable } from "@/components/data-table/data-table";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import {
   AdminSheetScaffold,
+  SheetActionsFooter,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { Input } from "@/components/ui/input";
@@ -72,7 +80,6 @@ import type {
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount } from "@/lib/money";
-import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 type TaxProfile = {
   id: string;
@@ -299,6 +306,26 @@ export function pricePeriodState(
   if (validFrom > today) return "future" as const;
   if (validTo && validTo < today) return "past" as const;
   return "current" as const;
+}
+
+type PricePeriod = {
+  valid_from: string;
+  valid_to?: string | null;
+};
+
+export function sortPriceVersionsForDisplay<T extends PricePeriod>(
+  versions: readonly T[],
+  today = todayInputDate(),
+) {
+  const statePriority = { current: 0, future: 1, past: 2 } as const;
+  return [...versions].sort((left, right) => {
+    const leftState = pricePeriodState(left.valid_from, left.valid_to, today);
+    const rightState = pricePeriodState(right.valid_from, right.valid_to, today);
+    const stateDifference = statePriority[leftState] - statePriority[rightState];
+    if (stateDifference !== 0) return stateDifference;
+    if (leftState === "future") return left.valid_from.localeCompare(right.valid_from);
+    return right.valid_from.localeCompare(left.valid_from);
+  });
 }
 
 function createBlankAgencyServiceForm(unitLabel: string): AgencyServiceFormState {
@@ -590,7 +617,6 @@ function createFinanceCatalogFieldPatch<K extends keyof FinanceCatalogState>(
 function useFinanceCatalogPageContent() {
   const { user } = useAuth();
   const { t } = useLang();
-  const { staffGo } = useStaffNavigate();
   const vatCategoryLabel = (value: string | null | undefined) =>
     formatEnumLabelFromKeys(value, VAT_CATEGORY_LABEL_KEYS, t);
   const vatSourceLabel = (value: string | null | undefined) =>
@@ -613,7 +639,6 @@ function useFinanceCatalogPageContent() {
     [t.finance_catalog_unit_default],
   );
   const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
-  const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
 
   const [financeCatalogState, dispatchFinanceCatalogState] = useReducer(
     financeCatalogReducer,
@@ -728,6 +753,8 @@ function useFinanceCatalogPageContent() {
     BLANK_PRICE_VERSION_FORM,
   );
   const [priceDeleteConfirmOpen, setPriceDeleteConfirmOpen] = useState(false);
+  const [agencyServiceDeleteConfirmOpen, setAgencyServiceDeleteConfirmOpen] =
+    useState(false);
   const filteredAgencyServices = useMemo(() => {
     const query = catalogSearch.trim().toLowerCase();
     if (!query) return agencyServices;
@@ -750,11 +777,18 @@ function useFinanceCatalogPageContent() {
   const selectedAgencyService = agencyServiceForm.id
     ? agencyServices.find((item) => item.id === agencyServiceForm.id) ?? null
     : null;
+  const selectedServicePackage = packageForm.id
+    ? servicePackages.find((item) => item.id === packageForm.id) ?? null
+    : null;
+  const servicePackagesById = useMemo(
+    () => new Map(servicePackages.map((item) => [item.id, item] as const)),
+    [servicePackages],
+  );
   const selectedAgencyServicePrices = useMemo<AgencyServicePriceVersion[]>(() => {
     if (!selectedAgencyService) return [];
     const versions = selectedAgencyService.price_versions ?? [];
     if (versions.length > 0) {
-      return [...versions].sort((left, right) => right.valid_from.localeCompare(left.valid_from));
+      return sortPriceVersionsForDisplay(versions);
     }
     return [
       {
@@ -768,6 +802,178 @@ function useFinanceCatalogPageContent() {
       },
     ];
   }, [selectedAgencyService]);
+  const selectedAgencyServicePriceColumns = useMemo<
+    ColumnDef<AgencyServicePriceVersion>[]
+  >(
+    () => [
+      {
+        id: "unit_price",
+        label: t.revenue_agency_service_unit_price,
+        accessor: (version) => Number(version.unit_price) || 0,
+        align: "right",
+        width: 130,
+        render: (version) => (
+          <span className="font-medium tabular-nums text-foreground">
+            {formatMoney(version.unit_price as string | number, version.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "vat_rate",
+        label: t.revenue_agency_service_vat_percent,
+        accessor: (version) => Number(version.vat_rate) || 0,
+        align: "right",
+        width: 90,
+        render: (version) => (
+          <span className="tabular-nums text-foreground">{String(version.vat_rate)} %</span>
+        ),
+      },
+      {
+        id: "period",
+        label: t.revenue_common_validity_period,
+        accessor: (version) => version.valid_from,
+        width: 230,
+        render: (version) => (
+          <span className="font-mono text-xs text-foreground">
+            {version.valid_from} — {version.valid_to || t.finance_catalog_open_ended}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (version) => pricePeriodState(version.valid_from, version.valid_to),
+        width: 110,
+        render: (version) => {
+          const periodState = pricePeriodState(version.valid_from, version.valid_to);
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                "w-fit rounded-full",
+                periodState === "current"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : periodState === "future"
+                    ? "border-sky-200 bg-sky-50 text-sky-700"
+                    : "border-violet-200 bg-violet-50 text-violet-700",
+              )}
+            >
+              {periodState === "current"
+                ? t.finance_catalog_price_current
+                : periodState === "future"
+                  ? t.finance_catalog_price_future
+                  : t.finance_catalog_price_past}
+            </Badge>
+          );
+        },
+      },
+    ],
+    [t],
+  );
+  const selectedServicePackagePrices = useMemo<ServicePackagePriceVersion[]>(() => {
+    if (!selectedServicePackage) return [];
+    const versions = selectedServicePackage.price_versions ?? [];
+    if (versions.length > 0) {
+      return sortPriceVersionsForDisplay(versions);
+    }
+    return [
+      {
+        id: "",
+        base_price_net: selectedServicePackage.base_price_net,
+        base_price_vat: selectedServicePackage.base_price_vat,
+        base_price_gross: selectedServicePackage.base_price_gross,
+        currency: selectedServicePackage.currency,
+        tax_profile_id: selectedServicePackage.tax_profile_id,
+        tax_profile_key: selectedServicePackage.tax_profile_key,
+        tax_profile_name: selectedServicePackage.tax_profile_name,
+        tax_profile_vat_rate: selectedServicePackage.tax_profile_vat_rate,
+        valid_from: selectedServicePackage.valid_from ?? todayInputDate(),
+        valid_to: selectedServicePackage.valid_to,
+      },
+    ];
+  }, [selectedServicePackage]);
+  const selectedServicePackagePriceColumns = useMemo<
+    ColumnDef<ServicePackagePriceVersion>[]
+  >(
+    () => [
+      {
+        id: "net",
+        label: t.finance_catalog_base_net_price,
+        accessor: (version) => Number(version.base_price_net) || 0,
+        align: "right",
+        width: 120,
+        render: (version) => (
+          <span className="font-medium tabular-nums text-foreground">
+            {formatMoney(version.base_price_net, version.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "vat",
+        label: t.finance_catalog_vat_label,
+        accessor: (version) => Number(version.base_price_vat) || 0,
+        align: "right",
+        width: 110,
+        render: (version) => (
+          <span className="tabular-nums text-foreground">
+            {formatMoney(version.base_price_vat, version.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "gross",
+        label: t.finance_catalog_package_total,
+        accessor: (version) => Number(version.base_price_gross) || 0,
+        align: "right",
+        width: 120,
+        render: (version) => (
+          <span className="font-medium tabular-nums text-foreground">
+            {formatMoney(version.base_price_gross, version.currency)}
+          </span>
+        ),
+      },
+      {
+        id: "period",
+        label: t.revenue_common_validity_period,
+        accessor: (version) => version.valid_from,
+        width: 220,
+        render: (version) => (
+          <span className="font-mono text-xs text-foreground">
+            {version.valid_from} — {version.valid_to || t.finance_catalog_open_ended}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        label: t.users_status,
+        accessor: (version) => pricePeriodState(version.valid_from, version.valid_to),
+        width: 105,
+        render: (version) => {
+          const periodState = pricePeriodState(version.valid_from, version.valid_to);
+          return (
+            <Badge
+              variant="outline"
+              className={cn(
+                "w-fit rounded-full",
+                periodState === "current"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : periodState === "future"
+                    ? "border-sky-200 bg-sky-50 text-sky-700"
+                    : "border-violet-200 bg-violet-50 text-violet-700",
+              )}
+            >
+              {periodState === "current"
+                ? t.finance_catalog_price_current
+                : periodState === "future"
+                  ? t.finance_catalog_price_future
+                  : t.finance_catalog_price_past}
+            </Badge>
+          );
+        },
+      },
+    ],
+    [t],
+  );
   const vatMappingPagination = useDataTablePagination(
     catalogRows,
     "agency-service-vat-mapping",
@@ -977,7 +1183,9 @@ function useFinanceCatalogPageContent() {
       if (row.kind !== "package" || !row.pkg || !expandedPackages.has(row.rowId)) {
         return null;
       }
-      const priceRows: PackageTableRow[] = (row.pkg.price_versions ?? []).map((price) => ({
+      const priceRows: PackageTableRow[] = sortPriceVersionsForDisplay(
+        row.pkg.price_versions ?? [],
+      ).map((price) => ({
         rowId: `${row.rowId}:price:${price.id}`,
         kind: "price" as const,
         name: t.finance_catalog_price_period
@@ -1054,7 +1262,10 @@ function useFinanceCatalogPageContent() {
               <span className="truncate font-mono text-xs font-medium text-foreground">
                 {row.name}
               </span>
-              <Badge variant="outline" className="shrink-0 rounded-full px-1.5 py-0 text-[10px] font-normal">
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-full border-orange-200 bg-orange-50 px-2 py-0 text-[10px] font-semibold text-orange-700 tabular-nums"
+              >
                 {t.finance_catalog_price_versions_count.replace(
                   "{count}",
                   String(row.pkg?.price_versions?.length ?? 0),
@@ -1150,7 +1361,7 @@ function useFinanceCatalogPageContent() {
                   ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                   : pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "future"
                     ? "border-sky-200 bg-sky-50 text-sky-700"
-                    : "border-slate-200 bg-slate-50 text-slate-600",
+                    : "border-violet-200 bg-violet-50 text-violet-700",
               )}
             >
               {pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "current"
@@ -1206,7 +1417,7 @@ function useFinanceCatalogPageContent() {
   const expandAgencyServiceRow = useCallback(
     (row: AgencyServiceTableRow): AgencyServiceTableRow[] | null => {
       if (row.kind !== "service" || !expandedAgencyServices.has(row.rowId)) return null;
-      return (row.service.price_versions ?? []).map((version) => ({
+      return sortPriceVersionsForDisplay(row.service.price_versions ?? []).map((version) => ({
         rowId: `${row.rowId}:price:${version.id}`,
         kind: "price",
         service: row.service,
@@ -1232,6 +1443,8 @@ function useFinanceCatalogPageContent() {
         width: 360,
         render: (row) => {
           if (row.kind === "price" && row.version) {
+            const isCurrent =
+              pricePeriodState(row.version.valid_from, row.version.valid_to) === "current";
             return (
               <div className="flex min-w-0 items-center gap-1.5 pl-7 text-xs text-foreground">
                 <CornerDownRight className="size-3 shrink-0 text-amber-600" />
@@ -1240,6 +1453,14 @@ function useFinanceCatalogPageContent() {
                     .replace("{from}", row.version.valid_from)
                     .replace("{to}", row.version.valid_to || t.finance_catalog_open_ended)}
                 </span>
+                {isCurrent ? (
+                  <Badge
+                    variant="outline"
+                    className="h-5 shrink-0 rounded-full border-emerald-200 bg-emerald-50 px-2 text-[10px] font-semibold text-emerald-700"
+                  >
+                    {t.finance_catalog_price_active}
+                  </Badge>
+                ) : null}
               </div>
             );
           }
@@ -1263,7 +1484,10 @@ function useFinanceCatalogPageContent() {
               <span className="truncate font-mono text-xs text-foreground">
                 {agencyServiceNameLabel(item.service_key, item.service_name, t)}
               </span>
-              <Badge variant="outline" className="shrink-0 rounded-full px-1.5 py-0 text-[10px] font-normal">
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-full border-orange-200 bg-orange-50 px-2 py-0 text-[10px] font-semibold text-orange-700 tabular-nums"
+              >
                 {t.finance_catalog_price_versions_count.replace("{count}", String(priceCount))}
               </Badge>
               {priceCount > 0 ? (
@@ -1362,22 +1586,55 @@ function useFinanceCatalogPageContent() {
             return <span className="text-foreground">-</span>;
           }
           return (
-            <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-              {packageUsages.slice(0, 2).map((usage) => (
-                <Badge
-                  key={usage.id}
-                  variant="outline"
-                  title={usage.packageKey}
-                  className={cn(
-                    "max-w-[160px] truncate rounded-full",
-                    usage.isActive
-                      ? "border-sky-200 bg-sky-50 text-sky-700"
-                      : "border-slate-200 bg-slate-50 text-slate-600",
-                  )}
-                >
-                  {usage.name}
-                </Badge>
-              ))}
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+              {packageUsages.slice(0, 2).map((usage) => {
+                const servicePackage = servicePackagesById.get(usage.id);
+                return (
+                  <div
+                    key={usage.id}
+                    title={usage.packageKey}
+                    className={cn(
+                      "flex min-w-0 max-w-[230px] items-center overflow-hidden rounded-full border",
+                      usage.isActive
+                        ? "border-sky-200 bg-sky-50 text-sky-700"
+                        : "border-slate-200 bg-slate-50 text-slate-600",
+                    )}
+                  >
+                    <span className="min-w-0 truncate px-2 py-0.5 text-xs font-medium">
+                      {usage.name}
+                    </span>
+                    {servicePackage ? (
+                      <span className="shrink-0 border-l border-current/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+                        {formatMoney(servicePackage.base_price_net, servicePackage.currency)}
+                      </span>
+                    ) : null}
+                    {canManageTaxProfiles && servicePackage ? (
+                      <button
+                        type="button"
+                        className="flex size-6 shrink-0 items-center justify-center border-l border-current/15 transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPriceVersionForm({
+                            ...BLANK_PRICE_VERSION_FORM,
+                            open: true,
+                            kind: "service-package",
+                            parentId: servicePackage.id,
+                            title: servicePackage.name,
+                            netPrice: servicePackage.base_price_net,
+                            currency: servicePackage.currency || "EUR",
+                            taxProfileId: servicePackage.tax_profile_id ?? "",
+                            validFrom: todayInputDate(),
+                          });
+                        }}
+                        aria-label={t.finance_catalog_add_price_version}
+                        title={t.finance_catalog_add_price_version}
+                      >
+                        <BadgeEuro className="size-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
               {packageUsages.length > 2 ? (
                 <Badge variant="outline" className="shrink-0 rounded-full">
                   {t.finance_catalog_more_packages.replace(
@@ -1416,7 +1673,7 @@ function useFinanceCatalogPageContent() {
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                     : periodState === "future"
                       ? "border-sky-200 bg-sky-50 text-sky-700"
-                      : "border-slate-200 bg-slate-50 text-slate-600",
+                      : "border-violet-200 bg-violet-50 text-violet-700",
                 )}
               >
                 {periodState === "current"
@@ -1446,7 +1703,9 @@ function useFinanceCatalogPageContent() {
     ],
     [
       agencyServicePackageUsages,
+      canManageTaxProfiles,
       expandedAgencyServices,
+      servicePackagesById,
       t,
       toggleAgencyServiceExpanded,
     ],
@@ -1645,6 +1904,7 @@ function useFinanceCatalogPageContent() {
 
   function closeAgencyServiceForm() {
     if (agencyServiceBusy) return;
+    setAgencyServiceDeleteConfirmOpen(false);
     setAgencyServiceFormOpen(false);
     setAgencyServiceError("");
     setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
@@ -1657,7 +1917,6 @@ function useFinanceCatalogPageContent() {
     setCreateOpen(false);
     setEditingTaxProfileId("");
     setPackageFormOpen(false);
-    setAgencyServiceFormOpen(false);
     setPriceVersionForm({
       ...BLANK_PRICE_VERSION_FORM,
       open: true,
@@ -1679,7 +1938,6 @@ function useFinanceCatalogPageContent() {
   ) {
     setCreateOpen(false);
     setEditingTaxProfileId("");
-    setPackageFormOpen(false);
     setAgencyServiceFormOpen(false);
     setPriceVersionForm({
       ...BLANK_PRICE_VERSION_FORM,
@@ -1998,16 +2256,7 @@ function useFinanceCatalogPageContent() {
 
   async function handleRemoveAgencyService() {
     if (!agencyServiceForm.id || agencyServiceBusy) return;
-    const usageCount = selectedAgencyService?.usage_count ?? 0;
-    const actionLabel = usageCount > 0 ? t.common_archive : t.common_delete;
-    if (
-      !window.confirm(
-        `${actionLabel}: ${agencyServiceForm.serviceName.trim() || agencyServiceForm.serviceKey.trim()}?`,
-      )
-    ) {
-      return;
-    }
-
+    setAgencyServiceDeleteConfirmOpen(false);
     setAgencyServiceBusy(true);
     setAgencyServiceError("");
     try {
@@ -2068,6 +2317,7 @@ function useFinanceCatalogPageContent() {
             ) : null}
           </>
         }
+        rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
         rowActions={
           canManageTaxProfiles
             ? (profile) => (
@@ -2168,63 +2418,30 @@ function useFinanceCatalogPageContent() {
             onPageChange={agencyServicesPagination.onPageChange}
           />
         }
+        rowActionsAlwaysVisible
+        rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
+        rowActionsWidth={44}
         rowActions={
-          canManageTaxProfiles || canCreateOrders
+          canManageTaxProfiles
             ? (row) => (
-                <div className="flex items-center gap-1">
-                  {row.kind === "service" && canCreateOrders && row.service.is_active ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        staffGo(`/orders?create=1&service=${row.service.id}`);
-                      }}
-                      aria-label={t.orders_new_button}
-                      title={t.orders_new_button}
-                    >
-                      <ClipboardPlus className="size-3.5" />
-                    </Button>
-                  ) : null}
-                  {canManageTaxProfiles && row.kind === "service" ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-7 rounded-full text-[var(--brand)] hover:bg-orange-50 hover:text-[var(--brand)]"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openAgencyServicePriceVersion(row.service);
-                      }}
-                      aria-label={t.finance_catalog_add_price_version}
-                      title={t.finance_catalog_add_price_version}
-                    >
-                      <BadgeEuro className="size-4" />
-                    </Button>
-                  ) : null}
-                  {canManageTaxProfiles ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (row.kind === "price" && row.version) {
-                          openAgencyServicePriceVersion(row.service, row.version);
-                        } else {
-                          openEditAgencyService(row.service);
-                        }
-                      }}
-                      aria-label={t.finance_catalog_edit}
-                      title={t.finance_catalog_edit}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                  ) : null}
-                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (row.kind === "price" && row.version) {
+                      openAgencyServicePriceVersion(row.service, row.version);
+                    } else {
+                      openEditAgencyService(row.service);
+                    }
+                  }}
+                  aria-label={t.finance_catalog_edit}
+                  title={t.finance_catalog_edit}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
               )
             : undefined
         }
@@ -2257,6 +2474,7 @@ function useFinanceCatalogPageContent() {
             ) : null}
           </>
         }
+        rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
         rowActions={
           canManageTaxProfiles
             ? (row) =>
@@ -2331,56 +2549,30 @@ function useFinanceCatalogPageContent() {
         }
       />
 
-      <Sheet
+      <Dialog
         open={priceVersionForm.open && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closePriceVersionForm();
         }}
       >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[560px]">
-          <form className="flex h-full min-h-0 flex-col" onSubmit={handleSavePriceVersion}>
-            <AdminSheetScaffold
-              title={
+        <DialogContent
+          className="z-[70] max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          overlayClassName="z-[69]"
+        >
+          <DialogHeader className="border-b border-border px-5 py-4">
+            <DialogTitle>
+              {
                 priceVersionForm.versionId
                   ? t.finance_catalog_edit_price_version
                   : t.finance_catalog_add_price_version
               }
-              footer={
-                <div className="shrink-0 border-t border-border bg-popover px-4 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      {priceVersionForm.versionId ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          disabled={priceVersionForm.busy}
-                          onClick={() => setPriceDeleteConfirmOpen(true)}
-                        >
-                          <Trash2 className="size-4" />
-                          {t.common_delete}
-                        </Button>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-9 rounded-lg"
-                        disabled={priceVersionForm.busy}
-                        onClick={closePriceVersionForm}
-                      >
-                        {t.common_cancel}
-                      </Button>
-                      <Button type="submit" className="h-9 rounded-lg" disabled={priceVersionForm.busy}>
-                        {t.common_save}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              }
-            >
-              <div className="space-y-4">
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex min-h-0 flex-col overflow-y-auto"
+            onSubmit={handleSavePriceVersion}
+          >
+            <div className="space-y-4 p-5">
                 {priceVersionForm.error ? (
                   <Banner tone="error" withIcon>
                     {priceVersionForm.error}
@@ -2504,11 +2696,40 @@ function useFinanceCatalogPageContent() {
                 <p className="text-xs leading-5 text-muted-foreground">
                   {t.finance_catalog_price_history_hint}
                 </p>
+            </div>
+            <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none px-5 py-3 sm:justify-between">
+              <div>
+                {priceVersionForm.versionId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={priceVersionForm.busy}
+                    onClick={() => setPriceDeleteConfirmOpen(true)}
+                  >
+                    <Trash2 className="size-4" />
+                    {t.common_delete}
+                  </Button>
+                ) : null}
               </div>
-            </AdminSheetScaffold>
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-lg"
+                  disabled={priceVersionForm.busy}
+                  onClick={closePriceVersionForm}
+                >
+                  {t.common_cancel}
+                </Button>
+                <Button type="submit" className="h-9 rounded-lg" disabled={priceVersionForm.busy}>
+                  {t.common_save}
+                </Button>
+              </div>
+            </DialogFooter>
           </form>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <DirtyDismissConfirmDialog
         open={priceDeleteConfirmOpen}
@@ -2891,16 +3112,49 @@ function useFinanceCatalogPageContent() {
                   : t.revenue_agency_service_new_title
               }
               footer={
-                <SheetFormFooter
-                  cancelLabel={t.common_cancel}
-                  submitLabel={
-                    agencyServiceForm.id
-                      ? t.revenue_agency_service_save
-                      : t.revenue_agency_service_create
-                  }
-                  submitting={agencyServiceBusy}
-                  onCancel={closeAgencyServiceForm}
-                />
+                agencyServiceForm.id ? (
+                  <SheetActionsFooter>
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={agencyServiceBusy}
+                        onClick={() => setAgencyServiceDeleteConfirmOpen(true)}
+                      >
+                        <Trash2 className="size-4" />
+                        {(selectedAgencyService?.usage_count ?? 0) > 0
+                          ? t.common_archive
+                          : t.common_delete}
+                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg"
+                          disabled={agencyServiceBusy}
+                          onClick={closeAgencyServiceForm}
+                        >
+                          {t.common_cancel}
+                        </Button>
+                        <Button
+                          type="submit"
+                          className="h-9 rounded-lg"
+                          disabled={agencyServiceBusy}
+                        >
+                          {t.revenue_agency_service_save}
+                        </Button>
+                      </div>
+                    </div>
+                  </SheetActionsFooter>
+                ) : (
+                  <SheetFormFooter
+                    cancelLabel={t.common_cancel}
+                    submitLabel={t.revenue_agency_service_create}
+                    submitting={agencyServiceBusy}
+                    onCancel={closeAgencyServiceForm}
+                  />
+                )
               }
             >
               <div className="space-y-3 rounded-xl p-4">
@@ -2957,101 +3211,54 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_package_pricing}>
+                <Section
+                  title={t.finance_catalog_package_pricing}
+                  accessory={
+                    selectedAgencyService ? (
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg"
+                        onClick={() => openAgencyServicePriceVersion(selectedAgencyService)}
+                        disabled={agencyServiceBusy}
+                      >
+                        <BadgeEuro className="size-4" />
+                        {t.finance_catalog_add_price_version}
+                      </Button>
+                    ) : null
+                  }
+                >
                   {selectedAgencyService ? (
-                    <div className="space-y-3">
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          className="h-9 rounded-lg"
-                          onClick={() => openAgencyServicePriceVersion(selectedAgencyService)}
-                          disabled={agencyServiceBusy}
-                        >
-                          <BadgeEuro className="size-4" />
-                          {t.finance_catalog_add_price_version}
-                        </Button>
-                      </div>
-                      <div className="overflow-hidden rounded-xl border border-border/60">
-                        <table className="w-full text-left text-sm">
-                          <thead className="bg-muted/35 text-xs font-medium text-muted-foreground">
-                            <tr>
-                              <th className="px-3 py-2 font-medium">
-                                {t.revenue_agency_service_unit_price}
-                              </th>
-                              <th className="px-3 py-2 font-medium">
-                                {t.revenue_agency_service_vat_percent}
-                              </th>
-                              <th className="px-3 py-2 font-medium">
-                                {t.revenue_common_validity_period}
-                              </th>
-                              <th className="px-3 py-2 font-medium">{t.users_status}</th>
-                              <th className="w-12 px-2 py-2" />
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/60">
-                            {selectedAgencyServicePrices.map((version) => {
-                              const periodState = pricePeriodState(
-                                version.valid_from,
-                                version.valid_to,
-                              );
-                              return (
-                                <tr key={version.id || "catalog-current-price"}>
-                                  <td className="px-3 py-2.5 font-medium tabular-nums text-foreground">
-                                    {formatMoney(
-                                      version.unit_price as string | number,
-                                      version.currency,
-                                    )}
-                                  </td>
-                                  <td className="px-3 py-2.5 tabular-nums text-foreground">
-                                    {String(version.vat_rate)} %
-                                  </td>
-                                  <td className="px-3 py-2.5 font-mono text-xs text-foreground">
-                                    {version.valid_from} —{" "}
-                                    {version.valid_to || t.finance_catalog_open_ended}
-                                  </td>
-                                  <td className="px-3 py-2.5">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "w-fit rounded-full",
-                                        periodState === "current"
-                                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                          : periodState === "future"
-                                            ? "border-sky-200 bg-sky-50 text-sky-700"
-                                            : "border-slate-200 bg-slate-50 text-slate-600",
-                                      )}
-                                    >
-                                      {periodState === "current"
-                                        ? t.finance_catalog_price_current
-                                        : periodState === "future"
-                                          ? t.finance_catalog_price_future
-                                          : t.finance_catalog_price_past}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-2 py-2 text-right">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-sm"
-                                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                                      onClick={() =>
-                                        openAgencyServicePriceVersion(
-                                          selectedAgencyService,
-                                          version,
-                                        )
-                                      }
-                                      aria-label={t.finance_catalog_edit_price_version}
-                                      title={t.finance_catalog_edit_price_version}
-                                    >
-                                      <Pencil className="size-3.5" />
-                                    </Button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                    <div>
+                      <DataTable
+                        rows={selectedAgencyServicePrices}
+                        columns={selectedAgencyServicePriceColumns}
+                        rowId={(version) => version.id || "catalog-current-price"}
+                        density="compact"
+                        storageKey="finance-catalog-agency-price-list"
+                        rowActionsAlwaysVisible
+                        rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
+                        rowActionsWidth={80}
+                        rowActions={(version) => (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              openAgencyServicePriceVersion(selectedAgencyService, version)
+                            }
+                            aria-label={t.finance_catalog_edit_price_version}
+                            title={t.finance_catalog_edit_price_version}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        )}
+                        footer={
+                          <span className="tabular-nums">
+                            {selectedAgencyServicePrices.length}
+                          </span>
+                        }
+                      />
                     </div>
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -3156,28 +3363,32 @@ function useFinanceCatalogPageContent() {
                       disabled={agencyServiceBusy}
                     />
                   </Field>
-                  {agencyServiceForm.id ? (
-                    <div className="mt-3 flex items-center justify-end border-t border-border/60 pt-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
-                        onClick={() => void handleRemoveAgencyService()}
-                        disabled={agencyServiceBusy}
-                      >
-                        <Trash2 className="size-4" />
-                        {(selectedAgencyService?.usage_count ?? 0) > 0
-                          ? t.common_archive
-                          : t.common_delete}
-                      </Button>
-                    </div>
-                  ) : null}
                 </Section>
               </div>
             </AdminSheetScaffold>
           </form>
         </SheetContent>
       </Sheet>
+
+      <DirtyDismissConfirmDialog
+        open={agencyServiceDeleteConfirmOpen}
+        destructive
+        title={t.finance_catalog_remove_agency_service_title}
+        message={
+          (selectedAgencyService?.usage_count ?? 0) > 0
+            ? t.finance_catalog_archive_agency_service_message
+            : t.finance_catalog_delete_agency_service_message
+        }
+        cancelLabel={t.common_cancel}
+        confirmLabel={
+          (selectedAgencyService?.usage_count ?? 0) > 0
+            ? t.common_archive
+            : t.common_delete
+        }
+        confirmDisabled={agencyServiceBusy}
+        onCancel={() => setAgencyServiceDeleteConfirmOpen(false)}
+        onConfirm={() => void handleRemoveAgencyService()}
+      />
 
       <Sheet
         open={packageFormOpen && canManageTaxProfiles}
@@ -3244,62 +3455,112 @@ function useFinanceCatalogPageContent() {
                   </div>
                 </Section>
 
-                <Section title={t.finance_catalog_package_pricing}>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
-                      <Input
-                        id="package-base-price"
-                        value={packageForm.basePriceNet}
-                        onChange={(event) =>
-                          setPackageForm((current) => ({
-                            ...current,
-                            basePriceNet: event.target.value,
-                          }))
-                        }
-                        className={inputClass}
-                        disabled={packageBusy}
-                      />
-                    </Field>
-                    <Field
-                      label={t.finance_catalog_package_vat_profile}
-                      htmlFor="package-tax-profile"
-                    >
-                      <NativeComboboxSelect
-                        id="package-tax-profile"
-                        value={packageForm.taxProfileId || "__none__"}
-                        onChange={(event) =>
-                          setPackageForm((current) => ({
-                            ...current,
-                            taxProfileId:
-                              event.target.value === "__none__" ? "" : event.target.value,
-                          }))
-                        }
-                        className={selectClass}
+                <Section
+                  title={t.finance_catalog_package_pricing}
+                  accessory={
+                    selectedServicePackage ? (
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg"
+                        onClick={() => openServicePackagePriceVersion(selectedServicePackage)}
                         disabled={packageBusy}
                       >
-                        <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
-                        {taxProfiles.map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {profile.name} ({profile.vat_rate}%)
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
-                    <Field label={t.finance_catalog_currency} htmlFor="package-currency">
-                      <Input
-                        id="package-currency"
-                        value={packageForm.currency}
-                        onChange={(event) =>
-                          setPackageForm((current) => ({
-                            ...current,
-                            currency: event.target.value,
-                          }))
+                        <BadgeEuro className="size-4" />
+                        {t.finance_catalog_add_price_version}
+                      </Button>
+                    ) : null
+                  }
+                >
+                  {selectedServicePackage ? (
+                    <div>
+                      <DataTable
+                        rows={selectedServicePackagePrices}
+                        columns={selectedServicePackagePriceColumns}
+                        rowId={(version) => version.id || "package-current-price"}
+                        density="compact"
+                        storageKey="finance-catalog-package-price-list"
+                        rowActionsAlwaysVisible
+                        rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
+                        rowActionsWidth={48}
+                        rowActions={(version) => (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                            onClick={() =>
+                              openServicePackagePriceVersion(selectedServicePackage, version)
+                            }
+                            aria-label={t.finance_catalog_edit_price_version}
+                            title={t.finance_catalog_edit_price_version}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        )}
+                        footer={
+                          <span className="tabular-nums">
+                            {selectedServicePackagePrices.length}
+                          </span>
                         }
-                        className={inputClass}
-                        disabled={packageBusy}
                       />
-                    </Field>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t.finance_catalog_base_net_price} htmlFor="package-base-price">
+                        <Input
+                          id="package-base-price"
+                          value={packageForm.basePriceNet}
+                          onChange={(event) =>
+                            setPackageForm((current) => ({
+                              ...current,
+                              basePriceNet: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                      <Field
+                        label={t.finance_catalog_package_vat_profile}
+                        htmlFor="package-tax-profile"
+                      >
+                        <NativeComboboxSelect
+                          id="package-tax-profile"
+                          value={packageForm.taxProfileId || "__none__"}
+                          onChange={(event) =>
+                            setPackageForm((current) => ({
+                              ...current,
+                              taxProfileId:
+                                event.target.value === "__none__" ? "" : event.target.value,
+                            }))
+                          }
+                          className={selectClass}
+                          disabled={packageBusy}
+                        >
+                          <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
+                          {taxProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name} ({profile.vat_rate}%)
+                            </option>
+                          ))}
+                        </NativeComboboxSelect>
+                      </Field>
+                      <Field label={t.finance_catalog_currency} htmlFor="package-currency">
+                        <Input
+                          id="package-currency"
+                          value={packageForm.currency}
+                          onChange={(event) =>
+                            setPackageForm((current) => ({
+                              ...current,
+                              currency: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={packageBusy}
+                        />
+                      </Field>
+                    </div>
+                  )}
                 </Section>
 
                 <Section title={t.finance_catalog_package_validity}>
@@ -3419,7 +3680,7 @@ function useFinanceCatalogPageContent() {
                     {packageForm.items.map((item, index) => (
                       <div
                         key={item.formKey}
-                        className="rounded-xl border border-border/50 bg-muted/20 p-3"
+                        className="rounded-xl border border-border bg-card p-4 shadow-xs"
                       >
                         <div className="grid gap-3 sm:grid-cols-2">
                           <Field label={t.revenue_agency_service_catalog_items}>
@@ -3457,17 +3718,6 @@ function useFinanceCatalogPageContent() {
                               }
                               className={inputClass}
                               disabled={packageBusy}
-                            />
-                          </Field>
-                          <Field label={t.finance_catalog_service_key}>
-                            <Input
-                              value={item.serviceKey}
-                              onChange={(event) =>
-                                updatePackageItem(index, { serviceKey: event.target.value })
-                              }
-                              className={inputClass}
-                              disabled={packageBusy}
-                              placeholder={t.uiText.finance_catalog_service_key_placeholder}
                             />
                           </Field>
                           <Field label={t.finance_catalog_included_quantity}>
@@ -3539,19 +3789,19 @@ function useFinanceCatalogPageContent() {
                             />
                             {t.finance_catalog_approval_required}
                           </label>
-                          <div className="flex items-end justify-end">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 rounded-lg text-rose-700"
-                              onClick={() => removePackageItem(index)}
-                              disabled={packageBusy}
-                            >
-                              <Trash2 className="size-4" />
-                              {t.common_remove}
-                            </Button>
-                          </div>
+                        </div>
+                        <div className="mt-4 flex justify-end border-t border-border/70 pt-3">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 rounded-lg text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+                            onClick={() => removePackageItem(index)}
+                            disabled={packageBusy}
+                          >
+                            <Trash2 className="size-4" />
+                            {t.common_remove}
+                          </Button>
                         </div>
                       </div>
                     ))}

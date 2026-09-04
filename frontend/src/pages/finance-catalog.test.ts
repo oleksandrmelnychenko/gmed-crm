@@ -7,6 +7,7 @@ import {
   packageItemPatchFromAgencyService,
   packageItemVatRate,
   pricePeriodState,
+  sortPriceVersionsForDisplay,
   validateAgencyServiceForm,
 } from "./finance-catalog";
 
@@ -21,6 +22,25 @@ describe("pricePeriodState", () => {
 
   it("keeps both validity boundaries inclusive", () => {
     expect(pricePeriodState("2026-09-04", "2026-09-04", today)).toBe("current");
+  });
+});
+
+describe("sortPriceVersionsForDisplay", () => {
+  it("places the current price first while keeping every other version", () => {
+    const versions = [
+      { id: "previous", valid_from: "2026-01-01", valid_to: "2026-08-31" },
+      { id: "future-later", valid_from: "2026-11-01", valid_to: null },
+      { id: "current", valid_from: "2026-09-01", valid_to: "2026-09-30" },
+      { id: "future-next", valid_from: "2026-10-01", valid_to: "2026-10-31" },
+    ];
+
+    expect(sortPriceVersionsForDisplay(versions, "2026-09-04").map((item) => item.id)).toEqual([
+      "current",
+      "future-next",
+      "future-later",
+      "previous",
+    ]);
+    expect(versions).toHaveLength(4);
   });
 });
 
