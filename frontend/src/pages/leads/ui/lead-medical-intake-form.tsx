@@ -14,7 +14,10 @@ import {
   PatientClinicalWarningSection,
   PatientMedicationSection,
 } from "@/pages/patients/ui/sections/patient-clinical-entry-sections";
-import type { ProviderSummary } from "@/pages/providers/model/types";
+import type {
+  ProviderSummary,
+  SpecializationItem,
+} from "@/pages/providers/model/types";
 
 type Tx = (ru: string, de: string) => string;
 
@@ -30,6 +33,7 @@ type LeadMedicalIntakeFormProps = {
   caves: ClinicalWarning[];
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
+  specializations: SpecializationItem[];
   onNarrativeChange: (value: ClinicalNarrative) => void;
   onDiagnosesChange: (value: ClinicalDiagnosis[]) => void;
   onMedicationsChange: (value: ClinicalMedication[]) => void;
@@ -66,6 +70,7 @@ export function LeadMedicalIntakeForm({
   caves,
   providers,
   allDoctors,
+  specializations,
   onNarrativeChange,
   onDiagnosesChange,
   onMedicationsChange,
@@ -111,6 +116,7 @@ export function LeadMedicalIntakeForm({
         items={diagnoses}
         providers={providers}
         allDoctors={allDoctors}
+        specializations={specializations}
         canManage
         lang={lang}
         onSave={async (next) => {

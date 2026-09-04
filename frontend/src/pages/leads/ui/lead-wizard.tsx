@@ -23,6 +23,7 @@ import {
   HeartPulse,
   History,
   LoaderCircle,
+  MessageSquareText,
   Pencil,
   Plus,
   ReceiptText,
@@ -4875,6 +4876,16 @@ ${serviceCommentLines.join("\n")}`
                             value: tx("Не указано", "Nicht angegeben"),
                           }]),
                     ] : []),
+                    ...(lead.message ? [{
+                      label: tx("Комментарий клиента", "Kundennachricht"),
+                      value: (
+                        <span className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 font-normal text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                          <MessageSquareText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span className="min-w-0 whitespace-pre-wrap break-words">{lead.message}</span>
+                        </span>
+                      ),
+                      wide: true,
+                    }] : []),
                   ]}
                 />
                 </Section>
@@ -5446,6 +5457,7 @@ ${serviceCommentLines.join("\n")}`
                   caves={draft.caves}
                   providers={clinicalProviders}
                   allDoctors={allDoctors}
+                  specializations={specialties}
                   onNarrativeChange={(value) => {
                     setError("");
                     clearServerValidation();
@@ -5467,9 +5479,8 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && lead && step === "service" ? (
             <section className="space-y-5">
-              {isQuestionnaireLead || lead.message ? (
-                <Section title={tx("Данные опросника", "Fragebogendaten")}>
               {isQuestionnaireLead ? (
+                <Section title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
                   items={[
                     { label: tx("Нужен переводчик", "Dolmetscher benötigt"), value: yesNoValue(draft.serviceNeeds.includes("interpreter_support"), tx) },
@@ -5483,16 +5494,6 @@ ${serviceCommentLines.join("\n")}`
                     { label: tx("Выбранная программа", "Gewähltes Programm"), value: lead.selected_program ? leadProgramServiceLabel(lead.selected_program, t) : tx("Не указано", "Nicht angegeben") },
                   ]}
                 />
-              ) : null}
-              {lead.message ? (
-                <LeadQuestionnaireFacts
-                  items={[{
-                    label: tx("Комментарий клиента", "Kundennachricht"),
-                    value: lead.message,
-                    wide: true,
-                  }]}
-                />
-              ) : null}
                 </Section>
               ) : null}
               <Section
