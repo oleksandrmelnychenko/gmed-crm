@@ -652,18 +652,20 @@ export function PatientMedicationTable({
 }) {
   const sections = groupedClinicalItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
   const columnCount = canManage ? 13 : 12;
-  const doseCell = (value: string | null) => (value && value.trim() ? value.trim() : "");
+  const doseCell = (value: string | null) => {
+    const normalized = value?.trim() ?? "";
+    return normalized || <span aria-hidden="true" className="text-muted-foreground/35">—</span>;
+  };
 
-  // Design-system table styling (soft borders, muted header, hover rows).
-  const headCell = "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const headDoseCell = "px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const bodyCell = "break-words px-2.5 py-2 align-top text-foreground";
-  const bodyDoseCell = "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
+  const headCell = "px-2.5 py-2 text-xs font-medium text-muted-foreground";
+  const headDoseCell = "px-1.5 py-2 text-center text-xs font-medium text-muted-foreground";
+  const bodyCell = "break-words px-2.5 py-2.5 align-middle leading-snug text-foreground";
+  const bodyDoseCell = "px-1.5 py-2.5 text-center align-middle font-mono tabular-nums text-foreground";
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border/40 bg-white">
-      <table className="w-full min-w-[1200px] border-collapse text-left text-xs">
-        <thead className="border-b border-border bg-muted/40">
+    <div className="overflow-x-auto bg-card">
+      <table className="w-full min-w-[1160px] border-collapse text-left text-xs">
+        <thead className="border-b border-border/40 bg-card">
           <tr>
             <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
             <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
@@ -678,20 +680,20 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
             <th scope="col" className={headCell}>{tx("Источник", "Quelle")}</th>
             {canManage ? (
-              <th scope="col" className="px-2 py-2 text-right">
-                <span className="sr-only">{tx("Действия", "Aktionen")}</span>
+              <th scope="col" className="px-2.5 py-2 text-right text-xs font-medium text-muted-foreground">
+                {tx("Действия", "Aktionen")}
               </th>
             ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/60">
+        <tbody className="divide-y divide-border/30">
           {sections.map((section) => (
             <Fragment key={section.key}>
               {section.label && section.key !== "dauer" ? (
                 <tr>
                   <td
                     colSpan={columnCount}
-                    className="bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    className="bg-muted/55 px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground"
                   >
                     {section.label}
                   </td>
@@ -709,11 +711,11 @@ export function PatientMedicationTable({
                         ? "bg-rose-50/70"
                         : item.on_hold
                           ? "bg-amber-50/70"
-                          : "hover:bg-muted/30",
+                          : "even:bg-muted/20 hover:bg-muted/45",
                     )}
                   >
-                    <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
-                    <td className={cn(bodyCell, "font-medium")}>
+                    <td className={cn(bodyCell, "whitespace-pre-line font-medium")}>{item.wirkstoff || "—"}</td>
+                    <td className={bodyCell}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
                       {item.einnahme_bis ? (
                         <span
@@ -758,7 +760,9 @@ export function PatientMedicationTable({
                     <td className={bodyCell}>
                       {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
                       {attribution ? (
-                        <span className="mt-0.5 block break-words text-[10px] text-muted-foreground">{attribution}</span>
+                        <span className="mt-1 block max-w-full break-words text-[10px] leading-snug text-muted-foreground">
+                          {attribution}
+                        </span>
                       ) : null}
                     </td>
                     <td className={bodyCell}>{item.grund || ""}</td>
@@ -1023,7 +1027,7 @@ function ClinicalSection<T extends { id?: string | null }>({
         </div>
       </header>
 
-      <div className="space-y-1.5 p-3">
+      <div className={cn(listView && list.length > 0 ? "min-w-0" : "space-y-1.5 p-3")}>
         {list.length === 0 ? (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Пока нет записей", "Noch keine Einträge")}
@@ -1921,7 +1925,7 @@ function PatientLabHistoryTable({
         storageKey={storageKey}
         density="compact"
         disableRowHover
-        rowHeightOverrides={{ comfortable: 100, compact: 92, condensed: 84 }}
+        rowHeightOverrides={{ comfortable: 56, compact: 48, condensed: 42 }}
         rowActions={canManage ? (row) => (
           <div className="flex items-center justify-end gap-1">
             <PatientLabResultEditAction
@@ -1937,11 +1941,6 @@ function PatientLabHistoryTable({
         rowActionsLabel={tx("Действия", "Aktionen")}
         rowActionsWidth={80}
         className="w-full min-w-0 shadow-none"
-        footer={
-          <span className="tabular-nums">
-            {rows.length} {tx("результатов", "Ergebnisse")}
-          </span>
-        }
       />
 
       <Dialog open={notePreview !== null} onOpenChange={(open) => !open && setNotePreview(null)}>
@@ -4293,10 +4292,10 @@ export function PatientClinicalTab({
               return (
                 <details
                   key={group.name.toLocaleLowerCase()}
-                  open={groupIndex < 3}
+                  open={groupIndex === 0}
                   className="group overflow-hidden rounded-lg border border-border/60 bg-white"
                 >
-                  <summary className="grid cursor-pointer list-none gap-2 px-3 py-3 sm:grid-cols-[minmax(220px,300px)_140px_minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
+                  <summary className="grid cursor-pointer list-none gap-2 px-3 py-2.5 sm:grid-cols-[minmax(220px,300px)_140px_minmax(0,1fr)_auto] sm:items-center [&::-webkit-details-marker]:hidden">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{group.name}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -4327,7 +4326,7 @@ export function PatientClinicalTab({
                     <span aria-hidden className="text-xs text-muted-foreground transition-transform group-open:rotate-90">›</span>
                   </summary>
 
-                  <div className="border-t border-border/50 bg-slate-50/40 p-2">
+                  <div className="border-t border-border/50 bg-slate-50/40 p-1.5">
                     <PatientLabHistoryTable
                       rows={group.rows}
                       storageKey={`patient-clinical:lab-history:${group.name.toLocaleLowerCase()}`}

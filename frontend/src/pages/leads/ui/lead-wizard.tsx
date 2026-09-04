@@ -40,6 +40,7 @@ import {
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
@@ -1582,6 +1583,51 @@ function money(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+type ServiceBillingUnitKind = "hour" | "day" | "unit" | "other";
+
+function serviceBillingUnitKind(unitLabel: string | null | undefined): ServiceBillingUnitKind {
+  const normalized = unitLabel?.trim().toLocaleLowerCase("de-DE") ?? "";
+  if (/^(std\.?|stunde(?:n)?|hour(?:s)?|ч\.?|час(?:а|ов)?)$/u.test(normalized)) {
+    return "hour";
+  }
+  if (/^(tag(?:e)?\.?|day(?:s)?|день|дня|дней)$/u.test(normalized)) {
+    return "day";
+  }
+  if (/^(einheit(?:en)?|unit(?:s)?|ед\.?|единиц(?:а|ы)?)$/u.test(normalized)) {
+    return "unit";
+  }
+  return "other";
+}
+
+function serviceBillingUnitLabel(
+  unitLabel: string | null | undefined,
+  tx: Tx,
+) {
+  switch (serviceBillingUnitKind(unitLabel)) {
+    case "hour":
+      return tx("час", "Stunde");
+    case "day":
+      return tx("день", "Tag");
+    case "unit":
+      return tx("единица", "Einheit");
+    default:
+      return unitLabel?.trim() || tx("единица", "Einheit");
+  }
+}
+
+function serviceBillingUnitBadgeClass(unitLabel: string | null | undefined) {
+  switch (serviceBillingUnitKind(unitLabel)) {
+    case "hour":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "day":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "unit":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    default:
+      return "border-border/70 bg-muted/40 text-muted-foreground";
+  }
+}
+
 const MONEY_FORMATTERS = {
   de: new Intl.NumberFormat("de-DE", {
     minimumFractionDigits: 2,
@@ -1653,8 +1699,8 @@ function costEstimateServiceLines(
 ) {
   return workTypes.map((item) => ({
     description: costEstimateWorkTypeDescription(item, additionalLanguage),
-    quantity: String(Math.max(1, item.duration_hours)),
-    fee: `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR`,
+    quantity: `${Math.max(1, item.duration_hours)} Std.`,
+    fee: `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR/Std.`,
     line_total: costEstimateWorkTypeRange(item),
   }));
 }
@@ -2350,6 +2396,7 @@ export function LeadWizard({
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [deleteServiceLine, setDeleteServiceLine] = useState<ServiceLine | null>(null);
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
@@ -2896,6 +2943,7 @@ export function LeadWizard({
     setMedicalLookupsLoading(false);
     setCommercialLookupsLoading(false);
     setArchiveConfirmOpen(false);
+    setDeleteServiceLine(null);
     setDeleteDocument(null);
     setDeleteReason("");
     setDeleteError("");
@@ -4685,7 +4733,7 @@ ${serviceCommentLines.join("\n")}`
       sortable: false,
       required: true,
       pinned: "left",
-      width: 310,
+      width: 420,
       render: (line) => {
         const catalogService = line.agencyServiceId
           ? agencyServiceById.get(line.agencyServiceId)
@@ -4704,27 +4752,51 @@ ${serviceCommentLines.join("\n")}`
     },
     {
       id: "quantity",
-      label: tx("Количество", "Menge"),
+      label: tx("Объём", "Umfang"),
       accessor: (line) => money(line.quantity),
       sortable: false,
+      required: true,
       align: "right",
-      width: 130,
+      width: 132,
       cellClassName: "overflow-visible",
-      render: (line) => (
-        <Input
-          name={`service_quantity_${line.id}`}
-          autoComplete="off"
-          inputMode="decimal"
-          aria-label={`${tx("Количество", "Menge")}: ${line.description}`}
-          className="h-7 rounded-md bg-field text-right font-mono text-xs tabular-nums"
-          value={line.quantity}
-          disabled={isBusy}
-          onChange={(event) => {
-            setCommercialSaveFeedback(null);
-            updateLine(line.id, { quantity: event.target.value });
-          }}
-        />
-      ),
+      render: (line) => {
+        const catalogService = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)
+          : undefined;
+        const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
+        const unit = serviceBillingUnitLabel(
+          rawUnit,
+          tx,
+        );
+        return (
+          <div className="grid min-w-0 grid-cols-[3rem_4.25rem] items-center justify-end gap-1">
+            <Input
+              name={`service_quantity_${line.id}`}
+              autoComplete="off"
+              inputMode="decimal"
+              aria-label={`${tx("Объём", "Umfang")} (${unit}): ${line.description}`}
+              title={`${tx("Объём", "Umfang")}: ${line.quantity || "0"} ${unit}`}
+              className="h-7 w-12 shrink-0 rounded-md bg-field px-2 text-right font-mono text-xs tabular-nums"
+              value={line.quantity}
+              disabled={isBusy}
+              onChange={(event) => {
+                setCommercialSaveFeedback(null);
+                updateLine(line.id, { quantity: event.target.value });
+              }}
+            />
+            <Badge
+              aria-hidden="true"
+              variant="outline"
+              className={cn(
+                "h-5 w-full shrink-0 justify-center px-1.5 font-mono text-[10px] font-semibold",
+                serviceBillingUnitBadgeClass(rawUnit),
+              )}
+            >
+              {unit}
+            </Badge>
+          </div>
+        );
+      },
     },
     {
       id: "description",
@@ -4732,7 +4804,6 @@ ${serviceCommentLines.join("\n")}`
       accessor: (line) => line.catalogDescription,
       sortable: false,
       searchable: true,
-      width: 360,
       render: (line) => (
         <span
           className="line-clamp-2 whitespace-normal text-xs text-muted-foreground"
@@ -4744,13 +4815,24 @@ ${serviceCommentLines.join("\n")}`
     },
     {
       id: "unit_price",
-      label: tx("Цена за единицу", "Einzelpreis"),
+      label: tx("Ставка", "Satz"),
       accessor: (line) => money(line.price),
       sortable: false,
       align: "right",
-      width: 150,
+      width: 170,
       render: (line) => {
-        return <span className="whitespace-nowrap">{formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}</span>;
+        const catalogService = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)
+          : undefined;
+        const unit = serviceBillingUnitLabel(
+          line.catalogUnitLabel || catalogService?.unit_label,
+          tx,
+        );
+        return (
+          <span className="whitespace-nowrap">
+            {formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}/{unit}
+          </span>
+        );
       },
     },
     {
@@ -4770,9 +4852,20 @@ ${serviceCommentLines.join("\n")}`
       align: "right",
       width: 150,
       render: (line) => {
+        const catalogService = line.agencyServiceId
+          ? agencyServiceById.get(line.agencyServiceId)
+          : undefined;
+        const unit = serviceBillingUnitLabel(
+          line.catalogUnitLabel || catalogService?.unit_label,
+          tx,
+        );
+        const total = money(line.quantity) * money(line.price);
         return (
-          <span className="whitespace-nowrap font-semibold">
-            {formatMoneyValue(money(line.quantity) * money(line.price), lang)} {line.currency || "EUR"}
+          <span
+            className="whitespace-nowrap font-semibold"
+            title={`${line.quantity || "0"} ${unit} × ${formatMoneyValue(money(line.price), lang)} ${line.currency || "EUR"} = ${formatMoneyValue(total, lang)} ${line.currency || "EUR"}`}
+          >
+            {formatMoneyValue(total, lang)} {line.currency || "EUR"}
           </span>
         );
       },
@@ -5602,6 +5695,50 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && lead && step === "service" ? (
             <section className="space-y-5">
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Период программы", "Programmzeitraum")}
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    label={tx("Начало программы", "Programmbeginn")}
+                    required={Boolean(draft.programDateTo)}
+                    error={orderFieldError("program-date-from")}
+                    errorId={`${ORDER_DATE_FROM_ID}-error`}
+                  >
+                    <Input
+                      id={ORDER_DATE_FROM_ID}
+                      name="program_date_from"
+                      type="date"
+                      required={Boolean(draft.programDateTo)}
+                      aria-invalid={Boolean(orderFieldError("program-date-from"))}
+                      aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
+                      className={inputClass}
+                      value={draft.programDateFrom}
+                      onChange={(event) => patch("programDateFrom", event.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label={tx("Окончание программы", "Programmende")}
+                    required={Boolean(draft.programDateFrom)}
+                    error={orderFieldError("program-date-to", "program-date-range")}
+                    errorId={`${ORDER_DATE_TO_ID}-error`}
+                  >
+                    <Input
+                      id={ORDER_DATE_TO_ID}
+                      name="program_date_to"
+                      type="date"
+                      min={draft.programDateFrom || undefined}
+                      required={Boolean(draft.programDateFrom)}
+                      aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
+                      aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
+                      className={inputClass}
+                      value={draft.programDateTo}
+                      onChange={(event) => patch("programDateTo", event.target.value)}
+                    />
+                  </Field>
+                </div>
+              </Section>
               {isQuestionnaireLead ? (
                 <Section title={tx("Данные опросника", "Fragebogendaten")}>
                 <LeadQuestionnaireFacts
@@ -5943,50 +6080,6 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
-                title={tx("Период программы", "Programmzeitraum")}
-              >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    label={tx("Начало программы", "Programmbeginn")}
-                    required={Boolean(draft.programDateTo)}
-                    error={orderFieldError("program-date-from")}
-                    errorId={`${ORDER_DATE_FROM_ID}-error`}
-                  >
-                    <Input
-                      id={ORDER_DATE_FROM_ID}
-                      name="program_date_from"
-                      type="date"
-                      required={Boolean(draft.programDateTo)}
-                      aria-invalid={Boolean(orderFieldError("program-date-from"))}
-                      aria-describedby={orderFieldError("program-date-from") ? `${ORDER_DATE_FROM_ID}-error` : undefined}
-                      className={inputClass}
-                      value={draft.programDateFrom}
-                      onChange={(event) => patch("programDateFrom", event.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label={tx("Окончание программы", "Programmende")}
-                    required={Boolean(draft.programDateFrom)}
-                    error={orderFieldError("program-date-to", "program-date-range")}
-                    errorId={`${ORDER_DATE_TO_ID}-error`}
-                  >
-                    <Input
-                      id={ORDER_DATE_TO_ID}
-                      name="program_date_to"
-                      type="date"
-                      min={draft.programDateFrom || undefined}
-                      required={Boolean(draft.programDateFrom)}
-                      aria-invalid={Boolean(orderFieldError("program-date-to", "program-date-range"))}
-                      aria-describedby={orderFieldError("program-date-to", "program-date-range") ? `${ORDER_DATE_TO_ID}-error` : undefined}
-                      className={inputClass}
-                      value={draft.programDateTo}
-                      onChange={(event) => patch("programDateTo", event.target.value)}
-                    />
-                  </Field>
-                </div>
-              </Section>
-              <Section
-                className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Специализации", "Fachrichtungen")}
               >
                 <Field
@@ -6149,12 +6242,21 @@ ${serviceCommentLines.join("\n")}`
                                               workType.code}
                                         </span>
                                         <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+                                          {Math.max(1, workType.duration_hours)} {tx("ч.", "Std.")}
+                                          {" × "}
                                           {formatMoneyValue(workType.min_price_eur, lang)}
                                           {" - "}
-                                          {formatMoneyValue(workType.max_price_eur, lang)} EUR
-                                          {" · "}
-                                          {workType.duration_hours}{" "}
-                                          {tx("ч.", "Std.")}
+                                          {formatMoneyValue(workType.max_price_eur, lang)} EUR/{tx("ч.", "Std.")}
+                                          {" = "}
+                                          {formatMoneyValue(
+                                            workType.min_price_eur * Math.max(1, workType.duration_hours),
+                                            lang,
+                                          )}
+                                          {" - "}
+                                          {formatMoneyValue(
+                                            workType.max_price_eur * Math.max(1, workType.duration_hours),
+                                            lang,
+                                          )} EUR
                                         </span>
                                       </span>
                                     </label>
@@ -6263,7 +6365,22 @@ ${serviceCommentLines.join("\n")}`
                     items={[
                       {
                         label: tx("Запрос клиента", "Kundenbedarf"),
-                        value: draft.serviceNeeds.map((value) => knownLeadProgramServiceLabel(value, t) ?? serviceNeedLabel(value, tx)).join(", "),
+                        value: (
+                          <span className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 font-normal text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                            <MessageSquareText
+                              aria-hidden="true"
+                              className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+                            />
+                            <span className="min-w-0 whitespace-pre-wrap break-words">
+                              {draft.serviceNeeds
+                                .map((value) =>
+                                  knownLeadProgramServiceLabel(value, t)
+                                  ?? serviceNeedLabel(value, tx),
+                                )
+                                .join(", ")}
+                            </span>
+                          </span>
+                        ),
                         wide: true,
                       },
                     ]}
@@ -6284,7 +6401,7 @@ ${serviceCommentLines.join("\n")}`
                       value={service.id}
                       disabled={lines.some((line) => line.agencyServiceId === service.id)}
                     >
-                      {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}
+                      {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}/{serviceBillingUnitLabel(service.unit_label, tx)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -6297,23 +6414,24 @@ ${serviceCommentLines.join("\n")}`
                     rowId={(line) => line.id}
                     density="comfortable"
                     rowHeightOverrides={{ comfortable: 46 }}
-                    storageKey="lead-wizard-order-lines"
-                    rowActionsWidth={48}
-                    rowActionsLabel={tx("Действия", "Aktionen")}
+                    storageKey="lead-wizard-order-lines-v2"
+                    rowActionsAlwaysVisible
+                    rowActionsWidth={36}
+                    rowActionsLabel={(
+                      <span className="sr-only">{tx("Действия", "Aktionen")}</span>
+                    )}
                     rowActions={(line) => (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
+                        className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         disabled={isBusy}
                         title={tx("Удалить услугу", "Leistung entfernen")}
                         aria-label={`${tx("Удалить услугу", "Leistung entfernen")}: ${line.description}`}
-                        onClick={() => {
-                          setCommercialSaveFeedback(null);
-                          setLines((current) => current.filter((item) => item.id !== line.id));
-                        }}
+                        onClick={() => setDeleteServiceLine(line)}
                       >
-                        <X className="size-3.5" />
+                        <Trash2 aria-hidden="true" className="size-3.5" />
                       </Button>
                     )}
                     footer={(
@@ -7014,6 +7132,54 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </SheetContent>
       </Sheet>
+      <Dialog
+        open={Boolean(deleteServiceLine)}
+        allowImplicitDismissal
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setDeleteServiceLine(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{tx("Удалить позицию заказа?", "Auftragsposition entfernen?")}</DialogTitle>
+            <DialogDescription>
+              {tx(
+                "Позиция будет удалена, а итоговая сумма заказа пересчитается.",
+                "Die Position wird entfernt und die Auftragssumme neu berechnet.",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-w-0 rounded-lg border border-border bg-muted/35 px-3 py-2 text-sm font-medium text-foreground">
+            <span className="block truncate" title={deleteServiceLine?.description || undefined}>
+              {deleteServiceLine?.description}
+            </span>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteServiceLine(null)}
+            >
+              {tx("Отмена", "Abbrechen")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (!deleteServiceLine) return;
+                setCommercialSaveFeedback(null);
+                setLines((current) =>
+                  current.filter((item) => item.id !== deleteServiceLine.id),
+                );
+                setDeleteServiceLine(null);
+              }}
+            >
+              <Trash2 aria-hidden="true" className="size-3.5" />
+              {tx("Удалить", "Entfernen")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(documentPreview)}
         onOpenChange={(nextOpen) => {
