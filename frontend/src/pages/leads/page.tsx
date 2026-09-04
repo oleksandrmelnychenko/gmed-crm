@@ -39,6 +39,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
+  countryCodeForDisplay,
+  countryNameForDisplay,
+} from "@/components/ui/country-select";
+import {
   Dialog,
   DialogClose,
   DialogContent,
@@ -78,6 +82,7 @@ import {
   daysInStatusLabel,
   failedOutcomeTone,
   leadRowAccent,
+  leadSourceTone,
   leadStatusTone,
 } from "./appearance/status-appearance";
 import {
@@ -757,16 +762,37 @@ function useLeadsPageContent() {
         filterType: "text",
         group: "origin",
         width: 180,
-        render: (row) => <span className="text-xs text-foreground">{leadSourceLabel(row.source, t)}</span>,
+        render: (row) => (
+          <StatusBadge tone={leadSourceTone(row.source)}>
+            {leadSourceLabel(row.source, t)}
+          </StatusBadge>
+        ),
       },
       {
         id: "country",
         label: t.providers_country,
-        accessor: (row) => row.country ?? "",
+        accessor: (row) => countryNameForDisplay(row.country, lang),
         filterType: "text",
         group: "origin",
-        width: 150,
-        render: (row) => <span className="text-xs text-foreground">{row.country || t.common_not_set}</span>,
+        width: 180,
+        render: (row) => (
+          <span className="text-xs text-foreground">
+            {countryNameForDisplay(row.country, lang) || t.common_not_set}
+          </span>
+        ),
+      },
+      {
+        id: "country_code",
+        label: lang === "de" ? "Ländercode" : "Код страны",
+        accessor: (row) => countryCodeForDisplay(row.country),
+        filterType: "text",
+        group: "origin",
+        width: 120,
+        render: (row) => (
+          <span className="font-mono text-xs text-foreground">
+            {countryCodeForDisplay(row.country) || t.common_not_set}
+          </span>
+        ),
       },
       {
         id: "failed",
@@ -800,6 +826,7 @@ function useLeadsPageContent() {
         "phone",
         "source",
         "country",
+        "country_code",
       ]);
       return columns.filter((column) => conciergeColumns.has(column.id));
     },

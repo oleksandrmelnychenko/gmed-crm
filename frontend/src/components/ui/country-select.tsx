@@ -99,6 +99,15 @@ export function countryNameForDisplay(
   return COUNTRY_CODE_SET.has(code) ? countryLabel(code, lang) : normalized;
 }
 
+/** ISO alpha-2 code for either a stored code or a recognized legacy country name. */
+export function countryCodeForDisplay(value: string | null | undefined) {
+  const normalized = countryCodeFromStoredValue(value);
+  if (!normalized) return "";
+
+  const code = normalized.toUpperCase();
+  return COUNTRY_CODE_SET.has(code) ? code : "";
+}
+
 /** Localized human-readable country name for an ISO alpha-2 code. */
 export function countryLabel(code: string | null | undefined, lang: string): string {
   if (!code) {

@@ -58,6 +58,44 @@ export function failedOutcomeTone(status?: string | null): StatusTone {
   return "warning";
 }
 
+/** Visual category for the different channels through which a lead entered CRM. */
+export function leadSourceTone(source?: string | null): StatusTone {
+  const normalized = source?.trim().toLowerCase().replace(/[-\s]+/g, "_") ?? "";
+
+  switch (normalized) {
+    case "apply":
+    case "website":
+    case "website_wizard":
+      return "warning";
+    case "existing_patient":
+      return "success";
+    case "website_contact":
+    case "website_contact_form":
+    case "website_form":
+    case "contact_form":
+    case "visitor_facade":
+    case "phone":
+    case "email":
+    case "whatsapp":
+      return "info";
+    case "agent":
+    case "referral":
+    case "partner":
+    case "social_media":
+    case "google_ads":
+    case "facebook":
+    case "instagram":
+      return "brand";
+    case "manual":
+    case "walk_in":
+    case "other":
+    case "":
+      return "neutral";
+    default:
+      return "error";
+  }
+}
+
 export function leadRowAccent(status: string): string {
   switch (status) {
     case "new":
