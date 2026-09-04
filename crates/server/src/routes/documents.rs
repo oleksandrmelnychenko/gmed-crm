@@ -14505,8 +14505,13 @@ fn admin_signature_grid(
         let anchored_top_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + BLOCK_HEIGHT_MM;
         if layout.y_mm < anchored_top_mm + 12.0 {
             layout.page_break();
+            // A dedicated signature page should read from the top down. Keeping
+            // the usual bottom anchor here leaves an almost entirely blank page
+            // with the signature lines stranded above the footer.
+            layout.y_mm = layout.top_start_y_mm();
+        } else {
+            layout.y_mm = anchored_top_mm;
         }
-        layout.y_mm = anchored_top_mm;
     } else {
         layout.ensure_space(BLOCK_HEIGHT_MM);
     }
@@ -24090,6 +24095,54 @@ mod tests {
                 "missing signature text: {expected}"
             );
         }
+    }
+
+    #[test]
+    fn admin_signature_grid_starts_near_top_on_dedicated_page() {
+        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let mut layout = TreatmentPlanPdfLayout::new_legal(Vec::new(), regular, bold);
+        layout.text_block(
+            "Previous page content",
+            9.5,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.0,
+        );
+        layout.y_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + 30.0;
+
+        admin_signature_grid(
+            &mut layout,
+            AdminSignatureParty {
+                place: Some("Berlin"),
+                date: NaiveDate::from_ymd_opt(2026, 7, 17),
+                name: "Anna Beispiel",
+                role: "Auftraggeber",
+            },
+            AdminSignatureParty {
+                place: Some("München"),
+                date: NaiveDate::from_ymd_opt(2026, 7, 17),
+                name: "GMED - Agentur für Patientenbetreuung",
+                role: "Auftragnehmer",
+            },
+        );
+
+        assert_eq!(layout.pages.len(), 1);
+        let signature_text_y_positions = layout
+            .page_ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::SetTextCursor { pos } => Some(pos.y.0),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(signature_text_y_positions.len(), 4);
+        assert!(
+            signature_text_y_positions
+                .iter()
+                .all(|y| *y > pdf_mm_to_pt(230.0).0)
+        );
     }
 
     #[test]

@@ -9,50 +9,6 @@ CREATE INDEX IF NOT EXISTS idx_order_leistungen_agency_price_version
     ON order_leistungen(agency_service_price_version_id)
     WHERE agency_service_price_version_id IS NOT NULL;
 
-ALTER TABLE order_service_groups
-    ADD COLUMN IF NOT EXISTS agency_service_price_version_id UUID
-        REFERENCES agency_service_price_versions(id) ON DELETE SET NULL;
-
-WITH resolved AS (
-    SELECT service_group.id,
-           (
-               SELECT version.id
-               FROM agency_service_price_versions version
-               WHERE version.agency_service_id = service_group.agency_service_id
-                 AND version.valid_from <= COALESCE(
-                        service_group.service_date,
-                        ord.date_from,
-                        service_group.created_at::DATE
-                     )
-                 AND (
-                        version.valid_to IS NULL
-                        OR version.valid_to >= COALESCE(
-                            service_group.service_date,
-                            ord.date_from,
-                            service_group.created_at::DATE
-                        )
-                     )
-                 AND version.unit_price = service_group.unit_price
-                 AND UPPER(version.currency) = UPPER(service_group.currency)
-                 AND version.vat_rate = service_group.vat_rate
-               ORDER BY version.valid_from DESC, version.created_at DESC
-               LIMIT 1
-           ) AS price_version_id
-    FROM order_service_groups service_group
-    JOIN orders ord ON ord.id = service_group.order_id
-    WHERE service_group.agency_service_id IS NOT NULL
-      AND service_group.agency_service_price_version_id IS NULL
-)
-UPDATE order_service_groups service_group
-SET agency_service_price_version_id = resolved.price_version_id
-FROM resolved
-WHERE service_group.id = resolved.id
-  AND resolved.price_version_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_order_service_groups_agency_price_version
-    ON order_service_groups(agency_service_price_version_id)
-    WHERE agency_service_price_version_id IS NOT NULL;
-
 WITH resolved AS (
     SELECT line.id,
            (
@@ -141,13 +97,9 @@ SET base_price_net_snapshot = COALESCE(base_price_net_snapshot, 0),
     currency_snapshot = COALESCE(NULLIF(UPPER(BTRIM(currency_snapshot)), ''), 'EUR');
 
 ALTER TABLE patient_service_packages
-    ALTER COLUMN base_price_net_snapshot SET DEFAULT 0,
     ALTER COLUMN base_price_net_snapshot SET NOT NULL,
-    ALTER COLUMN base_price_vat_snapshot SET DEFAULT 0,
     ALTER COLUMN base_price_vat_snapshot SET NOT NULL,
-    ALTER COLUMN base_price_gross_snapshot SET DEFAULT 0,
     ALTER COLUMN base_price_gross_snapshot SET NOT NULL,
-    ALTER COLUMN currency_snapshot SET DEFAULT 'EUR',
     ALTER COLUMN currency_snapshot SET NOT NULL;
 
 ALTER TABLE patient_service_packages
@@ -170,9 +122,7 @@ ALTER TABLE service_package_consumptions
         REFERENCES agency_service_price_versions(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS unit_price_net_snapshot NUMERIC,
     ADD COLUMN IF NOT EXISTS currency_snapshot TEXT,
-    ADD COLUMN IF NOT EXISTS vat_rate_snapshot NUMERIC,
-    ADD COLUMN IF NOT EXISTS tax_profile_id_snapshot UUID
-        REFERENCES tax_profiles(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS vat_rate_snapshot NUMERIC;
 
 WITH resolved AS (
     SELECT consumption.id,
@@ -189,12 +139,7 @@ WITH resolved AS (
                catalog.vat_rate,
                package_tax.vat_rate,
                0
-           ) AS vat_rate,
-           CASE
-               WHEN item_tax.id IS NOT NULL THEN item_tax.id
-               WHEN catalog.id IS NOT NULL THEN NULL
-               ELSE package_tax.id
-           END AS tax_profile_id
+           ) AS vat_rate
     FROM service_package_consumptions consumption
     JOIN patient_service_packages patient_package
       ON patient_package.id = consumption.patient_service_package_id
@@ -220,8 +165,7 @@ UPDATE service_package_consumptions consumption
 SET agency_service_price_version_id = resolved.price_version_id,
     unit_price_net_snapshot = resolved.unit_price_net,
     currency_snapshot = resolved.currency,
-    vat_rate_snapshot = resolved.vat_rate,
-    tax_profile_id_snapshot = resolved.tax_profile_id
+    vat_rate_snapshot = resolved.vat_rate
 FROM resolved
 WHERE consumption.id = resolved.id;
 
@@ -231,11 +175,8 @@ SET unit_price_net_snapshot = COALESCE(unit_price_net_snapshot, 0),
     vat_rate_snapshot = COALESCE(vat_rate_snapshot, 0);
 
 ALTER TABLE service_package_consumptions
-    ALTER COLUMN unit_price_net_snapshot SET DEFAULT 0,
     ALTER COLUMN unit_price_net_snapshot SET NOT NULL,
-    ALTER COLUMN currency_snapshot SET DEFAULT 'EUR',
     ALTER COLUMN currency_snapshot SET NOT NULL,
-    ALTER COLUMN vat_rate_snapshot SET DEFAULT 0,
     ALTER COLUMN vat_rate_snapshot SET NOT NULL;
 
 ALTER TABLE service_package_consumptions
