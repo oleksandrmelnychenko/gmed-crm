@@ -8,6 +8,7 @@ import {
   X,
   Send,
   MessageSquare,
+  LoaderCircle,
   UserRoundPlus,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -40,6 +41,7 @@ import {
   type ChatMessage,
   type Notification,
   dismissActiveAnnouncement,
+  fetchOldestNewLead,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
@@ -161,6 +163,13 @@ export function Topbar() {
     user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads"),
   );
   const newLeads = useNewLeadCounter(showLeadShortcut);
+  const [leadShortcutBusy, setLeadShortcutBusy] = useState(false);
+  const canOpenLeadWizard = user?.role === "ceo" || user?.role === "patient_manager";
+  const leadShortcutTitle = newLeads > 0
+    ? lang === "de"
+      ? `${newLeads} neue Leads. Ältesten öffnen`
+      : `${newLeads} новых лидов. Открыть самый ранний`
+    : t.leads_title;
   const onlineUsersWithSelf =
     !isPatientPortal && user
       ? [
@@ -316,13 +325,34 @@ export function Topbar() {
           {showLeadShortcut ? (
             <TopbarIconButton
               onClick={() => {
-                navigate("/leads");
                 setNotifOpen(false);
                 setUsersOpen(false);
+                if (leadShortcutBusy) return;
+                if (newLeads <= 0) {
+                  navigate("/leads");
+                  return;
+                }
+                setLeadShortcutBusy(true);
+                void fetchOldestNewLead()
+                  .then((lead) => {
+                    if (!lead) {
+                      navigate("/leads");
+                      return;
+                    }
+                    const query = new URLSearchParams({ lead: lead.id });
+                    if (canOpenLeadWizard) query.set("view", "wizard");
+                    navigate(`/leads?${query.toString()}`);
+                  })
+                  .catch(() => navigate("/leads"))
+                  .finally(() => setLeadShortcutBusy(false));
               }}
-              title={t.leads_title}
+              title={leadShortcutTitle}
             >
-              <UserRoundPlus aria-hidden="true" className="size-[17px]" />
+              {leadShortcutBusy ? (
+                <LoaderCircle aria-hidden="true" className="size-[17px] animate-spin" />
+              ) : (
+                <UserRoundPlus aria-hidden="true" className="size-[17px]" />
+              )}
               {newLeads > 0 ? (
                 <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[10px] font-semibold text-white">
                   {newLeads > 99 ? "99+" : newLeads}

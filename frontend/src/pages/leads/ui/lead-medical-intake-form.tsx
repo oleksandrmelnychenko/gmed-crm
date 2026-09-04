@@ -127,6 +127,7 @@ export function LeadMedicalIntakeForm({
       <div id={anamneseId} tabIndex={-1} className="rounded-xl outline-none">
         <AnamneseSection
           active={narrative}
+          specializations={specializations}
           canManage
           lang={lang}
           requireCurrent

@@ -19,6 +19,7 @@ const CHAT_NOTIFICATION_EVENTS = [
 ] as const;
 
 const REFRESH_INTERVAL_MS = 60_000;
+export const NEW_LEAD_COUNTER_REFRESH_EVENT = "gmed:new-lead-counter-refresh";
 
 type LeadStatusCount = {
   status: string;
@@ -60,9 +61,11 @@ export function useNewLeadCounter(enabled: boolean): number {
     refreshLeads();
     const timer = window.setInterval(refreshLeads, REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refreshLeads);
+    window.addEventListener(NEW_LEAD_COUNTER_REFRESH_EVENT, refreshLeads);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshLeads);
+      window.removeEventListener(NEW_LEAD_COUNTER_REFRESH_EVENT, refreshLeads);
     };
   }, [enabled, refreshLeads]);
 

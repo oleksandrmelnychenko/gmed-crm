@@ -60,6 +60,29 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface NewLeadQueueItem {
+  id: string;
+  created_at: string;
+}
+
+export function oldestNewLead(items: NewLeadQueueItem[]) {
+  return items.reduce<NewLeadQueueItem | null>((oldest, item) => {
+    if (!oldest) return item;
+    const oldestTime = Date.parse(oldest.created_at);
+    const itemTime = Date.parse(item.created_at);
+    if (!Number.isFinite(itemTime)) return oldest;
+    if (!Number.isFinite(oldestTime) || itemTime < oldestTime) return item;
+    return oldest;
+  }, null);
+}
+
+export async function fetchOldestNewLead() {
+  const items = await apiFetch<NewLeadQueueItem[]>("/leads?status=new", {
+    forceFresh: true,
+  });
+  return oldestNewLead(items);
+}
+
 export function notificationHrefForRole(item: Notification, role: string) {
   if (!item.entity_type) return null;
 

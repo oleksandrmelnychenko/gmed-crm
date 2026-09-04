@@ -3,8 +3,25 @@ import { describe, expect, it } from "vitest";
 import {
   localizedNotificationCopy,
   notificationHrefForRole,
+  oldestNewLead,
   type Notification,
 } from "./topbar-data";
+
+describe("oldestNewLead", () => {
+  it("selects the earliest unprocessed lead for FIFO handling", () => {
+    expect(
+      oldestNewLead([
+        { id: "lead-newest", created_at: "2026-09-04T10:00:00Z" },
+        { id: "lead-oldest", created_at: "2026-08-30T10:00:00Z" },
+        { id: "lead-middle", created_at: "2026-09-01T10:00:00Z" },
+      ])?.id,
+    ).toBe("lead-oldest");
+  });
+
+  it("returns null for an empty queue", () => {
+    expect(oldestNewLead([])).toBeNull();
+  });
+});
 
 function notification(entityType: string, entityId = "entity-1"): Notification {
   return {

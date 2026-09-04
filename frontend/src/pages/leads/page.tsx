@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -410,6 +411,9 @@ function useLeadsPageContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
   const isConciergeReadOnly = user?.role === "concierge";
+  const conciergeTabsRef = useRef<HTMLDivElement | null>(null);
+  const conciergeTabPillRef = useRef<HTMLSpanElement | null>(null);
+  const conciergeTabPillReadyRef = useRef(false);
   useEffect(() => {
     if (!permissions.canConvert) return;
     preloadLeadWizard();
@@ -597,6 +601,45 @@ function useLeadsPageContent() {
     setLeadUiField("failedLeadBusy", value);
   const setActionBusy = (value: SetStateAction<string | null>) =>
     setLeadUiField("actionBusy", value);
+
+  useEffect(() => {
+    if (!isConciergeReadOnly || !detailOpen) {
+      conciergeTabPillReadyRef.current = false;
+      return;
+    }
+    const tabs = conciergeTabsRef.current;
+    const pill = conciergeTabPillRef.current;
+    if (!tabs || !pill) return;
+
+    const activeTab = () => tabs.querySelector<HTMLElement>(`[data-pane-tab="${paneTab}"]`);
+    const movePill = (animate: boolean) => {
+      const active = activeTab();
+      if (!active) return;
+      if (!animate) {
+        const previousTransition = pill.style.transition;
+        pill.style.transition = "none";
+        pill.style.transform = `translateX(${active.offsetLeft}px)`;
+        pill.style.width = `${active.offsetWidth}px`;
+        void pill.offsetWidth;
+        pill.style.transition = previousTransition;
+        return;
+      }
+      pill.style.transform = `translateX(${active.offsetLeft}px)`;
+      pill.style.width = `${active.offsetWidth}px`;
+    };
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const animationFrame = window.requestAnimationFrame(() => {
+      movePill(conciergeTabPillReadyRef.current && !reduceMotion);
+      conciergeTabPillReadyRef.current = true;
+    });
+    const handleResize = () => movePill(false);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [detailOpen, isConciergeReadOnly, paneTab]);
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, search: deferredSearch || filters.search }),
@@ -1238,11 +1281,12 @@ function useLeadsPageContent() {
   const paneTabs: Array<{
     key: LeadPaneTab;
     label: string;
+    icon: typeof FileCheck2;
   }> = [
-    { key: "overview", label: t.lead_tab_overview },
-    { key: "process", label: t.lead_tab_process },
-    { key: "qualification", label: t.lead_tab_qualification },
-    { key: "details", label: t.lead_tab_details },
+    { key: "overview", label: t.lead_tab_overview, icon: FileCheck2 },
+    { key: "process", label: t.lead_tab_process, icon: ArrowRight },
+    { key: "qualification", label: t.lead_tab_qualification, icon: ShieldCheck },
+    { key: "details", label: t.lead_tab_details, icon: ClipboardCheck },
   ];
 
   const leadWorkflow = detail && detailIsConsoleLead
@@ -1360,31 +1404,66 @@ function useLeadsPageContent() {
           </div>
         </div>
         {detailIsConsoleLead ? (
-          <div className="mt-2 flex flex-wrap gap-1">
-          {paneTabs.map((tab) => {
-            const isActive = paneTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setPaneTab(tab.key)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-                aria-pressed={isActive}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-          </div>
+          isConciergeReadOnly ? (
+            <nav
+              className="mt-3 overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              aria-label={lang === "de" ? "Lead-Bereiche" : "Разделы лида"}
+            >
+              <div className="flex w-max min-w-full justify-center py-1">
+                <div ref={conciergeTabsRef} className="t-tabs lead-wizard-step-tabs" role="tablist">
+                  <span
+                    ref={conciergeTabPillRef}
+                    className="t-tabs-pill lead-wizard-step-pill"
+                    aria-hidden="true"
+                  />
+                  {paneTabs.map((tab) => {
+                    const isActive = paneTab === tab.key;
+                    const TabIcon = tab.icon;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        role="tab"
+                        data-pane-tab={tab.key}
+                        aria-selected={isActive}
+                        onClick={() => setPaneTab(tab.key)}
+                        className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <TabIcon aria-hidden="true" className="size-4 shrink-0" />
+                        <span className="whitespace-nowrap">{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </nav>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {paneTabs.map((tab) => {
+                const isActive = paneTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setPaneTab(tab.key)}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                      isActive
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                    aria-pressed={isActive}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          )
         ) : null}
       </div>
       <div className="flex-1 overflow-y-auto space-y-4 px-5 py-4">
-        <div className="space-y-4 rounded-xl">
+        <div className={cn("space-y-4 rounded-xl", isConciergeReadOnly && "mx-auto w-full max-w-6xl")}>
           {detailLoading ? (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-500">
               <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -2057,6 +2136,7 @@ function useLeadsPageContent() {
                       </div>
                     </div>
 
+                    {permissions.canEdit ? (
                     <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm}>
                       <fieldset disabled={!permissions.canEdit} className="contents">
                       <div className="grid gap-4 md:grid-cols-2">
@@ -2248,6 +2328,41 @@ function useLeadsPageContent() {
                       </div>
                       </fieldset>
                     </form>
+                    ) : (
+                      <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <DetailCard label={t.patients_email} value={gateForm.email || t.common_not_set} />
+                        <DetailCard label={t.field_phone} value={gateForm.phone || t.common_not_set} />
+                        <DetailCard
+                          label={t.providers_country}
+                          value={countryNameForDisplay(gateForm.country, lang) || t.common_not_set}
+                        />
+                        <DetailCard
+                          label={t.lead_primary_language}
+                          value={leadLanguageLabel(gateForm.primaryLanguage, t)}
+                        />
+                        <DetailCard
+                          label={t.field_birth_date}
+                          value={formatDate(gateForm.dateOfBirth, locale, t.common_not_set)}
+                        />
+                        <DetailCard
+                          label={t.lead_legal_sex}
+                          value={legalSexLabel(gateForm.legalSex, t)}
+                        />
+                        <DetailCard
+                          label={t.lead_compliance_status}
+                          value={complianceStatusLabel(gateForm.complianceStatus, t)}
+                        />
+                        <DetailCard label={t.patients_notes} value={gateForm.notes || t.common_not_set} />
+                        <DetailCard
+                          label={t.lead_healthcare_consent_available}
+                          value={yesNo(gateForm.consentHealthcare, t)}
+                        />
+                        <DetailCard
+                          label={t.lead_privacy_practices_accepted}
+                          value={yesNo(gateForm.consentPrivacyPractices, t)}
+                        />
+                      </div>
+                    )}
                   </section>
                 ) : null}
 
@@ -2731,7 +2846,7 @@ function useLeadsPageContent() {
               if (!open) syncLeadQuery(undefined, { replace: false });
             }}
           >
-            <DialogContent className="flex h-[min(92dvh,56rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,52rem)] sm:w-[min(92vw,76rem)] sm:max-w-[76rem]">
+            <DialogContent className="flex h-[90dvh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]">
               <DialogTitle className="sr-only">
                 {detail
                   ? `${detail.first_name} ${detail.last_name}`

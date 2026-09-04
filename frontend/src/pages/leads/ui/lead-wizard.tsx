@@ -67,6 +67,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { useLang, type Lang } from "@/lib/i18n";
+import { NEW_LEAD_COUNTER_REFRESH_EVENT } from "@/lib/use-nav-counters";
 import type { LeadDetail } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -2821,7 +2822,10 @@ export function LeadWizard({
     if (promotedInProgressRef.current === leadId) return;
     promotedInProgressRef.current = leadId;
     void updateLeadStatus(leadId, "in_progress")
-      .then(() => refreshLeadState())
+      .then(() => {
+        window.dispatchEvent(new Event(NEW_LEAD_COUNTER_REFRESH_EVENT));
+        return refreshLeadState();
+      })
       .catch(() => undefined);
   }, [open, leadId, lead?.qualification_status, refreshLeadState]);
 
