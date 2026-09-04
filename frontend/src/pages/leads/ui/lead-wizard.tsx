@@ -88,6 +88,7 @@ import {
   updateQuoteStatus,
 } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem, ContractItem, QuoteItem } from "@/pages/contracts/model/types";
+import { resolveAgencyServicePrice } from "@/pages/contracts/model/contracts-model";
 import {
   createDocumentPreviewObjectUrl,
   deleteStoredDocumentFile,
@@ -1599,7 +1600,7 @@ function germanList(values: string[]) {
   return `${uniqueValues.slice(0, -1).join(", ")} und ${uniqueValues.at(-1)}`;
 }
 
-function resolveServiceDescriptionTemplate(
+export function resolveServiceDescriptionTemplate(
   template: string,
   context: {
     dateFrom: string;
@@ -1608,15 +1609,21 @@ function resolveServiceDescriptionTemplate(
   },
 ) {
   const specialties = germanList(context.specialties);
-  return template
+  const resolved = template
     .replace(/\[Datum\s+Beginn\]/giu, germanDateLabel(context.dateFrom))
     .replace(/\[Datum\s+Ende\]/giu, germanDateLabel(context.dateTo))
     .replace(
       /\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\](?:(?:\s*,\s*(?:und\s+)?|\s+und\s+)\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\])*/giu,
       specialties,
-    )
-    .replace(/\s+([,.;:])/gu, "$1")
-    .replace(/\s{2,}/gu, " ")
+    );
+  return resolved
+    .split(/\r?\n/gu)
+    .map((line) => line
+      .replace(/[^\S\r\n]+([,.;:])/gu, "$1")
+      .replace(/[^\S\r\n]{2,}/gu, " ")
+      .trim())
+    .join("\n")
+    .replace(/\n{3,}/gu, "\n\n")
     .trim();
 }
 
@@ -5026,6 +5033,11 @@ ${serviceCommentLines.join("\n")}`
   function addAgencyService(serviceId: string) {
     const service = agencyServiceById.get(serviceId);
     if (!service) return;
+    const effectivePrice = resolveAgencyServicePrice(
+      service,
+      draft?.programDateFrom || undefined,
+    );
+    if (!effectivePrice) return;
     setCommercialSaveFeedback(null);
     setLines((current) => {
       if (current.some((line) => line.agencyServiceId === service.id)) return current;
@@ -5037,9 +5049,9 @@ ${serviceCommentLines.join("\n")}`
           description: service.service_name,
           catalogDescription: service.description?.trim() ?? "",
           catalogUnitLabel: service.unit_label?.trim() ?? "",
-          currency: service.currency || "EUR",
-          price: inputString(service.unit_price),
-          vat: inputString(service.vat_rate, "19"),
+          currency: effectivePrice.currency || "EUR",
+          price: inputString(effectivePrice.unit_price),
+          vat: inputString(effectivePrice.vat_rate, "19"),
         },
       ];
     });
@@ -6907,15 +6919,26 @@ ${serviceCommentLines.join("\n")}`
                     className={cn(selectClass, "w-full md:max-w-2xl")}
                   >
                     <option value="">{tx("Выберите услугу из каталога", "Leistung aus dem Katalog auswählen")}</option>
-                    {agencyServices.map((service) => (
-                      <option
-                        key={service.id}
-                        value={service.id}
-                        disabled={lines.some((line) => line.agencyServiceId === service.id)}
-                      >
-                        {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}/{serviceBillingUnitLabel(service.unit_label, tx)}
-                      </option>
-                    ))}
+                    {agencyServices.map((service) => {
+                      const effectivePrice = resolveAgencyServicePrice(
+                        service,
+                        draft.programDateFrom || undefined,
+                      );
+                      return (
+                        <option
+                          key={service.id}
+                          value={service.id}
+                          disabled={
+                            !effectivePrice ||
+                            lines.some((line) => line.agencyServiceId === service.id)
+                          }
+                        >
+                          {service.service_name} · {effectivePrice
+                            ? `${formatMoneyValue(money(inputString(effectivePrice.unit_price)), lang)} ${effectivePrice.currency}`
+                            : "—"}/{serviceBillingUnitLabel(service.unit_label, tx)}
+                        </option>
+                      );
+                    })}
                   </NativeComboboxSelect>
                 </div>
                 {lines.length === 0 ? (

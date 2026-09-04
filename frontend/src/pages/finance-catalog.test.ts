@@ -111,7 +111,7 @@ describe("packageItemPatchFromAgencyService", () => {
       description: "Interpreter support per hour",
       serviceKey: "interpreter_hours",
       unitLabel: "h",
-      overageUnitPriceNet: "120.50",
+      overageUnitPriceNet: "",
     });
   });
 
@@ -158,7 +158,7 @@ describe("createPackageItemFromAgencyService", () => {
       serviceKey: "interpreter_hours",
       includedQuantity: "1",
       unitLabel: "h",
-      overageUnitPriceNet: "120.50",
+      overageUnitPriceNet: "",
       taxProfileId: "",
       requiresPatientApproval: false,
     });

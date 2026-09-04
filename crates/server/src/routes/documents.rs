@@ -14626,6 +14626,74 @@ fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
     lines
 }
 
+fn single_order_scope_points(item: &GeneratedContractLineItem) -> Vec<String> {
+    let note = item.notes.as_deref().map(str::trim).unwrap_or_default();
+    let normalized_note = note.to_ascii_lowercase();
+    let source = if note.is_empty()
+        || normalized_note.starts_with("leistungsumfang")
+        || normalized_note.contains("einschließlich folgender absätze")
+    {
+        item.description.trim()
+    } else {
+        note
+    };
+    if source.is_empty() {
+        return Vec::new();
+    }
+
+    fn strip_list_marker(line: &str) -> (&str, bool) {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("• "))
+        {
+            return (rest.trim(), true);
+        }
+        let marker_end = trimmed
+            .char_indices()
+            .find_map(|(index, character)| matches!(character, ')' | '.').then_some(index));
+        if let Some(marker_end) = marker_end {
+            let prefix = &trimmed[..marker_end];
+            let rest = trimmed[marker_end + 1..].trim_start();
+            if !prefix.is_empty()
+                && prefix.chars().all(|character| character.is_ascii_digit())
+                && !rest.is_empty()
+            {
+                return (rest, true);
+            }
+        }
+        (trimmed, false)
+    }
+
+    let mut points = Vec::new();
+    let mut current = String::new();
+    let flush = |points: &mut Vec<String>, current: &mut String| {
+        let value = current.trim();
+        if !value.is_empty() {
+            points.push(value.to_string());
+        }
+        current.clear();
+    };
+
+    for raw_line in source.replace('\r', "").lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            flush(&mut points, &mut current);
+            continue;
+        }
+        let (content, starts_new_point) = strip_list_marker(line);
+        if starts_new_point {
+            flush(&mut points, &mut current);
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(content);
+    }
+    flush(&mut points, &mut current);
+    points
+}
+
 fn build_single_order_pdf(
     context: &GeneratedSingleOrderContext,
     fallback_document_reference: &str,
@@ -14636,6 +14704,20 @@ fn build_single_order_pdf(
         fallback_document_reference,
     );
     let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
+    let scope_points_by_item = context
+        .line_items
+        .iter()
+        .map(single_order_scope_points)
+        .collect::<Vec<_>>();
+    let mut next_scope_number = 1usize;
+    let scope_ranges = scope_points_by_item
+        .iter()
+        .map(|points| {
+            let start = next_scope_number;
+            next_scope_number += points.len();
+            (start, next_scope_number.saturating_sub(1))
+        })
+        .collect::<Vec<_>>();
 
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -14738,6 +14820,13 @@ fn build_single_order_pdf(
         0.0,
         1.0,
     );
+    let mut scope_number = 1usize;
+    for points in &scope_points_by_item {
+        for point in points {
+            admin_block(&mut layout, &format!("{scope_number}. {point}"), 0.0, 1.0);
+            scope_number += 1;
+        }
+    }
     admin_block(
         &mut layout,
         "Der konkrete Leistungsumfang beschränkt sich auf die in Abschnitt II aufgeführten, vom Auftraggeber ausgewählten Leistungen und den zugehörigen Kostenvoranschlag.",
@@ -14811,18 +14900,31 @@ fn build_single_order_pdf(
         } else {
             layout.ensure_space(45.0);
             layout.table_header_row(&[
-                ("Leistungen", 88.0, PdfCellAlign::Left),
-                ("Honorar*", 30.0, PdfCellAlign::Right),
-                ("Anmerkung", 56.0, PdfCellAlign::Left),
+                ("Leistungen", 80.0, PdfCellAlign::Left),
+                ("Honorar*", 40.0, PdfCellAlign::Left),
+                ("Anmerkung", 54.0, PdfCellAlign::Left),
             ]);
-            for item in &context.line_items {
+            for (item_index, item) in context.line_items.iter().enumerate() {
                 let fee = cost_coverage_money_cell(&item.unit_price)
                     .unwrap_or_else(|| "____________".to_string());
+                let annotation = scope_ranges
+                    .get(item_index)
+                    .filter(|(start, end)| start <= end)
+                    .map(|(start, end)| {
+                        let references = (*start..=*end)
+                            .map(|value| value.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            "Einschließlich folgender Absätze aus dem (I) Leistungsumfang: {references}."
+                        )
+                    })
+                    .unwrap_or_default();
                 layout.table_row_aligned(
                     &[
-                        (item.description.trim(), 88.0, PdfCellAlign::Left),
-                        (&fee, 30.0, PdfCellAlign::Right),
-                        ("", 56.0, PdfCellAlign::Left),
+                        (item.description.trim(), 80.0, PdfCellAlign::Left),
+                        (&fee, 40.0, PdfCellAlign::Left),
+                        (&annotation, 54.0, PdfCellAlign::Left),
                     ],
                     false,
                     false,
@@ -23991,6 +24093,33 @@ mod tests {
     }
 
     #[test]
+    fn single_order_scope_points_preserve_catalog_description_items() {
+        let item = GeneratedContractLineItem {
+            localized_sections: Vec::new(),
+            description: "Concierge Service Essential (1 Tag)".to_string(),
+            quantity: "1".to_string(),
+            unit_price: "150,00 EUR".to_string(),
+            line_gross: "150,00 EUR".to_string(),
+            vat_rate: Some("19".to_string()),
+            notes: Some(
+                "1) Dining: Up to 2 restaurant reservations per day\n2) Transport Coordination: up to 2 transfers/day\n\nNOT INCLUDED\n- Private chauffeur services\n- Security services"
+                    .to_string(),
+            ),
+        };
+
+        assert_eq!(
+            single_order_scope_points(&item),
+            vec![
+                "Dining: Up to 2 restaurant reservations per day",
+                "Transport Coordination: up to 2 transfers/day",
+                "NOT INCLUDED",
+                "Private chauffeur services",
+                "Security services",
+            ]
+        );
+    }
+
+    #[test]
     fn single_order_and_order_cost_estimate_are_separate_legal_documents() {
         let context = GeneratedSingleOrderContext {
             language: "de".to_string(),
@@ -24029,7 +24158,10 @@ mod tests {
                     unit_price: "100,00 EUR".to_string(),
                     line_gross: "500,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
-                    notes: Some("Leistungsumfang 10, 11".to_string()),
+                    notes: Some(
+                        "Herstellung von Kontakten und Terminvereinbarungen.\n\nKoordination der interdisziplinären Zusammenarbeit."
+                            .to_string(),
+                    ),
                 },
                 GeneratedContractLineItem {
                     localized_sections: Vec::new(),
@@ -24095,7 +24227,11 @@ mod tests {
         assert!(text.contains("Dolmetscher-/Betreuungsleistung"));
         assert!(text.contains("HONORAR*"));
         assert!(text.contains("ANMERKUNG"));
-        assert!(!text.contains("Leistungsumfang 10, 11"));
+        assert!(text.contains("1. Herstellung von Kontakten und Terminvereinbarungen."));
+        assert!(text.contains("2. Koordination der interdisziplinären Zusammenarbeit."));
+        assert!(
+            text.contains("Einschließlich folgender Absätze aus dem (I) Leistungsumfang: 1, 2.")
+        );
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
 

@@ -40,6 +40,7 @@ struct ServiceGroupDefaults {
     order_id: Uuid,
     group_title: String,
     agency_service_id: Option<Uuid>,
+    agency_service_price_version_id: Option<Uuid>,
     quantity: Decimal,
     unit_price: Decimal,
     currency: String,
@@ -67,7 +68,8 @@ pub async fn generate_order_service_group_lines(
     let mut tx = pool.begin().await?;
 
     let group = sqlx::query(
-        r#"SELECT id, order_id, group_title, agency_service_id, quantity, unit_price,
+        r#"SELECT id, order_id, group_title, agency_service_id,
+                  agency_service_price_version_id, quantity, unit_price,
                   currency, vat_rate, tax_profile_id, vat_source
            FROM order_service_groups
            WHERE id = $1
@@ -81,6 +83,9 @@ pub async fn generate_order_service_group_lines(
         order_id: row.try_get("order_id").unwrap_or_default(),
         group_title: row.try_get("group_title").unwrap_or_default(),
         agency_service_id: row.try_get("agency_service_id").unwrap_or_default(),
+        agency_service_price_version_id: row
+            .try_get("agency_service_price_version_id")
+            .unwrap_or_default(),
         quantity: row.try_get("quantity").unwrap_or(Decimal::ONE),
         unit_price: row.try_get("unit_price").unwrap_or(Decimal::ZERO),
         currency: row
@@ -156,6 +161,11 @@ pub async fn generate_order_service_group_lines(
             });
         let quantity = participant.quantity_override.unwrap_or(group.quantity);
         let unit_price = participant.unit_price_override.unwrap_or(group.unit_price);
+        let agency_service_price_version_id = participant
+            .unit_price_override
+            .is_none()
+            .then_some(group.agency_service_price_version_id)
+            .flatten();
 
         if let Some(existing_id) = existing_id {
             sqlx::query(
@@ -185,10 +195,11 @@ pub async fn generate_order_service_group_lines(
                        provider_id = $7,
                        doctor_id = $8,
                        agency_service_id = $9,
-                       tax_profile_id = $10,
-                       vat_source = $11,
-                       source_service_group_id = $12,
-                       notes = $13
+                       agency_service_price_version_id = $10,
+                       tax_profile_id = $11,
+                       vat_source = $12,
+                       source_service_group_id = $13,
+                       notes = $14
                    WHERE id = $1"#,
             )
             .bind(existing_id)
@@ -200,6 +211,7 @@ pub async fn generate_order_service_group_lines(
             .bind(participant.provider_id)
             .bind(participant.doctor_id)
             .bind(group.agency_service_id)
+            .bind(agency_service_price_version_id)
             .bind(group.tax_profile_id)
             .bind(&group.vat_source)
             .bind(group_id)
@@ -215,13 +227,14 @@ pub async fn generate_order_service_group_lines(
             r#"INSERT INTO order_leistungen (
                     order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                     is_cost_passthrough, provider_id, doctor_id, agency_service_id,
-                    tax_profile_id, vat_source, source_service_group_id,
+                    agency_service_price_version_id, tax_profile_id, vat_source,
+                    source_service_group_id,
                     source_service_group_participant_id, notes
                ) VALUES (
                     $1, (SELECT patient_id FROM orders WHERE id = $1), $2, $3, $4, $5, $6,
                     false, $7, $8, $9,
-                    $10, $11, $12,
-                    $13, $14
+                    $10, $11, $12, $13,
+                    $14, $15
                )
                RETURNING id"#,
         )
@@ -234,6 +247,7 @@ pub async fn generate_order_service_group_lines(
         .bind(participant.provider_id)
         .bind(participant.doctor_id)
         .bind(group.agency_service_id)
+        .bind(agency_service_price_version_id)
         .bind(group.tax_profile_id)
         .bind(&group.vat_source)
         .bind(group_id)
@@ -278,7 +292,8 @@ pub async fn preview_order_service_group_lines(
     override_duplicates: bool,
 ) -> Result<ServiceGroupLinePreviewSummary, sqlx::Error> {
     let group = sqlx::query(
-        r#"SELECT id, order_id, group_title, agency_service_id, quantity, unit_price,
+        r#"SELECT id, order_id, group_title, agency_service_id,
+                  agency_service_price_version_id, quantity, unit_price,
                   currency, vat_rate, tax_profile_id, vat_source
            FROM order_service_groups
            WHERE id = $1
@@ -291,6 +306,9 @@ pub async fn preview_order_service_group_lines(
         order_id: row.try_get("order_id").unwrap_or_default(),
         group_title: row.try_get("group_title").unwrap_or_default(),
         agency_service_id: row.try_get("agency_service_id").unwrap_or_default(),
+        agency_service_price_version_id: row
+            .try_get("agency_service_price_version_id")
+            .unwrap_or_default(),
         quantity: row.try_get("quantity").unwrap_or(Decimal::ONE),
         unit_price: row.try_get("unit_price").unwrap_or(Decimal::ZERO),
         currency: row
@@ -431,6 +449,7 @@ mod tests {
             order_id: Uuid::new_v4(),
             group_title: "Tumor board".to_string(),
             agency_service_id: None,
+            agency_service_price_version_id: None,
             quantity: Decimal::ONE,
             unit_price: Decimal::new(120, 0),
             currency: "EUR".to_string(),

@@ -135,6 +135,7 @@ import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
 import { fetchAgencyServices } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
+import { resolveAgencyServicePrice } from "@/pages/contracts/model/contracts-model";
 import {
   DEFAULT_FILTERS,
   EXTERNAL_INVOICE_STATUSES,
@@ -2111,7 +2112,10 @@ function useOrdersPageContent() {
     setSearchParams(params, { replace: true });
 
     const service = agencyServices.find((item) => item.id === agencyServiceId);
-    if (!service) {
+    const effectivePrice = service
+      ? resolveAgencyServicePrice(service, orderDetail.date_from || undefined)
+      : null;
+    if (!service || !effectivePrice) {
       setDetailError(
         lang === "de"
           ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
@@ -2129,8 +2133,8 @@ function useOrdersPageContent() {
         service.service_name,
         t,
       ),
-      unitPrice: String(service.unit_price ?? ""),
-      vatRate: String(service.vat_rate ?? "0"),
+      unitPrice: String(effectivePrice.unit_price ?? ""),
+      vatRate: String(effectivePrice.vat_rate ?? "0"),
     });
     setLeistungOpen(true);
   }, [
@@ -8133,6 +8137,12 @@ function useOrdersPageContent() {
                       const service = agencyServices.find(
                         (item) => item.id === agencyServiceId,
                       );
+                      const effectivePrice = service
+                        ? resolveAgencyServicePrice(
+                            service,
+                            orderDetail?.date_from || undefined,
+                          )
+                        : null;
                       setLeistungForm((current) => ({
                         ...current,
                         agencyServiceId,
@@ -8143,11 +8153,11 @@ function useOrdersPageContent() {
                               t,
                             )
                           : current.description,
-                        unitPrice: service
-                          ? String(service.unit_price ?? "")
+                        unitPrice: effectivePrice
+                          ? String(effectivePrice.unit_price ?? "")
                           : current.unitPrice,
-                        vatRate: service
-                          ? String(service.vat_rate ?? "0")
+                        vatRate: effectivePrice
+                          ? String(effectivePrice.vat_rate ?? "0")
                           : current.vatRate,
                       }));
                     }}
@@ -8158,16 +8168,24 @@ function useOrdersPageContent() {
                         ? "Individuelle Leistung ohne Katalogbezug"
                         : "Индивидуальная услуга без позиции каталога"}
                     </option>
-                    {agencyServices.map((service) => (
-                      <option key={service.id} value={service.id}>
-                        {agencyServiceNameLabel(
-                          service.service_key,
-                          service.service_name,
-                          t,
-                        )}
-                        {` · ${formatMoney(service.unit_price, service.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`}
-                      </option>
-                    ))}
+                    {agencyServices.map((service) => {
+                      const effectivePrice = resolveAgencyServicePrice(
+                        service,
+                        orderDetail?.date_from || undefined,
+                      );
+                      return (
+                        <option key={service.id} value={service.id} disabled={!effectivePrice}>
+                          {agencyServiceNameLabel(
+                            service.service_key,
+                            service.service_name,
+                            t,
+                          )}
+                          {effectivePrice
+                            ? ` · ${formatMoney(effectivePrice.unit_price, effectivePrice.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`
+                            : " · —"}
+                        </option>
+                      );
+                    })}
                   </NativeComboboxSelect>
                   {leistungForm.agencyServiceId ? (
                     <p className="mt-2 text-xs text-muted-foreground">

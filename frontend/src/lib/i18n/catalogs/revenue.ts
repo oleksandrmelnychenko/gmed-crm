@@ -36,6 +36,8 @@ export interface RevenueTranslations {
   finance_catalog_package_validity: string;
   finance_catalog_add_price_version: string;
   finance_catalog_edit_price_version: string;
+  finance_catalog_price_name: string;
+  finance_catalog_price_name_placeholder: string;
   finance_catalog_price_period: string;
   finance_catalog_price_versions_count: string;
   finance_catalog_open_ended: string;
@@ -830,6 +832,8 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_package_validity: "Период и статус",
   finance_catalog_add_price_version: "Добавить цену",
   finance_catalog_edit_price_version: "Изменить цену",
+  finance_catalog_price_name: "Название цены",
+  finance_catalog_price_name_placeholder: "Напр. Стандартная цена 2026",
   finance_catalog_price_period: "Цена: {from} — {to}",
   finance_catalog_price_versions_count: "Цены: {count}",
   finance_catalog_open_ended: "бессрочно",
@@ -843,7 +847,8 @@ export const revenueRu: RevenueTranslations = {
     "Удалить эту версию цены? Последнюю единственную версию удалить нельзя.",
   finance_catalog_delete_price_version_title: "Удалить версию цены?",
   finance_catalog_error_price_period: "Дата окончания не может быть раньше даты начала.",
-  finance_catalog_error_price_version_required: "Укажите цену и дату начала действия",
+  finance_catalog_error_price_version_required:
+    "Укажите название, цену и дату начала действия",
   finance_catalog_error_save_price_version: "Не удалось сохранить версию цены",
   finance_catalog_error_delete_price_version: "Не удалось удалить версию цены",
   finance_catalog_package_notes: "Описание пакета",
@@ -1184,6 +1189,8 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_package_validity: "Zeitraum und Status",
   finance_catalog_add_price_version: "Preis hinzufügen",
   finance_catalog_edit_price_version: "Preis bearbeiten",
+  finance_catalog_price_name: "Preisname",
+  finance_catalog_price_name_placeholder: "Z. B. Standardpreis 2026",
   finance_catalog_price_period: "Preis: {from} – {to}",
   finance_catalog_price_versions_count: "Preise: {count}",
   finance_catalog_open_ended: "unbefristet",
@@ -1197,7 +1204,8 @@ export const revenueDe: RevenueTranslations = {
     "Diese Preisversion löschen? Die einzige verbleibende Version kann nicht gelöscht werden.",
   finance_catalog_delete_price_version_title: "Preisversion löschen?",
   finance_catalog_error_price_period: "Das Enddatum darf nicht vor dem Startdatum liegen.",
-  finance_catalog_error_price_version_required: "Preis und Gültigkeitsbeginn sind erforderlich",
+  finance_catalog_error_price_version_required:
+    "Name, Preis und Gültigkeitsbeginn sind erforderlich",
   finance_catalog_error_save_price_version: "Preisversion konnte nicht gespeichert werden",
   finance_catalog_error_delete_price_version: "Preisversion konnte nicht gelöscht werden",
   finance_catalog_package_notes: "Paketbeschreibung",

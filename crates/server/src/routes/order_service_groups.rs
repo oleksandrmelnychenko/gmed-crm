@@ -124,6 +124,8 @@ async fn list_order_service_groups(
                   appointment.title AS appointment_title,
                   group_row.group_title,
                   group_row.service_key,
+                  group_row.agency_service_id,
+                  group_row.agency_service_price_version_id,
                   group_row.description,
                   group_row.service_date,
                   group_row.quantity,
@@ -209,9 +211,9 @@ async fn create_order_service_group(
         Err(resp) => return resp,
     };
     let quantity = decimal_from_optional(body.quantity, Decimal::ONE);
-    let unit_price = decimal_from_optional(body.unit_price, Decimal::ZERO);
-    let vat_rate = decimal_from_optional(body.vat_rate, Decimal::new(19, 0));
-    let currency = body
+    let requested_unit_price = decimal_from_optional(body.unit_price, Decimal::ZERO);
+    let requested_vat_rate = decimal_from_optional(body.vat_rate, Decimal::new(19, 0));
+    let requested_currency = body
         .currency
         .as_deref()
         .map(str::trim)
@@ -235,12 +237,127 @@ async fn create_order_service_group(
         }
     };
 
+    let (
+        agency_service_price_version_id,
+        unit_price,
+        currency,
+        vat_rate,
+        tax_profile_id,
+        vat_source,
+    ) = if let Some(agency_service_id) = body.agency_service_id {
+        match sqlx::query(
+            r#"SELECT price.id AS price_version_id,
+                          COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
+                          UPPER(COALESCE(price.currency, catalog.currency)) AS currency,
+                          COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate,
+                          catalog.tax_profile_id
+                   FROM orders ord
+                   JOIN agency_service_catalog catalog ON catalog.id = $2
+                   LEFT JOIN LATERAL (
+                       SELECT version.id, version.unit_price, version.currency, version.vat_rate
+                       FROM agency_service_price_versions version
+                       WHERE version.agency_service_id = catalog.id
+                         AND version.valid_from <= COALESCE($3, ord.date_from, CURRENT_DATE)
+                         AND (
+                               version.valid_to IS NULL
+                               OR version.valid_to >= COALESCE($3, ord.date_from, CURRENT_DATE)
+                             )
+                       ORDER BY version.valid_from DESC, version.created_at DESC
+                       LIMIT 1
+                   ) price ON true
+                   WHERE ord.id = $1
+                     AND catalog.is_active
+                     AND (
+                           price.id IS NOT NULL
+                           OR (
+                               catalog.valid_from <= COALESCE($3, ord.date_from, CURRENT_DATE)
+                               AND (
+                                   catalog.valid_to IS NULL
+                                   OR catalog.valid_to >= COALESCE($3, ord.date_from, CURRENT_DATE)
+                               )
+                           )
+                         )"#,
+        )
+        .bind(order_id)
+        .bind(agency_service_id)
+        .bind(service_date)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => {
+                let resolved_currency = row
+                    .try_get::<String, _>("currency")
+                    .unwrap_or_else(|_| "EUR".to_string());
+                let order_currency = match sqlx::query_scalar::<_, String>(
+                    "SELECT UPPER(currency) FROM orders WHERE id = $1",
+                )
+                .bind(order_id)
+                .fetch_one(&mut *tx)
+                .await
+                {
+                    Ok(value) => value,
+                    Err(error) => {
+                        tracing::error!(error = %error, order_id = %order_id, "load order currency for service group");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to create service group",
+                        );
+                    }
+                };
+                if resolved_currency != order_currency {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Agency service currency must match order currency",
+                    );
+                }
+                (
+                    row.try_get::<Option<Uuid>, _>("price_version_id")
+                        .unwrap_or_default(),
+                    row.try_get::<Decimal, _>("unit_price")
+                        .unwrap_or(Decimal::ZERO),
+                    resolved_currency,
+                    row.try_get::<Decimal, _>("vat_rate")
+                        .unwrap_or(Decimal::ZERO),
+                    row.try_get::<Option<Uuid>, _>("tax_profile_id")
+                        .unwrap_or_default(),
+                    "catalog".to_string(),
+                )
+            }
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Agency service has no active price for the service date",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, %agency_service_id, "resolve agency service price for service group");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create service group",
+                );
+            }
+        }
+    } else {
+        (
+            None,
+            requested_unit_price,
+            requested_currency,
+            requested_vat_rate,
+            None,
+            "manual".to_string(),
+        )
+    };
+
     let service_group_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO order_service_groups (
                 order_id, appointment_id, group_title, service_key, agency_service_id,
-                description, service_date, quantity, unit_price, currency, vat_rate,
+                agency_service_price_version_id, description, service_date, quantity,
+                unit_price, currency, vat_rate, tax_profile_id, vat_source,
                 status, created_by, updated_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'draft', $12, $12)
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, 'draft', $15, $15
+           )
            RETURNING id"#,
     )
     .bind(order_id)
@@ -248,12 +365,15 @@ async fn create_order_service_group(
     .bind(group_title)
     .bind(normalize_optional_text(body.service_key))
     .bind(body.agency_service_id)
+    .bind(agency_service_price_version_id)
     .bind(normalize_optional_text(body.description))
     .bind(service_date)
     .bind(quantity)
     .bind(unit_price)
     .bind(currency)
     .bind(vat_rate)
+    .bind(tax_profile_id)
+    .bind(vat_source)
     .bind(auth.user_id)
     .fetch_one(&mut *tx)
     .await
@@ -801,6 +921,8 @@ async fn load_service_group_payload(
                   appointment.title AS appointment_title,
                   group_row.group_title,
                   group_row.service_key,
+                  group_row.agency_service_id,
+                  group_row.agency_service_price_version_id,
                   group_row.description,
                   group_row.service_date,
                   group_row.quantity,
@@ -867,6 +989,8 @@ async fn load_service_group_payload(
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "group_title": row.try_get::<String, _>("group_title").unwrap_or_default(),
         "service_key": row.try_get::<Option<String>, _>("service_key").unwrap_or_default(),
+        "agency_service_id": row.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+        "agency_service_price_version_id": row.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
         "service_date": row.try_get::<Option<chrono::NaiveDate>, _>("service_date").unwrap_or_default().map(|value| value.to_string()),
         "quantity": decimal_json(&row, "quantity"),
@@ -886,6 +1010,8 @@ fn service_group_list_json(row: sqlx::postgres::PgRow) -> serde_json::Value {
         "appointment_title": row.try_get::<Option<String>, _>("appointment_title").unwrap_or_default(),
         "group_title": row.try_get::<String, _>("group_title").unwrap_or_default(),
         "service_key": row.try_get::<Option<String>, _>("service_key").unwrap_or_default(),
+        "agency_service_id": row.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+        "agency_service_price_version_id": row.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
         "service_date": row.try_get::<Option<chrono::NaiveDate>, _>("service_date").unwrap_or_default().map(|value| value.to_string()),
         "quantity": decimal_json(&row, "quantity"),

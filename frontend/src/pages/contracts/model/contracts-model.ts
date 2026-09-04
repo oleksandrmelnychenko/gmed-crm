@@ -2,6 +2,7 @@ import type {
   AgencyServiceFilters,
   AgencyServiceFormState,
   AgencyServiceItem,
+  AgencyServicePriceVersion,
   ContractFilters,
   ContractFormState,
   ContractItem,
@@ -98,6 +99,50 @@ export function buildAgencyServicesPath(filters: AgencyServiceFilters) {
   if (filters.activeOnly === "true") params.set("active_only", "true");
   if (filters.activeOnly === "false") params.set("active_only", "false");
   return params.size ? `/agency-services?${params.toString()}` : "/agency-services";
+}
+
+function localTodayInputDate() {
+  const today = new Date();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${today.getFullYear()}-${month}-${day}`;
+}
+
+export function resolveAgencyServicePrice(
+  service: AgencyServiceItem,
+  effectiveOn = localTodayInputDate(),
+): AgencyServicePriceVersion | null {
+  const version = [...(service.price_versions ?? [])]
+    .filter(
+      (candidate) =>
+        candidate.valid_from <= effectiveOn &&
+        (!candidate.valid_to || candidate.valid_to >= effectiveOn),
+    )
+    .sort((left, right) => {
+      const byStart = right.valid_from.localeCompare(left.valid_from);
+      if (byStart !== 0) return byStart;
+      return (right.created_at ?? "").localeCompare(left.created_at ?? "");
+    })[0];
+  if (version) return version;
+
+  if (
+    service.valid_from &&
+    service.valid_from <= effectiveOn &&
+    (!service.valid_to || service.valid_to >= effectiveOn)
+  ) {
+    return {
+      id: "",
+      name: null,
+      unit_price: service.unit_price,
+      currency: service.currency,
+      vat_rate: service.vat_rate,
+      valid_from: service.valid_from,
+      valid_to: service.valid_to,
+      created_at: service.created_at,
+    };
+  }
+
+  return null;
 }
 
 export function blankContractForm(patientId = ""): ContractFormState {

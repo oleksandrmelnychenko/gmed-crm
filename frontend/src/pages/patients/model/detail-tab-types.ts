@@ -350,6 +350,12 @@ export type PatientServicePackageItem = {
   order_number?: string | null;
   package_name: string;
   status: string;
+  package_price_version_id?: string | null;
+  base_price_net_snapshot?: string;
+  base_price_vat_snapshot?: string;
+  base_price_gross_snapshot?: string;
+  currency_snapshot?: string;
+  tax_profile_id_snapshot?: string | null;
   starts_on?: string | null;
   ends_on?: string | null;
   assigned_at?: string;

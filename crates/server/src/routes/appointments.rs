@@ -71,6 +71,7 @@ struct InterpreterReportBillingCandidate {
 
 struct AgencyServiceBillingItem {
     id: Uuid,
+    price_version_id: Option<Uuid>,
     service_key: String,
     service_name: String,
     unit_price: rust_decimal::Decimal,
@@ -6716,7 +6717,8 @@ async fn load_agency_service_catalog_item(
     service_date: chrono::NaiveDate,
 ) -> Result<Option<AgencyServiceBillingItem>, sqlx::Error> {
     sqlx::query(
-        r#"SELECT catalog.id, catalog.service_key, catalog.service_name,
+        r#"SELECT catalog.id, price.id AS price_version_id,
+                  catalog.service_key, catalog.service_name,
                   COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
                   COALESCE(price.currency, catalog.currency) AS currency,
                   COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate
@@ -6749,6 +6751,9 @@ async fn load_agency_service_catalog_item(
     .map(|row| {
         row.map(|row| AgencyServiceBillingItem {
             id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            price_version_id: row
+                .try_get::<Option<Uuid>, _>("price_version_id")
+                .unwrap_or_default(),
             service_key: row.try_get::<String, _>("service_key").unwrap_or_default(),
             service_name: row.try_get::<String, _>("service_name").unwrap_or_default(),
             unit_price: row
@@ -6843,11 +6848,12 @@ async fn sync_completed_medical_appointment_to_billing(
         r#"INSERT INTO order_leistungen (
                 order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                 is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
-                source_medical_appointment_id, agency_service_id
+                source_medical_appointment_id, agency_service_id,
+                agency_service_price_version_id
            ) VALUES (
                 $1, $2, $3, 1, $4, $5, $6,
                 false, $7, $8, 'delivered', now(), $9,
-                $10, $11
+                $10, $11, $12
            )
            ON CONFLICT (source_medical_appointment_id)
                WHERE source_medical_appointment_id IS NOT NULL
@@ -6864,6 +6870,7 @@ async fn sync_completed_medical_appointment_to_billing(
     .bind(notes.join("\n"))
     .bind(appointment_id)
     .bind(catalog_item.id)
+    .bind(catalog_item.price_version_id)
     .execute(&state.db)
     .await?;
 
@@ -6999,11 +7006,12 @@ async fn sync_interpreter_report_billing_candidates(
             r#"INSERT INTO order_leistungen (
                     order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
                     is_cost_passthrough, status, delivered_at, approved_by, approved_at,
-                    notes, source_interpreter_report_id, agency_service_id
+                    notes, source_interpreter_report_id, agency_service_id,
+                    agency_service_price_version_id
                ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     false, 'approved', $8, $9, $8,
-                    $10, $11, $12
+                    $10, $11, $12, $13
                )
                ON CONFLICT (source_interpreter_report_id)
                    WHERE source_interpreter_report_id IS NOT NULL
@@ -7021,6 +7029,7 @@ async fn sync_interpreter_report_billing_candidates(
         .bind(notes)
         .bind(candidate.report_id)
         .bind(catalog_item.id)
+        .bind(catalog_item.price_version_id)
         .execute(&state.db)
         .await?;
 

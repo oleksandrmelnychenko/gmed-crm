@@ -134,6 +134,7 @@ type ServicePackage = {
 
 type ServicePackagePriceVersion = {
   id: string;
+  name?: string | null;
   base_price_net: string;
   base_price_vat: string;
   base_price_gross: string;
@@ -157,6 +158,7 @@ type PriceVersionForm = {
   parentId: string;
   versionId: string;
   title: string;
+  name: string;
   netPrice: string;
   currency: string;
   vatRate: string;
@@ -290,6 +292,7 @@ const BLANK_PRICE_VERSION_FORM: PriceVersionForm = {
   parentId: "",
   versionId: "",
   title: "",
+  name: "",
   netPrice: "0",
   currency: "EUR",
   vatRate: "19",
@@ -447,7 +450,10 @@ export function packageItemPatchFromAgencyService(
     description: service.description?.trim() || service.service_name,
     serviceKey: service.service_key,
     unitLabel: service.unit_label || defaultUnitLabel,
-    overageUnitPriceNet: valueToInput(service.unit_price),
+    // An empty override means that billing resolves the catalog price version
+    // for the actual consumption date. A value entered by an operator remains
+    // an explicit package-specific overage price.
+    overageUnitPriceNet: "",
   };
 }
 
@@ -793,6 +799,7 @@ function useFinanceCatalogPageContent() {
     return [
       {
         id: "",
+        name: selectedAgencyService.service_name,
         unit_price: selectedAgencyService.unit_price,
         currency: selectedAgencyService.currency,
         vat_rate: selectedAgencyService.vat_rate,
@@ -806,6 +813,17 @@ function useFinanceCatalogPageContent() {
     ColumnDef<AgencyServicePriceVersion>[]
   >(
     () => [
+      {
+        id: "name",
+        label: t.finance_catalog_price_name,
+        accessor: (version) => version.name ?? "",
+        width: 180,
+        render: (version) => (
+          <span className="truncate font-medium text-foreground">
+            {version.name?.trim() || `${t.finance_catalog_price_current} · ${version.valid_from}`}
+          </span>
+        ),
+      },
       {
         id: "unit_price",
         label: t.revenue_agency_service_unit_price,
@@ -879,6 +897,7 @@ function useFinanceCatalogPageContent() {
     return [
       {
         id: "",
+        name: selectedServicePackage.name,
         base_price_net: selectedServicePackage.base_price_net,
         base_price_vat: selectedServicePackage.base_price_vat,
         base_price_gross: selectedServicePackage.base_price_gross,
@@ -896,6 +915,17 @@ function useFinanceCatalogPageContent() {
     ColumnDef<ServicePackagePriceVersion>[]
   >(
     () => [
+      {
+        id: "name",
+        label: t.finance_catalog_price_name,
+        accessor: (version) => version.name ?? "",
+        width: 180,
+        render: (version) => (
+          <span className="truncate font-medium text-foreground">
+            {version.name?.trim() || `${t.finance_catalog_price_current} · ${version.valid_from}`}
+          </span>
+        ),
+      },
       {
         id: "net",
         label: t.finance_catalog_base_net_price,
@@ -1188,9 +1218,11 @@ function useFinanceCatalogPageContent() {
       ).map((price) => ({
         rowId: `${row.rowId}:price:${price.id}`,
         kind: "price" as const,
-        name: t.finance_catalog_price_period
-          .replace("{from}", price.valid_from)
-          .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
+        name:
+          price.name?.trim() ||
+          t.finance_catalog_price_period
+            .replace("{from}", price.valid_from)
+            .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
         itemCount: 0,
         childCount: 0,
         gross: Number(price.base_price_gross) || 0,
@@ -1198,7 +1230,14 @@ function useFinanceCatalogPageContent() {
         vat: Number(price.base_price_vat) || 0,
         currency: price.currency,
         isActive: pricePeriodState(price.valid_from, price.valid_to) === "current",
-        description: price.tax_profile_name ?? "",
+        description: [
+          t.finance_catalog_price_period
+            .replace("{from}", price.valid_from)
+            .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
+          price.tax_profile_name,
+        ]
+          .filter(Boolean)
+          .join(" · "),
         pkg: row.pkg,
         priceVersion: price,
       }));
@@ -1245,8 +1284,15 @@ function useFinanceCatalogPageContent() {
                 "size-3 shrink-0",
                 row.kind === "price" ? "text-amber-600" : "text-foreground/60",
               )} />
-              <span className="truncate font-mono text-xs text-foreground">
-                {row.name}
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-foreground">
+                  {row.name}
+                </span>
+                {row.kind === "price" ? (
+                  <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                    {row.description}
+                  </span>
+                ) : null}
               </span>
             </div>
           ) : (
@@ -1434,7 +1480,7 @@ function useFinanceCatalogPageContent() {
         label: t.finance_catalog_service,
         accessor: (row) =>
           row.kind === "price"
-            ? row.version?.valid_from ?? ""
+            ? row.version?.name?.trim() || row.version?.valid_from || ""
             : agencyServiceNameLabel(row.service.service_key, row.service.service_name, t),
         filterType: "text",
         sortable: true,
@@ -1448,10 +1494,14 @@ function useFinanceCatalogPageContent() {
             return (
               <div className="flex min-w-0 items-center gap-1.5 pl-7 text-xs text-foreground">
                 <CornerDownRight className="size-3 shrink-0 text-amber-600" />
-                <span className="truncate font-mono">
-                  {t.finance_catalog_price_period
-                    .replace("{from}", row.version.valid_from)
-                    .replace("{to}", row.version.valid_to || t.finance_catalog_open_ended)}
+                <span className="min-w-0 truncate font-medium">
+                  {row.version.name?.trim() ||
+                    t.finance_catalog_price_period
+                      .replace("{from}", row.version.valid_from)
+                      .replace("{to}", row.version.valid_to || t.finance_catalog_open_ended)}
+                </span>
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {row.version.valid_from} — {row.version.valid_to || t.finance_catalog_open_ended}
                 </span>
                 {isCurrent ? (
                   <Badge
@@ -1924,6 +1974,9 @@ function useFinanceCatalogPageContent() {
       parentId: service.id,
       versionId: version?.id ?? "",
       title: agencyServiceNameLabel(service.service_key, service.service_name, t),
+      name: version
+        ? version.name?.trim() || `${service.service_name} · ${version.valid_from}`
+        : "",
       netPrice: valueToInput(version?.unit_price ?? service.unit_price),
       currency: version?.currency ?? service.currency ?? "EUR",
       vatRate: valueToInput(version?.vat_rate ?? service.vat_rate) || "19",
@@ -1946,6 +1999,9 @@ function useFinanceCatalogPageContent() {
       parentId: servicePackage.id,
       versionId: version?.id ?? "",
       title: servicePackage.name,
+      name: version
+        ? version.name?.trim() || `${servicePackage.name} · ${version.valid_from}`
+        : "",
       netPrice: version?.base_price_net ?? servicePackage.base_price_net,
       currency: version?.currency ?? servicePackage.currency ?? "EUR",
       taxProfileId: version?.tax_profile_id ?? servicePackage.tax_profile_id ?? "",
@@ -1962,7 +2018,11 @@ function useFinanceCatalogPageContent() {
 
   async function handleSavePriceVersion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!priceVersionForm.parentId || !priceVersionForm.validFrom) {
+    if (
+      !priceVersionForm.parentId ||
+      !priceVersionForm.name.trim() ||
+      !priceVersionForm.validFrom
+    ) {
       setPriceVersionForm((current) => ({
         ...current,
         error: t.finance_catalog_error_price_version_required,
@@ -2007,6 +2067,7 @@ function useFinanceCatalogPageContent() {
       const payload =
         priceVersionForm.kind === "agency-service"
           ? {
+              name: priceVersionForm.name.trim(),
               unit_price: decimalPayload(priceVersionForm.netPrice),
               currency: priceVersionForm.currency.trim() || "EUR",
               vat_rate: decimalPayload(priceVersionForm.vatRate, 19),
@@ -2014,6 +2075,7 @@ function useFinanceCatalogPageContent() {
               valid_to: priceVersionForm.validTo || null,
             }
           : {
+              name: priceVersionForm.name.trim(),
               base_price_net: decimalPayload(priceVersionForm.netPrice),
               currency: priceVersionForm.currency.trim() || "EUR",
               tax_profile_id: priceVersionForm.taxProfileId || null,
@@ -2580,6 +2642,29 @@ function useFinanceCatalogPageContent() {
                 ) : null}
                 <Section title={priceVersionForm.title}>
                   <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <Field
+                        label={t.finance_catalog_price_name}
+                        htmlFor="catalog-price-version-name"
+                      >
+                        <Input
+                          id="catalog-price-version-name"
+                          required
+                          maxLength={160}
+                          autoFocus
+                          value={priceVersionForm.name}
+                          onChange={(event) =>
+                            setPriceVersionForm((current) => ({
+                              ...current,
+                              name: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          placeholder={t.finance_catalog_price_name_placeholder}
+                          disabled={priceVersionForm.busy}
+                        />
+                      </Field>
+                    </div>
                     <Field
                       label={
                         priceVersionForm.kind === "agency-service"

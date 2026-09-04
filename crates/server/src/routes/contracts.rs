@@ -150,6 +150,7 @@ struct UpsertAgencyServiceRequest {
 
 #[derive(Deserialize)]
 struct CreateAgencyServicePriceVersionRequest {
+    name: String,
     unit_price: Decimal,
     currency: Option<String>,
     vat_rate: Option<Decimal>,
@@ -158,6 +159,7 @@ struct CreateAgencyServicePriceVersionRequest {
 }
 
 struct NormalizedAgencyServicePriceVersion {
+    name: String,
     unit_price: Decimal,
     currency: String,
     vat_rate: Decimal,
@@ -417,6 +419,13 @@ fn normalize_agency_service_payload(
 fn normalize_agency_service_price_version(
     body: CreateAgencyServicePriceVersionRequest,
 ) -> Result<NormalizedAgencyServicePriceVersion, &'static str> {
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return Err("Price name is required");
+    }
+    if name.chars().count() > 160 {
+        return Err("Price name cannot exceed 160 characters");
+    }
     if body.unit_price < Decimal::ZERO {
         return Err("Unit price must be a valid non-negative number");
     }
@@ -441,6 +450,7 @@ fn normalize_agency_service_price_version(
         return Err("Valid-to cannot be earlier than valid-from");
     }
     Ok(NormalizedAgencyServicePriceVersion {
+        name,
         unit_price: body.unit_price.round_dp(2),
         currency,
         vat_rate: vat_rate.round_dp(2),
@@ -587,13 +597,22 @@ async fn list_agency_services(
 
     match sqlx::query(
         r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description,
-                  catalog.unit_label, catalog.unit_price, catalog.currency, catalog.vat_rate,
-                  catalog.is_active, catalog.valid_from, catalog.valid_to,
+                  catalog.unit_label,
+                  COALESCE(current_price.unit_price, catalog.unit_price) AS unit_price,
+                  COALESCE(current_price.currency, catalog.currency) AS currency,
+                  COALESCE(current_price.vat_rate, catalog.vat_rate) AS vat_rate,
+                  catalog.is_active,
+                  COALESCE(current_price.valid_from, catalog.valid_from) AS valid_from,
+                  CASE
+                      WHEN current_price.id IS NOT NULL THEN current_price.valid_to
+                      ELSE catalog.valid_to
+                  END AS valid_to,
                   catalog.created_at, catalog.updated_at,
                   COALESCE((
                       SELECT jsonb_agg(
                           jsonb_build_object(
                               'id', price.id,
+                              'name', price.name,
                               'unit_price', price.unit_price::TEXT,
                               'currency', price.currency,
                               'vat_rate', price.vat_rate::TEXT,
@@ -611,6 +630,16 @@ async fn list_agency_services(
                     + (SELECT COUNT(*) FROM order_service_groups service_group WHERE service_group.agency_service_id = catalog.id)
                   )::BIGINT AS usage_count
            FROM agency_service_catalog catalog
+           LEFT JOIN LATERAL (
+               SELECT version.id, version.unit_price, version.currency, version.vat_rate,
+                      version.valid_from, version.valid_to
+               FROM agency_service_price_versions version
+               WHERE version.agency_service_id = catalog.id
+                 AND version.valid_from <= CURRENT_DATE
+                 AND (version.valid_to IS NULL OR version.valid_to >= CURRENT_DATE)
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) current_price ON true
            WHERE (
                     $1::TEXT IS NULL
                     OR catalog.service_key ILIKE $1
@@ -695,10 +724,10 @@ async fn create_agency_service(
              RETURNING id, created_at, updated_at
            )
            INSERT INTO agency_service_price_versions (
-               agency_service_id, unit_price, currency, vat_rate,
+               agency_service_id, name, unit_price, currency, vat_rate,
                valid_from, valid_to, created_by
            )
-           SELECT id, $5, $6, $7, $9, $10, $11
+           SELECT id, $2, $5, $6, $7, $9, $10, $11
            FROM inserted
            RETURNING agency_service_id AS id, created_at, created_at AS updated_at"#,
     )
@@ -798,10 +827,10 @@ async fn update_agency_service(
              RETURNING id
            )
            INSERT INTO agency_service_price_versions (
-               agency_service_id, unit_price, currency, vat_rate,
+               agency_service_id, name, unit_price, currency, vat_rate,
                valid_from, valid_to, created_by
            )
-           SELECT id, $6, $7, $8, $10, $11, $12
+           SELECT id, $3, $6, $7, $8, $10, $11, $12
            FROM updated
            ON CONFLICT (agency_service_id, valid_from) DO UPDATE
            SET unit_price = EXCLUDED.unit_price,
@@ -970,18 +999,20 @@ async fn save_agency_service_price_version(
     let saved_id = if let Some(price_version_id) = price_version_id {
         match sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE agency_service_price_versions
-               SET unit_price = $3,
-                   currency = $4,
-                   vat_rate = $5,
-                   valid_from = $6,
-                   valid_to = $7,
-                   created_by = $8,
+               SET name = $3,
+                   unit_price = $4,
+                   currency = $5,
+                   vat_rate = $6,
+                   valid_from = $7,
+                   valid_to = $8,
+                   created_by = $9,
                    created_at = now()
                WHERE id = $1 AND agency_service_id = $2
                RETURNING id"#,
         )
         .bind(price_version_id)
         .bind(service_id)
+        .bind(&payload.name)
         .bind(payload.unit_price)
         .bind(&payload.currency)
         .bind(payload.vat_rate)
@@ -1007,12 +1038,13 @@ async fn save_agency_service_price_version(
     } else {
         match sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO agency_service_price_versions (
-                   agency_service_id, unit_price, currency, vat_rate,
+                   agency_service_id, name, unit_price, currency, vat_rate,
                    valid_from, valid_to, created_by
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                RETURNING id"#,
         )
         .bind(service_id)
+        .bind(&payload.name)
         .bind(payload.unit_price)
         .bind(&payload.currency)
         .bind(payload.vat_rate)

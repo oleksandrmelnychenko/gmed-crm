@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   blankContractForm,
   contractActionErrorMessage,
+  resolveAgencyServicePrice,
   validateCreateContractForm,
   validateContractStatusForm,
   type ContractFormValidationMessages,
 } from "./contracts-model";
+import type { AgencyServiceItem } from "./types";
 
 const messages: ContractFormValidationMessages = {
   invalidConditionsJson: "Conditions must be valid JSON.",
@@ -20,6 +22,56 @@ const messages: ContractFormValidationMessages = {
   validFromRequired: "Valid from is required.",
   validToBeforeValidFrom: "Valid to cannot be before valid from.",
 };
+
+const datedService: AgencyServiceItem = {
+  id: "service-1",
+  service_key: "concierge_day",
+  service_name: "Concierge day",
+  description: null,
+  unit_label: "day",
+  unit_price: "100",
+  currency: "EUR",
+  vat_rate: "19",
+  is_active: true,
+  valid_from: "2026-01-01",
+  valid_to: null,
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  price_versions: [
+    {
+      id: "price-1",
+      name: "2026 H1",
+      unit_price: "100",
+      currency: "EUR",
+      vat_rate: "19",
+      valid_from: "2026-01-01",
+      valid_to: "2026-06-30",
+      created_at: "2026-01-01T00:00:00Z",
+    },
+    {
+      id: "price-2",
+      name: "2026 H2",
+      unit_price: "125",
+      currency: "EUR",
+      vat_rate: "19",
+      valid_from: "2026-07-01",
+      valid_to: null,
+      created_at: "2026-06-01T00:00:00Z",
+    },
+  ],
+};
+
+describe("resolveAgencyServicePrice", () => {
+  it("selects the price version active on the business date", () => {
+    expect(resolveAgencyServicePrice(datedService, "2026-06-30")?.id).toBe("price-1");
+    expect(resolveAgencyServicePrice(datedService, "2026-07-01")?.id).toBe("price-2");
+    expect(resolveAgencyServicePrice(datedService, "2026-08-15")?.unit_price).toBe("125");
+  });
+
+  it("returns no price when neither history nor the catalog row covers the date", () => {
+    expect(resolveAgencyServicePrice(datedService, "2025-12-31")).toBeNull();
+  });
+});
 
 describe("validateCreateContractForm", () => {
   it("returns user-facing required field errors before the API can return 422", () => {

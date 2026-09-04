@@ -83,6 +83,7 @@ struct UpsertServicePackageRequest {
 
 #[derive(Deserialize)]
 struct CreateServicePackagePriceVersionRequest {
+    name: String,
     base_price_net: Decimal,
     currency: Option<String>,
     tax_profile_id: Option<Uuid>,
@@ -112,6 +113,17 @@ struct CreatePackageConsumptionRequest {
     order_leistung_id: Option<Uuid>,
     quantity: Decimal,
     notes: Option<String>,
+}
+
+struct PackageItemConsumptionContext {
+    id: Uuid,
+    included_quantity: Decimal,
+    requires_patient_approval: bool,
+    agency_service_price_version_id: Option<Uuid>,
+    unit_price_net: Decimal,
+    currency: String,
+    vat_rate: Decimal,
+    tax_profile_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -277,16 +289,29 @@ async fn load_service_package_payloads(
     package_id: Option<Uuid>,
 ) -> Result<Vec<Value>, axum::response::Response> {
     let package_rows = sqlx::query(
-        r#"SELECT sp.id, sp.package_key, sp.name, sp.description, sp.currency,
-                  sp.base_price_net, sp.base_price_vat, sp.base_price_gross,
-                  sp.tax_profile_id, sp.is_active, sp.valid_from, sp.valid_to,
-                  tp.profile_key AS tax_profile_key,
-                  tp.name AS tax_profile_name,
-                  tp.vat_rate AS tax_profile_vat_rate,
+        r#"SELECT sp.id, sp.package_key, sp.name, sp.description,
+                  COALESCE(current_price.currency, sp.currency) AS currency,
+                  COALESCE(current_price.base_price_net, sp.base_price_net) AS base_price_net,
+                  COALESCE(current_price.base_price_vat, sp.base_price_vat) AS base_price_vat,
+                  COALESCE(current_price.base_price_gross, sp.base_price_gross) AS base_price_gross,
+                  CASE
+                      WHEN current_price.id IS NOT NULL THEN current_price.tax_profile_id
+                      ELSE sp.tax_profile_id
+                  END AS tax_profile_id,
+                  sp.is_active,
+                  COALESCE(current_price.valid_from, sp.valid_from) AS valid_from,
+                  CASE
+                      WHEN current_price.id IS NOT NULL THEN current_price.valid_to
+                      ELSE sp.valid_to
+                  END AS valid_to,
+                  current_tax.profile_key AS tax_profile_key,
+                  current_tax.name AS tax_profile_name,
+                  current_tax.vat_rate AS tax_profile_vat_rate,
                   COALESCE((
                       SELECT jsonb_agg(
                           jsonb_build_object(
                               'id', price.id,
+                              'name', price.name,
                               'base_price_net', price.base_price_net::TEXT,
                               'base_price_vat', price.base_price_vat::TEXT,
                               'base_price_gross', price.base_price_gross::TEXT,
@@ -305,7 +330,22 @@ async fn load_service_package_payloads(
                       WHERE price.package_id = sp.id
                   ), '[]'::jsonb) AS price_versions
            FROM service_packages sp
-           LEFT JOIN tax_profiles tp ON tp.id = sp.tax_profile_id
+           LEFT JOIN LATERAL (
+               SELECT version.id, version.base_price_net, version.base_price_vat,
+                      version.base_price_gross, version.currency, version.tax_profile_id,
+                      version.valid_from, version.valid_to
+               FROM service_package_price_versions version
+               WHERE version.package_id = sp.id
+                 AND version.valid_from <= CURRENT_DATE
+                 AND (version.valid_to IS NULL OR version.valid_to >= CURRENT_DATE)
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) current_price ON true
+           LEFT JOIN tax_profiles current_tax
+             ON current_tax.id = CASE
+                 WHEN current_price.id IS NOT NULL THEN current_price.tax_profile_id
+                 ELSE sp.tax_profile_id
+             END
            WHERE ($1::uuid IS NULL OR sp.id = $1)
            ORDER BY sp.is_active DESC, sp.package_key"#,
     )
@@ -333,14 +373,41 @@ async fn load_service_package_payloads(
                       spi.overage_unit_price_net, spi.tax_profile_id,
                       spi.requires_patient_approval, spi.sort_order,
                       c.service_name AS agency_service_name,
-                      c.unit_price AS agency_service_unit_price,
-                      c.currency AS agency_service_currency,
-                      c.vat_rate AS agency_service_vat_rate,
+                      CASE
+                          WHEN current_price.id IS NOT NULL THEN current_price.unit_price
+                          WHEN c.valid_from <= CURRENT_DATE
+                               AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
+                              THEN c.unit_price
+                          ELSE NULL
+                      END AS agency_service_unit_price,
+                      CASE
+                          WHEN current_price.id IS NOT NULL THEN current_price.currency
+                          WHEN c.valid_from <= CURRENT_DATE
+                               AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
+                              THEN c.currency
+                          ELSE NULL
+                      END AS agency_service_currency,
+                      CASE
+                          WHEN current_price.id IS NOT NULL THEN current_price.vat_rate
+                          WHEN c.valid_from <= CURRENT_DATE
+                               AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
+                              THEN c.vat_rate
+                          ELSE NULL
+                      END AS agency_service_vat_rate,
                       tp.profile_key AS tax_profile_key,
                       tp.name AS tax_profile_name,
                       tp.vat_rate AS tax_profile_vat_rate
                FROM service_package_items spi
                LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
+               LEFT JOIN LATERAL (
+                   SELECT version.id, version.unit_price, version.currency, version.vat_rate
+                   FROM agency_service_price_versions version
+                   WHERE version.agency_service_id = spi.agency_service_id
+                     AND version.valid_from <= CURRENT_DATE
+                     AND (version.valid_to IS NULL OR version.valid_to >= CURRENT_DATE)
+                   ORDER BY version.valid_from DESC, version.created_at DESC
+                   LIMIT 1
+               ) current_price ON true
                LEFT JOIN tax_profiles tp ON tp.id = spi.tax_profile_id
                WHERE spi.package_id = ANY($1)
                ORDER BY spi.sort_order, spi.created_at"#,
@@ -706,7 +773,7 @@ async fn create_service_package(
            RETURNING id"#,
     )
     .bind(package_key)
-    .bind(name)
+    .bind(&name)
     .bind(normalize_optional(body.description.as_deref()))
     .bind(&currency)
     .bind(base_net)
@@ -736,11 +803,12 @@ async fn create_service_package(
 
     if let Err(e) = sqlx::query(
         r#"INSERT INTO service_package_price_versions (
-               package_id, base_price_net, base_price_vat, base_price_gross,
+               package_id, name, base_price_net, base_price_vat, base_price_gross,
                currency, tax_profile_id, valid_from, valid_to, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, CURRENT_DATE), $8, $9)"#,
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, CURRENT_DATE), $9, $10)"#,
     )
     .bind(package_id)
+    .bind(&name)
     .bind(base_net)
     .bind(base_vat)
     .bind(base_gross)
@@ -865,7 +933,7 @@ async fn update_service_package(
     )
     .bind(package_id)
     .bind(package_key)
-    .bind(name)
+    .bind(&name)
     .bind(normalize_optional(body.description.as_deref()))
     .bind(&currency)
     .bind(base_net)
@@ -897,10 +965,10 @@ async fn update_service_package(
 
     if let Err(e) = sqlx::query(
         r#"INSERT INTO service_package_price_versions (
-               package_id, base_price_net, base_price_vat, base_price_gross,
+               package_id, name, base_price_net, base_price_vat, base_price_gross,
                currency, tax_profile_id, valid_from, valid_to, created_by
            )
-           SELECT id, $2, $3, $4, $5, $6, valid_from, valid_to, $7
+           SELECT id, $2, $3, $4, $5, $6, $7, valid_from, valid_to, $8
            FROM service_packages
            WHERE id = $1
            ON CONFLICT (package_id, valid_from) DO UPDATE
@@ -914,6 +982,7 @@ async fn update_service_package(
                created_at = now()"#,
     )
     .bind(package_id)
+    .bind(&name)
     .bind(base_net)
     .bind(base_vat)
     .bind(base_gross)
@@ -1028,6 +1097,16 @@ async fn save_service_package_price_version(
     if !can_manage_package_catalog(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Price name is required");
+    }
+    if name.chars().count() > 160 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Price name cannot exceed 160 characters",
+        );
+    }
     if body.base_price_net < Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -1092,20 +1171,22 @@ async fn save_service_package_price_version(
     let saved_id = if let Some(price_version_id) = price_version_id {
         match sqlx::query_scalar::<_, Uuid>(
             r#"UPDATE service_package_price_versions
-               SET base_price_net = $3,
-                   base_price_vat = $4,
-                   base_price_gross = $5,
-                   currency = $6,
-                   tax_profile_id = $7,
-                   valid_from = $8,
-                   valid_to = $9,
-                   created_by = $10,
+               SET name = $3,
+                   base_price_net = $4,
+                   base_price_vat = $5,
+                   base_price_gross = $6,
+                   currency = $7,
+                   tax_profile_id = $8,
+                   valid_from = $9,
+                   valid_to = $10,
+                   created_by = $11,
                    created_at = now()
                WHERE id = $1 AND package_id = $2
                RETURNING id"#,
         )
         .bind(price_version_id)
         .bind(package_id)
+        .bind(&name)
         .bind(base_net)
         .bind(base_vat)
         .bind(base_gross)
@@ -1133,12 +1214,13 @@ async fn save_service_package_price_version(
     } else {
         match sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO service_package_price_versions (
-                   package_id, base_price_net, base_price_vat, base_price_gross,
+                   package_id, name, base_price_net, base_price_vat, base_price_gross,
                    currency, tax_profile_id, valid_from, valid_to, created_by
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                RETURNING id"#,
         )
         .bind(package_id)
+        .bind(&name)
         .bind(base_net)
         .bind(base_vat)
         .bind(base_gross)
@@ -1406,6 +1488,9 @@ async fn list_patient_service_packages(
                   psp.portal_visible,
                   psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                   psp.payer_contact_name, psp.payer_contact_relationship,
+                  psp.package_price_version_id, psp.base_price_net_snapshot,
+                  psp.base_price_vat_snapshot, psp.base_price_gross_snapshot,
+                  psp.currency_snapshot, psp.tax_profile_id_snapshot,
                   o.order_number,
                   spi.id AS package_item_id, COALESCE(c.service_key, spi.service_key) AS service_key,
                   c.service_name AS agency_service_name, spi.description, spi.included_quantity,
@@ -1430,6 +1515,9 @@ async fn list_patient_service_packages(
                     psp.portal_visible,
                     psp.starts_on, psp.ends_on, psp.assigned_at, psp.notes,
                     psp.payer_contact_name, psp.payer_contact_relationship,
+                    psp.package_price_version_id, psp.base_price_net_snapshot,
+                    psp.base_price_vat_snapshot, psp.base_price_gross_snapshot,
+                    psp.currency_snapshot, psp.tax_profile_id_snapshot,
                     o.order_number, spi.id, COALESCE(c.service_key, spi.service_key), c.service_name,
                     spi.description, spi.included_quantity,
                     spi.unit_label, spi.requires_patient_approval
@@ -1457,6 +1545,12 @@ async fn list_patient_service_packages(
                         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "package_name": row.try_get::<String, _>("package_name").unwrap_or_default(),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "package_price_version_id": row.try_get::<Option<Uuid>, _>("package_price_version_id").unwrap_or_default(),
+                        "base_price_net_snapshot": decimal_to_string(row.try_get::<Decimal, _>("base_price_net_snapshot").unwrap_or(Decimal::ZERO)),
+                        "base_price_vat_snapshot": decimal_to_string(row.try_get::<Decimal, _>("base_price_vat_snapshot").unwrap_or(Decimal::ZERO)),
+                        "base_price_gross_snapshot": decimal_to_string(row.try_get::<Decimal, _>("base_price_gross_snapshot").unwrap_or(Decimal::ZERO)),
+                        "currency_snapshot": row.try_get::<String, _>("currency_snapshot").unwrap_or_else(|_| "EUR".to_string()),
+                        "tax_profile_id_snapshot": row.try_get::<Option<Uuid>, _>("tax_profile_id_snapshot").unwrap_or_default(),
                         "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
                         "starts_on": row.try_get::<Option<NaiveDate>, _>("starts_on").unwrap_or_default().map(|value| value.to_string()),
                         "ends_on": row.try_get::<Option<NaiveDate>, _>("ends_on").unwrap_or_default().map(|value| value.to_string()),
@@ -1795,8 +1889,41 @@ async fn assign_patient_service_package(
         r#"INSERT INTO patient_service_packages (
                 patient_id, order_id, package_id, status, starts_on, ends_on,
                 payer_contact_name, payer_contact_email, payer_contact_phone,
-                payer_contact_relationship, portal_visible, notes, assigned_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                payer_contact_relationship, portal_visible, notes, assigned_by,
+                package_price_version_id, base_price_net_snapshot,
+                base_price_vat_snapshot, base_price_gross_snapshot,
+                currency_snapshot, tax_profile_id_snapshot
+           )
+           SELECT $1, $2, package.id, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                  price.id,
+                  COALESCE(price.base_price_net, package.base_price_net),
+                  COALESCE(price.base_price_vat, package.base_price_vat),
+                  COALESCE(price.base_price_gross, package.base_price_gross),
+                  UPPER(COALESCE(price.currency, package.currency)),
+                  CASE
+                      WHEN price.id IS NOT NULL THEN price.tax_profile_id
+                      ELSE package.tax_profile_id
+                  END
+           FROM service_packages package
+           LEFT JOIN LATERAL (
+               SELECT version.id, version.base_price_net, version.base_price_vat,
+                      version.base_price_gross, version.currency, version.tax_profile_id
+               FROM service_package_price_versions version
+               WHERE version.package_id = package.id
+                 AND version.valid_from <= COALESCE($5, CURRENT_DATE)
+                 AND (version.valid_to IS NULL OR version.valid_to >= COALESCE($5, CURRENT_DATE))
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) price ON true
+           WHERE package.id = $3
+             AND package.is_active
+             AND (
+                   price.id IS NOT NULL
+                   OR (
+                       package.valid_from <= COALESCE($5, CURRENT_DATE)
+                       AND (package.valid_to IS NULL OR package.valid_to >= COALESCE($5, CURRENT_DATE))
+                   )
+             )
            RETURNING id"#,
     )
     .bind(patient_id)
@@ -1814,10 +1941,10 @@ async fn assign_patient_service_package(
     .bind(body.portal_visible.unwrap_or(true))
     .bind(normalize_optional(body.notes.as_deref()))
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_optional(&state.db)
     .await
     {
-        Ok(row) => {
+        Ok(Some(row)) => {
             let patient_service_package_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             crate::realtime::publish_patient_event(
                 &state,
@@ -1837,6 +1964,10 @@ async fn assign_patient_service_package(
             }))
             .into_response()
         }
+        Ok(None) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Package has no active price for the package start date",
+        ),
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23503") => {
             err(StatusCode::UNPROCESSABLE_ENTITY, "Package not found")
         }
@@ -1917,22 +2048,82 @@ async fn create_package_consumption(
 
     let item_context = if let Some(package_item_id) = body.package_item_id {
         match sqlx::query(
-            r#"SELECT id, included_quantity, requires_patient_approval
-               FROM service_package_items
-               WHERE id = $1 AND package_id = $2"#,
+            r#"SELECT item.id, item.included_quantity, item.requires_patient_approval,
+                      CASE
+                          WHEN item.overage_unit_price_net IS NULL THEN price.id
+                          ELSE NULL
+                      END AS agency_service_price_version_id,
+                      COALESCE(item.overage_unit_price_net, price.unit_price, catalog.unit_price, 0)
+                          AS unit_price_net,
+                      UPPER(COALESCE(price.currency, catalog.currency, package.currency, 'EUR'))
+                          AS currency,
+                      COALESCE(
+                          item_tax.vat_rate,
+                          price.vat_rate,
+                          catalog.vat_rate,
+                          package_tax.vat_rate,
+                          0
+                      ) AS vat_rate,
+                      CASE
+                          WHEN item_tax.id IS NOT NULL THEN item_tax.id
+                          WHEN catalog.id IS NOT NULL THEN NULL
+                          ELSE package_tax.id
+                      END AS tax_profile_id
+               FROM service_package_items item
+               JOIN service_packages package ON package.id = item.package_id
+               LEFT JOIN agency_service_catalog catalog ON catalog.id = item.agency_service_id
+               LEFT JOIN tax_profiles item_tax ON item_tax.id = item.tax_profile_id
+               LEFT JOIN tax_profiles package_tax ON package_tax.id = package.tax_profile_id
+               LEFT JOIN LATERAL (
+                   SELECT version.id, version.unit_price, version.currency, version.vat_rate
+                   FROM agency_service_price_versions version
+                   WHERE version.agency_service_id = item.agency_service_id
+                     AND version.valid_from <= CURRENT_DATE
+                     AND (version.valid_to IS NULL OR version.valid_to >= CURRENT_DATE)
+                   ORDER BY version.valid_from DESC, version.created_at DESC
+                   LIMIT 1
+               ) price ON true
+               WHERE item.id = $1
+                 AND item.package_id = $2
+                 AND (
+                       item.overage_unit_price_net IS NOT NULL
+                       OR item.agency_service_id IS NULL
+                       OR price.id IS NOT NULL
+                       OR (
+                           catalog.valid_from <= CURRENT_DATE
+                           AND (catalog.valid_to IS NULL OR catalog.valid_to >= CURRENT_DATE)
+                       )
+                 )"#,
         )
         .bind(package_item_id)
         .bind(package_id)
         .fetch_optional(&state.db)
         .await
         {
-            Ok(Some(row)) => Some((
-                row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                row.try_get::<Decimal, _>("included_quantity")
+            Ok(Some(row)) => Some(PackageItemConsumptionContext {
+                id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                included_quantity: row
+                    .try_get::<Decimal, _>("included_quantity")
                     .unwrap_or(Decimal::ZERO),
-                row.try_get::<bool, _>("requires_patient_approval")
+                requires_patient_approval: row
+                    .try_get::<bool, _>("requires_patient_approval")
                     .unwrap_or(false),
-            )),
+                agency_service_price_version_id: row
+                    .try_get::<Option<Uuid>, _>("agency_service_price_version_id")
+                    .unwrap_or_default(),
+                unit_price_net: row
+                    .try_get::<Decimal, _>("unit_price_net")
+                    .unwrap_or(Decimal::ZERO),
+                currency: row
+                    .try_get::<String, _>("currency")
+                    .unwrap_or_else(|_| "EUR".to_string()),
+                vat_rate: row
+                    .try_get::<Decimal, _>("vat_rate")
+                    .unwrap_or(Decimal::ZERO),
+                tax_profile_id: row
+                    .try_get::<Option<Uuid>, _>("tax_profile_id")
+                    .unwrap_or_default(),
+            }),
             Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Package item not found"),
             Err(e) => {
                 tracing::error!(error = %e, package_item_id = %package_item_id, "load package item");
@@ -1988,12 +2179,14 @@ async fn create_package_consumption(
     }
 
     let included_quantity = item_context
-        .map(|(_, included, _)| included)
+        .as_ref()
+        .map(|context| context.included_quantity)
         .unwrap_or(Decimal::ZERO);
     let item_requires_approval = item_context
-        .map(|(_, _, requires)| requires)
+        .as_ref()
+        .map(|context| context.requires_patient_approval)
         .unwrap_or(false);
-    let package_item_id = item_context.map(|(id, _, _)| id);
+    let package_item_id = item_context.as_ref().map(|context| context.id);
     let used_quantity = match sqlx::query_scalar::<_, Decimal>(
         r#"SELECT COALESCE(SUM(quantity), 0)
            FROM service_package_consumptions
@@ -2031,8 +2224,13 @@ async fn create_package_consumption(
         r#"INSERT INTO service_package_consumptions (
                 patient_service_package_id, package_item_id, order_id, order_leistung_id,
                 quantity, overage_quantity, requires_patient_approval,
-                approval_status, notes, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                approval_status, notes, created_by,
+                agency_service_price_version_id, unit_price_net_snapshot,
+                currency_snapshot, vat_rate_snapshot, tax_profile_id_snapshot
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15
+           )
            RETURNING id, consumed_at"#,
     )
     .bind(patient_service_package_id)
@@ -2045,6 +2243,34 @@ async fn create_package_consumption(
     .bind(approval_status)
     .bind(normalize_optional(body.notes.as_deref()))
     .bind(auth.user_id)
+    .bind(
+        item_context
+            .as_ref()
+            .and_then(|context| context.agency_service_price_version_id),
+    )
+    .bind(
+        item_context
+            .as_ref()
+            .map(|context| context.unit_price_net)
+            .unwrap_or(Decimal::ZERO),
+    )
+    .bind(
+        item_context
+            .as_ref()
+            .map(|context| context.currency.as_str())
+            .unwrap_or("EUR"),
+    )
+    .bind(
+        item_context
+            .as_ref()
+            .map(|context| context.vat_rate)
+            .unwrap_or(Decimal::ZERO),
+    )
+    .bind(
+        item_context
+            .as_ref()
+            .and_then(|context| context.tax_profile_id),
+    )
     .fetch_one(&state.db)
     .await
     {

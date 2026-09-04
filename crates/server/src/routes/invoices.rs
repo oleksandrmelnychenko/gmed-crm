@@ -3076,30 +3076,17 @@ async fn build_invoice_snapshot_with_approved_package_overages(
                   spi.agency_service_id,
                   COALESCE(NULLIF(spi.description, ''), c.service_name, sp.name, 'Package overage') AS item_description,
                   COALESCE(NULLIF(spi.unit_label, ''), 'unit') AS unit_label,
-                  COALESCE(spi.overage_unit_price_net, c.unit_price, 0) AS unit_price_net,
-                  COALESCE(item_tp.vat_rate, c.vat_rate, package_tp.vat_rate, 0) AS vat_rate,
-                  CASE
-                    WHEN item_tp.id IS NOT NULL THEN item_tp.id
-                    WHEN c.vat_rate IS NOT NULL THEN NULL
-                    ELSE package_tp.id
-                  END AS tax_profile_id,
-                  CASE
-                    WHEN item_tp.id IS NOT NULL THEN item_tp.profile_key
-                    WHEN c.vat_rate IS NOT NULL THEN NULL
-                    ELSE package_tp.profile_key
-                  END AS tax_profile_key,
-                  CASE
-                    WHEN item_tp.id IS NOT NULL THEN item_tp.name
-                    WHEN c.vat_rate IS NOT NULL THEN NULL
-                    ELSE package_tp.name
-                  END AS tax_profile_name
+                  spc.unit_price_net_snapshot AS unit_price_net,
+                  spc.vat_rate_snapshot AS vat_rate,
+                  snapshot_tp.id AS tax_profile_id,
+                  snapshot_tp.profile_key AS tax_profile_key,
+                  snapshot_tp.name AS tax_profile_name
            FROM service_package_consumptions spc
            JOIN patient_service_packages psp ON psp.id = spc.patient_service_package_id
            JOIN service_packages sp ON sp.id = psp.package_id
            LEFT JOIN service_package_items spi ON spi.id = spc.package_item_id
            LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
-           LEFT JOIN tax_profiles item_tp ON item_tp.id = spi.tax_profile_id
-           LEFT JOIN tax_profiles package_tp ON package_tp.id = sp.tax_profile_id
+           LEFT JOIN tax_profiles snapshot_tp ON snapshot_tp.id = spc.tax_profile_id_snapshot
            WHERE psp.patient_id = $1
              AND spc.order_id = $2
              AND spc.invoice_id IS NULL

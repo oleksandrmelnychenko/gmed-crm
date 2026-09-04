@@ -2970,6 +2970,7 @@ async fn get_order(
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
                   ol.source_medical_appointment_id, ol.agency_service_id,
+                  ol.agency_service_price_version_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
@@ -3117,6 +3118,7 @@ async fn get_order(
             "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
             "source_medical_appointment_id": l.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
             "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+            "agency_service_price_version_id": l.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
             "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
             "agency_service_name": l.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
             "agency_service_description": l.try_get::<Option<String>, _>("agency_service_description").unwrap_or_default(),
@@ -6700,7 +6702,8 @@ async fn list_leistungen(
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
                   ol.provider_id, ol.doctor_id,
                   ol.source_interpreter_report_id, ol.source_medical_appointment_id,
-                  ol.agency_service_id, ol.external_document_id,
+                  ol.agency_service_id, ol.agency_service_price_version_id,
+                  ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
@@ -6763,6 +6766,7 @@ async fn list_leistungen(
                     "source_interpreter_report_id": r.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
                     "source_medical_appointment_id": r.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
                     "agency_service_id": r.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+                    "agency_service_price_version_id": r.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
                     "agency_service_key": r.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
                     "agency_service_name": r.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
                     "agency_service_description": r.try_get::<Option<String>, _>("agency_service_description").unwrap_or_default(),
@@ -6818,13 +6822,20 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    let order_currency =
-        match sqlx::query_scalar::<_, String>("SELECT UPPER(currency) FROM orders WHERE id = $1")
-            .bind(order_id)
-            .fetch_optional(&state.db)
-            .await
+    let (order_currency, effective_price_date) =
+        match sqlx::query(
+            "SELECT UPPER(currency) AS currency, COALESCE(date_from, CURRENT_DATE) AS effective_price_date FROM orders WHERE id = $1",
+        )
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
         {
-            Ok(Some(currency)) => currency,
+            Ok(Some(row)) => (
+                row.try_get::<String, _>("currency")
+                    .unwrap_or_else(|_| "EUR".to_string()),
+                row.try_get::<chrono::NaiveDate, _>("effective_price_date")
+                    .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+            ),
             Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
             Err(error) => {
                 tracing::error!(%error, %order_id, "load order currency for service");
@@ -6832,25 +6843,60 @@ async fn add_leistung(
             }
         };
 
-    if let Some(agency_service_id) = body.agency_service_id {
-        match sqlx::query_scalar::<_, String>(
-            "SELECT UPPER(currency) FROM agency_service_catalog WHERE id = $1 AND is_active",
+    let resolved_agency_price = if let Some(agency_service_id) = body.agency_service_id {
+        match sqlx::query(
+            r#"SELECT price.id AS price_version_id,
+                      COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
+                      UPPER(COALESCE(price.currency, catalog.currency)) AS currency,
+                      COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate
+               FROM agency_service_catalog catalog
+               LEFT JOIN LATERAL (
+                   SELECT version.id, version.unit_price, version.currency, version.vat_rate
+                   FROM agency_service_price_versions version
+                   WHERE version.agency_service_id = catalog.id
+                     AND version.valid_from <= $2
+                     AND (version.valid_to IS NULL OR version.valid_to >= $2)
+                   ORDER BY version.valid_from DESC, version.created_at DESC
+                   LIMIT 1
+               ) price ON true
+               WHERE catalog.id = $1
+                 AND catalog.is_active
+                 AND (
+                       price.id IS NOT NULL
+                       OR (
+                           catalog.valid_from <= $2
+                           AND (catalog.valid_to IS NULL OR catalog.valid_to >= $2)
+                       )
+                 )"#,
         )
         .bind(agency_service_id)
+        .bind(effective_price_date)
         .fetch_optional(&state.db)
         .await
         {
-            Ok(Some(currency)) if currency == order_currency => {}
-            Ok(Some(_)) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "Agency service currency must match order currency",
-                );
+            Ok(Some(row)) => {
+                let currency = row
+                    .try_get::<String, _>("currency")
+                    .unwrap_or_else(|_| "EUR".to_string());
+                if currency != order_currency {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Agency service currency must match order currency",
+                    );
+                }
+                Some((
+                    row.try_get::<Option<Uuid>, _>("price_version_id")
+                        .unwrap_or_default(),
+                    row.try_get::<rust_decimal::Decimal, _>("unit_price")
+                        .unwrap_or(rust_decimal::Decimal::ZERO),
+                    row.try_get::<rust_decimal::Decimal, _>("vat_rate")
+                        .unwrap_or(rust_decimal::Decimal::ZERO),
+                ))
             }
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Agency service is missing or inactive",
+                    "Agency service has no active price for the order date",
                 );
             }
             Err(error) => {
@@ -6858,7 +6904,9 @@ async fn add_leistung(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
-    }
+    } else {
+        None
+    };
 
     let description = body.description.trim().to_string();
     if description.is_empty() {
@@ -6887,7 +6935,7 @@ async fn add_leistung(
         );
     }
 
-    let vat = match rust_decimal::Decimal::try_from(raw_vat) {
+    let mut vat = match rust_decimal::Decimal::try_from(raw_vat) {
         Ok(value) => value,
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service VAT rate"),
     };
@@ -6895,7 +6943,7 @@ async fn add_leistung(
         Ok(value) => value,
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service quantity"),
     };
-    let price = match rust_decimal::Decimal::try_from(body.unit_price) {
+    let mut price = match rust_decimal::Decimal::try_from(body.unit_price) {
         Ok(value) => value,
         Err(_) => {
             return err(
@@ -6904,6 +6952,14 @@ async fn add_leistung(
             );
         }
     };
+    let agency_service_price_version_id = resolved_agency_price
+        .as_ref()
+        .and_then(|(version_id, _, _)| *version_id);
+    if let Some((_, resolved_price, resolved_vat)) = resolved_agency_price {
+        price = resolved_price;
+        vat = resolved_vat;
+    }
+
     let maximum_service_total = rust_decimal::Decimal::new(999_999_999_999, 2);
     let maximum_quantity = rust_decimal::Decimal::new(1_000_000, 0);
     if qty > maximum_quantity
@@ -6976,17 +7032,19 @@ async fn add_leistung(
 
     match sqlx::query(
         "INSERT INTO order_leistungen (
-             order_id, patient_id, agency_service_id, description, quantity, unit_price, currency, vat_rate,
+             order_id, patient_id, agency_service_id, agency_service_price_version_id,
+             description, quantity, unit_price, currency, vat_rate,
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference,
              planned_partner_cost_net, planned_partner_cost_vat,
              planned_partner_cost_gross
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                 $15, $16, $17)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                 $16, $17, $18)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
              agency_service_id = EXCLUDED.agency_service_id,
+             agency_service_price_version_id = EXCLUDED.agency_service_price_version_id,
              description = EXCLUDED.description,
              quantity = EXCLUDED.quantity,
              unit_price = EXCLUDED.unit_price,
@@ -7008,6 +7066,7 @@ async fn add_leistung(
     .bind(order_id)
     .bind(service_patient_id)
     .bind(body.agency_service_id)
+    .bind(agency_service_price_version_id)
     .bind(&description)
     .bind(qty)
     .bind(price)
@@ -7070,9 +7129,15 @@ async fn add_leistung(
             .await
             {
                 Ok(Some(row)) => {
-                    let same_cost = row.try_get::<rust_decimal::Decimal, _>("planned_partner_cost_net").is_ok_and(|value| value == planned_cost_net)
-                        && row.try_get::<rust_decimal::Decimal, _>("planned_partner_cost_vat").is_ok_and(|value| value == planned_cost_vat)
-                        && row.try_get::<rust_decimal::Decimal, _>("planned_partner_cost_gross").is_ok_and(|value| value == planned_cost_gross);
+                    let same_cost = row
+                        .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_net")
+                        .is_ok_and(|value| value == planned_cost_net)
+                        && row
+                            .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_vat")
+                            .is_ok_and(|value| value == planned_cost_vat)
+                        && row
+                            .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_gross")
+                            .is_ok_and(|value| value == planned_cost_gross);
                     if !same_cost {
                         return err(
                             StatusCode::CONFLICT,

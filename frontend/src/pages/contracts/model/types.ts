@@ -162,6 +162,7 @@ export type AgencyServiceItem = {
 
 export type AgencyServicePriceVersion = {
   id: string;
+  name?: string | null;
   unit_price: unknown;
   currency: string;
   vat_rate: unknown;
