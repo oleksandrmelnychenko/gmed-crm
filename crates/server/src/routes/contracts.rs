@@ -29,6 +29,14 @@ pub fn router() -> Router<AppState> {
             post(update_agency_service),
         )
         .route(
+            "/agency-services/{service_id}/price-versions",
+            post(create_agency_service_price_version),
+        )
+        .route(
+            "/agency-services/{service_id}/price-versions/{price_version_id}",
+            post(update_agency_service_price_version).delete(delete_agency_service_price_version),
+        )
+        .route(
             "/agency-services/{service_id}",
             delete(delete_agency_service),
         )
@@ -138,6 +146,23 @@ struct UpsertAgencyServiceRequest {
     is_active: Option<bool>,
     valid_from: String,
     valid_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateAgencyServicePriceVersionRequest {
+    unit_price: Decimal,
+    currency: Option<String>,
+    vat_rate: Option<Decimal>,
+    valid_from: String,
+    valid_to: Option<String>,
+}
+
+struct NormalizedAgencyServicePriceVersion {
+    unit_price: Decimal,
+    currency: String,
+    vat_rate: Decimal,
+    valid_from: NaiveDate,
+    valid_to: Option<NaiveDate>,
 }
 
 struct NormalizedAgencyServicePayload {
@@ -389,6 +414,41 @@ fn normalize_agency_service_payload(
     })
 }
 
+fn normalize_agency_service_price_version(
+    body: CreateAgencyServicePriceVersionRequest,
+) -> Result<NormalizedAgencyServicePriceVersion, &'static str> {
+    if body.unit_price < Decimal::ZERO {
+        return Err("Unit price must be a valid non-negative number");
+    }
+    let vat_rate = body.vat_rate.unwrap_or(Decimal::new(19, 0));
+    if vat_rate < Decimal::ZERO || vat_rate > Decimal::new(100, 0) {
+        return Err("VAT rate must be between 0 and 100");
+    }
+    let currency = body
+        .currency
+        .map(|value| value.trim().to_uppercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "EUR".to_string());
+    if currency.len() > 8 {
+        return Err("Currency cannot exceed 8 characters");
+    }
+    let valid_from =
+        parse_optional_date(Some(body.valid_from.as_str()))?.ok_or("Valid-from is required")?;
+    let valid_to = parse_optional_date(body.valid_to.as_deref())?;
+    if let Some(valid_to) = valid_to
+        && valid_to < valid_from
+    {
+        return Err("Valid-to cannot be earlier than valid-from");
+    }
+    Ok(NormalizedAgencyServicePriceVersion {
+        unit_price: body.unit_price.round_dp(2),
+        currency,
+        vat_rate: vat_rate.round_dp(2),
+        valid_from,
+        valid_to,
+    })
+}
+
 fn generate_agency_service_key(service_name: &str) -> String {
     let mut base = service_name
         .trim()
@@ -530,6 +590,21 @@ async fn list_agency_services(
                   catalog.unit_label, catalog.unit_price, catalog.currency, catalog.vat_rate,
                   catalog.is_active, catalog.valid_from, catalog.valid_to,
                   catalog.created_at, catalog.updated_at,
+                  COALESCE((
+                      SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'id', price.id,
+                              'unit_price', price.unit_price::TEXT,
+                              'currency', price.currency,
+                              'vat_rate', price.vat_rate::TEXT,
+                              'valid_from', price.valid_from,
+                              'valid_to', price.valid_to,
+                              'created_at', price.created_at
+                          ) ORDER BY price.valid_from DESC, price.created_at DESC
+                      )
+                      FROM agency_service_price_versions price
+                      WHERE price.agency_service_id = catalog.id
+                  ), '[]'::jsonb) AS price_versions,
                   (
                       (SELECT COUNT(*) FROM order_leistungen line WHERE line.agency_service_id = catalog.id)
                     + (SELECT COUNT(*) FROM service_package_items item WHERE item.agency_service_id = catalog.id)
@@ -575,6 +650,7 @@ async fn list_agency_services(
                         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
                         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").ok().map(|value| value.to_rfc3339()),
                         "usage_count": row.try_get::<i64, _>("usage_count").unwrap_or_default(),
+                        "price_versions": row.try_get::<Value, _>("price_versions").unwrap_or_else(|_| json!([])),
                     })
                 })
                 .collect();
@@ -608,14 +684,23 @@ async fn create_agency_service(
         .unwrap_or_else(|| generate_agency_service_key(&payload.service_name));
 
     match sqlx::query(
-        r#"INSERT INTO agency_service_catalog (
+        r#"WITH inserted AS (
+             INSERT INTO agency_service_catalog (
                 service_key, service_name, description, unit_label, unit_price,
                 currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by
-           ) VALUES (
+             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10, $11, $11
+             )
+             RETURNING id, created_at, updated_at
            )
-           RETURNING id, created_at, updated_at"#,
+           INSERT INTO agency_service_price_versions (
+               agency_service_id, unit_price, currency, vat_rate,
+               valid_from, valid_to, created_by
+           )
+           SELECT id, $5, $6, $7, $9, $10, $11
+           FROM inserted
+           RETURNING agency_service_id AS id, created_at, created_at AS updated_at"#,
     )
     .bind(service_key)
     .bind(payload.service_name)
@@ -683,8 +768,20 @@ async fn update_agency_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    match sqlx::query(
-        r#"UPDATE agency_service_catalog
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "begin agency service update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update agency service",
+            );
+        }
+    };
+
+    let updated = match sqlx::query(
+        r#"WITH updated AS (
+             UPDATE agency_service_catalog
            SET service_key = COALESCE($2, service_key),
                service_name = $3,
                description = $4,
@@ -697,7 +794,23 @@ async fn update_agency_service(
                valid_to = $11,
                updated_by = $12,
                updated_at = now()
-           WHERE id = $1"#,
+             WHERE id = $1
+             RETURNING id
+           )
+           INSERT INTO agency_service_price_versions (
+               agency_service_id, unit_price, currency, vat_rate,
+               valid_from, valid_to, created_by
+           )
+           SELECT id, $6, $7, $8, $10, $11, $12
+           FROM updated
+           ON CONFLICT (agency_service_id, valid_from) DO UPDATE
+           SET unit_price = EXCLUDED.unit_price,
+               currency = EXCLUDED.currency,
+               vat_rate = EXCLUDED.vat_rate,
+               valid_to = EXCLUDED.valid_to,
+               created_by = EXCLUDED.created_by,
+               created_at = now()
+           RETURNING agency_service_id"#,
     )
     .bind(service_id)
     .bind(payload.service_key)
@@ -711,36 +824,460 @@ async fn update_agency_service(
     .bind(payload.valid_from)
     .bind(payload.valid_to)
     .bind(auth.user_id)
-    .execute(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {
-            let _ = audit(
-                &state,
-                auth.user_id,
-                "update_agency_service",
-                "agency_service_catalog",
-                Some(service_id),
-                Some(json!({ "service_id": service_id })),
-            )
-            .await;
-            Json(json!({ "ok": true })).into_response()
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Agency service not found"),
+        Ok(value) => value.is_some(),
         Err(e)
             if e.to_string()
                 .contains("agency_service_catalog_service_key_key") =>
         {
-            err(StatusCode::CONFLICT, "Agency service key already exists")
+            return err(StatusCode::CONFLICT, "Agency service key already exists");
         }
         Err(e) => {
             tracing::error!(error = %e, service_id = %service_id, "update agency service");
-            err(
+            return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to update agency service",
-            )
+            );
+        }
+    };
+    if !updated {
+        return err(StatusCode::NOT_FOUND, "Agency service not found");
+    }
+
+    if let Err(error) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+           )
+           UPDATE agency_service_price_versions price
+           SET valid_to = CASE
+               WHEN ordered.next_from IS NOT NULL THEN ordered.next_from - 1
+               ELSE price.valid_to
+           END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(service_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, "normalize agency service prices after service update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update agency service",
+        );
+    }
+
+    if let Err(error) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT unit_price, currency, vat_rate, valid_from, valid_to
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE agency_service_catalog catalog
+           SET unit_price = selected.unit_price,
+               currency = selected.currency,
+               vat_rate = selected.vat_rate,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE catalog.id = $1"#,
+    )
+    .bind(service_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, "sync agency service price after service update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update agency service",
+        );
+    }
+
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %service_id, "commit agency service update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update agency service",
+        );
+    }
+
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "update_agency_service",
+        "agency_service_catalog",
+        Some(service_id),
+        Some(json!({ "service_id": service_id })),
+    )
+    .await;
+    Json(json!({ "ok": true })).into_response()
+}
+
+async fn save_agency_service_price_version(
+    state: &AppState,
+    auth: &AuthUser,
+    service_id: Uuid,
+    price_version_id: Option<Uuid>,
+    body: CreateAgencyServicePriceVersionRequest,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let payload = match normalize_agency_service_price_version(body) {
+        Ok(payload) => payload,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "begin agency service price version save");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save price version",
+            );
+        }
+    };
+    let service_exists = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM agency_service_catalog WHERE id = $1 FOR UPDATE",
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *tx)
+    .await;
+    match service_exists {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Agency service not found"),
+        Err(error) => {
+            tracing::error!(%error, %service_id, "lock agency service for price version save");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save price version",
+            );
         }
     }
+
+    let saved_id = if let Some(price_version_id) = price_version_id {
+        match sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE agency_service_price_versions
+               SET unit_price = $3,
+                   currency = $4,
+                   vat_rate = $5,
+                   valid_from = $6,
+                   valid_to = $7,
+                   created_by = $8,
+                   created_at = now()
+               WHERE id = $1 AND agency_service_id = $2
+               RETURNING id"#,
+        )
+        .bind(price_version_id)
+        .bind(service_id)
+        .bind(payload.unit_price)
+        .bind(&payload.currency)
+        .bind(payload.vat_rate)
+        .bind(payload.valid_from)
+        .bind(payload.valid_to)
+        .bind(auth.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Price version not found"),
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+                return err(StatusCode::CONFLICT, "A price already starts on this date");
+            }
+            Err(error) => {
+                tracing::error!(%error, %service_id, %price_version_id, "update agency service price version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        }
+    } else {
+        match sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO agency_service_price_versions (
+                   agency_service_id, unit_price, currency, vat_rate,
+                   valid_from, valid_to, created_by
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id"#,
+        )
+        .bind(service_id)
+        .bind(payload.unit_price)
+        .bind(&payload.currency)
+        .bind(payload.vat_rate)
+        .bind(payload.valid_from)
+        .bind(payload.valid_to)
+        .bind(auth.user_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(id) => id,
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+                return err(StatusCode::CONFLICT, "A price already starts on this date");
+            }
+            Err(error) => {
+                tracing::error!(%error, %service_id, "create agency service price version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        }
+    };
+
+    if let Err(error) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+           )
+           UPDATE agency_service_price_versions price
+           SET valid_to = CASE
+               WHEN ordered.next_from IS NOT NULL THEN ordered.next_from - 1
+               WHEN price.id = $2 THEN $3
+               ELSE price.valid_to
+           END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(service_id)
+    .bind(saved_id)
+    .bind(payload.valid_to)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, %saved_id, "normalize agency service price periods");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save price version",
+        );
+    }
+
+    if let Err(error) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT unit_price, currency, vat_rate, valid_from, valid_to
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE agency_service_catalog catalog
+           SET unit_price = selected.unit_price,
+               currency = selected.currency,
+               vat_rate = selected.vat_rate,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE catalog.id = $1"#,
+    )
+    .bind(service_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, "sync agency service current price");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save price version");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %service_id, "commit agency service price version save");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save price version",
+        );
+    }
+    let action = if price_version_id.is_some() {
+        "update_agency_service_price_version"
+    } else {
+        "create_agency_service_price_version"
+    };
+    let _ = audit(
+        state,
+        auth.user_id,
+        action,
+        "agency_service_price_versions",
+        Some(saved_id),
+        Some(json!({ "service_id": service_id, "price_version_id": saved_id })),
+    )
+    .await;
+    Json(json!({ "id": saved_id, "ok": true })).into_response()
+}
+
+async fn create_agency_service_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<CreateAgencyServicePriceVersionRequest>,
+) -> axum::response::Response {
+    save_agency_service_price_version(&state, &auth, service_id, None, body).await
+}
+
+async fn update_agency_service_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((service_id, price_version_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreateAgencyServicePriceVersionRequest>,
+) -> axum::response::Response {
+    save_agency_service_price_version(&state, &auth, service_id, Some(price_version_id), body).await
+}
+
+async fn delete_agency_service_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((service_id, price_version_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "begin agency service price version delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    match sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM agency_service_catalog WHERE id = $1 FOR UPDATE",
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Agency service not found"),
+        Err(error) => {
+            tracing::error!(%error, %service_id, "lock agency service for price version delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    }
+    let count = match sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM agency_service_price_versions WHERE agency_service_id = $1",
+    )
+    .bind(service_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(%error, %service_id, "count agency service price versions");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    if count <= 1 {
+        return err(
+            StatusCode::CONFLICT,
+            "The only price version cannot be deleted",
+        );
+    }
+    let deleted = match sqlx::query(
+        "DELETE FROM agency_service_price_versions WHERE id = $1 AND agency_service_id = $2",
+    )
+    .bind(price_version_id)
+    .bind(service_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected() > 0,
+        Err(error) => {
+            tracing::error!(%error, %service_id, %price_version_id, "delete agency service price version");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    if !deleted {
+        return err(StatusCode::NOT_FOUND, "Price version not found");
+    }
+    if let Err(error) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+           )
+           UPDATE agency_service_price_versions price
+           SET valid_to = CASE WHEN ordered.next_from IS NULL THEN NULL ELSE ordered.next_from - 1 END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(service_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, "normalize agency service price periods after delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete price version");
+    }
+    if let Err(error) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT unit_price, currency, vat_rate, valid_from, valid_to
+               FROM agency_service_price_versions
+               WHERE agency_service_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE agency_service_catalog catalog
+           SET unit_price = selected.unit_price,
+               currency = selected.currency,
+               vat_rate = selected.vat_rate,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE catalog.id = $1"#,
+    )
+    .bind(service_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %service_id, "sync agency service current price after delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete price version");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %service_id, "commit agency service price version delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete price version",
+        );
+    }
+    let _ = audit(
+        &state,
+        auth.user_id,
+        "delete_agency_service_price_version",
+        "agency_service_price_versions",
+        Some(price_version_id),
+        Some(json!({ "service_id": service_id, "price_version_id": price_version_id })),
+    )
+    .await;
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn delete_agency_service(

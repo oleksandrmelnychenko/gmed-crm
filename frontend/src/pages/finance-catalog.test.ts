@@ -6,8 +6,23 @@ import {
   createPackageItemFromAgencyService,
   packageItemPatchFromAgencyService,
   packageItemVatRate,
+  pricePeriodState,
   validateAgencyServiceForm,
 } from "./finance-catalog";
+
+describe("pricePeriodState", () => {
+  const today = "2026-09-04";
+
+  it("distinguishes past, current and future price periods", () => {
+    expect(pricePeriodState("2025-01-01", "2026-09-03", today)).toBe("past");
+    expect(pricePeriodState("2026-09-04", null, today)).toBe("current");
+    expect(pricePeriodState("2026-09-05", null, today)).toBe("future");
+  });
+
+  it("keeps both validity boundaries inclusive", () => {
+    expect(pricePeriodState("2026-09-04", "2026-09-04", today)).toBe("current");
+  });
+});
 
 describe("packageItemVatRate", () => {
   const servicePackage = {
@@ -195,10 +210,10 @@ describe("validateAgencyServiceForm", () => {
     validFrom: "2026-06-19",
   };
 
-  it("requires service identity and validity start", () => {
+  it("requires the service name and validity start", () => {
     expect(
       validateAgencyServiceForm(
-        { ...validForm, serviceKey: " ", serviceName: "Interpreter hours" },
+        { ...validForm, serviceKey: " ", serviceName: " " },
         messages,
       ),
     ).toBe("required");
@@ -224,6 +239,7 @@ describe("validateAgencyServiceForm", () => {
 
   it("accepts comma decimal price and optional VAT", () => {
     expect(validateAgencyServiceForm(validForm, messages)).toBe("");
+    expect(validateAgencyServiceForm({ ...validForm, serviceKey: "" }, messages)).toBe("");
     expect(validateAgencyServiceForm({ ...validForm, vatRate: "" }, messages)).toBe("");
   });
 });

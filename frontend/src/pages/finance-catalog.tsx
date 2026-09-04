@@ -27,6 +27,7 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import {
   AdminSheetScaffold,
   SheetFormFooter,
@@ -66,6 +67,7 @@ import {
 import type {
   AgencyServiceFormState,
   AgencyServiceItem,
+  AgencyServicePriceVersion,
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount } from "@/lib/money";
@@ -118,7 +120,41 @@ type ServicePackage = {
   is_active: boolean;
   valid_from: string;
   valid_to?: string | null;
+  price_versions?: ServicePackagePriceVersion[];
   items?: ServicePackageItem[];
+};
+
+type ServicePackagePriceVersion = {
+  id: string;
+  base_price_net: string;
+  base_price_vat: string;
+  base_price_gross: string;
+  currency: string;
+  tax_profile_id?: string | null;
+  tax_profile_key?: string | null;
+  tax_profile_name?: string | null;
+  tax_profile_vat_rate?: string | null;
+  valid_from: string;
+  valid_to?: string | null;
+  created_at?: string | null;
+};
+
+type PriceVersionKind = "agency-service" | "service-package";
+
+type PriceVersionForm = {
+  open: boolean;
+  busy: boolean;
+  error: string;
+  kind: PriceVersionKind;
+  parentId: string;
+  versionId: string;
+  title: string;
+  netPrice: string;
+  currency: string;
+  vatRate: string;
+  taxProfileId: string;
+  validFrom: string;
+  validTo: string;
 };
 
 type ServicePackageItem = {
@@ -236,6 +272,32 @@ function todayInputDate() {
   const now = new Date();
   const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return localDate.toISOString().slice(0, 10);
+}
+
+const BLANK_PRICE_VERSION_FORM: PriceVersionForm = {
+  open: false,
+  busy: false,
+  error: "",
+  kind: "agency-service",
+  parentId: "",
+  versionId: "",
+  title: "",
+  netPrice: "0",
+  currency: "EUR",
+  vatRate: "19",
+  taxProfileId: "",
+  validFrom: "",
+  validTo: "",
+};
+
+export function pricePeriodState(
+  validFrom: string,
+  validTo?: string | null,
+  today = todayInputDate(),
+) {
+  if (validFrom > today) return "future" as const;
+  if (validTo && validTo < today) return "past" as const;
+  return "current" as const;
 }
 
 function createBlankAgencyServiceForm(unitLabel: string): AgencyServiceFormState {
@@ -444,11 +506,11 @@ type AgencyServiceValidationMessages = {
 export function validateAgencyServiceForm(
   form: Pick<
     AgencyServiceFormState,
-    "serviceKey" | "serviceName" | "unitPrice" | "vatRate" | "validFrom"
+    "serviceName" | "unitPrice" | "vatRate" | "validFrom"
   >,
   messages: AgencyServiceValidationMessages,
 ) {
-  if (!form.serviceKey.trim() || !form.serviceName.trim() || !form.validFrom) {
+  if (!form.serviceName.trim() || !form.validFrom) {
     return messages.required;
   }
   if (
@@ -661,6 +723,10 @@ function useFinanceCatalogPageContent() {
     [servicePackages],
   );
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [priceVersionForm, setPriceVersionForm] = useState<PriceVersionForm>(
+    BLANK_PRICE_VERSION_FORM,
+  );
+  const [priceDeleteConfirmOpen, setPriceDeleteConfirmOpen] = useState(false);
   const filteredAgencyServices = useMemo(() => {
     const query = catalogSearch.trim().toLowerCase();
     if (!query) return agencyServices;
@@ -843,9 +909,10 @@ function useFinanceCatalogPageContent() {
 
   type PackageTableRow = {
     rowId: string;
-    kind: "package" | "item";
+    kind: "package" | "price" | "item";
     name: string;
     itemCount: number;
+    childCount: number;
     gross: number;
     net: number;
     vat: number;
@@ -853,6 +920,7 @@ function useFinanceCatalogPageContent() {
     isActive: boolean;
     description: string;
     pkg?: ServicePackage;
+    priceVersion?: ServicePackagePriceVersion;
     unitLabel?: string;
     quantity?: string;
   };
@@ -874,6 +942,7 @@ function useFinanceCatalogPageContent() {
         kind: "package",
         name: pkg.name,
         itemCount: pkg.items?.length ?? 0,
+        childCount: (pkg.items?.length ?? 0) + (pkg.price_versions?.length ?? 0),
         gross: Number(pkg.base_price_gross) || 0,
         net: Number(pkg.base_price_net) || 0,
         vat: Number(pkg.base_price_vat) || 0,
@@ -889,8 +958,24 @@ function useFinanceCatalogPageContent() {
       if (row.kind !== "package" || !row.pkg || !expandedPackages.has(row.rowId)) {
         return null;
       }
-      const items = row.pkg.items ?? [];
-      return items.map((item) => ({
+      const priceRows: PackageTableRow[] = (row.pkg.price_versions ?? []).map((price) => ({
+        rowId: `${row.rowId}:price:${price.id}`,
+        kind: "price" as const,
+        name: t.finance_catalog_price_period
+          .replace("{from}", price.valid_from)
+          .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
+        itemCount: 0,
+        childCount: 0,
+        gross: Number(price.base_price_gross) || 0,
+        net: Number(price.base_price_net) || 0,
+        vat: Number(price.base_price_vat) || 0,
+        currency: price.currency,
+        isActive: pricePeriodState(price.valid_from, price.valid_to) === "current",
+        description: price.tax_profile_name ?? "",
+        pkg: row.pkg,
+        priceVersion: price,
+      }));
+      const itemRows: PackageTableRow[] = (row.pkg.items ?? []).map((item) => ({
         rowId: `${row.rowId}:item:${item.id}`,
         kind: "item" as const,
         name:
@@ -898,6 +983,7 @@ function useFinanceCatalogPageContent() {
           agencyServiceNameLabel(item.service_key ?? "", item.agency_service_name ?? null, t) ||
           item.description,
         itemCount: 0,
+        childCount: 0,
         gross: 0,
         net: Number(item.agency_service_unit_price) || 0,
         vat: 0,
@@ -907,6 +993,7 @@ function useFinanceCatalogPageContent() {
         unitLabel: agencyServiceUnitLabel(item.unit_label, t),
         quantity: item.included_quantity,
       }));
+      return [...priceRows, ...itemRows];
     },
     [expandedPackages, t],
   );
@@ -922,12 +1009,15 @@ function useFinanceCatalogPageContent() {
         required: true,
         width: 380,
         render: (row) =>
-          row.kind === "item" ? (
+          row.kind !== "package" ? (
             <div
               className="flex min-w-0 items-center gap-1.5 pl-7"
               title={row.description || undefined}
             >
-              <CornerDownRight className="size-3 shrink-0 text-foreground/60" />
+              <CornerDownRight className={cn(
+                "size-3 shrink-0",
+                row.kind === "price" ? "text-amber-600" : "text-foreground/60",
+              )} />
               <span className="truncate font-mono text-xs text-foreground">
                 {row.name}
               </span>
@@ -945,7 +1035,13 @@ function useFinanceCatalogPageContent() {
               <span className="truncate font-mono text-xs font-medium text-foreground">
                 {row.name}
               </span>
-              {row.itemCount > 0 ? (
+              <Badge variant="outline" className="shrink-0 rounded-full px-1.5 py-0 text-[10px] font-normal">
+                {t.finance_catalog_price_versions_count.replace(
+                  "{count}",
+                  String(row.pkg?.price_versions?.length ?? 0),
+                )}
+              </Badge>
+              {row.childCount > 0 ? (
                 <ChevronDown
                   className={cn(
                     "size-3.5 shrink-0 text-muted-foreground transition-transform",
@@ -969,9 +1065,9 @@ function useFinanceCatalogPageContent() {
               {row.quantity}
               {row.unitLabel ? ` ${row.unitLabel}` : ""}
             </span>
-          ) : (
+          ) : row.kind === "package" ? (
             <span className="tabular-nums text-foreground">{row.itemCount}</span>
-          ),
+          ) : null,
       },
       {
         id: "net",
@@ -982,7 +1078,7 @@ function useFinanceCatalogPageContent() {
         width: 130,
         render: (row) => (
           <span className={cn("tabular-nums", row.kind === "item" ? "text-muted-foreground" : "text-foreground")}>
-            {row.net ? formatMoney(String(row.net), row.currency) : "—"}
+            {row.net || row.kind === "price" ? formatMoney(String(row.net), row.currency) : "—"}
           </span>
         ),
       },
@@ -1026,7 +1122,25 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 110,
         render: (row) =>
-          row.kind === "item" ? null : (
+          row.kind === "item" ? null : row.kind === "price" && row.priceVersion ? (
+            <Badge
+              variant="outline"
+              className={cn(
+                "w-fit rounded-full",
+                pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "current"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "future"
+                    ? "border-sky-200 bg-sky-50 text-sky-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600",
+              )}
+            >
+              {pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "current"
+                ? t.finance_catalog_price_current
+                : pricePeriodState(row.priceVersion.valid_from, row.priceVersion.valid_to) === "future"
+                  ? t.finance_catalog_price_future
+                  : t.finance_catalog_price_past}
+            </Badge>
+          ) : (
             <Badge
               variant="outline"
               className={cn(
@@ -1044,90 +1158,187 @@ function useFinanceCatalogPageContent() {
     [expandedPackages, t, togglePackageExpanded],
   );
 
-  const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceItem>[]>(
+  type AgencyServiceTableRow = {
+    rowId: string;
+    kind: "service" | "price";
+    service: AgencyServiceItem;
+    version?: AgencyServicePriceVersion;
+  };
+  const [expandedAgencyServices, setExpandedAgencyServices] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleAgencyServiceExpanded = useCallback((serviceId: string) => {
+    setExpandedAgencyServices((current) => {
+      const next = new Set(current);
+      if (next.has(serviceId)) next.delete(serviceId);
+      else next.add(serviceId);
+      return next;
+    });
+  }, []);
+  const agencyServiceTableRows = useMemo<AgencyServiceTableRow[]>(
+    () =>
+      agencyServicesPagination.pagedRows.map((service) => ({
+        rowId: service.id,
+        kind: "service",
+        service,
+      })),
+    [agencyServicesPagination.pagedRows],
+  );
+  const expandAgencyServiceRow = useCallback(
+    (row: AgencyServiceTableRow): AgencyServiceTableRow[] | null => {
+      if (row.kind !== "service" || !expandedAgencyServices.has(row.rowId)) return null;
+      return (row.service.price_versions ?? []).map((version) => ({
+        rowId: `${row.rowId}:price:${version.id}`,
+        kind: "price",
+        service: row.service,
+        version,
+      }));
+    },
+    [expandedAgencyServices],
+  );
+
+  const agencyServiceColumns = useMemo<ColumnDef<AgencyServiceTableRow>[]>(
     () => [
       {
         id: "service",
         label: t.finance_catalog_service,
-        accessor: (item) => agencyServiceNameLabel(item.service_key, item.service_name, t),
+        accessor: (row) =>
+          row.kind === "price"
+            ? row.version?.valid_from ?? ""
+            : agencyServiceNameLabel(row.service.service_key, row.service.service_name, t),
         filterType: "text",
         sortable: true,
         searchable: true,
         required: true,
         width: 360,
-        render: (item) => (
-          <span
-            className="truncate font-mono text-xs text-foreground"
-            title={
-              item.description
-                ? agencyServiceDescriptionLabel(item.service_key, item.description, t)
-                : undefined
-            }
-          >
-            {agencyServiceNameLabel(item.service_key, item.service_name, t)}
-          </span>
-        ),
+        render: (row) => {
+          if (row.kind === "price" && row.version) {
+            return (
+              <div className="flex min-w-0 items-center gap-1.5 pl-7 text-xs text-foreground">
+                <CornerDownRight className="size-3 shrink-0 text-amber-600" />
+                <span className="truncate font-mono">
+                  {t.finance_catalog_price_period
+                    .replace("{from}", row.version.valid_from)
+                    .replace("{to}", row.version.valid_to || t.finance_catalog_open_ended)}
+                </span>
+              </div>
+            );
+          }
+          const item = row.service;
+          const priceCount = item.price_versions?.length ?? 0;
+          return (
+            <button
+              type="button"
+              className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              aria-expanded={expandedAgencyServices.has(row.rowId)}
+              title={
+                item.description
+                  ? agencyServiceDescriptionLabel(item.service_key, item.description, t)
+                  : undefined
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleAgencyServiceExpanded(row.rowId);
+              }}
+            >
+              <span className="truncate font-mono text-xs text-foreground">
+                {agencyServiceNameLabel(item.service_key, item.service_name, t)}
+              </span>
+              <Badge variant="outline" className="shrink-0 rounded-full px-1.5 py-0 text-[10px] font-normal">
+                {t.finance_catalog_price_versions_count.replace("{count}", String(priceCount))}
+              </Badge>
+              {priceCount > 0 ? (
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                    expandedAgencyServices.has(row.rowId) && "rotate-180",
+                  )}
+                />
+              ) : null}
+            </button>
+          );
+        },
       },
       {
         id: "unit_price",
         label: t.revenue_agency_service_unit_price,
-        accessor: (item) => Number(item.unit_price) || 0,
+        accessor: (row) => Number(row.version?.unit_price ?? row.service.unit_price) || 0,
         filterType: "number",
         sortable: true,
         width: 120,
-        render: (item) => (
+        render: (row) => (
           <span className="tabular-nums text-foreground">
-            {formatMoney(item.unit_price as string | number, item.currency)}
+            {formatMoney(
+              (row.version?.unit_price ?? row.service.unit_price) as string | number,
+              row.version?.currency ?? row.service.currency,
+            )}
           </span>
         ),
       },
       {
         id: "gross",
         label: t.revenue_common_gross,
-        accessor: (item) => agencyServiceGrossAmount(item),
+        accessor: (row) => {
+          if (!row.version) return agencyServiceGrossAmount(row.service);
+          const net = Number(row.version.unit_price) || 0;
+          const vat = Number(row.version.vat_rate) || 0;
+          return net * (1 + vat / 100);
+        },
         filterType: "number",
         sortable: true,
         width: 120,
-        render: (item) => (
+        render: (row) => {
+          const gross = row.version
+            ? (Number(row.version.unit_price) || 0) * (1 + (Number(row.version.vat_rate) || 0) / 100)
+            : agencyServiceGrossAmount(row.service);
+          return (
           <span className="tabular-nums text-foreground">
-            {formatMoney(agencyServiceGrossAmount(item), item.currency)}
+            {formatMoney(gross, row.version?.currency ?? row.service.currency)}
           </span>
-        ),
+          );
+        },
       },
       {
         id: "unit",
         label: t.revenue_agency_service_unit,
-        accessor: (item) => agencyServiceUnitLabel(item.unit_label, t),
+        accessor: (row) => agencyServiceUnitLabel(row.service.unit_label, t),
         filterType: "text",
         sortable: true,
         width: 110,
-        render: (item) => (
+        render: (row) => (
           <span className="truncate text-foreground">
-            {agencyServiceUnitLabel(item.unit_label, t)}
+            {agencyServiceUnitLabel(row.service.unit_label, t)}
           </span>
         ),
       },
       {
         id: "vat",
         label: t.finance_catalog_vat_label,
-        accessor: (item) => Number(valueToInput(item.vat_rate)) || 0,
+        accessor: (row) => Number(valueToInput(row.version?.vat_rate ?? row.service.vat_rate)) || 0,
         filterType: "number",
         sortable: true,
         width: 80,
-        render: (item) => (
-          <span className="tabular-nums text-foreground">{valueToInput(item.vat_rate) || "0"}%</span>
+        render: (row) => (
+          <span className="tabular-nums text-foreground">
+            {valueToInput(row.version?.vat_rate ?? row.service.vat_rate) || "0"}%
+          </span>
         ),
       },
       {
         id: "packages",
         label: t.finance_catalog_packages_column,
-        accessor: (item) =>
-          (agencyServicePackageUsages.get(item.id) ?? []).map((usage) => usage.name).join(", "),
+        accessor: (row) =>
+          row.kind === "price"
+            ? ""
+            : (agencyServicePackageUsages.get(row.service.id) ?? [])
+                .map((usage) => usage.name)
+                .join(", "),
         filterType: "text",
         searchable: true,
         width: 380,
-        render: (item) => {
-          const packageUsages = agencyServicePackageUsages.get(item.id) ?? [];
+        render: (row) => {
+          if (row.kind === "price") return null;
+          const packageUsages = agencyServicePackageUsages.get(row.service.id) ?? [];
           if (packageUsages.length === 0) {
             return <span className="text-foreground">-</span>;
           }
@@ -1163,7 +1374,10 @@ function useFinanceCatalogPageContent() {
       {
         id: "status",
         label: t.users_status,
-        accessor: (item) => (item.is_active ? "active" : "inactive"),
+        accessor: (row) => {
+          if (row.version) return pricePeriodState(row.version.valid_from, row.version.valid_to);
+          return row.service.is_active ? "active" : "inactive";
+        },
         filterType: "enum",
         filterOptions: [
           { value: "active", label: t.common_active },
@@ -1171,7 +1385,31 @@ function useFinanceCatalogPageContent() {
         ],
         sortable: true,
         width: 110,
-        render: (item) => (
+        render: (row) => {
+          if (row.version) {
+            const periodState = pricePeriodState(row.version.valid_from, row.version.valid_to);
+            return (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "w-fit rounded-full",
+                  periodState === "current"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : periodState === "future"
+                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                      : "border-slate-200 bg-slate-50 text-slate-600",
+                )}
+              >
+                {periodState === "current"
+                  ? t.finance_catalog_price_current
+                  : periodState === "future"
+                    ? t.finance_catalog_price_future
+                    : t.finance_catalog_price_past}
+              </Badge>
+            );
+          }
+          const item = row.service;
+          return (
           <Badge
             variant="outline"
             className={cn(
@@ -1183,10 +1421,16 @@ function useFinanceCatalogPageContent() {
           >
             {item.is_active ? t.common_active : t.common_inactive}
           </Badge>
-        ),
+          );
+        },
       },
     ],
-    [agencyServicePackageUsages, t],
+    [
+      agencyServicePackageUsages,
+      expandedAgencyServices,
+      t,
+      toggleAgencyServiceExpanded,
+    ],
   );
 
   const load = useCallback(async () => {
@@ -1387,6 +1631,163 @@ function useFinanceCatalogPageContent() {
     setAgencyServiceForm(createBlankAgencyServiceForm(t.finance_catalog_unit_default));
   }
 
+  function openAgencyServicePriceVersion(
+    service: AgencyServiceItem,
+    version?: AgencyServicePriceVersion,
+  ) {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
+    setPackageFormOpen(false);
+    setAgencyServiceFormOpen(false);
+    setPriceVersionForm({
+      ...BLANK_PRICE_VERSION_FORM,
+      open: true,
+      kind: "agency-service",
+      parentId: service.id,
+      versionId: version?.id ?? "",
+      title: agencyServiceNameLabel(service.service_key, service.service_name, t),
+      netPrice: valueToInput(version?.unit_price ?? service.unit_price),
+      currency: version?.currency ?? service.currency ?? "EUR",
+      vatRate: valueToInput(version?.vat_rate ?? service.vat_rate) || "19",
+      validFrom: version?.valid_from ?? todayInputDate(),
+      validTo: version?.valid_to ?? "",
+    });
+  }
+
+  function openServicePackagePriceVersion(
+    servicePackage: ServicePackage,
+    version?: ServicePackagePriceVersion,
+  ) {
+    setCreateOpen(false);
+    setEditingTaxProfileId("");
+    setPackageFormOpen(false);
+    setAgencyServiceFormOpen(false);
+    setPriceVersionForm({
+      ...BLANK_PRICE_VERSION_FORM,
+      open: true,
+      kind: "service-package",
+      parentId: servicePackage.id,
+      versionId: version?.id ?? "",
+      title: servicePackage.name,
+      netPrice: version?.base_price_net ?? servicePackage.base_price_net,
+      currency: version?.currency ?? servicePackage.currency ?? "EUR",
+      taxProfileId: version?.tax_profile_id ?? servicePackage.tax_profile_id ?? "",
+      validFrom: version?.valid_from ?? todayInputDate(),
+      validTo: version?.valid_to ?? "",
+    });
+  }
+
+  function closePriceVersionForm() {
+    if (priceVersionForm.busy) return;
+    setPriceDeleteConfirmOpen(false);
+    setPriceVersionForm(BLANK_PRICE_VERSION_FORM);
+  }
+
+  async function handleSavePriceVersion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!priceVersionForm.parentId || !priceVersionForm.validFrom) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        error: t.finance_catalog_error_price_version_required,
+      }));
+      return;
+    }
+    if (!decimalInputIsValid(priceVersionForm.netPrice) || decimalPayload(priceVersionForm.netPrice) < 0) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        error: t.finance_catalog_error_base_price_numeric,
+      }));
+      return;
+    }
+    if (
+      priceVersionForm.kind === "agency-service" &&
+      (!decimalInputIsValid(priceVersionForm.vatRate) ||
+        decimalPayload(priceVersionForm.vatRate) < 0 ||
+        decimalPayload(priceVersionForm.vatRate) > 100)
+    ) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        error: t.finance_catalog_error_agency_service_vat_rate,
+      }));
+      return;
+    }
+    if (
+      priceVersionForm.validTo &&
+      priceVersionForm.validTo < priceVersionForm.validFrom
+    ) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        error: t.finance_catalog_error_price_period,
+      }));
+      return;
+    }
+    setPriceVersionForm((current) => ({ ...current, busy: true, error: "" }));
+    try {
+      const basePath =
+        priceVersionForm.kind === "agency-service"
+          ? `/agency-services/${priceVersionForm.parentId}/price-versions`
+          : `/service-packages/${priceVersionForm.parentId}/price-versions`;
+      const payload =
+        priceVersionForm.kind === "agency-service"
+          ? {
+              unit_price: decimalPayload(priceVersionForm.netPrice),
+              currency: priceVersionForm.currency.trim() || "EUR",
+              vat_rate: decimalPayload(priceVersionForm.vatRate, 19),
+              valid_from: priceVersionForm.validFrom,
+              valid_to: priceVersionForm.validTo || null,
+            }
+          : {
+              base_price_net: decimalPayload(priceVersionForm.netPrice),
+              currency: priceVersionForm.currency.trim() || "EUR",
+              tax_profile_id: priceVersionForm.taxProfileId || null,
+              valid_from: priceVersionForm.validFrom,
+              valid_to: priceVersionForm.validTo || null,
+            };
+      await apiFetch(
+        priceVersionForm.versionId
+          ? `${basePath}/${priceVersionForm.versionId}`
+          : basePath,
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+      clearApiCache("/agency-services");
+      clearApiCache("/service-packages");
+      setPriceVersionForm(BLANK_PRICE_VERSION_FORM);
+      setPriceDeleteConfirmOpen(false);
+      await load();
+    } catch (err) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        busy: false,
+        error:
+          err instanceof Error ? err.message : t.finance_catalog_error_save_price_version,
+      }));
+    }
+  }
+
+  async function handleDeletePriceVersion() {
+    if (!priceVersionForm.parentId || !priceVersionForm.versionId || priceVersionForm.busy) return;
+    setPriceDeleteConfirmOpen(false);
+    setPriceVersionForm((current) => ({ ...current, busy: true, error: "" }));
+    try {
+      const basePath =
+        priceVersionForm.kind === "agency-service"
+          ? `/agency-services/${priceVersionForm.parentId}/price-versions`
+          : `/service-packages/${priceVersionForm.parentId}/price-versions`;
+      await apiFetch(`${basePath}/${priceVersionForm.versionId}`, { method: "DELETE" });
+      clearApiCache("/agency-services");
+      clearApiCache("/service-packages");
+      setPriceVersionForm(BLANK_PRICE_VERSION_FORM);
+      await load();
+    } catch (err) {
+      setPriceVersionForm((current) => ({
+        ...current,
+        busy: false,
+        error:
+          err instanceof Error ? err.message : t.finance_catalog_error_delete_price_version,
+      }));
+    }
+  }
+
   function updatePackageItem(index: number, patch: Partial<ServicePackageItemForm>) {
     setPackageForm((current) => ({
       ...current,
@@ -1547,7 +1948,6 @@ function useFinanceCatalogPageContent() {
         {
           method: "POST",
           body: JSON.stringify({
-            service_key: agencyServiceForm.serviceKey.trim(),
             service_name: agencyServiceForm.serviceName.trim(),
             description: toOptional(agencyServiceForm.description),
             unit_label: toOptional(agencyServiceForm.unitLabel),
@@ -1670,12 +2070,23 @@ function useFinanceCatalogPageContent() {
 
       <DataTableSurface
         loading={loading}
-        rows={agencyServicesPagination.pagedRows}
+        rows={agencyServiceTableRows}
         columns={agencyServiceColumns}
         dictionary={t as unknown as Record<string, string>}
-        rowId={(item) => item.id}
+        rowId={(row) => row.rowId}
+        expandRow={expandAgencyServiceRow}
         activeRowId={agencyServiceFormOpen ? agencyServiceForm.id : null}
-        onRowClick={canManageTaxProfiles ? openEditAgencyService : undefined}
+        onRowClick={
+          canManageTaxProfiles
+            ? (row) => {
+                if (row.kind === "price" && row.version) {
+                  openAgencyServicePriceVersion(row.service, row.version);
+                } else {
+                  openEditAgencyService(row.service);
+                }
+              }
+            : undefined
+        }
         emptyState={<EmptyCell>{t.revenue_agency_service_empty_title}</EmptyCell>}
         tableClassName="max-h-[560px]"
         toolbarStart={
@@ -1740,9 +2151,9 @@ function useFinanceCatalogPageContent() {
         }
         rowActions={
           canManageTaxProfiles || canCreateOrders
-            ? (item) => (
+            ? (row) => (
                 <div className="flex items-center gap-1">
-                  {canCreateOrders && item.is_active ? (
+                  {row.kind === "service" && canCreateOrders && row.service.is_active ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -1750,12 +2161,28 @@ function useFinanceCatalogPageContent() {
                       className="size-7 rounded-full text-muted-foreground hover:text-foreground"
                       onClick={(event) => {
                         event.stopPropagation();
-                        staffGo(`/orders?create=1&service=${item.id}`);
+                        staffGo(`/orders?create=1&service=${row.service.id}`);
                       }}
                       aria-label={t.orders_new_button}
                       title={t.orders_new_button}
                     >
                       <ClipboardPlus className="size-3.5" />
+                    </Button>
+                  ) : null}
+                  {canManageTaxProfiles && row.kind === "service" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openAgencyServicePriceVersion(row.service);
+                      }}
+                      aria-label={t.finance_catalog_add_price_version}
+                      title={t.finance_catalog_add_price_version}
+                    >
+                      <Plus className="size-3.5" />
                     </Button>
                   ) : null}
                   {canManageTaxProfiles ? (
@@ -1766,7 +2193,11 @@ function useFinanceCatalogPageContent() {
                       className="size-7 rounded-full text-muted-foreground hover:text-foreground"
                       onClick={(event) => {
                         event.stopPropagation();
-                        openEditAgencyService(item);
+                        if (row.kind === "price" && row.version) {
+                          openAgencyServicePriceVersion(row.service, row.version);
+                        } else {
+                          openEditAgencyService(row.service);
+                        }
                       }}
                       aria-label={t.finance_catalog_edit}
                       title={t.finance_catalog_edit}
@@ -1810,18 +2241,42 @@ function useFinanceCatalogPageContent() {
         rowActions={
           canManageTaxProfiles
             ? (row) =>
-                row.kind === "package" && row.pkg ? (
+                row.pkg ? (
+                  <div className="flex items-center gap-1">
+                    {row.kind === "package" ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                        onClick={() => row.pkg && openServicePackagePriceVersion(row.pkg)}
+                        aria-label={t.finance_catalog_add_price_version}
+                        title={t.finance_catalog_add_price_version}
+                      >
+                        <Plus className="size-3.5" />
+                      </Button>
+                    ) : null}
+                    {row.kind !== "item" ? (
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => row.pkg && openEditPackage(row.pkg)}
+                    onClick={() => {
+                      if (!row.pkg) return;
+                      if (row.kind === "price" && row.priceVersion) {
+                        openServicePackagePriceVersion(row.pkg, row.priceVersion);
+                      } else {
+                        openEditPackage(row.pkg);
+                      }
+                    }}
                     aria-label={t.finance_catalog_edit}
                     title={t.finance_catalog_edit}
                   >
                     <Pencil className="size-3.5" />
                   </Button>
+                    ) : null}
+                  </div>
                 ) : null
             : undefined
         }
@@ -1856,6 +2311,198 @@ function useFinanceCatalogPageContent() {
           />
         }
       />
+
+      <Sheet
+        open={priceVersionForm.open && canManageTaxProfiles}
+        onOpenChange={(open) => {
+          if (!open) closePriceVersionForm();
+        }}
+      >
+        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[560px]">
+          <form className="flex h-full min-h-0 flex-col" onSubmit={handleSavePriceVersion}>
+            <AdminSheetScaffold
+              title={
+                priceVersionForm.versionId
+                  ? t.finance_catalog_edit_price_version
+                  : t.finance_catalog_add_price_version
+              }
+              footer={
+                <div className="shrink-0 border-t border-border bg-popover px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      {priceVersionForm.versionId ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-9 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={priceVersionForm.busy}
+                          onClick={() => setPriceDeleteConfirmOpen(true)}
+                        >
+                          <Trash2 className="size-4" />
+                          {t.common_delete}
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-lg"
+                        disabled={priceVersionForm.busy}
+                        onClick={closePriceVersionForm}
+                      >
+                        {t.common_cancel}
+                      </Button>
+                      <Button type="submit" className="h-9 rounded-lg" disabled={priceVersionForm.busy}>
+                        {t.common_save}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              }
+            >
+              <div className="space-y-4">
+                {priceVersionForm.error ? (
+                  <Banner tone="error" withIcon>
+                    {priceVersionForm.error}
+                  </Banner>
+                ) : null}
+                <Section title={priceVersionForm.title}>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field
+                      label={
+                        priceVersionForm.kind === "agency-service"
+                          ? t.revenue_agency_service_unit_price
+                          : t.finance_catalog_base_net_price
+                      }
+                      htmlFor="catalog-price-version-net"
+                    >
+                      <Input
+                        id="catalog-price-version-net"
+                        inputMode="decimal"
+                        required
+                        value={priceVersionForm.netPrice}
+                        onChange={(event) =>
+                          setPriceVersionForm((current) => ({
+                            ...current,
+                            netPrice: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={priceVersionForm.busy}
+                      />
+                    </Field>
+                    <Field label={t.finance_catalog_currency} htmlFor="catalog-price-version-currency">
+                      <Input
+                        id="catalog-price-version-currency"
+                        value={priceVersionForm.currency}
+                        onChange={(event) =>
+                          setPriceVersionForm((current) => ({
+                            ...current,
+                            currency: event.target.value.toUpperCase(),
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={priceVersionForm.busy}
+                      />
+                    </Field>
+                    {priceVersionForm.kind === "agency-service" ? (
+                      <Field label={t.finance_catalog_vat_rate} htmlFor="catalog-price-version-vat">
+                        <Input
+                          id="catalog-price-version-vat"
+                          inputMode="decimal"
+                          required
+                          value={priceVersionForm.vatRate}
+                          onChange={(event) =>
+                            setPriceVersionForm((current) => ({
+                              ...current,
+                              vatRate: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={priceVersionForm.busy}
+                        />
+                      </Field>
+                    ) : (
+                      <Field
+                        label={t.finance_catalog_package_vat_profile}
+                        htmlFor="catalog-price-version-tax-profile"
+                      >
+                        <select
+                          id="catalog-price-version-tax-profile"
+                          value={priceVersionForm.taxProfileId}
+                          onChange={(event) =>
+                            setPriceVersionForm((current) => ({
+                              ...current,
+                              taxProfileId: event.target.value,
+                            }))
+                          }
+                          className={selectClass}
+                          disabled={priceVersionForm.busy}
+                        >
+                          <option value="">{t.finance_catalog_no_vat_profile}</option>
+                          {taxProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name} ({profile.vat_rate}%)
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    )}
+                    <Field label={t.finance_catalog_valid_from} htmlFor="catalog-price-version-from">
+                      <Input
+                        id="catalog-price-version-from"
+                        type="date"
+                        required
+                        value={priceVersionForm.validFrom}
+                        onChange={(event) =>
+                          setPriceVersionForm((current) => ({
+                            ...current,
+                            validFrom: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={priceVersionForm.busy}
+                      />
+                    </Field>
+                    <Field label={t.finance_catalog_valid_to} htmlFor="catalog-price-version-to">
+                      <Input
+                        id="catalog-price-version-to"
+                        type="date"
+                        value={priceVersionForm.validTo}
+                        onChange={(event) =>
+                          setPriceVersionForm((current) => ({
+                            ...current,
+                            validTo: event.target.value,
+                          }))
+                        }
+                        className={inputClass}
+                        disabled={priceVersionForm.busy}
+                      />
+                    </Field>
+                  </div>
+                </Section>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t.finance_catalog_price_history_hint}
+                </p>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        </SheetContent>
+      </Sheet>
+
+      <DirtyDismissConfirmDialog
+        open={priceDeleteConfirmOpen}
+        destructive
+        title={t.finance_catalog_delete_price_version_title}
+        message={t.finance_catalog_confirm_delete_price_version}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.common_delete}
+        confirmDisabled={priceVersionForm.busy}
+        onCancel={() => setPriceDeleteConfirmOpen(false)}
+        onConfirm={() => void handleDeletePriceVersion()}
+      />
+
       <Sheet
         open={createOpen && canManageTaxProfiles}
         onOpenChange={(open) => {
@@ -2246,35 +2893,22 @@ function useFinanceCatalogPageContent() {
 
                 <Section title={t.revenue_common_basic_data}>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={t.revenue_agency_service_service_key}>
-                      <Input
-                        required
-                        value={agencyServiceForm.serviceKey}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({
-                            ...current,
-                            serviceKey: event.target.value,
-                          }))
-                        }
-                        className={inputClass}
-                        disabled={agencyServiceBusy}
-                        placeholder={t.uiText.finance_catalog_service_key_placeholder}
-                      />
-                    </Field>
-                    <Field label={t.revenue_agency_service_service_name}>
-                      <Input
-                        required
-                        value={agencyServiceForm.serviceName}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({
-                            ...current,
-                            serviceName: event.target.value,
-                          }))
-                        }
-                        className={inputClass}
-                        disabled={agencyServiceBusy}
-                      />
-                    </Field>
+                    <div className="sm:col-span-2">
+                      <Field label={t.revenue_agency_service_service_name}>
+                        <Input
+                          required
+                          value={agencyServiceForm.serviceName}
+                          onChange={(event) =>
+                            setAgencyServiceForm((current) => ({
+                              ...current,
+                              serviceName: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={agencyServiceBusy}
+                        />
+                      </Field>
+                    </div>
                     <Field label={t.revenue_agency_service_unit_label}>
                       <Input
                         value={agencyServiceForm.unitLabel}
@@ -2401,8 +3035,8 @@ function useFinanceCatalogPageContent() {
                           description: event.target.value,
                         }))
                       }
-                      className={textareaClass}
-                      rows={3}
+                      className={cn(textareaClass, "min-h-56 resize-y")}
+                      rows={9}
                       disabled={agencyServiceBusy}
                     />
                   </Field>

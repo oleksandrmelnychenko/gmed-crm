@@ -33,6 +33,14 @@ pub fn router() -> Router<AppState> {
             post(update_service_package),
         )
         .route(
+            "/service-packages/{package_id}/price-versions",
+            post(create_service_package_price_version),
+        )
+        .route(
+            "/service-packages/{package_id}/price-versions/{price_version_id}",
+            post(update_service_package_price_version).delete(delete_service_package_price_version),
+        )
+        .route(
             "/patients/{patient_id}/service-packages",
             get(list_patient_service_packages).post(assign_patient_service_package),
         )
@@ -71,6 +79,15 @@ struct UpsertServicePackageRequest {
     valid_from: Option<String>,
     valid_to: Option<String>,
     items: Option<Vec<ServicePackageItemInput>>,
+}
+
+#[derive(Deserialize)]
+struct CreateServicePackagePriceVersionRequest {
+    base_price_net: Decimal,
+    currency: Option<String>,
+    tax_profile_id: Option<Uuid>,
+    valid_from: String,
+    valid_to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -265,7 +282,28 @@ async fn load_service_package_payloads(
                   sp.tax_profile_id, sp.is_active, sp.valid_from, sp.valid_to,
                   tp.profile_key AS tax_profile_key,
                   tp.name AS tax_profile_name,
-                  tp.vat_rate AS tax_profile_vat_rate
+                  tp.vat_rate AS tax_profile_vat_rate,
+                  COALESCE((
+                      SELECT jsonb_agg(
+                          jsonb_build_object(
+                              'id', price.id,
+                              'base_price_net', price.base_price_net::TEXT,
+                              'base_price_vat', price.base_price_vat::TEXT,
+                              'base_price_gross', price.base_price_gross::TEXT,
+                              'currency', price.currency,
+                              'tax_profile_id', price.tax_profile_id,
+                              'tax_profile_key', price_tax.profile_key,
+                              'tax_profile_name', price_tax.name,
+                              'tax_profile_vat_rate', price_tax.vat_rate::TEXT,
+                              'valid_from', price.valid_from,
+                              'valid_to', price.valid_to,
+                              'created_at', price.created_at
+                          ) ORDER BY price.valid_from DESC, price.created_at DESC
+                      )
+                      FROM service_package_price_versions price
+                      LEFT JOIN tax_profiles price_tax ON price_tax.id = price.tax_profile_id
+                      WHERE price.package_id = sp.id
+                  ), '[]'::jsonb) AS price_versions
            FROM service_packages sp
            LEFT JOIN tax_profiles tp ON tp.id = sp.tax_profile_id
            WHERE ($1::uuid IS NULL OR sp.id = $1)
@@ -363,6 +401,7 @@ async fn load_service_package_payloads(
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
                 "valid_from": row.try_get::<NaiveDate, _>("valid_from").map(|value| value.to_string()).unwrap_or_default(),
                 "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
+                "price_versions": row.try_get::<Value, _>("price_versions").unwrap_or_else(|_| serde_json::json!([])),
                 "items": items_by_package.remove(&id).unwrap_or_default(),
             })
         })
@@ -669,7 +708,7 @@ async fn create_service_package(
     .bind(package_key)
     .bind(name)
     .bind(normalize_optional(body.description.as_deref()))
-    .bind(currency)
+    .bind(&currency)
     .bind(base_net)
     .bind(base_vat)
     .bind(base_gross)
@@ -694,6 +733,31 @@ async fn create_service_package(
         }
     };
     let package_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO service_package_price_versions (
+               package_id, base_price_net, base_price_vat, base_price_gross,
+               currency, tax_profile_id, valid_from, valid_to, created_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, CURRENT_DATE), $8, $9)"#,
+    )
+    .bind(package_id)
+    .bind(base_net)
+    .bind(base_vat)
+    .bind(base_gross)
+    .bind(&currency)
+    .bind(body.tax_profile_id)
+    .bind(valid_from)
+    .bind(valid_to)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, package_id = %package_id, "create service package price version");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create service package",
+        );
+    }
 
     if let Err(e) = replace_package_items(&mut tx, package_id, &items).await {
         tracing::error!(error = %e, package_id = %package_id, "create service package items");
@@ -803,7 +867,7 @@ async fn update_service_package(
     .bind(package_key)
     .bind(name)
     .bind(normalize_optional(body.description.as_deref()))
-    .bind(currency)
+    .bind(&currency)
     .bind(base_net)
     .bind(base_vat)
     .bind(base_gross)
@@ -831,6 +895,103 @@ async fn update_service_package(
         return err(StatusCode::NOT_FOUND, "Service package not found");
     }
 
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO service_package_price_versions (
+               package_id, base_price_net, base_price_vat, base_price_gross,
+               currency, tax_profile_id, valid_from, valid_to, created_by
+           )
+           SELECT id, $2, $3, $4, $5, $6, valid_from, valid_to, $7
+           FROM service_packages
+           WHERE id = $1
+           ON CONFLICT (package_id, valid_from) DO UPDATE
+           SET base_price_net = EXCLUDED.base_price_net,
+               base_price_vat = EXCLUDED.base_price_vat,
+               base_price_gross = EXCLUDED.base_price_gross,
+               currency = EXCLUDED.currency,
+               tax_profile_id = EXCLUDED.tax_profile_id,
+               valid_to = EXCLUDED.valid_to,
+               created_by = EXCLUDED.created_by,
+               created_at = now()"#,
+    )
+    .bind(package_id)
+    .bind(base_net)
+    .bind(base_vat)
+    .bind(base_gross)
+    .bind(&currency)
+    .bind(body.tax_profile_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, package_id = %package_id, "save service package price version");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update service package",
+        );
+    }
+
+    if let Err(e) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM service_package_price_versions
+               WHERE package_id = $1
+           )
+           UPDATE service_package_price_versions price
+           SET valid_to = CASE
+               WHEN ordered.next_from IS NOT NULL THEN ordered.next_from - 1
+               ELSE price.valid_to
+           END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(package_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, package_id = %package_id, "normalize package prices after package update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update service package",
+        );
+    }
+
+    if let Err(e) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT base_price_net, base_price_vat, base_price_gross,
+                      currency, tax_profile_id, valid_from, valid_to
+               FROM service_package_price_versions
+               WHERE package_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE service_packages package
+           SET base_price_net = selected.base_price_net,
+               base_price_vat = selected.base_price_vat,
+               base_price_gross = selected.base_price_gross,
+               currency = selected.currency,
+               tax_profile_id = selected.tax_profile_id,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE package.id = $1"#,
+    )
+    .bind(package_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(error = %e, package_id = %package_id, "sync package price after package update");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update service package",
+        );
+    }
+
     if let Err(e) = replace_package_items(&mut tx, package_id, &items).await {
         tracing::error!(error = %e, package_id = %package_id, "update service package items");
         return err(
@@ -855,6 +1016,377 @@ async fn update_service_package(
         .into_response(),
         Err(resp) => resp,
     }
+}
+
+async fn save_service_package_price_version(
+    state: &AppState,
+    auth: &AuthUser,
+    package_id: Uuid,
+    price_version_id: Option<Uuid>,
+    body: CreateServicePackagePriceVersionRequest,
+) -> axum::response::Response {
+    if !can_manage_package_catalog(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if body.base_price_net < Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "base_price_net must be non-negative",
+        );
+    }
+    let valid_from = match parse_optional_date(Some(body.valid_from.as_str()), "valid_from") {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "valid_from is required"),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let valid_to = match parse_optional_date(body.valid_to.as_deref(), "valid_to") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    if let Some(valid_to) = valid_to
+        && valid_to < valid_from
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "valid_to cannot be earlier than valid_from",
+        );
+    }
+    let vat_rate = match tax_profile_rate(state, body.tax_profile_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let (base_net, base_vat, base_gross) = compute_price_parts(body.base_price_net, vat_rate);
+    let currency = normalize_optional(body.currency.as_deref())
+        .unwrap_or_else(|| "EUR".to_string())
+        .to_uppercase();
+    if currency.len() > 8 {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "currency is too long");
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %package_id, "begin package price version save");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save price version",
+            );
+        }
+    };
+    match sqlx::query_scalar::<_, Uuid>("SELECT id FROM service_packages WHERE id = $1 FOR UPDATE")
+        .bind(package_id)
+        .fetch_optional(&mut *tx)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Service package not found"),
+        Err(error) => {
+            tracing::error!(%error, %package_id, "lock package for price version save");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save price version",
+            );
+        }
+    }
+
+    let saved_id = if let Some(price_version_id) = price_version_id {
+        match sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE service_package_price_versions
+               SET base_price_net = $3,
+                   base_price_vat = $4,
+                   base_price_gross = $5,
+                   currency = $6,
+                   tax_profile_id = $7,
+                   valid_from = $8,
+                   valid_to = $9,
+                   created_by = $10,
+                   created_at = now()
+               WHERE id = $1 AND package_id = $2
+               RETURNING id"#,
+        )
+        .bind(price_version_id)
+        .bind(package_id)
+        .bind(base_net)
+        .bind(base_vat)
+        .bind(base_gross)
+        .bind(&currency)
+        .bind(body.tax_profile_id)
+        .bind(valid_from)
+        .bind(valid_to)
+        .bind(auth.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Price version not found"),
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+                return err(StatusCode::CONFLICT, "A price already starts on this date");
+            }
+            Err(error) => {
+                tracing::error!(%error, %package_id, %price_version_id, "update package price version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        }
+    } else {
+        match sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO service_package_price_versions (
+                   package_id, base_price_net, base_price_vat, base_price_gross,
+                   currency, tax_profile_id, valid_from, valid_to, created_by
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+               RETURNING id"#,
+        )
+        .bind(package_id)
+        .bind(base_net)
+        .bind(base_vat)
+        .bind(base_gross)
+        .bind(&currency)
+        .bind(body.tax_profile_id)
+        .bind(valid_from)
+        .bind(valid_to)
+        .bind(auth.user_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(id) => id,
+            Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+                return err(StatusCode::CONFLICT, "A price already starts on this date");
+            }
+            Err(error) => {
+                tracing::error!(%error, %package_id, "create package price version");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save price version",
+                );
+            }
+        }
+    };
+
+    if let Err(error) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM service_package_price_versions
+               WHERE package_id = $1
+           )
+           UPDATE service_package_price_versions price
+           SET valid_to = CASE
+               WHEN ordered.next_from IS NOT NULL THEN ordered.next_from - 1
+               WHEN price.id = $2 THEN $3
+               ELSE price.valid_to
+           END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(package_id)
+    .bind(saved_id)
+    .bind(valid_to)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %package_id, %saved_id, "normalize package price periods");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save price version",
+        );
+    }
+    if let Err(error) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT base_price_net, base_price_vat, base_price_gross,
+                      currency, tax_profile_id, valid_from, valid_to
+               FROM service_package_price_versions
+               WHERE package_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE service_packages package
+           SET base_price_net = selected.base_price_net,
+               base_price_vat = selected.base_price_vat,
+               base_price_gross = selected.base_price_gross,
+               currency = selected.currency,
+               tax_profile_id = selected.tax_profile_id,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE package.id = $1"#,
+    )
+    .bind(package_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %package_id, "sync package current price");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to save price version");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %package_id, "commit package price version save");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save price version",
+        );
+    }
+    Json(serde_json::json!({ "id": saved_id, "ok": true })).into_response()
+}
+
+async fn create_service_package_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(package_id): Path<Uuid>,
+    Json(body): Json<CreateServicePackagePriceVersionRequest>,
+) -> axum::response::Response {
+    save_service_package_price_version(&state, &auth, package_id, None, body).await
+}
+
+async fn update_service_package_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((package_id, price_version_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CreateServicePackagePriceVersionRequest>,
+) -> axum::response::Response {
+    save_service_package_price_version(&state, &auth, package_id, Some(price_version_id), body)
+        .await
+}
+
+async fn delete_service_package_price_version(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((package_id, price_version_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_manage_package_catalog(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %package_id, "begin package price version delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    match sqlx::query_scalar::<_, Uuid>("SELECT id FROM service_packages WHERE id = $1 FOR UPDATE")
+        .bind(package_id)
+        .fetch_optional(&mut *tx)
+        .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Service package not found"),
+        Err(error) => {
+            tracing::error!(%error, %package_id, "lock package for price version delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    }
+    let count = match sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM service_package_price_versions WHERE package_id = $1",
+    )
+    .bind(package_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(%error, %package_id, "count package price versions");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    if count <= 1 {
+        return err(
+            StatusCode::CONFLICT,
+            "The only price version cannot be deleted",
+        );
+    }
+    let deleted = match sqlx::query(
+        "DELETE FROM service_package_price_versions WHERE id = $1 AND package_id = $2",
+    )
+    .bind(price_version_id)
+    .bind(package_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(result) => result.rows_affected() > 0,
+        Err(error) => {
+            tracing::error!(%error, %package_id, %price_version_id, "delete package price version");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete price version",
+            );
+        }
+    };
+    if !deleted {
+        return err(StatusCode::NOT_FOUND, "Price version not found");
+    }
+    if let Err(error) = sqlx::query(
+        r#"WITH ordered AS (
+               SELECT id, LEAD(valid_from) OVER (ORDER BY valid_from, created_at, id) AS next_from
+               FROM service_package_price_versions
+               WHERE package_id = $1
+           )
+           UPDATE service_package_price_versions price
+           SET valid_to = CASE WHEN ordered.next_from IS NULL THEN NULL ELSE ordered.next_from - 1 END
+           FROM ordered
+           WHERE price.id = ordered.id"#,
+    )
+    .bind(package_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %package_id, "normalize package price periods after delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete price version");
+    }
+    if let Err(error) = sqlx::query(
+        r#"WITH selected AS (
+               SELECT base_price_net, base_price_vat, base_price_gross,
+                      currency, tax_profile_id, valid_from, valid_to
+               FROM service_package_price_versions
+               WHERE package_id = $1
+               ORDER BY
+                   (valid_from <= CURRENT_DATE AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)) DESC,
+                   valid_from DESC,
+                   created_at DESC
+               LIMIT 1
+           )
+           UPDATE service_packages package
+           SET base_price_net = selected.base_price_net,
+               base_price_vat = selected.base_price_vat,
+               base_price_gross = selected.base_price_gross,
+               currency = selected.currency,
+               tax_profile_id = selected.tax_profile_id,
+               valid_from = selected.valid_from,
+               valid_to = selected.valid_to,
+               updated_by = $2,
+               updated_at = now()
+           FROM selected
+           WHERE package.id = $1"#,
+    )
+    .bind(package_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        tracing::error!(%error, %package_id, "sync package current price after delete");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete price version");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %package_id, "commit package price version delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete price version",
+        );
+    }
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 async fn list_patient_service_packages(

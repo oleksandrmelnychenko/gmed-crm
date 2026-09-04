@@ -34,6 +34,21 @@ export interface RevenueTranslations {
   finance_catalog_package_basics: string;
   finance_catalog_package_pricing: string;
   finance_catalog_package_validity: string;
+  finance_catalog_add_price_version: string;
+  finance_catalog_edit_price_version: string;
+  finance_catalog_price_period: string;
+  finance_catalog_price_versions_count: string;
+  finance_catalog_open_ended: string;
+  finance_catalog_price_current: string;
+  finance_catalog_price_future: string;
+  finance_catalog_price_past: string;
+  finance_catalog_price_history_hint: string;
+  finance_catalog_confirm_delete_price_version: string;
+  finance_catalog_delete_price_version_title: string;
+  finance_catalog_error_price_period: string;
+  finance_catalog_error_price_version_required: string;
+  finance_catalog_error_save_price_version: string;
+  finance_catalog_error_delete_price_version: string;
   finance_catalog_package_notes: string;
   finance_catalog_package_total: string;
   finance_catalog_package_key: string;
@@ -809,6 +824,23 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_package_basics: "Параметры пакета",
   finance_catalog_package_pricing: "Цена и НДС",
   finance_catalog_package_validity: "Период и статус",
+  finance_catalog_add_price_version: "Добавить цену",
+  finance_catalog_edit_price_version: "Изменить цену",
+  finance_catalog_price_period: "Цена: {from} — {to}",
+  finance_catalog_price_versions_count: "Цены: {count}",
+  finance_catalog_open_ended: "без окончания",
+  finance_catalog_price_current: "Текущая",
+  finance_catalog_price_future: "Будущая",
+  finance_catalog_price_past: "Архивная",
+  finance_catalog_price_history_hint:
+    "Периоды выстраиваются по датам автоматически. Предыдущая цена сохраняется в истории и применяется к услугам за соответствующий период.",
+  finance_catalog_confirm_delete_price_version:
+    "Удалить эту версию цены? Последнюю единственную версию удалить нельзя.",
+  finance_catalog_delete_price_version_title: "Удалить версию цены?",
+  finance_catalog_error_price_period: "Дата окончания не может быть раньше даты начала.",
+  finance_catalog_error_price_version_required: "Укажите цену и дату начала действия",
+  finance_catalog_error_save_price_version: "Не удалось сохранить версию цены",
+  finance_catalog_error_delete_price_version: "Не удалось удалить версию цены",
   finance_catalog_package_notes: "Описание пакета",
   finance_catalog_package_total: "Сумма пакета",
   finance_catalog_package_key: "Ключ пакета",
@@ -1140,6 +1172,23 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_package_basics: "Paketdaten",
   finance_catalog_package_pricing: "Preis und USt.",
   finance_catalog_package_validity: "Zeitraum und Status",
+  finance_catalog_add_price_version: "Preis hinzufügen",
+  finance_catalog_edit_price_version: "Preis bearbeiten",
+  finance_catalog_price_period: "Preis: {from} – {to}",
+  finance_catalog_price_versions_count: "Preise: {count}",
+  finance_catalog_open_ended: "ohne Enddatum",
+  finance_catalog_price_current: "Aktuell",
+  finance_catalog_price_future: "Zukünftig",
+  finance_catalog_price_past: "Archiviert",
+  finance_catalog_price_history_hint:
+    "Die Zeiträume werden automatisch nach Datum geordnet. Frühere Preise bleiben erhalten und gelten für Leistungen im jeweiligen Zeitraum.",
+  finance_catalog_confirm_delete_price_version:
+    "Diese Preisversion löschen? Die einzige verbleibende Version kann nicht gelöscht werden.",
+  finance_catalog_delete_price_version_title: "Preisversion löschen?",
+  finance_catalog_error_price_period: "Das Enddatum darf nicht vor dem Startdatum liegen.",
+  finance_catalog_error_price_version_required: "Preis und Gültigkeitsbeginn sind erforderlich",
+  finance_catalog_error_save_price_version: "Preisversion konnte nicht gespeichert werden",
+  finance_catalog_error_delete_price_version: "Preisversion konnte nicht gelöscht werden",
   finance_catalog_package_notes: "Paketbeschreibung",
   finance_catalog_package_total: "Paketsumme",
   finance_catalog_package_key: "Paketschlüssel",

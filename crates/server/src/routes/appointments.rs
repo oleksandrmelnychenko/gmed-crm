@@ -6716,13 +6716,30 @@ async fn load_agency_service_catalog_item(
     service_date: chrono::NaiveDate,
 ) -> Result<Option<AgencyServiceBillingItem>, sqlx::Error> {
     sqlx::query(
-        r#"SELECT id, service_key, service_name, unit_price, currency, vat_rate
-           FROM agency_service_catalog
-           WHERE service_key = $1
-             AND is_active = true
-             AND valid_from <= $2
-             AND (valid_to IS NULL OR valid_to >= $2)
-           ORDER BY valid_from DESC, updated_at DESC
+        r#"SELECT catalog.id, catalog.service_key, catalog.service_name,
+                  COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
+                  COALESCE(price.currency, catalog.currency) AS currency,
+                  COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate
+           FROM agency_service_catalog catalog
+           LEFT JOIN LATERAL (
+               SELECT version.id, version.unit_price, version.currency, version.vat_rate
+               FROM agency_service_price_versions version
+               WHERE version.agency_service_id = catalog.id
+                 AND version.valid_from <= $2
+                 AND (version.valid_to IS NULL OR version.valid_to >= $2)
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) price ON true
+           WHERE catalog.service_key = $1
+             AND catalog.is_active = true
+             AND (
+                 price.id IS NOT NULL
+                 OR (
+                     catalog.valid_from <= $2
+                     AND (catalog.valid_to IS NULL OR catalog.valid_to >= $2)
+                 )
+             )
+           ORDER BY catalog.updated_at DESC
            LIMIT 1"#,
     )
     .bind(service_key)

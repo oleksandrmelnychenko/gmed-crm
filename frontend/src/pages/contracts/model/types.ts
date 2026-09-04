@@ -157,6 +157,17 @@ export type AgencyServiceItem = {
   created_at: string | null;
   updated_at: string | null;
   usage_count?: number;
+  price_versions?: AgencyServicePriceVersion[];
+};
+
+export type AgencyServicePriceVersion = {
+  id: string;
+  unit_price: unknown;
+  currency: string;
+  vat_rate: unknown;
+  valid_from: string;
+  valid_to: string | null;
+  created_at: string | null;
 };
 
 export type AgencyServiceFilters = {

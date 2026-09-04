@@ -13,6 +13,7 @@ import {
 import {
   Archive,
   Check,
+  ChevronDown,
   CircleAlert,
   ClipboardList,
   Download,
@@ -1583,6 +1584,41 @@ function money(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function germanDateLabel(value: string | null | undefined) {
+  const normalized = value?.trim() ?? "";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(normalized);
+  if (!match) return normalized || "noch festzulegen";
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
+function germanList(values: string[]) {
+  const uniqueValues = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  if (uniqueValues.length === 0) return "noch festzulegende Fachrichtungen";
+  if (uniqueValues.length === 1) return uniqueValues[0];
+  return `${uniqueValues.slice(0, -1).join(", ")} und ${uniqueValues.at(-1)}`;
+}
+
+function resolveServiceDescriptionTemplate(
+  template: string,
+  context: {
+    dateFrom: string;
+    dateTo: string;
+    specialties: string[];
+  },
+) {
+  const specialties = germanList(context.specialties);
+  return template
+    .replace(/\[Datum\s+Beginn\]/giu, germanDateLabel(context.dateFrom))
+    .replace(/\[Datum\s+Ende\]/giu, germanDateLabel(context.dateTo))
+    .replace(
+      /\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\](?:(?:\s*,\s*(?:und\s+)?|\s+und\s+)\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\])*/giu,
+      specialties,
+    )
+    .replace(/\s+([,.;:])/gu, "$1")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+}
+
 type ServiceBillingUnitKind = "hour" | "day" | "unit" | "other";
 
 function serviceBillingUnitKind(unitLabel: string | null | undefined): ServiceBillingUnitKind {
@@ -1716,6 +1752,209 @@ function costEstimateTotalRange(
     { minimum: 0, maximum: 0 },
   );
   return `${formatMoneyValue(total.minimum, "de")} - ${formatMoneyValue(total.maximum, "de")} EUR`;
+}
+
+function workTypeDurationLabel(hours: number, tx: Tx) {
+  const duration = Math.max(1, hours);
+  const roundedDuration = Math.round(duration);
+  const russianUnit = roundedDuration % 10 === 1 && roundedDuration % 100 !== 11
+    ? "час"
+    : roundedDuration % 10 >= 2
+      && roundedDuration % 10 <= 4
+      && (roundedDuration % 100 < 12 || roundedDuration % 100 > 14)
+      ? "часа"
+      : "часов";
+  return `${duration} ${tx(russianUnit, duration === 1 ? "Stunde" : "Stunden")}`;
+}
+
+const SPECIALIZATION_CHIP_CLASSES = [
+  "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300",
+  "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300",
+  "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+  "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+  "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300",
+  "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300",
+] as const;
+
+function specializationChipClass(value: string) {
+  const hash = [...value].reduce(
+    (result, character) => (result * 31 + character.charCodeAt(0)) >>> 0,
+    0,
+  );
+  return SPECIALIZATION_CHIP_CLASSES[hash % SPECIALIZATION_CHIP_CLASSES.length];
+}
+
+type SelectedWorkTypesSummaryProps = {
+  workTypes: SpecializationWorkType[];
+  specializationLabels: ReadonlyMap<string, string>;
+  lang: Lang;
+  tx: Tx;
+  compact?: boolean;
+};
+
+function SelectedWorkTypesSummary({
+  workTypes,
+  specializationLabels,
+  lang,
+  tx,
+  compact = false,
+}: SelectedWorkTypesSummaryProps) {
+  if (workTypes.length === 0) return null;
+
+  const totalRange = costEstimateTotalRange(workTypes);
+  const totalDuration = workTypes.reduce(
+    (sum, workType) => sum + Math.max(1, workType.duration_hours),
+    0,
+  );
+  const specializationNameList = (workType: SpecializationWorkType) => {
+    const specializationIds = workType.specialization_ids.length > 0
+      ? workType.specialization_ids
+      : [workType.specialization_id];
+    return [...new Set(
+      specializationIds
+        .map((id) => specializationLabels.get(id))
+        .filter((value): value is string => Boolean(value)),
+    )];
+  };
+  const specializationNames = (workType: SpecializationWorkType) =>
+    specializationNameList(workType).join(", ") || "—";
+  const workTypeName = (workType: SpecializationWorkType) => lang === "de"
+    ? workType.name_de || workType.name_en || workType.name_ru || workType.name_es || workType.code
+    : workType.name_ru || workType.name_de || workType.name_en || workType.name_es || workType.code;
+  const columns: ColumnDef<SpecializationWorkType>[] = [
+    ...(!compact ? [{
+      id: "specialization",
+      label: tx("Специализация", "Fachrichtung"),
+      accessor: specializationNames,
+      sortable: false,
+      width: 230,
+      render: (workType: SpecializationWorkType) => {
+        const names = specializationNameList(workType);
+        return names.length > 0 ? (
+          <span className="flex min-w-0 flex-wrap gap-1">
+            {names.map((name) => (
+              <Badge
+                key={name}
+                variant="outline"
+                className={cn(
+                  "max-w-full truncate text-[10px] font-medium",
+                  specializationChipClass(name),
+                )}
+                title={name}
+              >
+                {name}
+              </Badge>
+            ))}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        );
+      },
+    } satisfies ColumnDef<SpecializationWorkType>] : []),
+    {
+      id: "work_type",
+      label: tx("Вид работы", "Leistungsart"),
+      accessor: workTypeName,
+      sortable: false,
+      width: compact ? 320 : 420,
+      render: (workType) => (
+        <span className="break-words font-medium text-foreground">
+          {workTypeName(workType)}
+        </span>
+      ),
+    },
+    {
+      id: "duration",
+      label: tx("Объём", "Umfang"),
+      accessor: (workType) => Math.max(1, workType.duration_hours),
+      sortable: false,
+      align: "right",
+      width: 110,
+      render: (workType) => (
+        <Badge
+          variant="outline"
+          className="border-amber-300 bg-amber-50 font-mono text-[10px] font-semibold tabular-nums text-amber-700 dark:border-amber-800 dark:bg-amber-950/35 dark:text-amber-300"
+        >
+          {workTypeDurationLabel(workType.duration_hours, tx)}
+        </Badge>
+      ),
+    },
+    {
+      id: "rate",
+      label: tx("Ставка", "Satz"),
+      accessor: (workType) => workType.min_price_eur,
+      sortable: false,
+      align: "right",
+      width: 230,
+      render: (workType) => (
+        <span className="whitespace-nowrap font-mono tabular-nums text-foreground">
+          {formatMoneyValue(workType.min_price_eur, lang)} – {formatMoneyValue(workType.max_price_eur, lang)} EUR/{tx("час", "Std.")}
+        </span>
+      ),
+    },
+    {
+      id: "range",
+      label: tx("Диапазон", "Spanne"),
+      accessor: (workType) => workType.min_price_eur * Math.max(1, workType.duration_hours),
+      sortable: false,
+      align: "right",
+      width: 230,
+      render: (workType) => {
+        const duration = Math.max(1, workType.duration_hours);
+        return (
+          <span className="whitespace-nowrap font-mono font-semibold tabular-nums text-foreground">
+            {formatMoneyValue(workType.min_price_eur * duration, lang)} – {formatMoneyValue(workType.max_price_eur * duration, lang)} EUR
+          </span>
+        );
+      },
+    },
+  ];
+
+  return (
+    <DataTable
+      rows={workTypes}
+      columns={columns}
+      rowId={(workType) => workType.id}
+      density="compact"
+      rowHeightOverrides={{ compact: 44 }}
+      disableRowHover
+      footer={(
+        <div>
+          <div
+            className={cn(
+              "-mx-3 hidden items-center sm:grid",
+              compact
+                ? "grid-cols-[320px_110px_230px_230px]"
+                : "grid-cols-[230px_420px_110px_230px_230px]",
+            )}
+          >
+            {!compact ? <span aria-hidden="true" /> : null}
+            <span aria-hidden="true" />
+            <span className="whitespace-nowrap px-2 text-right">
+              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                {tx("Итого", "Gesamt")}: {workTypeDurationLabel(totalDuration, tx)}
+              </span>
+            </span>
+            <span aria-hidden="true" />
+            <span className="whitespace-nowrap px-2 text-right">
+              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                {tx("Итого", "Gesamt")}: {totalRange}
+              </span>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:hidden">
+            <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              {tx("Объём", "Umfang")}: {workTypeDurationLabel(totalDuration, tx)}
+            </span>
+            <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              {tx("Итого", "Gesamt")}: {totalRange}
+            </span>
+          </div>
+        </div>
+      )}
+      className="min-h-0 shadow-none"
+    />
+  );
 }
 
 function validLine(line: ServiceLine): boolean {
@@ -2396,6 +2635,12 @@ export function LeadWizard({
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  const [serviceReportOpen, setServiceReportOpen] = useState(false);
+  const [collapsedWorkTypeSpecializationIds, setCollapsedWorkTypeSpecializationIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [workTypesExpanded, setWorkTypesExpanded] = useState(true);
+  const [reportWorkTypesExpanded, setReportWorkTypesExpanded] = useState(true);
   const [deleteServiceLine, setDeleteServiceLine] = useState<ServiceLine | null>(null);
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
@@ -2548,6 +2793,18 @@ export function LeadWizard({
       workTypesBySpecialization,
     ],
   );
+  const selectedSpecializationLabelById = useMemo(
+    () => new Map(
+      selectedSpecializationItems.map((specialization) => [
+        specialization.id,
+        lang === "de"
+          ? specialization.name_de || specialization.name_en || specialization.name_ru || specialization.code
+          : specialization.name_ru || specialization.name_de || specialization.name_en || specialization.code,
+      ]),
+    ),
+    [lang, selectedSpecializationItems],
+  );
+  const orderPositionCount = lines.length + selectedCostEstimateWorkTypes.length;
 
   const showWizardError = useCallback((nextError: unknown) => {
     const reasons = leadErrorBlockingReasons(nextError);
@@ -2943,6 +3200,9 @@ export function LeadWizard({
     setMedicalLookupsLoading(false);
     setCommercialLookupsLoading(false);
     setArchiveConfirmOpen(false);
+    setServiceReportOpen(false);
+    setWorkTypesExpanded(true);
+    setReportWorkTypesExpanded(true);
     setDeleteServiceLine(null);
     setDeleteDocument(null);
     setDeleteReason("");
@@ -4383,7 +4643,12 @@ ${serviceCommentLines.join("\n")}`
       const result = await ensureCommercial();
       if (!accept) {
         const created = await createQuote(result.orderId, {
-          line_items: quoteLineItemsPayload(lines),
+          line_items: quoteLineItemsPayload(
+            lines.map((line) => ({
+              ...line,
+              catalogDescription: resolvedServiceCatalogDescription(line),
+            })),
+          ),
         });
         const createdQuote: QuoteItem = {
           id: created.id,
@@ -4466,7 +4731,12 @@ ${serviceCommentLines.join("\n")}`
         && !latestQuoteIsCurrent
       ) {
         await createQuote(commercial.orderId, {
-          line_items: quoteLineItemsPayload(lines),
+          line_items: quoteLineItemsPayload(
+            lines.map((line) => ({
+              ...line,
+              catalogDescription: resolvedServiceCatalogDescription(line),
+            })),
+          ),
         });
       }
       const generated = await generateDocument({
@@ -4709,11 +4979,20 @@ ${serviceCommentLines.join("\n")}`
     return line.description.trim() || catalogService?.service_name.trim() || "";
   }
 
-  function serviceDocumentNote(line: ServiceLine) {
+  function resolvedServiceCatalogDescription(line: ServiceLine) {
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    return line.catalogDescription.trim() || catalogService?.description?.trim() || undefined;
+    const template = line.catalogDescription.trim() || catalogService?.description?.trim() || "";
+    return resolveServiceDescriptionTemplate(template, {
+      dateFrom: draft?.programDateFrom ?? "",
+      dateTo: draft?.programDateTo ?? "",
+      specialties: (draft?.specialties ?? []).map((value) => specialtyDocumentLabel(value)),
+    });
+  }
+
+  function serviceDocumentNote(line: ServiceLine) {
+    return resolvedServiceCatalogDescription(line) || undefined;
   }
 
   function serviceDocumentFee(line: ServiceLine) {
@@ -4738,13 +5017,20 @@ ${serviceCommentLines.join("\n")}`
         const catalogService = line.agencyServiceId
           ? agencyServiceById.get(line.agencyServiceId)
           : undefined;
+        const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
         return (
           <div className="min-w-0">
             <div className="truncate font-medium text-foreground">{line.description}</div>
-            {line.catalogUnitLabel || catalogService?.unit_label ? (
-              <div className="truncate text-[11px] text-muted-foreground">
-                {line.catalogUnitLabel || catalogService?.unit_label}
-              </div>
+            {rawUnit ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "mt-1 h-5 w-fit max-w-full truncate text-[10px] font-semibold",
+                  serviceBillingUnitBadgeClass(rawUnit),
+                )}
+              >
+                {rawUnit}
+              </Badge>
             ) : null}
           </div>
         );
@@ -4804,14 +5090,17 @@ ${serviceCommentLines.join("\n")}`
       accessor: (line) => line.catalogDescription,
       sortable: false,
       searchable: true,
-      render: (line) => (
-        <span
-          className="line-clamp-2 whitespace-normal text-xs text-muted-foreground"
-          title={line.catalogDescription || undefined}
-        >
-          {line.catalogDescription || tx("Описание не указано", "Keine Beschreibung hinterlegt")}
-        </span>
-      ),
+      render: (line) => {
+        const description = resolvedServiceCatalogDescription(line);
+        return (
+          <span
+            className="line-clamp-2 whitespace-normal text-xs text-muted-foreground"
+            title={description || undefined}
+          >
+            {description || tx("Описание не указано", "Keine Beschreibung hinterlegt")}
+          </span>
+        );
+      },
     },
     {
       id: "unit_price",
@@ -6160,37 +6449,85 @@ ${serviceCommentLines.join("\n")}`
                 {selectedSpecializationItems.length > 0 ? (
                   <div className="mt-3 border-t border-border/70 pt-3">
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold text-foreground">
-                        {tx("Виды работ", "Leistungsarten")}
-                      </p>
-                      {workTypesLoading ? (
-                        <LoaderCircle
-                          aria-label={tx("Загрузка видов работ", "Leistungsarten werden geladen")}
-                          className="size-3.5 animate-spin text-muted-foreground"
-                        />
-                      ) : null}
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">
+                          {tx("Виды работ", "Leistungsarten")}
+                        </p>
+                        {selectedCostEstimateWorkTypes.length > 0 ? (
+                          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <span>{tx("Выбрано:", "Ausgewählt:")}</span>
+                            <span className="inline-flex min-w-5 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-semibold tabular-nums text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+                              {selectedCostEstimateWorkTypes.length}
+                            </span>
+                          </p>
+                        ) : (
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {tx("Выберите необходимые позиции", "Benötigte Positionen auswählen")}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {workTypesLoading ? (
+                          <LoaderCircle
+                            aria-label={tx("Загрузка видов работ", "Leistungsarten werden geladen")}
+                            className="size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none"
+                          />
+                        ) : null}
+                      </div>
                     </div>
                     {workTypesError ? (
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
                     ) : null}
                     {!workTypesLoading && !workTypesError ? (
-                      <div className="max-h-[380px] divide-y divide-border/70 overflow-y-auto overscroll-contain border-y border-border/60">
+                      <div className="max-h-[420px] space-y-2 overflow-y-auto overscroll-contain pr-1">
                         {selectedSpecializationItems.map((specialization) => {
                           const specializationWorkTypes =
                             workTypesBySpecialization[specialization.id] ?? [];
+                          const selectedInSpecialization = specializationWorkTypes.filter((workType) =>
+                            selectedWorkTypeIdSet.has(workType.id),
+                          ).length;
+                          const isExpanded = !collapsedWorkTypeSpecializationIds.has(specialization.id);
                           return (
                             <div
                               key={specialization.id}
-                              className="min-w-0"
+                              className="t-acc min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card"
+                              data-open={String(isExpanded)}
                             >
-                              <div className="sticky top-0 z-[1] flex items-center justify-between gap-3 border-b border-border/60 bg-muted/95 px-3 py-2 backdrop-blur-sm">
-                                <p className="min-w-0 break-words text-xs font-semibold text-foreground">
-                                  {specialtyLabel(specializationValue(specialization))}
-                                </p>
-                                <div className="flex shrink-0 items-center gap-2">
-                                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                                    {specializationWorkTypes.length}
+                              <div className="flex items-center gap-1 bg-muted/35 px-1.5">
+                                <button
+                                  type="button"
+                                  className="t-acc-head flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  aria-expanded={isExpanded}
+                                  onClick={() => {
+                                    setCollapsedWorkTypeSpecializationIds((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(specialization.id)) next.delete(specialization.id);
+                                      else next.add(specialization.id);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <span className="t-acc-chevron flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+                                    <ChevronDown aria-hidden="true" className="size-4" />
                                   </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block break-words text-xs font-semibold text-foreground">
+                                      {specialtyLabel(specializationValue(specialization))}
+                                    </span>
+                                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                      {selectedInSpecialization > 0
+                                        ? tx(
+                                            `${selectedInSpecialization} из ${specializationWorkTypes.length} выбрано`,
+                                            `${selectedInSpecialization} von ${specializationWorkTypes.length} ausgewählt`,
+                                          )
+                                        : tx(
+                                            `${specializationWorkTypes.length} доступно`,
+                                            `${specializationWorkTypes.length} verfügbar`,
+                                          )}
+                                    </span>
+                                  </span>
+                                </button>
+                                <div className="shrink-0 border-l border-border/60 pl-1">
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -6208,65 +6545,69 @@ ${serviceCommentLines.join("\n")}`
                                   </Button>
                                 </div>
                               </div>
-                              {specializationWorkTypes.length > 0 ? (
-                                <div className="divide-y divide-border/50 px-3">
-                                  {specializationWorkTypes.map((workType) => (
-                                    <label
-                                      key={workType.id}
-                                      className="flex cursor-pointer items-start gap-2.5 py-2 text-sm text-foreground"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        name="selected_specialization_work_type_ids"
-                                        checked={selectedWorkTypeIdSet.has(workType.id)}
-                                        onChange={(event) =>
-                                          toggleSpecializationWorkType(
-                                            workType.id,
-                                            event.target.checked,
-                                          )
-                                        }
-                                        className={cn(checkboxClass, "mt-0.5")}
-                                      />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block break-words leading-5">
-                                          {lang === "de"
-                                            ? workType.name_de ||
-                                              workType.name_en ||
-                                              workType.name_ru ||
-                                              workType.name_es ||
-                                              workType.code
-                                            : workType.name_ru ||
-                                              workType.name_de ||
-                                              workType.name_en ||
-                                              workType.name_es ||
-                                              workType.code}
-                                        </span>
-                                        <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
-                                          {Math.max(1, workType.duration_hours)} {tx("ч.", "Std.")}
-                                          {" × "}
-                                          {formatMoneyValue(workType.min_price_eur, lang)}
-                                          {" - "}
-                                          {formatMoneyValue(workType.max_price_eur, lang)} EUR/{tx("ч.", "Std.")}
-                                          {" = "}
-                                          {formatMoneyValue(
-                                            workType.min_price_eur * Math.max(1, workType.duration_hours),
-                                            lang,
-                                          )}
-                                          {" - "}
-                                          {formatMoneyValue(
-                                            workType.max_price_eur * Math.max(1, workType.duration_hours),
-                                            lang,
-                                          )} EUR
-                                        </span>
-                                      </span>
-                                    </label>
-                                  ))}
+                              <div className="t-acc-panel" aria-hidden={!isExpanded}>
+                                <div className="t-acc-panel-inner">
+                                  {specializationWorkTypes.length > 0 ? (
+                                    <div className="divide-y divide-border/50 border-t border-border/60">
+                                      {specializationWorkTypes.map((workType) => {
+                                        const selected = selectedWorkTypeIdSet.has(workType.id);
+                                        const durationHours = Math.max(1, workType.duration_hours);
+                                        return (
+                                          <label
+                                            key={workType.id}
+                                            className="flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors hover:bg-muted/45 motion-reduce:transition-none"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              name="selected_specialization_work_type_ids"
+                                              checked={selected}
+                                              onChange={(event) =>
+                                                toggleSpecializationWorkType(
+                                                  workType.id,
+                                                  event.target.checked,
+                                                )
+                                              }
+                                              className={cn(checkboxClass, "mt-0.5")}
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                              <span className={cn(
+                                                "block break-words text-sm leading-5",
+                                                selected ? "font-medium text-foreground" : "text-foreground/85",
+                                              )}>
+                                                {lang === "de"
+                                                  ? workType.name_de ||
+                                                    workType.name_en ||
+                                                    workType.name_ru ||
+                                                    workType.name_es ||
+                                                    workType.code
+                                                  : workType.name_ru ||
+                                                    workType.name_de ||
+                                                    workType.name_en ||
+                                                    workType.name_es ||
+                                                    workType.code}
+                                              </span>
+                                              <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                                                  {workTypeDurationLabel(durationHours, tx)}
+                                                </span>
+                                                <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono font-medium tabular-nums text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                                                  {formatMoneyValue(workType.min_price_eur * durationHours, lang)}
+                                                  {" – "}
+                                                  {formatMoneyValue(workType.max_price_eur * durationHours, lang)} EUR
+                                                </span>
+                                              </span>
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <p className="border-t border-border/60 px-3 py-3 text-xs text-muted-foreground">
+                                      {tx("Нет активных видов работ", "Keine aktiven Leistungsarten")}
+                                    </p>
+                                  )}
                                 </div>
-                              ) : (
-                                <p className="px-3 py-2.5 text-xs text-muted-foreground">
-                                  {tx("Нет активных видов работ", "Keine aktiven Leistungsarten")}
-                                </p>
-                              )}
+                              </div>
                             </div>
                           );
                         })}
@@ -6358,7 +6699,23 @@ ${serviceCommentLines.join("\n")}`
               <Section
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Позиции заказа", "Auftragspositionen")}
-                accessory={<CountBadge>{lines.length}</CountBadge>}
+                accessory={(
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      className="size-7 rounded-lg"
+                      disabled={orderPositionCount === 0}
+                      title={tx("Открыть полный отчёт", "Vollständige Übersicht öffnen")}
+                      aria-label={tx("Открыть полный отчёт по позициям заказа", "Vollständige Übersicht der Auftragspositionen öffnen")}
+                      onClick={() => setServiceReportOpen(true)}
+                    >
+                      <Eye aria-hidden="true" className="size-3.5" />
+                    </Button>
+                    <CountBadge>{orderPositionCount}</CountBadge>
+                  </div>
+                )}
               >
                 {draft.serviceNeeds.length > 0 ? (
                   <LeadQuestionnaireFacts
@@ -6386,27 +6743,71 @@ ${serviceCommentLines.join("\n")}`
                     ]}
                   />
                 ) : null}
-                <NativeComboboxSelect
-                  id={ORDER_SERVICE_SELECT_ID}
-                  aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
-                  name="agency_service"
-                  value=""
-                  onChange={(event) => addAgencyService(event.target.value)}
-                  className={selectClass}
-                >
-                  <option value="">{tx("Выберите услугу из каталога", "Leistung aus dem Katalog auswählen")}</option>
-                  {agencyServices.map((service) => (
-                    <option
-                      key={service.id}
-                      value={service.id}
-                      disabled={lines.some((line) => line.agencyServiceId === service.id)}
+                {selectedCostEstimateWorkTypes.length > 0 ? (
+                  <div className="t-acc" data-open={String(workTypesExpanded)}>
+                    <button
+                      type="button"
+                      className="t-acc-head flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1.5 text-left outline-none hover:bg-muted/45 focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-expanded={workTypesExpanded}
+                      onClick={() => setWorkTypesExpanded((current) => !current)}
                     >
-                      {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}/{serviceBillingUnitLabel(service.unit_label, tx)}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span aria-hidden="true" className="size-2 rounded-full bg-orange-500" />
+                        <span className="text-xs font-semibold text-foreground">
+                          {tx("Виды работ и часы", "Leistungsarten und Stunden")}
+                        </span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <CountBadge>{selectedCostEstimateWorkTypes.length}</CountBadge>
+                        <span className="t-acc-chevron text-muted-foreground">
+                          <ChevronDown aria-hidden="true" className="size-4" />
+                        </span>
+                      </span>
+                    </button>
+                    <div className="t-acc-panel" aria-hidden={!workTypesExpanded}>
+                      <div className="t-acc-panel-inner">
+                        <div className="space-y-2 pt-1">
+                          <SelectedWorkTypesSummary
+                            workTypes={selectedCostEstimateWorkTypes}
+                            specializationLabels={selectedSpecializationLabelById}
+                            lang={lang}
+                            tx={tx}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor={ORDER_SERVICE_SELECT_ID}
+                    className="flex items-center gap-2 text-xs font-semibold text-foreground"
+                  >
+                    <span aria-hidden="true" className="size-2 rounded-full bg-orange-500" />
+                    <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
+                  </label>
+                  <NativeComboboxSelect
+                    id={ORDER_SERVICE_SELECT_ID}
+                    aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
+                    name="agency_service"
+                    value=""
+                    onChange={(event) => addAgencyService(event.target.value)}
+                    className={cn(selectClass, "w-full md:max-w-2xl")}
+                  >
+                    <option value="">{tx("Выберите услугу из каталога", "Leistung aus dem Katalog auswählen")}</option>
+                    {agencyServices.map((service) => (
+                      <option
+                        key={service.id}
+                        value={service.id}
+                        disabled={lines.some((line) => line.agencyServiceId === service.id)}
+                      >
+                        {service.service_name} · {formatMoneyValue(money(inputString(service.unit_price)), lang)} {service.currency}/{serviceBillingUnitLabel(service.unit_label, tx)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </div>
                 {lines.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">{tx("Услуги не выбраны", "Keine Leistungen ausgewählt")}</p>
+                  <p className="text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>
                 ) : (
                   <DataTable
                     rows={lines}
@@ -6437,19 +6838,25 @@ ${serviceCommentLines.join("\n")}`
                     footer={(
                       <dl
                         aria-label={tx("Итоги заказа", "Auftragssummen")}
-                        className="grid grid-cols-3 gap-x-5 text-right"
+                        className="ml-auto flex w-fit max-w-full flex-wrap items-start justify-end gap-x-8 gap-y-2 text-right"
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-[7rem]">
                           <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Нетто", "Netto")}</dt>
-                          <dd className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">{formatMoneyValue(estimate.net, lang)} EUR</dd>
+                          <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                            {formatMoneyValue(estimate.net, lang)} EUR
+                          </dd>
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-[7rem]">
                           <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("НДС", "MwSt.")}</dt>
-                          <dd className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">{formatMoneyValue(estimate.vat, lang)} EUR</dd>
+                          <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                            {formatMoneyValue(estimate.vat, lang)} EUR
+                          </dd>
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-[8rem] border-l border-border pl-6">
                           <dt className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{tx("Итого", "Gesamt")}</dt>
-                          <dd className="whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">{formatMoneyValue(estimate.gross, lang)} EUR</dd>
+                          <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/55 dark:text-emerald-100">
+                            {formatMoneyValue(estimate.gross, lang)} EUR
+                          </dd>
                         </div>
                       </dl>
                     )}
@@ -7132,6 +7539,247 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </SheetContent>
       </Sheet>
+      <Dialog
+        open={serviceReportOpen}
+        allowImplicitDismissal
+        onOpenChange={setServiceReportOpen}
+      >
+        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b border-border/70 px-6 py-4 pr-14">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <DialogTitle className="flex items-center gap-2">
+                  <Eye aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                  {tx("Отчёт по позициям заказа", "Übersicht der Auftragspositionen")}
+                </DialogTitle>
+              </div>
+              <Badge variant="outline" className="border-border bg-muted/40 text-[10px] text-muted-foreground">
+                {tx("Только просмотр", "Nur Ansicht")}
+              </Badge>
+            </div>
+          </DialogHeader>
+
+          {draft ? (
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted/15 px-6 py-5">
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Данные заказа", "Auftragsdaten")}
+              >
+              <dl className="grid overflow-hidden rounded-lg border border-border/70 bg-card sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  {
+                    label: tx("Клиент", "Kunde"),
+                    value: [draft.firstName, draft.lastName].filter(Boolean).join(" ") || "—",
+                  },
+                  {
+                    label: tx("Период программы", "Programmzeitraum"),
+                    value: draft.programDateFrom || draft.programDateTo
+                      ? `${draft.programDateFrom ? germanDateLabel(draft.programDateFrom) : "—"} — ${draft.programDateTo ? germanDateLabel(draft.programDateTo) : "—"}`
+                      : "—",
+                  },
+                  {
+                    label: tx("Специализации", "Fachrichtungen"),
+                    value: draft.specialties.map((value) => specialtyLabel(value)).join(", ") || "—",
+                  },
+                  {
+                    label: tx("Позиций", "Positionen"),
+                    value: String(orderPositionCount),
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="min-w-0 border-b border-border px-4 py-3 last:border-b-0 sm:border-r sm:[&:nth-child(2n)]:border-r-0 lg:border-b-0 lg:[&:nth-child(2n)]:border-r lg:last:border-r-0"
+                  >
+                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {item.label}
+                    </dt>
+                    <dd className="mt-1 break-words text-sm font-medium text-foreground">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              </Section>
+
+              {draft.serviceNeeds.length > 0 ? (
+                <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
+                  title={tx("Запрос клиента", "Kundenbedarf")}
+                >
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                    <MessageSquareText aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <p className="min-w-0 whitespace-pre-wrap break-words">
+                      {draft.serviceNeeds
+                        .map((value) =>
+                          knownLeadProgramServiceLabel(value, t)
+                          ?? serviceNeedLabel(value, tx),
+                        )
+                        .join(", ")}
+                    </p>
+                  </div>
+                </Section>
+              ) : null}
+
+              {selectedCostEstimateWorkTypes.length > 0 ? (
+                <section
+                  className={cn("t-acc", WIZARD_DOCUMENT_SECTION_CLASS)}
+                  data-open={String(reportWorkTypesExpanded)}
+                >
+                  <button
+                    type="button"
+                    className="t-acc-head flex w-full items-center justify-between gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-expanded={reportWorkTypesExpanded}
+                    onClick={() => setReportWorkTypesExpanded((current) => !current)}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />
+                      <span className="text-sm font-semibold text-foreground">
+                        {tx("Виды работ и часы", "Leistungsarten und Stunden")}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <CountBadge>{selectedCostEstimateWorkTypes.length}</CountBadge>
+                      <span className="t-acc-chevron text-muted-foreground">
+                        <ChevronDown aria-hidden="true" className="size-4" />
+                      </span>
+                    </span>
+                  </button>
+                  <div className="t-acc-panel" aria-hidden={!reportWorkTypesExpanded}>
+                    <div className="t-acc-panel-inner">
+                      <div className="pt-2.5">
+                        <SelectedWorkTypesSummary
+                          workTypes={selectedCostEstimateWorkTypes}
+                          specializationLabels={selectedSpecializationLabelById}
+                          lang={lang}
+                          tx={tx}
+                          compact
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Услуги и описания", "Leistungen und Beschreibungen")}
+                accessory={<CountBadge>{lines.length}</CountBadge>}
+              >
+                <div className="space-y-3">
+                  {lines.map((line) => {
+                    const catalogService = line.agencyServiceId
+                      ? agencyServiceById.get(line.agencyServiceId)
+                      : undefined;
+                    const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
+                    const unit = serviceBillingUnitLabel(rawUnit, tx);
+                    const description = resolvedServiceCatalogDescription(line);
+                    const net = money(line.quantity) * money(line.price);
+                    const vat = net * money(line.vat) / 100;
+                    return (
+                      <article
+                        key={line.id}
+                        className="overflow-hidden rounded-lg border border-border border-l-[3px] border-l-orange-500 bg-card shadow-sm"
+                      >
+                        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted/35 px-4 py-3">
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            <div className="min-w-0">
+                              <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{line.description}</h4>
+                              {line.catalogUnitLabel || catalogService?.unit_label ? (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "mt-1 w-fit text-[10px] font-semibold",
+                                    serviceBillingUnitBadgeClass(rawUnit),
+                                  )}
+                                >
+                                  {line.catalogUnitLabel || catalogService?.unit_label}
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "shrink-0 font-mono text-[10px] font-semibold",
+                              serviceBillingUnitBadgeClass(rawUnit),
+                            )}
+                          >
+                            {line.quantity || "0"} {unit}
+                          </Badge>
+                        </header>
+                        <div className="space-y-3 px-4 py-3">
+                          <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {tx("Полное описание", "Vollständige Beschreibung")}
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
+                              {description || tx("Описание не указано", "Keine Beschreibung hinterlegt")}
+                            </p>
+                          </div>
+                          <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            {[
+                              { label: tx("Объём", "Umfang"), value: `${line.quantity || "0"} ${unit}`, isTotal: false },
+                              { label: tx("Ставка", "Satz"), value: `${formatMoneyValue(money(line.price), lang)} ${line.currency || "EUR"}/${unit}`, isTotal: false },
+                              { label: tx("НДС", "MwSt."), value: `${formatMoneyValue(money(line.vat), lang)}%`, isTotal: false },
+                              { label: tx("Нетто", "Netto"), value: `${formatMoneyValue(net, lang)} ${line.currency || "EUR"}`, isTotal: false },
+                              { label: tx("Итого", "Gesamt"), value: `${formatMoneyValue(net + vat, lang)} ${line.currency || "EUR"}`, isTotal: true },
+                            ].map((item) => (
+                              <div key={item.label} className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
+                                <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</dt>
+                                <dd className="mt-0.5 whitespace-nowrap font-mono text-xs font-medium tabular-nums text-foreground">
+                                  {item.isTotal ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="border-emerald-200 bg-emerald-50 font-mono text-[10px] font-semibold tabular-nums text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                    >
+                                      {item.value}
+                                    </Badge>
+                                  ) : item.value}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </Section>
+
+              <Section
+                className={WIZARD_DOCUMENT_SECTION_CLASS}
+                title={tx("Итоги заказа", "Auftragssummen")}
+              >
+              <dl className="grid overflow-hidden rounded-lg border border-border/70 bg-muted/20 sm:grid-cols-3">
+                {[
+                  { label: tx("Нетто", "Netto"), value: estimate.net },
+                  { label: tx("НДС", "MwSt."), value: estimate.vat },
+                  { label: tx("Итого", "Gesamt"), value: estimate.gross, strong: true },
+                ].map((item) => (
+                  <div key={item.label} className="border-b border-border px-4 py-3 text-right last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+                    <dt className={cn("uppercase tracking-wide", item.strong ? "text-xs font-semibold text-foreground" : "text-[10px] font-medium text-muted-foreground")}>{item.label}</dt>
+                    <dd className={cn("mt-0.5 whitespace-nowrap font-mono text-sm tabular-nums text-foreground", item.strong && "text-[15px] font-semibold")}>
+                      {item.strong ? (
+                        <Badge
+                          variant="outline"
+                          className="border-emerald-200 bg-emerald-50 px-3 py-1 font-mono text-[15px] font-semibold tabular-nums text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                        >
+                          {formatMoneyValue(item.value, lang)} EUR
+                        </Badge>
+                      ) : `${formatMoneyValue(item.value, lang)} EUR`}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              </Section>
+            </div>
+          ) : null}
+
+          <DialogFooter className="mx-0 mb-0 border-t border-border bg-card px-6 py-4">
+            <Button type="button" onClick={() => setServiceReportOpen(false)}>
+              {tx("Закрыть", "Schließen")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(deleteServiceLine)}
         allowImplicitDismissal
