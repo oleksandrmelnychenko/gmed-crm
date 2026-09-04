@@ -8,6 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BadgeEuro,
   ChevronDown,
   ClipboardPlus,
   CornerDownRight,
@@ -749,6 +750,24 @@ function useFinanceCatalogPageContent() {
   const selectedAgencyService = agencyServiceForm.id
     ? agencyServices.find((item) => item.id === agencyServiceForm.id) ?? null
     : null;
+  const selectedAgencyServicePrices = useMemo<AgencyServicePriceVersion[]>(() => {
+    if (!selectedAgencyService) return [];
+    const versions = selectedAgencyService.price_versions ?? [];
+    if (versions.length > 0) {
+      return [...versions].sort((left, right) => right.valid_from.localeCompare(left.valid_from));
+    }
+    return [
+      {
+        id: "",
+        unit_price: selectedAgencyService.unit_price,
+        currency: selectedAgencyService.currency,
+        vat_rate: selectedAgencyService.vat_rate,
+        valid_from: selectedAgencyService.valid_from ?? todayInputDate(),
+        valid_to: selectedAgencyService.valid_to,
+        created_at: selectedAgencyService.created_at,
+      },
+    ];
+  }, [selectedAgencyService]);
   const vatMappingPagination = useDataTablePagination(
     catalogRows,
     "agency-service-vat-mapping",
@@ -2174,7 +2193,7 @@ function useFinanceCatalogPageContent() {
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                      className="size-7 rounded-full text-[var(--brand)] hover:bg-orange-50 hover:text-[var(--brand)]"
                       onClick={(event) => {
                         event.stopPropagation();
                         openAgencyServicePriceVersion(row.service);
@@ -2182,7 +2201,7 @@ function useFinanceCatalogPageContent() {
                       aria-label={t.finance_catalog_add_price_version}
                       title={t.finance_catalog_add_price_version}
                     >
-                      <Plus className="size-3.5" />
+                      <BadgeEuro className="size-4" />
                     </Button>
                   ) : null}
                   {canManageTaxProfiles ? (
@@ -2248,12 +2267,12 @@ function useFinanceCatalogPageContent() {
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                        className="size-7 rounded-full text-[var(--brand)] hover:bg-orange-50 hover:text-[var(--brand)]"
                         onClick={() => row.pkg && openServicePackagePriceVersion(row.pkg)}
                         aria-label={t.finance_catalog_add_price_version}
                         title={t.finance_catalog_add_price_version}
                       >
-                        <Plus className="size-3.5" />
+                        <BadgeEuro className="size-4" />
                       </Button>
                     ) : null}
                     {row.kind !== "item" ? (
@@ -2939,42 +2958,139 @@ function useFinanceCatalogPageContent() {
                 </Section>
 
                 <Section title={t.finance_catalog_package_pricing}>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label={t.revenue_agency_service_unit_price}>
-                      <Input
-                        required
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={agencyServiceForm.unitPrice}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({
-                            ...current,
-                            unitPrice: event.target.value,
-                          }))
-                        }
-                        className={inputClass}
-                        disabled={agencyServiceBusy}
-                      />
-                    </Field>
-                    <Field label={t.revenue_agency_service_vat_percent}>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={agencyServiceForm.vatRate}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({
-                            ...current,
-                            vatRate: event.target.value,
-                          }))
-                        }
-                        className={inputClass}
-                        disabled={agencyServiceBusy}
-                      />
-                    </Field>
-                  </div>
+                  {selectedAgencyService ? (
+                    <div className="space-y-3">
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg"
+                          onClick={() => openAgencyServicePriceVersion(selectedAgencyService)}
+                          disabled={agencyServiceBusy}
+                        >
+                          <BadgeEuro className="size-4" />
+                          {t.finance_catalog_add_price_version}
+                        </Button>
+                      </div>
+                      <div className="overflow-hidden rounded-xl border border-border/60">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-muted/35 text-xs font-medium text-muted-foreground">
+                            <tr>
+                              <th className="px-3 py-2 font-medium">
+                                {t.revenue_agency_service_unit_price}
+                              </th>
+                              <th className="px-3 py-2 font-medium">
+                                {t.revenue_agency_service_vat_percent}
+                              </th>
+                              <th className="px-3 py-2 font-medium">
+                                {t.revenue_common_validity_period}
+                              </th>
+                              <th className="px-3 py-2 font-medium">{t.users_status}</th>
+                              <th className="w-12 px-2 py-2" />
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {selectedAgencyServicePrices.map((version) => {
+                              const periodState = pricePeriodState(
+                                version.valid_from,
+                                version.valid_to,
+                              );
+                              return (
+                                <tr key={version.id || "catalog-current-price"}>
+                                  <td className="px-3 py-2.5 font-medium tabular-nums text-foreground">
+                                    {formatMoney(
+                                      version.unit_price as string | number,
+                                      version.currency,
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2.5 tabular-nums text-foreground">
+                                    {String(version.vat_rate)} %
+                                  </td>
+                                  <td className="px-3 py-2.5 font-mono text-xs text-foreground">
+                                    {version.valid_from} —{" "}
+                                    {version.valid_to || t.finance_catalog_open_ended}
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <Badge
+                                      variant="outline"
+                                      className={cn(
+                                        "w-fit rounded-full",
+                                        periodState === "current"
+                                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                          : periodState === "future"
+                                            ? "border-sky-200 bg-sky-50 text-sky-700"
+                                            : "border-slate-200 bg-slate-50 text-slate-600",
+                                      )}
+                                    >
+                                      {periodState === "current"
+                                        ? t.finance_catalog_price_current
+                                        : periodState === "future"
+                                          ? t.finance_catalog_price_future
+                                          : t.finance_catalog_price_past}
+                                    </Badge>
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                                      onClick={() =>
+                                        openAgencyServicePriceVersion(
+                                          selectedAgencyService,
+                                          version,
+                                        )
+                                      }
+                                      aria-label={t.finance_catalog_edit_price_version}
+                                      title={t.finance_catalog_edit_price_version}
+                                    >
+                                      <Pencil className="size-3.5" />
+                                    </Button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label={t.revenue_agency_service_unit_price}>
+                        <Input
+                          required
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={agencyServiceForm.unitPrice}
+                          onChange={(event) =>
+                            setAgencyServiceForm((current) => ({
+                              ...current,
+                              unitPrice: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={agencyServiceBusy}
+                        />
+                      </Field>
+                      <Field label={t.revenue_agency_service_vat_percent}>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={agencyServiceForm.vatRate}
+                          onChange={(event) =>
+                            setAgencyServiceForm((current) => ({
+                              ...current,
+                              vatRate: event.target.value,
+                            }))
+                          }
+                          className={inputClass}
+                          disabled={agencyServiceBusy}
+                        />
+                      </Field>
+                    </div>
+                  )}
                 </Section>
 
                 <Section title={t.revenue_common_validity_period}>
