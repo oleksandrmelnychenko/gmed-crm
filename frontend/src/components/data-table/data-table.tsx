@@ -58,6 +58,7 @@ export type DataTableProps<T> = {
   selectionEnabled?: boolean;
   rowAccent?: (row: T) => string | null;
   rowActions?: (row: T) => ReactNode;
+  rowActionsAlwaysVisible?: boolean;
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
   rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
@@ -128,6 +129,7 @@ function useDataTableContent<T>({
   selectionEnabled = false,
   rowAccent,
   rowActions,
+  rowActionsAlwaysVisible = false,
   rowActionsLabel,
   rowActionsWidth = 144,
   rowHeightOverrides,
@@ -597,7 +599,12 @@ function useDataTableContent<T>({
                   {rowActions ? (
                     <div
                       role="presentation"
-                      className="data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 opacity-0 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color] group-focus-within/row:opacity-100 group-hover/row:opacity-100"
+                      className={cn(
+                        "data-table-cell sticky right-0 z-20 flex h-full items-center justify-end gap-1 border-l border-border/45 px-1 shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_65%,transparent)] transition-[opacity,background-color]",
+                        rowActionsAlwaysVisible
+                          ? "opacity-100"
+                          : "opacity-0 group-focus-within/row:opacity-100 group-hover/row:opacity-100",
+                      )}
                       style={{
                         gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}`,
                         width: rowActionsWidth,

@@ -1,6 +1,5 @@
 import {
   Download,
-  Eye,
   FilePlus2,
   FileWarning,
   LoaderCircle,
@@ -10,6 +9,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import {
   DataTablePager,
   useDataTablePagination,
@@ -157,6 +157,16 @@ function supportsInlinePreview(contentType?: string) {
     mimeType === "text/html" ||
     mimeType === "text/plain"
   );
+}
+
+export function patientDocumentPreviewSandbox(contentType?: string) {
+  const mimeType = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+
+  // Chromium's built-in PDF viewer cannot start inside a fully sandboxed
+  // blob iframe and leaves the preview surface blank. Other inline formats
+  // remain sandboxed; active text formats are additionally neutralized by
+  // createDocumentPreviewObjectUrl before they reach this component.
+  return mimeType === "application/pdf" ? undefined : "";
 }
 
 const CLINICAL_IMPORT_MIME_TYPES = new Set([
@@ -337,6 +347,12 @@ export function PatientDocumentsTab({
 
   const documentColumns = useMemo<ColumnDef<DocumentItem>[]>(
     () => [
+      createDocumentPreviewColumn<DocumentItem>({
+        getId: (doc) => doc.id,
+        getTitle: (doc) => doc.filename || "document",
+        label: t.documents_preview,
+        onPreview: (doc) => void openPatientDocumentPreview(doc),
+      }),
       {
         id: "filename",
         label: documentsFilenameLabel,
@@ -477,6 +493,7 @@ export function PatientDocumentsTab({
       formatDate,
       l,
       lang,
+      openPatientDocumentPreview,
       patientsAssignedByLabel,
       statusColors,
       statusLabel,
@@ -590,16 +607,6 @@ export function PatientDocumentsTab({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                title={t.documents_preview}
-                aria-label={t.documents_preview}
-                onClick={() => void openPatientDocumentPreview(doc)}
-              >
-                <Eye className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
                 title={t.documents_download}
                 aria-label={t.documents_download}
                 onClick={() =>
@@ -610,7 +617,8 @@ export function PatientDocumentsTab({
               </Button>
             </>
           )}
-          rowActionsWidth={canManageDocuments ? 150 : 82}
+          rowActionsAlwaysVisible
+          rowActionsWidth={canManageDocuments ? 118 : 46}
           emptyState={
             <EmptyCell>
               {documents.length === 0
@@ -770,7 +778,9 @@ export function PatientDocumentsTab({
               <iframe
                 title={documentPreview.title || t.documents_preview}
                 src={documentPreview.url}
-                sandbox=""
+                sandbox={patientDocumentPreviewSandbox(
+                  documentPreview.contentType,
+                )}
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : documentPreview?.url ? (

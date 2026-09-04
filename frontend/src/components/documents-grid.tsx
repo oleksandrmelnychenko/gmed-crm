@@ -4,6 +4,7 @@ import { ColumnVisibilityMenu } from "@/components/data-table/column-visibility-
 import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import { applyFilters } from "@/components/data-table/filter-logic";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { applySort } from "@/components/data-table/sort-logic";
@@ -44,12 +45,12 @@ type DocumentsGridItem = {
 
 type DocumentsGridLabels = {
   selectBulkShare: string;
+  preview?: string;
   filename: string;
   patient: string;
   category: string;
   status: string;
   visibility: string;
-  size: string;
   uploadedBy: string;
   unclassified: string;
   current: string;
@@ -69,13 +70,13 @@ type DocumentsGridProps = {
   onSelectionChange: (ids: string[]) => void;
   onToggleSelection: (id: string, checked: boolean) => void;
   onOpenDocument: (id: string) => void;
+  onPreviewDocument?: (id: string, title: string) => void;
   statusBadge: (value: string) => string;
   visibilityBadge: (value: string) => string;
   sensitivityBadge: (value: string) => string;
   formatStatusLabel: (value: string) => string;
   formatVisibilityLabel: (value: string) => string;
   formatSensitivityLabel: (value: string) => string;
-  formatFileSize: (value: number | null) => string;
   formatDateTime: (value?: string | null) => string;
   paginated?: boolean;
   paginationResetKey?: string;
@@ -110,7 +111,16 @@ function PaginatedDocumentsTable({
     { field: "updated_at", dir: "desc" },
   ]);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>(["updated_at"]);
-  const [frozenColumns, setFrozenColumns] = useState<string[]>(["filename"]);
+  const defaultFrozenColumns = useMemo(
+    () =>
+      columns.some((column) => column.id === "preview")
+        ? ["preview", "filename"]
+        : ["filename"],
+    [columns],
+  );
+  const [frozenColumns, setFrozenColumns] = useState<string[]>(
+    defaultFrozenColumns,
+  );
   const [paginationState, setPaginationState] = useState(() => ({
     pageIndex: 0,
     pageSize: DEFAULT_DOCUMENT_PAGE_SIZE,
@@ -154,7 +164,8 @@ function PaginatedDocumentsTable({
     const frozenSet = new Set(effectiveFrozenColumns);
     return columns.map((column) => ({
       ...column,
-      filterType: column.filterType ?? "text",
+      filterType:
+        column.id === "preview" ? undefined : (column.filterType ?? "text"),
       pinned: frozenSet.has(column.id) ? "left" : undefined,
       sortable: column.sortable ?? true,
     }));
@@ -236,7 +247,7 @@ function PaginatedDocumentsTable({
           defaultHidden={["updated_at"]}
           frozenColumns={effectiveFrozenColumns}
           onFrozenColumnsChange={setFrozenColumns}
-          defaultFrozen={["filename"]}
+          defaultFrozen={defaultFrozenColumns}
           maxFrozenColumns={3}
         />
       </div>
@@ -300,24 +311,24 @@ export function DocumentsGrid({
   localizeCode,
   onSelectionChange,
   onOpenDocument,
+  onPreviewDocument,
   statusBadge,
   visibilityBadge,
   sensitivityBadge,
   formatStatusLabel,
   formatVisibilityLabel,
   formatSensitivityLabel,
-  formatFileSize,
   formatDateTime,
   paginated = false,
   paginationResetKey = "",
 }: DocumentsGridProps) {
   const {
+    preview: previewLabel,
     filename: filenameLabel,
     patient: patientLabel,
     category: categoryLabel,
     status: statusLabel,
     visibility: visibilityLabel,
-    size: sizeLabel,
     uploadedBy: uploadedByLabel,
     unclassified: unclassifiedLabel,
     current: currentVersionLabel,
@@ -328,6 +339,21 @@ export function DocumentsGrid({
   } = labels;
 
   const columns = useMemo<ColumnDef<DocumentsGridItem>[]>(() => [
+    ...(onPreviewDocument && previewLabel
+      ? [
+          createDocumentPreviewColumn<DocumentsGridItem>({
+            getId: (item) => item.id,
+            getTitle: (item) =>
+              item.original_filename ?? localizeCode(item.auto_name),
+            label: previewLabel,
+            onPreview: (item) =>
+              onPreviewDocument(
+                item.id,
+                item.original_filename ?? localizeCode(item.auto_name),
+              ),
+          }),
+        ]
+      : []),
     {
       id: "filename",
       label: filenameLabel,
@@ -436,18 +462,6 @@ export function DocumentsGrid({
       ),
     },
     {
-      id: "size",
-      label: sizeLabel,
-      accessor: (item) => item.file_size,
-      sortable: true,
-      width: 110,
-      render: (item) => (
-        <span className="block text-right tabular-nums text-foreground">
-          {formatFileSize(item.file_size)}
-        </span>
-      ),
-    },
-    {
       id: "uploaded_by",
       label: uploadedByLabel,
       accessor: (item) => item.uploaded_by_name ?? "",
@@ -478,17 +492,17 @@ export function DocumentsGrid({
     currentVersionLabel,
     filenameLabel,
     formatDateTime,
-    formatFileSize,
     formatSensitivityLabel,
     formatStatusLabel,
     formatVisibilityLabel,
     localizeCode,
     needsCategorization,
     notSet,
+    onPreviewDocument,
     patientLabel,
     pidFallback,
+    previewLabel,
     sensitivityBadge,
-    sizeLabel,
     statusBadge,
     statusLabel,
     unclassifiedLabel,

@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { canRecognizePatientDocument } from "./patient-documents-tab";
+import {
+  canRecognizePatientDocument,
+  patientDocumentPreviewSandbox,
+} from "./patient-documents-tab";
+
+describe("patientDocumentPreviewSandbox", () => {
+  it("allows Chromium's built-in PDF viewer to render blob previews", () => {
+    expect(patientDocumentPreviewSandbox("application/pdf")).toBeUndefined();
+    expect(
+      patientDocumentPreviewSandbox("application/pdf; charset=binary"),
+    ).toBeUndefined();
+  });
+
+  it("keeps non-PDF inline previews sandboxed", () => {
+    expect(patientDocumentPreviewSandbox("image/png")).toBe("");
+    expect(patientDocumentPreviewSandbox("text/plain;charset=utf-8")).toBe("");
+  });
+});
 
 describe("canRecognizePatientDocument", () => {
   it("allows supported medical PDF and image documents", () => {

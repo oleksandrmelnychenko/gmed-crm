@@ -195,6 +195,7 @@ export function DataTableSurface<T>({
     return columns.map((column) => {
       const isUtilityColumn =
         column.id === "actions" ||
+        column.id === "preview" ||
         column.id.endsWith("_actions") ||
         column.id.endsWith(":actions");
       const pinned: ColumnDef<T>["pinned"] = frozenSet.has(column.id)

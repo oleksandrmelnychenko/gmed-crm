@@ -45,6 +45,7 @@ import {
   useDataTablePagination,
 } from "@/components/data-table/data-table-pager";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
@@ -2578,6 +2579,30 @@ function StaffDocumentsPage({
     }
   }
 
+  async function handleGridDocumentPreview(id: string, title: string) {
+    setDocumentPreviewBusy(true);
+    setDocumentPreviewError("");
+    setError("");
+    try {
+      const preview = await createDocumentPreviewObjectUrl(id);
+      replaceDocumentPreview({
+        ...preview,
+        id,
+        title,
+      });
+      setNotice(t.documents_preview_opened);
+    } catch (nextError) {
+      const message =
+        nextError instanceof Error
+          ? nextError.message
+          : t.documents_failed_open_preview;
+      setDocumentPreviewError(message);
+      setError(message);
+    } finally {
+      setDocumentPreviewBusy(false);
+    }
+  }
+
   async function reloadTranslationRequests(documentId: string) {
     const rows = await fetchTranslationRequests(documentId);
     setTranslationRequests(rows);
@@ -3252,6 +3277,9 @@ function StaffDocumentsPage({
             onApplySuggestion={handleApplyClassificationSuggestion}
             onDeleteDocument={(item) => requestDocumentDeletion(item, true)}
             onOpenDocument={openIntakeDocument}
+            onPreviewDocument={(id, title) =>
+              void handleGridDocumentPreview(id, title)
+            }
             rows={intakeQueue}
             selectedId={selectedId}
             t={t}
@@ -3272,6 +3300,9 @@ function StaffDocumentsPage({
             l={l}
             loading={translationQueueBusy}
             onOpenDocument={openDocument}
+            onPreviewDocument={(id, title) =>
+              void handleGridDocumentPreview(id, title)
+            }
             onUpdateRequest={handleUpdateQueuedTranslationRequest}
             rows={translationQueue}
             t={t}
@@ -3606,12 +3637,12 @@ function StaffDocumentsPage({
             selectedId={selectedId}
             labels={{
               selectBulkShare: t.documents_select_bulk_share,
+              preview: t.documents_preview,
               filename: t.documents_filename,
               patient: t.orders_patient,
               category: t.documents_category,
               status: t.users_status,
               visibility: text.visibilityHeader,
-              size: t.documents_size,
               uploadedBy: t.documents_uploaded_by,
               unclassified: t.documents_unclassified,
               current: text.current,
@@ -3624,13 +3655,15 @@ function StaffDocumentsPage({
             onSelectionChange={setSelectedDocumentIds}
             onToggleSelection={toggleDocumentSelection}
             onOpenDocument={openDocument}
+            onPreviewDocument={(id, title) =>
+              void handleGridDocumentPreview(id, title)
+            }
             statusBadge={statusBadge}
             visibilityBadge={visibilityBadge}
             sensitivityBadge={sensitivityBadge}
             formatStatusLabel={(value) => formatDocumentStatusLabel(value, t)}
             formatVisibilityLabel={(value) => formatVisibilityLabel(value, t)}
             formatSensitivityLabel={formatSensitivityLabel}
-            formatFileSize={formatFileSize}
             formatDateTime={formatDateTime}
           />
         )}
@@ -7619,6 +7652,7 @@ function DocumentIntakeQueueTable({
   onApplySuggestion,
   onDeleteDocument,
   onOpenDocument,
+  onPreviewDocument,
   rows,
   selectedId,
   t,
@@ -7632,6 +7666,7 @@ function DocumentIntakeQueueTable({
   onApplySuggestion: (item: DocumentItem) => Promise<void>;
   onDeleteDocument: (item: DocumentItem) => void;
   onOpenDocument: (id: string) => void;
+  onPreviewDocument: (id: string, title: string) => void;
   rows: DocumentItem[];
   selectedId: string;
   t: DocumentsPageTranslations;
@@ -7643,6 +7678,17 @@ function DocumentIntakeQueueTable({
   );
   const columns = useMemo<ColumnDef<DocumentItem>[]>(
     () => [
+      createDocumentPreviewColumn<DocumentItem>({
+        getId: (item) => item.id,
+        getTitle: (item) =>
+          item.original_filename ?? localizeDocumentCode(item.auto_name, l),
+        label: t.documents_preview,
+        onPreview: (item) =>
+          onPreviewDocument(
+            item.id,
+            item.original_filename ?? localizeDocumentCode(item.auto_name, l),
+          ),
+      }),
       {
         id: "document",
         label: t.documents_filename,
@@ -7831,7 +7877,17 @@ function DocumentIntakeQueueTable({
         ),
       },
     ],
-    [actionId, canDelete, l, onApplySuggestion, onDeleteDocument, onOpenDocument, t, text],
+    [
+      actionId,
+      canDelete,
+      l,
+      onApplySuggestion,
+      onDeleteDocument,
+      onOpenDocument,
+      onPreviewDocument,
+      t,
+      text,
+    ],
   );
 
   return (
@@ -7878,6 +7934,7 @@ function DocumentTranslationRequestsTable({
   l,
   loading,
   onOpenDocument,
+  onPreviewDocument,
   onUpdateRequest,
   rows,
   t,
@@ -7888,6 +7945,7 @@ function DocumentTranslationRequestsTable({
   l: DocumentsLocalizer;
   loading: boolean;
   onOpenDocument: (id: string) => void;
+  onPreviewDocument: (id: string, title: string) => void;
   onUpdateRequest: (
     request: TranslationRequest,
     status: string,
@@ -7902,6 +7960,16 @@ function DocumentTranslationRequestsTable({
   );
   const columns = useMemo<ColumnDef<TranslationRequest>[]>(
     () => [
+      createDocumentPreviewColumn<TranslationRequest>({
+        getId: (request) => request.document_id,
+        getTitle: (request) => request.document_name ?? request.document_id,
+        label: t.documents_preview,
+        onPreview: (request) =>
+          onPreviewDocument(
+            request.document_id,
+            request.document_name ?? request.document_id,
+          ),
+      }),
       {
         id: "document",
         label: t.documents_filename,
@@ -8080,6 +8148,7 @@ function DocumentTranslationRequestsTable({
       currentUserId,
       l,
       loading,
+      onPreviewDocument,
       onUpdateRequest,
       t,
     ],
