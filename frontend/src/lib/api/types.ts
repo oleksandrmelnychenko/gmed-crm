@@ -186,6 +186,9 @@ export interface LeadDetail extends Lead {
   converted_patient_id: string | null;
   intake_model: "legacy" | "patient_first";
   prospect_patient_id: string | null;
+  referrer_patient_id: string | null;
+  referrer_patient_pid: string | null;
+  referrer_patient_name: string | null;
   prospect_patient_lifecycle: "prospective" | "active" | "inactive" | null;
   prospect_case_id: string | null;
   notes: string | null;

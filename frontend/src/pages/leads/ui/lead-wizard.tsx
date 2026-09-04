@@ -2,6 +2,7 @@ import {
   Suspense,
   lazy,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -13,20 +14,26 @@ import {
   Archive,
   Check,
   CircleAlert,
+  ClipboardList,
   Download,
   Eye,
   ExternalLink,
   FileCheck2,
   FileText,
+  HeartPulse,
+  History,
   LoaderCircle,
   Pencil,
   Plus,
+  ReceiptText,
   RefreshCw,
   ShieldCheck,
   Trash2,
   Upload,
+  UserRound,
   UserRoundCheck,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
@@ -143,12 +150,14 @@ import {
   createLead,
   createLeadProspect,
   fetchLeadDetail,
+  fetchLeadReferrerPatients,
   importLeadAttachments,
   resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
   wizardConvertLead,
   type ProspectDuplicateCandidate,
+  type LeadReferrerPatientOption,
 } from "../data/leads-api";
 
 type Tx = (ru: string, de: string) => string;
@@ -244,6 +253,9 @@ type Draft = {
   serviceNeeds: string[];
   serviceComments: Record<string, string>;
   discoverySource: string;
+  discoverySourceOther: string;
+  referrerPatientId: string;
+  referrerPatientLabel: string;
   referrer: string;
   serviceNotes: string;
   specialties: string[];
@@ -418,6 +430,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
 }
 
 type MasterFieldKey =
+  | "referrerPatientId"
   | "firstName"
   | "lastName"
   | "birthDate"
@@ -493,7 +506,16 @@ const DISCOVERY_SOURCE_OPTIONS = [
   { value: "other", ru: "Другое", de: "Sonstiges" },
 ] as const;
 
+function referrerPatientOptionLabel(option: LeadReferrerPatientOption) {
+  const name = [option.title, option.first_name, option.last_name]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+  return [option.patient_id, name].filter(Boolean).join(" · ");
+}
+
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
+  "referrerPatientId",
   "firstName",
   "lastName",
   "birthDate",
@@ -509,6 +531,7 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
 ];
 
 const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
+  referrerPatientId: "lead-wizard-referrer-patient",
   firstName: "lead-wizard-first-name",
   lastName: "lead-wizard-last-name",
   birthDate: "lead-wizard-birth-date",
@@ -532,6 +555,16 @@ const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
   { id: "commercial", ru: "Договор и смета", de: "Vertrag & Angebot" },
   { id: "release", ru: "Создание пациента", de: "Freigabe" },
 ];
+
+const STEP_ICONS: Record<StepId, LucideIcon> = {
+  master_data: UserRound,
+  medical: HeartPulse,
+  service: History,
+  documents: FileText,
+  order: ClipboardList,
+  commercial: ReceiptText,
+  release: UserRoundCheck,
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -704,11 +737,23 @@ function autosavePayload(
     requested_specialties: draft.specialties,
     consent_privacy_practices: draft.privacyConsent,
     consent_healthcare: draft.healthcareConsent,
+    referrer_patient_id: draft.discoverySource === "customer_referral"
+      ? draft.referrerPatientId
+      : "",
     wizard_state: {
       ...previousWizardState,
       step,
       onboarding_version: 3,
       discovery_source: draft.discoverySource,
+      discovery_source_other: draft.discoverySource === "other"
+        ? draft.discoverySourceOther
+        : "",
+      referrer_patient_id: draft.discoverySource === "customer_referral"
+        ? draft.referrerPatientId || null
+        : null,
+      referrer_patient_label: draft.discoverySource === "customer_referral"
+        ? draft.referrerPatientLabel
+        : "",
       referrer: draft.referrer,
       program_date_from: draft.programDateFrom,
       program_date_to: draft.programDateTo,
@@ -1277,6 +1322,12 @@ function draftFromLead(lead: LeadDetail): Draft {
     ]),
     serviceComments: serviceCommentsFromLead(lead),
     discoverySource: inputString(lead.wizard_state?.["discovery_source"]) || questionnaireText(lead, "discoverySource", "howDidYouHearAboutUs", "referralSource"),
+    discoverySourceOther: inputString(lead.wizard_state?.["discovery_source_other"]),
+    referrerPatientId: lead.referrer_patient_id
+      ?? inputString(lead.wizard_state?.["referrer_patient_id"]),
+    referrerPatientLabel: lead.referrer_patient_name
+      ? [lead.referrer_patient_pid, lead.referrer_patient_name].filter(Boolean).join(" · ")
+      : inputString(lead.wizard_state?.["referrer_patient_label"]),
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
     specialties: lead.requested_specialties ?? [],
@@ -1332,6 +1383,9 @@ function blankDraft(): Draft {
     serviceNeeds: [],
     serviceComments: {},
     discoverySource: "",
+    discoverySourceOther: "",
+    referrerPatientId: "",
+    referrerPatientLabel: "",
     referrer: "",
     serviceNotes: "",
     specialties: [],
@@ -1823,6 +1877,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
 
 function masterValidationIssues(errors: MasterValidationErrors, tx: Tx): ValidationIssue[] {
   const labels: Record<MasterFieldKey, string> = {
+    referrerPatientId: tx("Рекомендовавший клиент", "Empfehlender Kunde"),
     firstName: tx("Имя", "Vorname"),
     lastName: tx("Фамилия", "Nachname"),
     birthDate: tx("Дата рождения", "Geburtsdatum"),
@@ -1986,6 +2041,9 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
 
   const errors: MasterValidationErrors = {};
   const required = tx("Обязательное поле", "Pflichtfeld");
+  if (draft.discoverySource === "customer_referral" && !draft.referrerPatientId) {
+    errors.referrerPatientId = required;
+  }
   if (!draft.firstName.trim()) errors.firstName = required;
   if (!draft.lastName.trim()) errors.lastName = required;
   if (!draft.birthDate) {
@@ -2201,6 +2259,11 @@ export function LeadWizard({
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [referrerSearch, setReferrerSearch] = useState("");
+  const deferredReferrerSearch = useDeferredValue(referrerSearch);
+  const [referrerPatients, setReferrerPatients] = useState<LeadReferrerPatientOption[]>([]);
+  const [referrerPatientsLoading, setReferrerPatientsLoading] = useState(false);
+  const [referrerPatientsError, setReferrerPatientsError] = useState("");
   const [step, setStep] = useState<StepId>("master_data");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [, setCases] = useState<CaseListItem[]>([]);
@@ -2254,6 +2317,9 @@ export function LeadWizard({
   const [validationContext, setValidationContext] = useState<ValidationContext | null>(null);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
+  const stepTabsRef = useRef<HTMLDivElement | null>(null);
+  const stepPillRef = useRef<HTMLSpanElement | null>(null);
+  const stepPillReadyRef = useRef(false);
   const wizardStateBaseRef = useRef<Record<string, unknown>>({});
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
@@ -2281,6 +2347,38 @@ export function LeadWizard({
     prepayment_required: 0,
     prepayment_amount: 0,
   });
+
+  useEffect(() => {
+    if (!open || draft?.discoverySource !== "customer_referral") {
+      setReferrerPatients([]);
+      setReferrerPatientsLoading(false);
+      setReferrerPatientsError("");
+      return;
+    }
+
+    let active = true;
+    setReferrerPatientsLoading(true);
+    setReferrerPatientsError("");
+    void fetchLeadReferrerPatients(deferredReferrerSearch)
+      .then((patients) => {
+        if (active) setReferrerPatients(patients);
+      })
+      .catch(() => {
+        if (!active) return;
+        setReferrerPatients([]);
+        setReferrerPatientsError(tx(
+          "Не удалось загрузить список клиентов",
+          "Kundenliste konnte nicht geladen werden",
+        ));
+      })
+      .finally(() => {
+        if (active) setReferrerPatientsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredReferrerSearch, draft?.discoverySource, open, tx]);
   const selectedSpecializationItems = useMemo(() => {
     const values = new Set(draft?.specialties ?? []);
     return specialties.filter((item) => values.has(specializationValue(item)));
@@ -2431,6 +2529,27 @@ export function LeadWizard({
         fetchSpecializations().catch(() => []),
         fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
       ]);
+      const leadOrdersPath = "/orders?lead_id=" + encodeURIComponent(leadId);
+      const ordersPromise = Promise.all([
+        leadPromise,
+        fetchOrders(leadOrdersPath).catch(() => []),
+      ]).then(async ([orderLead, existingOrders]) => {
+          if (
+            existingOrders.length > 0
+            || !["new", "in_progress", "qualified"].includes(orderLead.qualification_status)
+          ) {
+            return { bootstrapError: null, orders: existingOrders };
+          }
+          try {
+            await createOrder({ source_lead_id: leadId });
+            return {
+              bootstrapError: null,
+              orders: await fetchOrders(leadOrdersPath),
+            };
+          } catch (bootstrapError) {
+            return { bootstrapError, orders: existingOrders };
+          }
+        });
 
       void medicalLookupsPromise
         .then(([nextProviders, nextAllDoctors]) => {
@@ -2458,21 +2577,27 @@ export function LeadWizard({
         nextDocumentState,
         nextCases,
         nextContracts,
-        nextOrders,
+        nextOrderState,
         nextQuotes,
       ] = await Promise.all([
         leadPromise,
         documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
         fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
-        fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        ordersPromise,
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
       ]);
       if (!isCurrentReload()) return;
+      const nextOrders = nextOrderState.orders;
       setDocuments(nextDocumentState.documents);
       if (nextDocumentState.attachmentImportError) {
         setError(
           `${tx("Не удалось импортировать файлы опросника", "Fragebogendateien konnten nicht importiert werden")}: ${errorText(nextDocumentState.attachmentImportError, tx)}`,
+        );
+      }
+      if (nextOrderState.bootstrapError) {
+        setError(
+          `${tx("Не удалось создать заказ для лида", "Auftrag für den Lead konnte nicht erstellt werden")}: ${errorText(nextOrderState.bootstrapError, tx)}`,
         );
       }
       const nextOrder = nextOrders[0] ?? null;
@@ -2742,18 +2867,56 @@ export function LeadWizard({
   }, [open, replaceDocumentPreview]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      stepPillReadyRef.current = false;
+      return;
+    }
     const stepNav = stepNavRef.current;
-    const activeStep = stepNav?.querySelector<HTMLElement>(
-      `[data-step="${step}"]`,
-    );
-    if (!stepNav || !activeStep) return;
+    const stepTabs = stepTabsRef.current;
+    const stepPill = stepPillRef.current;
+    if (!stepNav || !stepTabs || !stepPill) return;
+
+    const activeStep = () => stepTabs.querySelector<HTMLElement>(`[data-step="${step}"]`);
+    const movePill = (animate: boolean) => {
+      const active = activeStep();
+      if (!active) return;
+      if (!animate) {
+        const previousTransition = stepPill.style.transition;
+        stepPill.style.transition = "none";
+        stepPill.style.transform = `translateX(${active.offsetLeft}px)`;
+        stepPill.style.width = `${active.offsetWidth}px`;
+        void stepPill.offsetWidth;
+        stepPill.style.transition = previousTransition;
+        return;
+      }
+      stepPill.style.transform = `translateX(${active.offsetLeft}px)`;
+      stepPill.style.width = `${active.offsetWidth}px`;
+    };
+
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    stepNav.scrollTo({
-      behavior: reduceMotion ? "auto" : "smooth",
-      left: activeStep.offsetLeft - (stepNav.clientWidth - activeStep.offsetWidth) / 2,
+    const animationFrame = window.requestAnimationFrame(() => {
+      movePill(stepPillReadyRef.current && !reduceMotion);
+      stepPillReadyRef.current = true;
+
+      const active = activeStep();
+      if (!active) return;
+      const navRect = stepNav.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      stepNav.scrollTo({
+        behavior: reduceMotion ? "auto" : "smooth",
+        left: stepNav.scrollLeft
+          + activeRect.left
+          - navRect.left
+          - (stepNav.clientWidth - activeRect.width) / 2,
+      });
     });
-  }, [open, step]);
+    const handleResize = () => movePill(false);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [lang, open, step]);
 
   const order = orders[0] ?? null;
   const contract = contracts.find((item) => item.status !== "terminated") ?? null;
@@ -3083,6 +3246,7 @@ export function LeadWizard({
           lastPersistedLeadIdRef.current = targetLeadId;
           setCreatedLeadId(targetLeadId);
           onCreated?.(targetLeadId);
+          await createOrder({ source_lead_id: targetLeadId });
         }
 
         lastPersistedLeadIdRef.current = targetLeadId;
@@ -3172,6 +3336,31 @@ export function LeadWizard({
     setError("");
     clearServerValidation();
     setDraft((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const changeDiscoverySource = (value: string) => {
+    setError("");
+    clearServerValidation();
+    setReferrerSearch("");
+    setDraft((current) => current ? {
+      ...current,
+      discoverySource: value,
+      ...(value === "customer_referral"
+        ? {}
+        : { referrerPatientId: "", referrerPatientLabel: "" }),
+      ...(value === "other" ? {} : { discoverySourceOther: "" }),
+    } : current);
+  };
+
+  const changeReferrerPatient = (patientId: string) => {
+    const selected = referrerPatients.find((patient) => patient.id === patientId);
+    setError("");
+    clearServerValidation();
+    setDraft((current) => current ? {
+      ...current,
+      referrerPatientId: patientId,
+      referrerPatientLabel: selected ? referrerPatientOptionLabel(selected) : "",
+    } : current);
   };
 
   const patchAml = <K extends keyof AmlEnhancedDueDiligenceDraft>(
@@ -3674,6 +3863,7 @@ export function LeadWizard({
       const generated = await generateDocument({
         template_id: templateId,
         lead_id: targetLeadId,
+        order_id: order?.id,
         language: "de",
         document_language: "de",
         document_direction: "outgoing",
@@ -3681,6 +3871,7 @@ export function LeadWizard({
         access_category: "patient",
         status: "active",
         bindings: {
+          order_number: order?.order_number,
           party_city: draft.city.trim() || undefined,
           party_sign_place: draft.city.trim() || undefined,
           ...(templateId === "privacy_consents"
@@ -4477,7 +4668,7 @@ ${serviceCommentLines.join("\n")}`
       >
       <DialogContent
         showOverlay={!documentPreview}
-        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
+        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
@@ -4573,43 +4764,53 @@ ${serviceCommentLines.join("\n")}`
 
         <nav
           ref={stepNavRef}
-          className="overflow-x-auto overscroll-x-contain border-b border-border"
+          className="overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
-          <div className="grid min-w-[72rem] grid-cols-7 sm:min-w-0">
-            {STEPS.map((item, itemIndex) => {
-              const selected = item.id === step;
-              const done = item.id === "master_data"
-                ? Boolean(draft && Object.keys(masterErrors).length === 0)
-                : item.id === "medical"
-                  ? Boolean(draft?.concern.trim())
-                  : item.id === "order"
-                    ? Boolean(draft && orderIssues.length === 0)
-                    : readiness.get(item.id) ?? false;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-step={item.id}
-                  disabled={loading || isBusy}
-                  onClick={() => navigateToStep(item.id)}
-                  aria-current={selected ? "step" : undefined}
-                  className={cn(
-                    "relative min-w-0 border-r border-border px-3 py-3 text-left last:border-r-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-                    selected && "bg-muted/50 after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--brand)]",
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]", done ? "border-emerald-600 text-emerald-700" : "border-muted-foreground/50 text-muted-foreground")}>
+          <div className="flex w-max min-w-full justify-center px-4 py-2.5">
+            <div ref={stepTabsRef} className="t-tabs lead-wizard-step-tabs" role="tablist">
+              <span ref={stepPillRef} className="t-tabs-pill lead-wizard-step-pill" aria-hidden="true" />
+              {STEPS.map((item, itemIndex) => {
+                const selected = item.id === step;
+                const done = item.id === "master_data"
+                  ? Boolean(draft && Object.keys(masterErrors).length === 0)
+                  : item.id === "medical"
+                    ? Boolean(draft?.concern.trim())
+                    : item.id === "order"
+                      ? Boolean(draft && orderIssues.length === 0)
+                      : readiness.get(item.id) ?? false;
+                const StepIcon = STEP_ICONS[item.id];
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    data-step={item.id}
+                    disabled={loading || isBusy}
+                    onClick={() => navigateToStep(item.id)}
+                    aria-selected={selected}
+                    aria-current={selected ? "step" : undefined}
+                    className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <StepIcon aria-hidden="true" className="size-4 shrink-0" />
+                    <span className="whitespace-nowrap">{lang === "de" ? item.de : item.ru}</span>
+                    <span
+                      data-count
+                      className={cn(
+                        "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none",
+                        selected
+                          ? "bg-white/20 text-white"
+                          : done
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                            : "bg-muted text-muted-foreground",
+                      )}
+                    >
                       {done ? <Check aria-hidden="true" className="size-3" /> : itemIndex + 1}
                     </span>
-                    <span className="min-w-0 break-words text-[11px] font-medium leading-tight text-foreground">
-                      {lang === "de" ? item.de : item.ru}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </nav>
 
@@ -4680,27 +4881,85 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section title={tx("Личные данные", "Persönliche Daten")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
-                  <NativeComboboxSelect
-                    aria-label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}
-                    name="discovery_source"
-                    value={draft.discoverySource}
-                    onChange={(event) => patch("discoverySource", event.target.value)}
-                    className={selectClass}
-                  >
-                    <option value="">{tx("Выберите источник", "Quelle auswählen")}</option>
-                    {draft.discoverySource && !DISCOVERY_SOURCE_OPTIONS.some((option) => option.value === draft.discoverySource) ? (
-                      <option value={draft.discoverySource}>
-                        {tx("Текущее значение", "Aktueller Wert")}: {draft.discoverySource}
-                      </option>
-                    ) : null}
-                    {DISCOVERY_SOURCE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {lang === "de" ? option.de : option.ru}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                </Field>
+                <div className="space-y-4">
+                  <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
+                    <NativeComboboxSelect
+                      aria-label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}
+                      name="discovery_source"
+                      value={draft.discoverySource}
+                      onChange={(event) => changeDiscoverySource(event.target.value)}
+                      className={selectClass}
+                    >
+                      <option value="">{tx("Выберите источник", "Quelle auswählen")}</option>
+                      {draft.discoverySource && !DISCOVERY_SOURCE_OPTIONS.some((option) => option.value === draft.discoverySource) ? (
+                        <option value={draft.discoverySource}>
+                          {tx("Текущее значение", "Aktueller Wert")}: {draft.discoverySource}
+                        </option>
+                      ) : null}
+                      {DISCOVERY_SOURCE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {lang === "de" ? option.de : option.ru}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  {draft.discoverySource === "customer_referral" ? (
+                    <Field
+                      label={tx("Рекомендовавший клиент", "Empfehlender Kunde")}
+                      required
+                      error={visibleMasterError("referrerPatientId")}
+                      errorId={`${MASTER_FIELD_IDS.referrerPatientId}-error`}
+                    >
+                      <NativeComboboxSelect
+                        id={MASTER_FIELD_IDS.referrerPatientId}
+                        name="referrer_patient_id"
+                        value={draft.referrerPatientId}
+                        required
+                        aria-invalid={Boolean(visibleMasterError("referrerPatientId"))}
+                        aria-describedby={visibleMasterError("referrerPatientId")
+                          ? `${MASTER_FIELD_IDS.referrerPatientId}-error`
+                          : undefined}
+                        className={cn(selectClass, visibleMasterError("referrerPatientId") && "border-destructive")}
+                        searchPlaceholder={tx("Найти клиента по имени или PID", "Kunde nach Name oder PID suchen")}
+                        onSearchChange={setReferrerSearch}
+                        missingValueLabel={() => draft.referrerPatientLabel || draft.referrerPatientId}
+                        onBlur={() => touchMasterField("referrerPatientId")}
+                        onChange={(event) => changeReferrerPatient(event.target.value)}
+                      >
+                        <option value="">{tx("Выберите клиента", "Kunden auswählen")}</option>
+                        {referrerPatients.map((patient) => (
+                          <option key={patient.id} value={patient.id}>
+                            {referrerPatientOptionLabel(patient)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
+                      <p className={cn(
+                        "mt-1.5 text-[11.5px] leading-tight",
+                        referrerPatientsError ? "text-destructive" : "text-muted-foreground",
+                      )}>
+                        {referrerPatientsError
+                          || (referrerPatientsLoading
+                            ? tx("Загрузка клиентов…", "Kunden werden geladen…")
+                            : tx(
+                                "Связь сохранится для статистики клиентских рекомендаций.",
+                                "Die Verknüpfung wird für die Statistik der Kundenempfehlungen gespeichert.",
+                              ))}
+                      </p>
+                    </Field>
+                  ) : null}
+                  {draft.discoverySource === "other" ? (
+                    <Field label={tx("Укажите источник", "Andere Quelle angeben")}>
+                      <Input
+                        name="discovery_source_other"
+                        autoComplete="off"
+                        className={inputClass}
+                        value={draft.discoverySourceOther}
+                        placeholder={tx("Введите источник вручную", "Quelle manuell eingeben")}
+                        onChange={(event) => patch("discoverySourceOther", event.target.value)}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
                 <Field
                   label={tx("Имя", "Vorname")}
                   required
@@ -6700,7 +6959,6 @@ ${serviceCommentLines.join("\n")}`
               <iframe
                 title={documentPreview.title}
                 src={documentPreview.url}
-                sandbox=""
                 className="h-full min-h-[32rem] w-full border border-border bg-white"
               />
             ) : null}

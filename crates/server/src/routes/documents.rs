@@ -13615,7 +13615,10 @@ async fn generate_document(
                 &patient_party,
                 &agency,
                 aml,
-                bindings.order_number.as_deref(),
+                generated_order_reference(
+                    bindings.order_number.as_deref(),
+                    order_number.as_deref(),
+                ),
                 &generated_doc_id,
             ) {
                 Ok(bytes) => bytes,
@@ -16636,6 +16639,20 @@ fn aml_binding_value(value: Option<&str>) -> &str {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("—")
+}
+
+fn generated_order_reference<'a>(
+    binding_override: Option<&'a str>,
+    crm_order_number: Option<&'a str>,
+) -> Option<&'a str> {
+    binding_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            crm_order_number
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
 }
 
 fn aml_checkbox_line(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
@@ -23132,12 +23149,12 @@ mod tests {
         cost_estimate_price_text, document_attachment_response, document_satisfies_compliance_kind,
         document_template_by_id, finalize_admin_pdf, generated_binding_snapshot,
         generated_cost_estimate_document_number, generated_document_number_for_template,
-        generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
-        is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
-        localized_estimate_work_type_sections, new_admin_pdf, parse_document_ocr_max_concurrency,
-        parse_document_ocr_timeout_seconds, patient_sticker_agency_line, pdf_mm_to_pt,
-        tesseract_input_extension, trusted_contact_recipients_binding,
-        valid_tesseract_language_spec,
+        generated_order_reference, generated_typed_document_number, german_document_country,
+        is_fixed_legal_document_template, is_lead_allowed_document_template,
+        legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
+        new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
+        patient_sticker_agency_line, pdf_mm_to_pt, tesseract_input_extension,
+        trusted_contact_recipients_binding, valid_tesseract_language_spec,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
@@ -23155,6 +23172,22 @@ mod tests {
     const LEGAL_EMAIL: &str = "office@gmed-health.com";
     const LEGAL_WEBSITE: &str = "gmed-health.com";
     const LEGAL_DATA_CONTROLLER_STATEMENT: &str = "Verantwortlich für die Verarbeitung Ihrer Daten ist Configured Owner, Teststraße 1, Deutschland";
+
+    #[test]
+    fn generated_order_reference_uses_crm_number_and_preserves_manual_override() {
+        assert_eq!(
+            generated_order_reference(None, Some("ORD-20260904-0001")),
+            Some("ORD-20260904-0001")
+        );
+        assert_eq!(
+            generated_order_reference(Some(" RE-20260904-0042 "), Some("ORD-20260904-0001")),
+            Some("RE-20260904-0042")
+        );
+        assert_eq!(
+            generated_order_reference(Some("   "), Some("ORD-20260904-0001")),
+            Some("ORD-20260904-0001")
+        );
+    }
 
     #[test]
     fn document_attachment_response_disables_caching() {

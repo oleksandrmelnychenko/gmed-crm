@@ -4,6 +4,7 @@ import { apiFetchFile } from "@/lib/api";
 
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   downloadDocumentFile,
   revokeDocumentPreviewObjectUrl,
 } from "./document-api";
@@ -28,6 +29,12 @@ describe("document preview API", () => {
     });
     revokeObjectUrlSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     apiFetchFileMock.mockReset();
+  });
+
+  it("does not fully sandbox Chromium PDF previews", () => {
+    expect(documentPreviewSandbox("application/pdf")).toBeUndefined();
+    expect(documentPreviewSandbox("application/pdf; charset=binary")).toBeUndefined();
+    expect(documentPreviewSandbox("text/plain")).toBe("");
   });
 
   afterEach(() => {

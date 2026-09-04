@@ -482,7 +482,9 @@ export function leadPermissions(role?: string): LeadPermissions {
   return {
     canViewPage:
       role === "ceo" || role === "patient_manager" || role === "sales" || role === "concierge",
-    canOpen: role === "ceo" || role === "patient_manager" || role === "sales",
+    canOpen:
+      role === "ceo" || role === "patient_manager" || role === "sales" || role === "concierge",
+    canEdit: role === "ceo" || role === "patient_manager" || role === "sales",
     canCreate: role === "ceo" || role === "patient_manager" || role === "sales",
     canConvert: role === "ceo" || role === "patient_manager",
   };

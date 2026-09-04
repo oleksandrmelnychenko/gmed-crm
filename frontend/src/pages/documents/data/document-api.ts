@@ -68,6 +68,11 @@ export type DocumentPreviewObjectUrl = {
   url: string;
 };
 
+export function documentPreviewSandbox(contentType?: string) {
+  const mime = contentType?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return mime === "application/pdf" ? undefined : "";
+}
+
 function postJson<T>(path: string, payload: JsonPayload) {
   return apiFetch<T>(path, {
     method: "POST",

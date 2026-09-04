@@ -3258,7 +3258,6 @@ export function ClinicalDocumentImportSheet({
                   key={`${preview.url}-${activePage}`}
                   title={documentImport?.document_name ?? tx("Предпросмотр документа", "Dokumentvorschau")}
                   src={`${preview.url}#page=${activePage}&zoom=page-width`}
-                  sandbox=""
                   className="h-full w-full rounded-lg border border-border bg-white shadow-sm"
                 />
               )

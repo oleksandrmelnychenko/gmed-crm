@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   createDocumentPreviewObjectUrl,
+  documentPreviewSandbox,
   downloadDocumentFile,
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
@@ -197,7 +198,7 @@ export function ClinicalRecordSource({
               <iframe
                 title={preview.title}
                 src={preview.url}
-                sandbox=""
+                sandbox={documentPreviewSandbox(preview.contentType)}
                 className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
               />
             ) : preview?.url ? (

@@ -8,11 +8,13 @@ import {
   X,
   Send,
   MessageSquare,
+  UserRoundPlus,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
-import { staffHrefIfAllowed } from "@/lib/staff-route-access";
+import { canAccessStaffRoute, staffHrefIfAllowed } from "@/lib/staff-route-access";
+import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
@@ -148,12 +150,17 @@ function RealtimeConnectionIndicator({
 export function Topbar() {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const { lang, setLang, t } = useLang();
   const { toggle: toggleNav } = useNavState();
   const realtimeConnection = useRealtimeConnectionStatus();
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
+  const showLeadShortcut = Boolean(
+    user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads"),
+  );
+  const newLeads = useNewLeadCounter(showLeadShortcut);
   const onlineUsersWithSelf =
     !isPatientPortal && user
       ? [
@@ -305,6 +312,24 @@ export function Topbar() {
               }}
             />
           )}
+
+          {showLeadShortcut ? (
+            <TopbarIconButton
+              onClick={() => {
+                navigate("/leads");
+                setNotifOpen(false);
+                setUsersOpen(false);
+              }}
+              title={t.leads_title}
+            >
+              <UserRoundPlus aria-hidden="true" className="size-[17px]" />
+              {newLeads > 0 ? (
+                <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[10px] font-semibold text-white">
+                  {newLeads > 99 ? "99+" : newLeads}
+                </span>
+              ) : null}
+            </TopbarIconButton>
+          ) : null}
 
           {/* Notifications */}
           <TopbarIconButton

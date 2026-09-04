@@ -3928,7 +3928,6 @@ function useStaffInvoicesPageContent() {
               <iframe
                 title={invoicePdfPreview.title}
                 src={invoicePdfPreview.url}
-                sandbox=""
                 className="h-full min-h-[32rem] w-full rounded-lg border border-border bg-white"
               />
             ) : null}

@@ -13,10 +13,11 @@ import {
 } from "./leads-model";
 
 describe("lead release permissions", () => {
-  it("keeps Concierge on the read-only grid", () => {
+  it("lets Concierge open leads without mutation rights", () => {
     expect(leadPermissions("concierge")).toEqual({
       canViewPage: true,
-      canOpen: false,
+      canOpen: true,
+      canEdit: false,
       canCreate: false,
       canConvert: false,
     });
@@ -26,6 +27,7 @@ describe("lead release permissions", () => {
     expect(leadPermissions("ceo")).toEqual({
       canViewPage: true,
       canOpen: true,
+      canEdit: true,
       canCreate: true,
       canConvert: true,
     });

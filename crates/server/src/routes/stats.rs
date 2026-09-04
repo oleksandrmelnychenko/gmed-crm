@@ -1177,6 +1177,7 @@ async fn leads_by_status(
         Role::Ceo,
         Role::CeoAssistant,
         Role::PatientManager,
+        Role::Concierge,
         Role::Sales,
     ]) {
         return e;

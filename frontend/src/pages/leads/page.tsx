@@ -1037,6 +1037,7 @@ function useLeadsPageContent() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!permissions.canCreate) return;
     setCreateBusy(true);
     setCreateError("");
 
@@ -1064,6 +1065,7 @@ function useLeadsPageContent() {
   }
 
   async function updateStatus(leadId: string, status: string) {
+    if (!permissions.canEdit) return;
     setActionBusy(`status:${leadId}:${status}`);
     try {
       await updateLeadStatus(leadId, status);
@@ -1078,6 +1080,7 @@ function useLeadsPageContent() {
   }
 
   async function promoteToConsole(leadId: string) {
+    if (!permissions.canEdit) return;
     setActionBusy(`promote-console:${leadId}`);
     setError("");
     setDetailError("");
@@ -1131,7 +1134,7 @@ function useLeadsPageContent() {
 
   async function handleSaveGateForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedLeadId || !gateForm) return;
+    if (!permissions.canEdit || !selectedLeadId || !gateForm) return;
 
     setGateBusy(true);
     setDetailError("");
@@ -1158,7 +1161,7 @@ function useLeadsPageContent() {
 
   async function handleResolveFailedLead(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedLeadId) return;
+    if (!permissions.canEdit || !selectedLeadId) return;
 
     setFailedLeadBusy(true);
     setDetailError("");
@@ -1282,7 +1285,7 @@ function useLeadsPageContent() {
                 {lang === "de" ? "Bearbeiten" : "Обработать"}
               </Button>
             ) : null}
-            {detail && detailCanPromoteToConsole ? (
+            {detail && permissions.canEdit && detailCanPromoteToConsole ? (
               <Button
                 type="button"
                 size="sm"
@@ -1424,6 +1427,7 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_flow} value={detail.flow} />
                     ) : null}
                   </div>
+                  {permissions.canEdit ? (
                   <div className="mt-4 flex justify-end">
                     <Button
                       type="button"
@@ -1440,6 +1444,7 @@ function useLeadsPageContent() {
                         : t.lead_promote_to_console}
                     </Button>
                   </div>
+                  ) : null}
                 </section>
 
                 {detailLeadType === "form" ? (
@@ -1772,6 +1777,7 @@ function useLeadsPageContent() {
                             size="sm"
                             disabled={
                               Boolean(actionBusy) ||
+                              !permissions.canEdit ||
                               leadWorkflow.leadQualified ||
                               !detail.readiness.qualification_ready ||
                               detail.failed_outcome.status !== "none"
@@ -2019,6 +2025,7 @@ function useLeadsPageContent() {
                     </div>
 
                     <form className="mt-4 space-y-4" onSubmit={handleSaveGateForm}>
+                      <fieldset disabled={!permissions.canEdit} className="contents">
                       <div className="grid gap-4 md:grid-cols-2">
                         <LeadField label={t.patients_email} htmlFor="lead-gate-email">
                           <Input
@@ -2206,6 +2213,7 @@ function useLeadsPageContent() {
                           {t.lead_save_gate_data}
                         </Button>
                       </div>
+                      </fieldset>
                     </form>
                   </section>
                 ) : null}
@@ -2257,7 +2265,7 @@ function useLeadsPageContent() {
                       </div>
                     ) : null}
 
-                    {detail.failed_outcome.status === "none" ? (
+                    {detail.failed_outcome.status === "none" && permissions.canEdit ? (
                       <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
                         <div className="grid gap-4 md:grid-cols-2">
                           <LeadField label={t.lead_resolution} htmlFor="lead-failed-resolution">

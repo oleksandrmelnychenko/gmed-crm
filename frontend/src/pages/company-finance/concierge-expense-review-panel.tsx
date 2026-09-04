@@ -997,7 +997,7 @@ export function ConciergeExpenseReviewPanel({
                           {preview.contentType.startsWith("image/") ? (
                             <img src={preview.url} alt={preview.filename} className="max-h-[34rem] w-full object-contain" />
                           ) : preview.contentType === "application/pdf" ? (
-                            <iframe src={preview.url} title={preview.filename} sandbox="" className="h-[28rem] w-full bg-white sm:h-[34rem]" />
+                            <iframe src={preview.url} title={preview.filename} className="h-[28rem] w-full bg-white sm:h-[34rem]" />
                           ) : (
                             <p className="px-4 py-10 text-center text-sm text-muted-foreground">{text.previewUnavailable}</p>
                           )}

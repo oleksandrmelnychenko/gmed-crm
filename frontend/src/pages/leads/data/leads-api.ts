@@ -37,6 +37,22 @@ export function fetchLeadDetail(leadId: string) {
   return apiFetch<LeadDetail>(`/leads/${leadId}`);
 }
 
+export type LeadReferrerPatientOption = {
+  id: string;
+  patient_id: string;
+  title: string | null;
+  first_name: string;
+  last_name: string;
+};
+
+export function fetchLeadReferrerPatients(search = "") {
+  const query = search.trim();
+  const suffix = query ? `?search=${encodeURIComponent(query)}` : "";
+  return apiFetch<LeadReferrerPatientOption[]>(`/leads/referrer-patients${suffix}`, {
+    cacheTtlMs: 60_000,
+  });
+}
+
 export type CreateLeadResponse = {
   id: string;
 };

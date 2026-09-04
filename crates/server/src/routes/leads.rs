@@ -59,6 +59,7 @@ pub fn public_router() -> Router<AppState> {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/leads", get(list_leads).post(create_lead))
+        .route("/leads/referrer-patients", get(list_lead_referrer_patients))
         .route(
             "/patients/{patient_id}/repeat-intake",
             post(retired_repeat_patient_intake),
@@ -231,6 +232,8 @@ struct UpdateLeadRequest {
     trusted_contacts: Option<Vec<TrustedContactRequest>>,
     requested_specialties: Option<serde_json::Value>,
     wizard_state: Option<serde_json::Value>,
+    // Empty string explicitly clears the link; omission leaves it unchanged.
+    referrer_patient_id: Option<String>,
 }
 
 fn normalized_contact_text(value: Option<&str>) -> Option<String> {
@@ -292,6 +295,59 @@ struct ListLeadsQuery {
     lead_type: Option<String>,
     flow: Option<String>,
     include_archived: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct ReferrerPatientsQuery {
+    search: Option<String>,
+}
+
+async fn list_lead_referrer_patients(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<ReferrerPatientsQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+        return e;
+    }
+
+    let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
+    match sqlx::query(
+        r#"SELECT id, patient_id, title, first_name, last_name
+           FROM patients
+           WHERE is_active = true
+             AND lifecycle_status = 'active'
+             AND (
+                 $1::text = '%%'
+                 OR de_normalize(concat_ws(' ', patient_id, title, first_name, last_name))
+                    LIKE de_normalize($1)
+             )
+           ORDER BY lower(last_name), lower(first_name), patient_id
+           LIMIT 50"#,
+    )
+    .bind(search_pattern)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(Value::Array(
+            rows.into_iter()
+                .map(|row| {
+                    json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+                        "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
+                        "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
+                        "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
+                    })
+                })
+                .collect(),
+        ))
+        .into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "list lead referrer patients");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
 }
 
 async fn list_leads(
@@ -1660,7 +1716,7 @@ async fn get_lead(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
         return e;
     }
 
@@ -1690,7 +1746,16 @@ async fn get_lead(
                   failed_processed_at, failed_processed_by,
                   notes, user_agent, created_at, updated_at,
                   requested_specialties, wizard_state, status_changed_at,
-                  intake_model, prospect_patient_id,
+                  intake_model, prospect_patient_id, referrer_patient_id,
+                  (
+                      SELECT p.patient_id FROM patients p
+                      WHERE p.id = leads.referrer_patient_id
+                  ) AS referrer_patient_pid,
+                  (
+                      SELECT NULLIF(concat_ws(' ', p.title, p.first_name, p.last_name), '')
+                      FROM patients p
+                      WHERE p.id = leads.referrer_patient_id
+                  ) AS referrer_patient_name,
                   (
                       SELECT p.lifecycle_status FROM patients p
                       WHERE p.id = leads.prospect_patient_id
@@ -2043,6 +2108,22 @@ async fn get_lead(
             .unwrap_or(Value::Null),
     );
     obj.insert(
+        "referrer_patient_id".into(),
+        row.try_get::<Option<Uuid>, _>("referrer_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "referrer_patient_pid".into(),
+        s_opt(&row, "referrer_patient_pid"),
+    );
+    obj.insert(
+        "referrer_patient_name".into(),
+        s_opt(&row, "referrer_patient_name"),
+    );
+    obj.insert(
         "prospect_patient_lifecycle".into(),
         row.try_get::<Option<String>, _>("prospect_patient_lifecycle")
             .ok()
@@ -2266,6 +2347,40 @@ async fn update_lead(
         );
     }
 
+    let referrer_patient_id_supplied = body.referrer_patient_id.is_some();
+    let referrer_patient_id = match body.referrer_patient_id.as_deref() {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => match Uuid::parse_str(value.trim()) {
+            Ok(id) => Some(id),
+            Err(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invalid referrer_patient_id",
+                );
+            }
+        },
+        None => None,
+    };
+    if let Some(referrer_id) = referrer_patient_id {
+        match sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM patients WHERE id = $1)")
+            .bind(referrer_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Referrer patient not found",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, referrer_patient_id = %referrer_id, "validate lead referrer patient");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+
     if body.email.is_none()
         && body.phone.is_none()
         && body.country.is_none()
@@ -2304,6 +2419,7 @@ async fn update_lead(
         && body.trusted_contacts.is_none()
         && body.requested_specialties.is_none()
         && body.wizard_state.is_none()
+        && body.referrer_patient_id.is_none()
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
     }
@@ -2369,7 +2485,11 @@ async fn update_lead(
                    WHEN $39 THEN $40
                    ELSE insurance_covers_germany
                END,
-               trusted_contacts = COALESCE($41::jsonb, trusted_contacts)
+               trusted_contacts = COALESCE($41::jsonb, trusted_contacts),
+               referrer_patient_id = CASE
+                   WHEN $42 THEN $43
+                   ELSE referrer_patient_id
+               END
            WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -2417,6 +2537,8 @@ async fn update_lead(
     .bind(insurance_covers_germany_supplied)
     .bind(insurance_covers_germany.as_deref())
     .bind(trusted_contacts.as_ref().map(Value::to_string))
+    .bind(referrer_patient_id_supplied)
+    .bind(referrer_patient_id)
     .execute(&state.db)
     .await
     {
@@ -2440,6 +2562,7 @@ async fn update_lead(
                     "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
                     "consent_healthcare": body.consent_healthcare,
                     "consent_privacy_practices": body.consent_privacy_practices,
+                    "referrer_patient_id": referrer_patient_id,
                 }),
             ));
             crate::realtime::publish_lead_event(
@@ -2455,6 +2578,7 @@ async fn update_lead(
                     "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
                     "consent_healthcare": body.consent_healthcare,
                     "consent_privacy_practices": body.consent_privacy_practices,
+                    "referrer_patient_id": referrer_patient_id,
                 }),
             )
             .await;
@@ -4126,6 +4250,7 @@ async fn convert_lead(
         "consent_opt_out": snapshot_value("consent_opt_out"),
         "consent_privacy_practices": snapshot_value("consent_privacy_practices"),
         "discovery_source": wizard_state.get("discovery_source").cloned().unwrap_or(Value::Null),
+        "discovery_source_other": wizard_state.get("discovery_source_other").cloned().unwrap_or(Value::Null),
         "referrer": wizard_state.get("referrer").cloned().unwrap_or(Value::Null),
         "trusted_contact": {
             "name": trusted_contact_name.clone(),
@@ -5073,7 +5198,7 @@ async fn download_attachment(
     Extension(auth): Extension<AuthUser>,
     Path((lead_id, attachment_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
         return e;
     }
 
@@ -5678,6 +5803,7 @@ async fn anonymize_lead_pii(
                trusted_contact_birth_date = NULL,
                trusted_contact_address = NULL,
                trusted_contacts = '[]'::jsonb,
+               referrer_patient_id = NULL,
                preferred_location = NULL,
                visit_timing = NULL,
                message = NULL,
@@ -5689,7 +5815,7 @@ async fn anonymize_lead_pii(
                remote_ip = NULL,
                user_agent = NULL,
                notes = NULL,
-               wizard_state = wizard_state - 'clinical_draft',
+               wizard_state = wizard_state - 'clinical_draft' - 'referrer_patient_id' - 'referrer_patient_label',
                qualification_status = 'deleted',
                status_changed_at = now(),
                failed_outcome_status = 'delete_anonymized',

@@ -20,6 +20,22 @@ const CHAT_NOTIFICATION_EVENTS = [
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+type LeadStatusCount = {
+  status: string;
+  count: number;
+};
+
+type LeadStatusCountsPayload =
+  | LeadStatusCount[]
+  | { data?: LeadStatusCount[] };
+
+export function getNewLeadCount(
+  payload: LeadStatusCountsPayload | null | undefined,
+): number {
+  const rows = Array.isArray(payload) ? payload : payload?.data ?? [];
+  return rows.find((item) => item.status === "new")?.count ?? 0;
+}
+
 export type NavCounters = {
   /** Unread direct-chat messages for the current user. */
   chatUnread: number;
@@ -27,13 +43,41 @@ export type NavCounters = {
   newLeads: number;
 };
 
+export function useNewLeadCounter(enabled: boolean): number {
+  const [newLeads, setNewLeads] = useState(0);
+
+  const refreshLeads = useCallback(() => {
+    if (!enabled) return;
+    apiFetch<LeadStatusCountsPayload>("/stats/leads/by-status", {
+      forceFresh: true,
+    })
+      .then((payload) => setNewLeads(getNewLeadCount(payload)))
+      .catch(() => undefined);
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    refreshLeads();
+    const timer = window.setInterval(refreshLeads, REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", refreshLeads);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshLeads);
+    };
+  }, [enabled, refreshLeads]);
+
+  useDebouncedRealtimeSubscription(LEAD_EVENTS, refreshLeads);
+
+  return newLeads;
+}
+
 /**
  * Lightweight badge counters for the nav panel. Each source degrades
  * silently: roles without access to an endpoint simply get no badge.
  */
 export function useNavCounters(enabled: boolean): NavCounters {
   const [chatUnread, setChatUnread] = useState(0);
-  const [newLeads, setNewLeads] = useState(0);
+  const newLeads = useNewLeadCounter(enabled);
 
   const refreshChat = useCallback(() => {
     if (!enabled) return;
@@ -42,38 +86,17 @@ export function useNavCounters(enabled: boolean): NavCounters {
       .catch(() => undefined);
   }, [enabled]);
 
-  const refreshLeads = useCallback(() => {
-    if (!enabled) return;
-    apiFetch<{ data: { status: string; count: number }[] }>("/stats/leads/by-status", {
-      forceFresh: true,
-    })
-      .then((payload) => {
-        const row = payload?.data?.find((item) => item.status === "new");
-        setNewLeads(row?.count ?? 0);
-      })
-      .catch(() => undefined);
-  }, [enabled]);
-
   useEffect(() => {
     if (!enabled) return;
     refreshChat();
-    refreshLeads();
-    const timer = window.setInterval(() => {
-      refreshChat();
-      refreshLeads();
-    }, REFRESH_INTERVAL_MS);
-    const onFocus = () => {
-      refreshChat();
-      refreshLeads();
-    };
-    window.addEventListener("focus", onFocus);
+    const timer = window.setInterval(refreshChat, REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", refreshChat);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshChat);
     };
-  }, [enabled, refreshChat, refreshLeads]);
+  }, [enabled, refreshChat]);
 
-  useDebouncedRealtimeSubscription(LEAD_EVENTS, refreshLeads);
   useDebouncedRealtimeSubscription(CHAT_NOTIFICATION_EVENTS, (_event, events) => {
     if (
       events.some(

@@ -959,7 +959,13 @@ pub async fn publish_lead_event(
         RealtimeEvent::new(event_type, "lead", lead_id)
             .actor(actor_user_id)
             .target_users([actor_user_id, created_by].into_iter().flatten().collect())
-            .roles(&["ceo", "patient_manager", "sales"])
+            .roles(&[
+                "ceo",
+                "ceo_assistant",
+                "patient_manager",
+                "concierge",
+                "sales",
+            ])
             .payload(payload),
     )
     .await;

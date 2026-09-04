@@ -25,18 +25,14 @@ import {
   Download,
   FileText,
   FolderPlus,
-  History,
-  Languages,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
   Search,
   Share2,
-  ShieldCheck,
   SlidersHorizontal,
   Trash2,
   Undo2,
-  UserRound,
   X,
 } from "lucide-react";
 
@@ -6416,11 +6412,11 @@ function StaffDocumentsPage({
 
                 {detailVersions.length > 0 ? (
                   <SectionCard
-                    icon={<History className="size-4" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_version_history}
-                    tone="violet"
+                    tone="neutral"
                   >
                     <div className="space-y-1">
                       {detailVersions.map((version, index) => {
@@ -6436,9 +6432,9 @@ function StaffDocumentsPage({
                           type="button"
                           onClick={() => openDocument(version.id)}
                           className={cn(
-                            "group relative grid w-full rounded-lg gap-3 bg-transparent px-3.5 py-1.5 text-left transition hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
+                            "group relative grid w-full rounded-lg gap-3 bg-transparent px-3.5 py-1.5 text-left transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:grid-cols-[64px_minmax(0,1fr)_minmax(132px,auto)]",
                             selected &&
-                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-violet-500",
+                              "before:absolute before:bottom-3 before:left-0 before:top-3 before:w-0.5 before:rounded-full before:bg-[var(--brand)]",
                           )}
                         >
                           <div className="flex items-center justify-center">
@@ -6446,7 +6442,7 @@ function StaffDocumentsPage({
                               className={cn(
                                 "inline-flex h-8 w-12 items-center justify-center rounded-lg border text-xs font-semibold leading-none tabular-nums",
                                 selected
-                                  ? "border-violet-200 bg-violet-100 text-violet-700"
+                                  ? "border-[var(--brand)]/30 bg-[var(--brand)]/10 text-[var(--brand)]"
                                   : "border-border/60 bg-background text-foreground",
                               )}
                             >
@@ -6476,7 +6472,7 @@ function StaffDocumentsPage({
                               {selected ? (
                                 <Badge
                                   variant="outline"
-                                  className="rounded-full border-violet-200 bg-violet-50 text-[10px] text-violet-700"
+                                  className="rounded-full border-[var(--brand)]/30 bg-[var(--brand)]/10 text-[10px] text-[var(--brand)]"
                                 >
                                   {l("documents_open")}
                                 </Badge>
@@ -6504,11 +6500,11 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<Search className="size-4" />}
+                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
                   iconChrome="plain"
                   neutralSurface
                   title={t.documents_text_extraction}
-                  tone="brand"
+                  tone="neutral"
                   accessory={
                     canRequestTranslation ? (
                       <Button
@@ -6626,11 +6622,11 @@ function StaffDocumentsPage({
 
                 {detail.patient_id ? (
                   <SectionCard
-                    icon={<Languages className="size-4" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_translation_requests}
-                    tone="brand"
+                    tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
@@ -7151,9 +7147,11 @@ function StaffDocumentsPage({
 
                 {canReviewSelectedDocument && editForm ? (
                   <SectionCard
-                    icon={<ShieldCheck className="size-4" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
+                    iconChrome="plain"
+                    neutralSurface
                     title={t.documents_interpreter_review}
-                    tone="rose"
+                    tone="neutral"
                   >
                     {saveError ? (
                       <Banner tone="error">{saveError}</Banner>
@@ -7271,11 +7269,11 @@ function StaffDocumentsPage({
                 ) : null}
 
                 <SectionCard
-                  icon={<UserRound className="size-4" />}
+                  icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
                   iconChrome="plain"
                   neutralSurface
                   title={t.documents_patient_portal}
-                  tone="brand"
+                  tone="neutral"
                   accessory={
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span
@@ -7433,11 +7431,11 @@ function StaffDocumentsPage({
 
                 {canViewShares ? (
                   <SectionCard
-                    icon={<Share2 className="size-4" />}
+                    icon={<span aria-hidden className="size-2 rounded-full bg-[var(--brand)]" />}
                     iconChrome="plain"
                     neutralSurface
                     title={t.documents_share}
-                    tone="brand"
+                    tone="neutral"
                     accessory={
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">

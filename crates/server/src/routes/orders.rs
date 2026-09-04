@@ -2474,7 +2474,7 @@ async fn create_order(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateOrderRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Sales]) {
         return e;
     }
 
