@@ -36,6 +36,7 @@ function Invoke-GitText {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $archive = $null
+$temporaryPublishRoot = $null
 $temporaryIndex = $null
 $temporaryObjects = $null
 $previousIndex = $env:GIT_INDEX_FILE
@@ -92,6 +93,21 @@ try {
 
   Invoke-Checked "git" @("archive", "--format=tar.gz", "-o", $archive, $sourceTree)
 
+  # Upload the deploy runner from the exact same tree as the application archive.
+  # Reading it directly from the checkout would let dirty local edits leak into a
+  # -CommittedOnly deployment even though the application itself came from HEAD.
+  $temporaryPublishRoot = Join-Path ([System.IO.Path]::GetTempPath()) "gmed-dev-publish-$PID-$([guid]::NewGuid().ToString('N'))"
+  [void](New-Item -ItemType Directory -Path $temporaryPublishRoot)
+  Invoke-Checked "tar" @(
+    "-xzf", $archive,
+    "-C", $temporaryPublishRoot,
+    "scripts/deploy-dev-current.sh"
+  )
+  $localDeployScript = Join-Path $temporaryPublishRoot "scripts\deploy-dev-current.sh"
+  if (-not (Test-Path -LiteralPath $localDeployScript)) {
+    throw "Deploy runner is missing from snapshot $snapshotLabel"
+  }
+
   if ($DryRun) {
     $sizeMb = [math]::Round((Get-Item -LiteralPath $archive).Length / 1MB, 2)
     Write-Host "Dry run OK: snapshot=$snapshotLabel archive=${sizeMb}MB"
@@ -110,7 +126,6 @@ try {
     "-o", "StrictHostKeyChecking=accept-new"
   )
   $remote = "$User@$HostName"
-  $localDeployScript = Join-Path $repoRoot "scripts\deploy-dev-current.sh"
 
   Invoke-Checked "ssh" ($sshOptions + @($remote, "mkdir -p /home/gmed/deploy"))
   Invoke-Checked "scp" ($sshOptions + @($archive, "${remote}:$RemoteArchive"))
@@ -157,6 +172,14 @@ finally {
       throw "Refusing to remove unexpected temporary object path: $objectsPath"
     }
     Remove-Item -LiteralPath $objectsPath -Recurse -Force
+  }
+  if ($temporaryPublishRoot -and (Test-Path -LiteralPath $temporaryPublishRoot)) {
+    $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+    $publishPath = [System.IO.Path]::GetFullPath($temporaryPublishRoot)
+    if (-not $publishPath.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to remove unexpected temporary publish path: $publishPath"
+    }
+    Remove-Item -LiteralPath $publishPath -Recurse -Force
   }
   if ($archive -and (Test-Path -LiteralPath $archive)) {
     Remove-Item -LiteralPath $archive -Force

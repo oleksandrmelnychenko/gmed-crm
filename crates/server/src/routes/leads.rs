@@ -1441,7 +1441,7 @@ async fn load_lead_conversion_readiness(
                       WHERE o.source_lead_id = leads.id
                         AND length(trim(ol.description)) > 0
                         AND ol.quantity > 0
-                        AND ol.unit_price >= 0
+                        AND ol.unit_price_snapshot >= 0
                   ) AS order_service_ready,
                   EXISTS (
                       SELECT 1 FROM documents d
@@ -1504,9 +1504,12 @@ async fn load_lead_conversion_readiness(
                       SELECT jsonb_agg(
                           jsonb_build_object(
                               'description', ol.description,
-                              'quantity', ol.quantity,
-                              'unit_price', ol.unit_price,
-                              'vat_rate', ol.vat_rate
+                              'quantity', round(ol.quantity, 4),
+                              'unit_price', round(ol.unit_price_snapshot, 2),
+                              'vat_rate', round(CASE
+                                  WHEN ol.is_cost_passthrough THEN 0
+                                  ELSE ol.vat_rate_snapshot
+                              END, 2)
                           )
                           ORDER BY ol.created_at, ol.id
                       )
@@ -1518,6 +1521,7 @@ async fn load_lead_conversion_readiness(
                           ORDER BY o.created_at DESC, o.id DESC
                           LIMIT 1
                       )
+                        -- Keep readiness on the same commercial scope used by quote creation.
                         AND ol.status <> 'invoiced'
                   ), '[]'::jsonb) AS order_service_line_items,
                   EXISTS (

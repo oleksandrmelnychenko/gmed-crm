@@ -41,9 +41,10 @@ export function fetchQuotes(path: string) {
   return apiFetch<QuoteItem[]>(path);
 }
 
-export function fetchAgencyServices(path: string) {
+export function fetchAgencyServices(path: string, options: { forceFresh?: boolean } = {}) {
   return apiFetch<AgencyServiceItem[]>(path, {
     cacheTtlMs: CONTRACT_CATALOG_CACHE_TTL_MS,
+    forceFresh: options.forceFresh,
   });
 }
 

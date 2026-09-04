@@ -895,6 +895,151 @@ async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_acce
 }
 
 #[tokio::test]
+async fn quote_commercial_invariants_use_persisted_order_lines() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-invariants");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Persisted quote invariant"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().unwrap();
+    let client_reference = format!("lead-wizard:{tag}:service:1");
+
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Persisted service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0,
+            "client_reference": client_reference
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+    let service_id = service["id"].as_str().unwrap();
+
+    let (status, order_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {order_detail}");
+    assert_eq!(
+        order_detail["leistungen"][0]["client_reference"],
+        client_reference
+    );
+
+    let (status, stale_custom_quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({
+            "line_items": [{
+                "description": "Persisted service",
+                "quantity": 1.0,
+                "unit_price": 99.0,
+                "vat_rate": 19.0
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "response: {stale_custom_quote}"
+    );
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    assert_eq!(quote["total_gross"], "119");
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, excessive_prepayment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/commercial-basis"),
+        &pm_bearer,
+        Some(json!({
+            "prepayment_required": true,
+            "prepayment_amount": "120"
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {excessive_prepayment}"
+    );
+
+    let (status, excessive_payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 120.0
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {excessive_payment}"
+    );
+
+    sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE id = $1")
+        .bind(Uuid::parse_str(service_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, stale_acceptance) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm_bearer,
+        Some(json!({
+            "status": "accepted",
+            "paid_amount": 100.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {stale_acceptance}");
+}
+
+#[tokio::test]
 async fn quote_versions_capture_initial_and_status_update_snapshots() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

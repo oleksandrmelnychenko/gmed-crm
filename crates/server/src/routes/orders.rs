@@ -518,7 +518,7 @@ async fn list_orders(
                     WHERE ol.order_id = o.id
                 )
              )
-           ORDER BY o.created_at DESC
+           ORDER BY o.created_at DESC, o.id DESC
            LIMIT 200"#,
     )
     .bind(search_pattern)
@@ -2968,6 +2968,7 @@ async fn get_order(
     let leistungen = match sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
+                  ol.client_reference,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
                   ol.source_medical_appointment_id, ol.agency_service_id,
                   ol.agency_service_price_version_id,
@@ -3107,6 +3108,7 @@ async fn get_order(
             "delivered_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "approved_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "notes": l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "client_reference": l.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
             "provider_id": l.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": l.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
             "provider_taxonomy_node_id": l.try_get::<Option<Uuid>, _>("provider_taxonomy_node_id").unwrap_or_default(),
@@ -3890,7 +3892,10 @@ async fn update_order_commercial_basis(
     }
 
     let order = match sqlx::query(
-        "SELECT patient_id, source_lead_id, date_from, date_to FROM orders WHERE id = $1",
+        r#"SELECT patient_id, source_lead_id, date_from, date_to,
+                  total_estimated, prepayment_amount
+           FROM orders
+           WHERE id = $1"#,
     )
     .bind(order_id)
     .fetch_optional(&state.db)
@@ -3914,6 +3919,12 @@ async fn update_order_commercial_basis(
         .unwrap_or_default();
     let current_date_to = order
         .try_get::<Option<chrono::NaiveDate>, _>("date_to")
+        .unwrap_or_default();
+    let current_total_estimated = order
+        .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
+        .unwrap_or_default();
+    let current_prepayment_amount = order
+        .try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount")
         .unwrap_or_default();
     match can_access_order(&state, &auth, order_id, order_patient_id).await {
         Ok(true) => {}
@@ -3963,6 +3974,20 @@ async fn update_order_commercial_basis(
     let effective_date_to = date_to_patch.unwrap_or(current_date_to);
     if let Err(resp) = validate_order_date_range(effective_date_from, effective_date_to) {
         return resp;
+    }
+    let effective_total_estimated = total_estimated.or(current_total_estimated);
+    let effective_prepayment_amount = if body.prepayment_required == Some(false) {
+        None
+    } else {
+        prepayment_amount.or(current_prepayment_amount)
+    };
+    if let (Some(amount), Some(total)) = (effective_prepayment_amount, effective_total_estimated)
+        && amount > total
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "prepayment_amount cannot exceed the current order total",
+        );
     }
 
     if let Some(contract_id) = body.contract_id {
@@ -4038,6 +4063,17 @@ async fn update_order_commercial_basis(
              END,
              updated_at = now()
          WHERE id = $1
+           AND (
+               CASE
+                   WHEN $6 IS FALSE THEN NULL
+                   ELSE COALESCE($7, prepayment_amount)
+               END IS NULL
+               OR COALESCE($2, total_estimated) IS NULL
+               OR CASE
+                   WHEN $6 IS FALSE THEN NULL
+                   ELSE COALESCE($7, prepayment_amount)
+               END <= COALESCE($2, total_estimated)
+           )
          RETURNING contract_id, total_estimated, signed_patient, signed_agency,
                    signed_patient_at, signed_agency_at, prepayment_required,
                    prepayment_amount, signed_at,
@@ -4123,7 +4159,10 @@ async fn update_order_commercial_basis(
             }))
             .into_response()
         }
-        Ok(None) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(None) => err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "prepayment_amount cannot exceed the current order total",
+        ),
         Err(e) => {
             tracing::error!(error = %e, order_id = %order_id, "update order commercial basis");
             err(
@@ -6940,9 +6979,15 @@ async fn add_leistung(
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service VAT rate"),
     };
     let qty = match rust_decimal::Decimal::try_from(body.quantity) {
-        Ok(value) => value,
+        Ok(value) => value.round_dp(4),
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service quantity"),
     };
+    if qty <= rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Service quantity is below the supported precision",
+        );
+    }
     let mut price = match rust_decimal::Decimal::try_from(body.unit_price) {
         Ok(value) => value,
         Err(_) => {
@@ -6959,6 +7004,8 @@ async fn add_leistung(
         price = resolved_price;
         vat = resolved_vat;
     }
+    price = price.round_dp(2);
+    vat = vat.round_dp(2);
 
     let maximum_service_total = rust_decimal::Decimal::new(999_999_999_999, 2);
     let maximum_quantity = rust_decimal::Decimal::new(1_000_000, 0);

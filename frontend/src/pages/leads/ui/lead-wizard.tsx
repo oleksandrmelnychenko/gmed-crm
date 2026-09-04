@@ -274,10 +274,11 @@ type Draft = {
   healthcareConsent: boolean;
 };
 
-type ServiceLine = {
+export type ServiceLine = {
   id: string;
   agencyServiceId: string | null;
   clientReference: string | null;
+  managedByWizard?: boolean;
   description: string;
   catalogDescription: string;
   catalogUnitLabel: string;
@@ -678,6 +679,7 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
             typeof line.agency_service_id === "string" ? line.agency_service_id : null,
           clientReference:
             typeof line.client_reference === "string" ? line.client_reference : null,
+          managedByWizard: line.managed_by_wizard !== false,
           description: inputString(line.description),
           catalogDescription: inputString(line.catalog_description),
           catalogUnitLabel: inputString(line.catalog_unit_label),
@@ -790,6 +792,7 @@ function autosavePayload(
           id: line.id,
           agency_service_id: line.agencyServiceId,
           client_reference: line.clientReference,
+          managed_by_wizard: line.managedByWizard !== false,
           description: line.description,
           catalog_description: line.catalogDescription,
           catalog_unit_label: line.catalogUnitLabel,
@@ -1568,6 +1571,7 @@ function newLine(index = 1): ServiceLine {
     id: "line-" + Date.now().toString(36) + "-" + index,
     agencyServiceId: null,
     clientReference: null,
+    managedByWizard: true,
     description: "",
     catalogDescription: "",
     catalogUnitLabel: "",
@@ -1969,6 +1973,25 @@ function validLine(line: ServiceLine): boolean {
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
 }
 
+export function calculateServiceLineEstimate(serviceLines: ServiceLine[]) {
+  let net = 0;
+  let vat = 0;
+  let gross = 0;
+  serviceLines.filter(validLine).forEach((line) => {
+    const lineNet = Math.round(money(line.quantity) * money(line.price) * 100) / 100;
+    const lineVat = Math.round(lineNet * money(line.vat)) / 100;
+    const lineGross = Math.round((lineNet + lineVat) * 100) / 100;
+    net += lineNet;
+    vat += lineVat;
+    gross += lineGross;
+  });
+  return {
+    net: Math.round(net * 100) / 100,
+    vat: Math.round(vat * 100) / 100,
+    gross: Math.round(gross * 100) / 100,
+  };
+}
+
 function specializationValue(item: SpecializationItem) {
   return item.code || item.name_en;
 }
@@ -2000,23 +2023,13 @@ function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
     && currentLines.every((line, index) => line === quotedLines[index]);
 }
 
-function quoteMatchesCurrentServices(
+export function quoteMatchesCurrentServices(
   quote: QuoteItem,
   lines: ServiceLine[],
   totalGross: number,
 ) {
   return Math.abs(money(quote.total_gross) - totalGross) < 0.005
     && quoteMatchesServiceLines(quote, lines);
-}
-
-function quoteLineItemsPayload(lines: ServiceLine[]) {
-  return lines.filter(validLine).map((line) => ({
-    description: line.description.trim(),
-    notes: line.catalogDescription.trim() || undefined,
-    quantity: money(line.quantity),
-    unit_price: money(line.price),
-    vat_rate: money(line.vat),
-  }));
 }
 
 function validMoneyInput(value: string) {
@@ -2030,6 +2043,7 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     id: item.id,
     agencyServiceId: item.agency_service_id ?? null,
     clientReference: item.client_reference ?? null,
+    managedByWizard: item.client_reference?.startsWith("lead-wizard:") ?? false,
     description: item.description,
     catalogDescription:
       item.agency_service_description_snapshot
@@ -2041,9 +2055,22 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
       ?? "",
     currency: item.currency_snapshot ?? item.currency ?? "EUR",
     quantity: String(item.quantity ?? "1"),
-    price: String(item.unit_price ?? ""),
-    vat: String(item.vat_rate ?? "19"),
+    price: String(item.unit_price_snapshot ?? item.unit_price ?? ""),
+    vat: String(
+      item.is_cost_passthrough
+        ? 0
+        : item.vat_rate_snapshot ?? item.vat_rate ?? "19",
+    ),
   };
+}
+
+export function preferPersistedCommercialLines(
+  storedLines: ServiceLine[],
+  orderLeistungen: Leistung[] | undefined,
+) {
+  return orderLeistungen !== undefined
+    ? orderLeistungen.map(lineFromOrderLeistung)
+    : storedLines;
 }
 
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
@@ -2892,7 +2919,7 @@ export function LeadWizard({
       ]);
       const commercialLookupsPromise = Promise.all([
         fetchSpecializations().catch(() => []),
-        fetchAgencyServices("/agency-services?active_only=true").catch(() => []),
+        fetchAgencyServices("/agency-services?active_only=true", { forceFresh: true }).catch(() => []),
       ]);
       const leadOrdersPath = "/orders?lead_id=" + encodeURIComponent(leadId);
       const ordersPromise = Promise.all([
@@ -2987,7 +3014,9 @@ export function LeadWizard({
           : Promise.resolve(null),
       ]);
       if (!isCurrentReload()) return;
-      const paymentQuote = nextQuotes[0];
+      const paymentQuote = nextOrder
+        ? nextQuotes.find((item) => item.order_id === nextOrder.id)
+        : nextQuotes[0];
       const storedCommercialDraft = storedCommercialDraftFromLead(nextLead);
       const storedLeadDraft = draftFromLead(nextLead);
       const leadDraft: Draft = {
@@ -3006,11 +3035,10 @@ export function LeadWizard({
         ? mergePatientClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
         : caseDraft;
       const nextStep: StepId = "master_data";
-      const nextLines = storedCommercialDraft?.lines.length
-        ? storedCommercialDraft.lines
-        : nextOrderDetail?.leistungen.length
-          ? nextOrderDetail.leistungen.map(lineFromOrderLeistung)
-          : [];
+      const nextLines = preferPersistedCommercialLines(
+        storedCommercialDraft?.lines ?? [],
+        nextOrderDetail?.leistungen,
+      );
       const nextPrepayment = nextOrder
         ? Boolean(nextOrder.prepayment_required)
         : storedCommercialDraft?.prepayment ?? false;
@@ -3294,16 +3322,7 @@ export function LeadWizard({
 
   const order = orders[0] ?? null;
   const contract = contracts.find((item) => item.status !== "terminated") ?? null;
-  const estimate = useMemo(() => {
-    let net = 0;
-    let vat = 0;
-    lines.filter(validLine).forEach((line) => {
-      const lineNet = money(line.quantity) * money(line.price);
-      net += lineNet;
-      vat += lineNet * money(line.vat) / 100;
-    });
-    return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, gross: Math.round((net + vat) * 100) / 100 };
-  }, [lines]);
+  const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
   const orderQuotes = useMemo(
     () => quotes.filter((item) => !order || item.order_id === order.id),
     [order, quotes],
@@ -4519,12 +4538,33 @@ ${serviceCommentLines.join("\n")}`
         date_to: draft.programDateTo,
       })).id;
     }
+    const requestedPrepaymentAmount = flags.prepayment_amount
+      ?? (prepayment ? prepaymentAmount : undefined);
+    const normalizedPrepaymentAmount = requestedPrepaymentAmount?.trim();
+    await updateOrderCommercialBasis(orderId, {
+      contract_id: contractId,
+      prepayment_required: flags.prepayment_required ?? prepayment,
+      ...(!syncOrderServiceLines
+        && normalizedPrepaymentAmount
+        && validMoneyInput(normalizedPrepaymentAmount)
+        ? { prepayment_amount: normalizedPrepaymentAmount }
+        : {}),
+      signed_patient: flags.signed_patient ?? signedPatient,
+      signed_agency: flags.signed_agency ?? signedAgency,
+      needs_description: needsDescription,
+      date_from: draft.programDateFrom,
+      date_to: draft.programDateTo,
+    });
+
+    let persistedServiceLines = lines.filter(validLine);
     if (syncOrderServiceLines) {
-      const currentServiceLines = lines.filter(validLine).map((line) => ({
+      const currentServiceLines = lines
+        .filter((line) => validLine(line) && line.managedByWizard !== false)
+        .map((line) => ({
         line,
         clientReference:
           line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
-      }));
+        }));
       await Promise.all(
         currentServiceLines.map(({ line, clientReference }) =>
           createOrderLeistung(orderId, {
@@ -4542,26 +4582,36 @@ ${serviceCommentLines.join("\n")}`
         leadId,
         currentServiceLines.map((item) => item.clientReference),
       );
+      const persistedOrder = await fetchOrder(orderId);
+      persistedServiceLines = persistedOrder.leistungen
+        .map(lineFromOrderLeistung)
+        .filter(validLine);
+      if (persistedServiceLines.length === 0) {
+        throw new Error(tx(
+          "Заказ не сохранил ни одной корректной услуги",
+          "Der Auftrag enthält nach dem Speichern keine gültige Leistung",
+        ));
+      }
+      const persistedEstimate = calculateServiceLineEstimate(persistedServiceLines);
+      if (
+        normalizedPrepaymentAmount
+        && validMoneyInput(normalizedPrepaymentAmount)
+        && money(normalizedPrepaymentAmount) > persistedEstimate.gross + 0.005
+      ) {
+        throw new Error(tx(
+          "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
+          "Die erforderliche Vorauszahlung übersteigt den neu berechneten Auftragsbetrag. Passen Sie die Vorauszahlung an.",
+        ));
+      }
+      await updateOrderCommercialBasis(orderId, {
+        total_estimated: persistedEstimate.gross.toFixed(2),
+        ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
+          ? { prepayment_amount: normalizedPrepaymentAmount }
+          : {}),
+      });
+      setLines(persistedServiceLines);
     }
-    const requestedPrepaymentAmount = flags.prepayment_amount
-      ?? (prepayment ? prepaymentAmount : undefined);
-    const normalizedPrepaymentAmount = requestedPrepaymentAmount?.trim();
-    await updateOrderCommercialBasis(orderId, {
-      contract_id: contractId,
-      ...(syncOrderServiceLines
-        ? { total_estimated: estimate.gross.toFixed(2) }
-        : {}),
-      prepayment_required: flags.prepayment_required ?? prepayment,
-      ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
-        ? { prepayment_amount: normalizedPrepaymentAmount }
-        : {}),
-      signed_patient: flags.signed_patient ?? signedPatient,
-      signed_agency: flags.signed_agency ?? signedAgency,
-      needs_description: needsDescription,
-      date_from: draft.programDateFrom,
-      date_to: draft.programDateTo,
-    });
-    return { contractId, orderId };
+    return { contractId, orderId, serviceLines: persistedServiceLines };
   }
 
   async function prepareCommercial() {
@@ -4703,7 +4753,7 @@ ${serviceCommentLines.join("\n")}`
       ));
       return;
     }
-    if (prepayment && !validMoneyInput(paidAmount)) {
+    if (accept && prepayment && !validMoneyInput(paidAmount)) {
       setError("");
       setCommercialQuoteError(tx(
         "Предоплата должна быть числом не меньше нуля",
@@ -4711,7 +4761,14 @@ ${serviceCommentLines.join("\n")}`
       ));
       return;
     }
-    if (prepayment && !requiredPrepaymentValid) {
+    if (
+      prepayment
+      && (
+        !validMoneyInput(prepaymentAmount)
+        || requiredPrepayment <= 0
+        || (accept && !requiredPrepaymentValid)
+      )
+    ) {
       setError("");
       setCommercialQuoteError(tx(
         "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
@@ -4733,15 +4790,28 @@ ${serviceCommentLines.join("\n")}`
     setCommercialQuoteError("");
     try {
       const result = await ensureCommercial();
+      const persistedEstimate = calculateServiceLineEstimate(result.serviceLines);
+      if (prepayment && requiredPrepayment > persistedEstimate.gross + 0.005) {
+        await reload(false, true);
+        setCommercialQuoteError(tx(
+          "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
+          "Die erforderliche Vorauszahlung übersteigt den neu berechneten Auftragsbetrag. Passen Sie die Vorauszahlung an.",
+        ));
+        return;
+      }
+      if (
+        accept
+        && (!quote || !quoteMatchesCurrentServices(quote, result.serviceLines, persistedEstimate.gross))
+      ) {
+        await reload(false, true);
+        setCommercialQuoteError(tx(
+          "Цены заказа изменились по периоду программы. Пересчитайте смету перед подтверждением.",
+          "Die Auftragspreise haben sich für den Programmzeitraum geändert. Berechnen Sie den Kostenvoranschlag vor der Annahme neu.",
+        ));
+        return;
+      }
       if (!accept) {
-        const created = await createQuote(result.orderId, {
-          line_items: quoteLineItemsPayload(
-            lines.map((line) => ({
-              ...line,
-              catalogDescription: resolvedServiceCatalogDescription(line),
-            })),
-          ),
-        });
+        const created = await createQuote(result.orderId, {});
         const createdQuote: QuoteItem = {
           id: created.id,
           order_id: created.order_id,
@@ -4809,7 +4879,6 @@ ${serviceCommentLines.join("\n")}`
       !normalizedPrepaymentAmount
       || !validMoneyInput(normalizedPrepaymentAmount)
       || money(normalizedPrepaymentAmount) <= 0
-      || Boolean(quote && money(normalizedPrepaymentAmount) > quoteTotal + 0.005)
     );
     if (invalidRequiredPrepayment) {
       setValidationContext(null);
@@ -4833,26 +4902,40 @@ ${serviceCommentLines.join("\n")}`
         : "de";
       const commercial = await ensureCommercial(
         {},
-        templateId !== "cost_estimate",
+        templateId !== "cost_estimate" || validServiceLines.length > 0,
       );
+      const commercialServiceLines = commercial.serviceLines.filter(validLine);
+      const commercialEstimate = calculateServiceLineEstimate(commercialServiceLines);
+      if (
+        prepayment
+        && commercialServiceLines.length > 0
+        && requiredPrepayment > commercialEstimate.gross + 0.005
+      ) {
+        await reload(false, true);
+        setCommercialDocumentErrors((current) => ({
+          ...current,
+          [templateId]: tx(
+            "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
+            "Die erforderliche Vorauszahlung übersteigt den neu berechneten Auftragsbetrag. Passen Sie die Vorauszahlung an.",
+          ),
+        }));
+        return;
+      }
       const latestOrderQuote = quotes.find((item) => item.order_id === commercial.orderId);
       const latestQuoteIsCurrent = Boolean(
         latestOrderQuote
-        && quoteMatchesCurrentServices(latestOrderQuote, lines, estimate.gross),
+        && quoteMatchesCurrentServices(
+          latestOrderQuote,
+          commercialServiceLines,
+          commercialEstimate.gross,
+        ),
       );
       if (
         templateId !== "framework_contract"
         && templateId !== "cost_estimate"
         && !latestQuoteIsCurrent
       ) {
-        await createQuote(commercial.orderId, {
-          line_items: quoteLineItemsPayload(
-            lines.map((line) => ({
-              ...line,
-              catalogDescription: resolvedServiceCatalogDescription(line),
-            })),
-          ),
-        });
+        await createQuote(commercial.orderId, {});
       }
       const generated = await generateDocument({
         template_id: templateId,
@@ -4877,14 +4960,14 @@ ${serviceCommentLines.join("\n")}`
           estimate_total: templateId === "cost_estimate"
             ? usesSpecializationWorkTypes
               ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-              : `${formatMoneyValue(estimate.gross, "de")} EUR`
-            : `${estimate.gross.toFixed(2)} EUR`,
+              : `${formatMoneyValue(commercialEstimate.gross, "de")} EUR`
+            : `${commercialEstimate.gross.toFixed(2)} EUR`,
           service_lines: templateId === "cost_estimate" && usesSpecializationWorkTypes
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
                 draft.costEstimateAdditionalLanguage,
               )
-            : validServiceLines.map((line) => ({
+            : commercialServiceLines.map((line) => ({
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),

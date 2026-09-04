@@ -291,6 +291,10 @@ fn decimal_to_string(value: Decimal) -> String {
     value.round_dp(2).normalize().to_string()
 }
 
+fn quantity_to_string(value: Decimal) -> String {
+    value.round_dp(4).normalize().to_string()
+}
+
 fn quote_decimal_value(value: Option<&Value>) -> Decimal {
     value
         .and_then(|value| match value {
@@ -299,6 +303,74 @@ fn quote_decimal_value(value: Option<&Value>) -> Decimal {
             _ => None,
         })
         .unwrap_or(Decimal::ZERO)
+}
+
+fn strict_quote_decimal_value(value: Option<&Value>) -> Option<Decimal> {
+    value.and_then(|value| match value {
+        Value::String(value) => value.parse::<Decimal>().ok(),
+        Value::Number(value) => value.to_string().parse::<Decimal>().ok(),
+        _ => None,
+    })
+}
+
+fn quote_line_signature(
+    description: &str,
+    quantity: Decimal,
+    unit_price: Decimal,
+    vat_rate: Decimal,
+    is_cost_passthrough: bool,
+) -> String {
+    json!([
+        description.trim(),
+        quantity_to_string(quantity),
+        decimal_to_string(unit_price),
+        decimal_to_string(vat_rate),
+        is_cost_passthrough,
+    ])
+    .to_string()
+}
+
+fn normalized_quote_line_signatures(items: &[QuoteLineItem]) -> Vec<String> {
+    let mut signatures = items
+        .iter()
+        .filter_map(|item| {
+            Some(quote_line_signature(
+                &item.description,
+                item.quantity.parse::<Decimal>().ok()?,
+                item.unit_price.parse::<Decimal>().ok()?,
+                item.vat_rate.parse::<Decimal>().ok()?,
+                item.is_cost_passthrough,
+            ))
+        })
+        .collect::<Vec<_>>();
+    signatures.sort();
+    signatures
+}
+
+fn stored_quote_line_signatures(value: &Value) -> Option<Vec<String>> {
+    let items = value.as_array()?;
+    let mut signatures = Vec::with_capacity(items.len());
+    for item in items {
+        let item = item.as_object()?;
+        signatures.push(quote_line_signature(
+            item.get("description")?.as_str()?,
+            strict_quote_decimal_value(item.get("quantity"))?,
+            strict_quote_decimal_value(item.get("unit_price"))?,
+            strict_quote_decimal_value(item.get("vat_rate"))?,
+            item.get("is_cost_passthrough")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ));
+    }
+    signatures.sort();
+    Some(signatures)
+}
+
+fn quote_lines_match_persisted(value: &Value, persisted: &[QuoteLineItem]) -> bool {
+    let Some(stored) = stored_quote_line_signatures(value) else {
+        return false;
+    };
+    !stored.is_empty() && stored == normalized_quote_line_signatures(persisted)
 }
 
 fn add_remaining_quote_quantities(mut line_items: Value, allocated_quantities: &Value) -> Value {
@@ -2107,8 +2179,12 @@ fn normalize_custom_line_items(
             return Err("Line item unit_price must be non-negative");
         }
 
-        let quantity =
-            Decimal::try_from(item.quantity).map_err(|_| "Invalid line item quantity")?;
+        let quantity = Decimal::try_from(item.quantity)
+            .map_err(|_| "Invalid line item quantity")?
+            .round_dp(4);
+        if quantity <= Decimal::ZERO {
+            return Err("Line item quantity is below the supported precision");
+        }
         let unit_price =
             Decimal::try_from(item.unit_price).map_err(|_| "Invalid line item unit_price")?;
         let is_cost_passthrough = item.is_cost_passthrough.unwrap_or(false);
@@ -2118,13 +2194,16 @@ fn normalize_custom_line_items(
             Decimal::try_from(item.vat_rate.unwrap_or(19.0))
                 .map_err(|_| "Invalid line item vat_rate")?
         };
+        if vat_rate < Decimal::ZERO || vat_rate > Decimal::new(100, 0) {
+            return Err("Line item vat_rate must be between 0 and 100");
+        }
         let line_net = (quantity * unit_price).round_dp(2);
         let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
         let line_gross = (line_net + line_vat).round_dp(2);
 
         normalized.push(QuoteLineItem {
             description: item.description.trim().to_string(),
-            quantity: decimal_to_string(quantity),
+            quantity: quantity_to_string(quantity),
             unit_price: decimal_to_string(unit_price),
             vat_rate: decimal_to_string(vat_rate),
             is_cost_passthrough,
@@ -2142,32 +2221,13 @@ fn normalize_custom_line_items(
     Ok(normalized)
 }
 
-async fn load_quote_line_items_from_order(
-    state: &AppState,
-    order_id: Uuid,
-) -> Result<Vec<QuoteLineItem>, axum::response::Response> {
-    let rows = sqlx::query(
-        r#"SELECT id, description, agency_service_description_snapshot,
-                  quantity, unit_price, vat_rate, is_cost_passthrough,
-                  external_document_id, provider_id, doctor_id, notes
-           FROM order_leistungen
-           WHERE order_id = $1
-             AND status <> 'invoiced'
-           ORDER BY created_at"#,
-    )
-    .bind(order_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, order_id = %order_id, "load quote line items");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote")
-    })?;
-
+fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<QuoteLineItem> {
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
         let quantity = row
             .try_get::<Decimal, _>("quantity")
-            .unwrap_or(Decimal::ZERO);
+            .unwrap_or(Decimal::ZERO)
+            .round_dp(4);
         let unit_price = row
             .try_get::<Decimal, _>("unit_price")
             .unwrap_or(Decimal::ZERO);
@@ -2204,7 +2264,7 @@ async fn load_quote_line_items_from_order(
 
         items.push(QuoteLineItem {
             description: row.try_get::<String, _>("description").unwrap_or_default(),
-            quantity: decimal_to_string(quantity),
+            quantity: quantity_to_string(quantity),
             unit_price: decimal_to_string(unit_price),
             vat_rate: decimal_to_string(vat_rate),
             is_cost_passthrough,
@@ -2225,7 +2285,29 @@ async fn load_quote_line_items_from_order(
         });
     }
 
-    Ok(items)
+    items
+}
+
+async fn load_quote_line_items_from_order_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT id, description, agency_service_description_snapshot,
+                  quantity, unit_price_snapshot AS unit_price,
+                  vat_rate_snapshot AS vat_rate, is_cost_passthrough,
+                  external_document_id, provider_id, doctor_id, notes
+           FROM order_leistungen
+           WHERE order_id = $1
+             AND status <> 'invoiced'
+           ORDER BY created_at
+           FOR SHARE"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    Ok(quote_line_items_from_order_rows(rows))
 }
 
 async fn load_quote_subject(
@@ -2551,26 +2633,47 @@ async fn create_quote(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let line_items = match body.line_items {
-        Some(items) if !items.is_empty() => match normalize_custom_line_items(&items) {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin quote create transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+        }
+    };
+    let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
+        Ok(items) if !items.is_empty() => items,
+        Ok(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "No order services available for quote",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, %order_id, "load canonical order services for quote");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+        }
+    };
+    if let Some(items) = body.line_items.as_ref().filter(|items| !items.is_empty()) {
+        let requested = match normalize_custom_line_items(items) {
             Ok(items) => items,
             Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-        },
-        _ => match load_quote_line_items_from_order(&state, order_id).await {
-            Ok(items) if !items.is_empty() => items,
-            Ok(_) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "No order services available for quote",
-                );
-            }
-            Err(resp) => return resp,
-        },
+        };
+        if normalized_quote_line_signatures(&requested)
+            != normalized_quote_line_signatures(&persisted_line_items)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Quote lines do not match the current order services",
+            );
+        }
     };
+    // Persist only the canonical order snapshot. Client-supplied lines are a
+    // concurrency guard, not a second commercial source of truth.
+    let line_items = persisted_line_items;
 
     let totals = compute_quote_totals(&line_items);
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('quote_number_seq')")
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await
     {
         Ok(value) => value,
@@ -2585,14 +2688,6 @@ async fn create_quote(
         Ok(value) => value,
         Err(e) => {
             tracing::error!(error = %e, "serialize quote line items");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
-        }
-    };
-
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin quote create transaction");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
         }
     };
@@ -2651,14 +2746,29 @@ async fn create_quote(
         );
     }
 
-    if let Err(e) = sqlx::query("UPDATE orders SET total_estimated = $2 WHERE id = $1")
-        .bind(order_id)
-        .bind(totals.total_gross)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, order_id = %order_id, "update order total_estimated from quote");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+    let updated_order = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE orders
+           SET total_estimated = $2
+           WHERE id = $1
+             AND (prepayment_amount IS NULL OR prepayment_amount <= $2)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(totals.total_gross)
+    .fetch_optional(&mut *tx)
+    .await;
+    match updated_order {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "prepayment_amount cannot exceed the current quote total",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, %order_id, "update order total_estimated from quote");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+        }
     }
 
     // TODO(audit-migrate): transactional — coupled to quote creation via
@@ -2850,9 +2960,13 @@ async fn update_quote_status(
         return resp;
     }
 
-    let paid_amount = body
-        .paid_amount
-        .and_then(|value| Decimal::try_from(value).ok());
+    let paid_amount = match body.paid_amount {
+        Some(value) => match Decimal::try_from(value) {
+            Ok(value) => Some(value.round_dp(2)),
+            Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount"),
+        },
+        None => None,
+    };
     let paid_at = match paid_amount {
         Some(value) if value > Decimal::ZERO => Some(Utc::now()),
         _ => None,
@@ -2865,6 +2979,74 @@ async fn update_quote_status(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
     };
+
+    let quote_context = match sqlx::query(
+        r#"SELECT q.order_id, q.total_gross, q.paid_amount, q.line_items, o.total_estimated
+           FROM quotes q
+           JOIN orders o ON o.id = q.order_id
+           WHERE q.id = $1
+           FOR UPDATE OF q, o"#,
+    )
+    .bind(quote_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "lock quote commercial context");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let order_id = quote_context
+        .try_get::<Uuid, _>("order_id")
+        .unwrap_or_default();
+    let quote_total = quote_context
+        .try_get::<Decimal, _>("total_gross")
+        .unwrap_or(Decimal::ZERO);
+    let current_paid_amount = quote_context
+        .try_get::<Decimal, _>("paid_amount")
+        .unwrap_or(Decimal::ZERO);
+    if paid_amount.unwrap_or(current_paid_amount) > quote_total {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "paid_amount cannot exceed the current quote total",
+        );
+    }
+
+    if body.status == "accepted" {
+        let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id)
+            .await
+        {
+            Ok(items) if !items.is_empty() => items,
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Quote cannot be accepted without current order services",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %quote_id, %order_id, "load current order services before quote acceptance");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+            }
+        };
+        let stored_line_items = quote_context
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| json!([]));
+        let current_total = compute_quote_totals(&persisted_line_items).total_gross;
+        let order_total = quote_context
+            .try_get::<Option<Decimal>, _>("total_estimated")
+            .unwrap_or_default();
+        if !quote_lines_match_persisted(&stored_line_items, &persisted_line_items)
+            || quote_total != current_total
+            || order_total != Some(current_total)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Quote no longer matches the current order services",
+            );
+        }
+    }
 
     let updated_row = match sqlx::query(
         r#"UPDATE quotes

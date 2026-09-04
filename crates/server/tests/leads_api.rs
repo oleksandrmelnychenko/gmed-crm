@@ -1325,6 +1325,89 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
 }
 
 #[tokio::test]
+async fn lead_readiness_normalizes_cost_passthrough_vat() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Passthrough",
+            "last_name": "Quote",
+            "email": format!("passthrough-quote-{tag}@test.local"),
+            "phone": "+49111000002",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    make_lead_ready_for_qualification(&app, &pm, &lead_id.to_string()).await;
+    let (status, qualified) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    sqlx::query("UPDATE order_leistungen SET is_cost_passthrough = true WHERE id = $1")
+        .bind(artifacts.service_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"UPDATE quotes
+           SET total_vat = 0,
+               total_gross = 100,
+               paid_amount = 100,
+               line_items = '[{"description":"Initial orthopedic coordination","quantity":1,"unit_price":100,"vat_rate":0,"is_cost_passthrough":true}]'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(artifacts.quote_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, status, client_reference
+           ) VALUES ($1, 'Already invoiced legacy line', 1, 999, 19, 'invoiced', $2)"#,
+    )
+    .bind(artifacts.order_id)
+    .bind(format!("lead-onboarding:{lead_id}:service:invoiced"))
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE orders SET total_estimated = 100, prepayment_amount = 100 WHERE id = $1")
+        .bind(artifacts.order_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+
+    let (status, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    let check_passed = |key: &str| {
+        lead["readiness"]["checks"]
+            .as_array()
+            .and_then(|checks| checks.iter().find(|check| check["key"] == key))
+            .and_then(|check| check["passed"].as_bool())
+            .unwrap_or(false)
+    };
+    assert!(check_passed("quote_accepted"), "{lead}");
+    assert!(check_passed("prepayment_ready"), "{lead}");
+}
+
+#[tokio::test]
 async fn wizard_convert_uses_the_full_readiness_gate() {
     let Some(app) = test_app().await else {
         return;

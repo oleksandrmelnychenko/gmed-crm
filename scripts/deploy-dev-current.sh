@@ -196,7 +196,10 @@ SWAPPED=1
 compose "$REPO_DIR" up -d --no-build postgres clinical-document-parser backend
 
 backend_healthy=0
-for _attempt in $(seq 1 30); do
+# Migrations and the first ClamAV-backed startup can occasionally take longer
+# than one minute on the DEV host. Keep the old release serving while allowing
+# the staged backend up to three minutes to pass its first health probe.
+for _attempt in $(seq 1 90); do
   backend_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' gmed-crm-backend-1)"
   if [[ "$backend_status" == "healthy" ]]; then
     backend_healthy=1

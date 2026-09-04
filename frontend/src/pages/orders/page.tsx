@@ -2078,7 +2078,7 @@ function useOrdersPageContent() {
 
     let cancelled = false;
     setAgencyServicesLoaded(false);
-    void fetchAgencyServices("/agency-services?active_only=true")
+    void fetchAgencyServices("/agency-services?active_only=true", { forceFresh: true })
       .then((items) => {
         if (!cancelled) setAgencyServices(items);
       })
