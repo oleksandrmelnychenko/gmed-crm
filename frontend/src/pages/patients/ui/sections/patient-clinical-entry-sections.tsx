@@ -158,9 +158,9 @@ function fieldToneClasses(tone: SectionTone) {
   }
   return {
     section: "border-border/70 bg-card",
-    header: "border-border/60",
+    header: "border-border/60 bg-muted/20",
     row: "border-border/50 bg-background",
-    addButton: "",
+    addButton,
   };
 }
 
@@ -408,11 +408,14 @@ function ClinicalListSection<T extends { id?: string | null }>({
   const toneClasses = fieldToneClasses(tone);
   const indexed = list.map((item, index) => ({ item, index }));
   return (
-    <section className={cn("rounded-xl border", toneClasses.section)}>
-      <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3", toneClasses.header)}>
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-          <Badge variant="outline" className="rounded-full text-[11px]">{list.length}</Badge>
+    <section className={cn("overflow-hidden rounded-lg border", toneClasses.section)}>
+      <header className={cn("flex flex-wrap items-center justify-between gap-3 border-b px-3.5 py-2.5", toneClasses.header)}>
+        <div className="flex min-w-0 items-center gap-2">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+          <Badge variant="outline" className="h-5 rounded-full bg-background px-2 text-[10px] font-medium tabular-nums">
+            {list.length}
+          </Badge>
         </div>
         <div className={cn("flex flex-wrap items-center justify-end gap-2", headerAction && "w-full sm:w-auto")}>
           {headerAction}
@@ -421,7 +424,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
               type="button"
               size="sm"
               variant="outline"
-              className={cn("h-8 rounded-lg", toneClasses.addButton)}
+              className={cn("h-8 rounded-lg px-3", toneClasses.addButton)}
               onClick={() => setEditing({ index: null, draft: blank() })}
             >
               <Plus className="size-3.5" />
@@ -431,7 +434,7 @@ function ClinicalListSection<T extends { id?: string | null }>({
         </div>
       </header>
 
-      <div className="space-y-1.5 p-3">
+      <div className={cn(listView && list.length > 0 ? "min-w-0" : "space-y-1.5 p-3")}>
         {list.length === 0 ? (
           <p className="px-1 py-4 text-center text-xs text-muted-foreground">
             {tx("Пока нет записей", "Noch keine Einträge")}
@@ -641,16 +644,20 @@ export function PatientMedicationTable({
 }) {
   const sections = groupedMedicationItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
   const columnCount = canManage ? 12 : 11;
-  const headCell = "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const headDoseCell = "px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const bodyCell = "break-words px-2.5 py-2 align-top text-foreground";
-  const bodyDoseCell = "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
+  const headCell = "px-2.5 py-2 text-xs font-medium text-muted-foreground";
+  const headDoseCell = "px-1.5 py-2 text-center text-xs font-medium text-muted-foreground";
+  const bodyCell = "break-words px-2.5 py-2.5 align-middle leading-snug text-foreground";
+  const bodyDoseCell = "px-1.5 py-2.5 text-center align-middle font-mono tabular-nums text-foreground";
   const dose = (value: string | null) => value?.trim() ?? "";
+  const doseValue = (value: string | null) => {
+    const normalized = dose(value);
+    return normalized || <span aria-hidden="true" className="text-muted-foreground/35">—</span>;
+  };
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
-      <table className="w-full min-w-[1080px] border-collapse text-left text-xs">
-        <thead className="border-b border-border bg-muted/40">
+    <div className="overflow-x-auto bg-card">
+      <table className="w-full min-w-[1040px] border-collapse text-left text-xs">
+        <thead className="border-b border-border/40 bg-card">
           <tr>
             <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
             <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
@@ -663,15 +670,19 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Ед.", "Einheit")}</th>
             <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
-            {canManage ? <th scope="col" className="px-2 py-2"><span className="sr-only">{tx("Действия", "Aktionen")}</span></th> : null}
+            {canManage ? (
+              <th scope="col" className="px-2.5 py-2 text-right text-xs font-medium text-muted-foreground">
+                {tx("Действия", "Aktionen")}
+              </th>
+            ) : null}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border/60">
+        <tbody className="divide-y divide-border/30">
           {sections.map((section) => (
             <Fragment key={section.key}>
               {section.label && section.key !== "dauer" ? (
                 <tr>
-                  <td colSpan={columnCount} className="bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <td colSpan={columnCount} className="bg-muted/55 px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground">
                     {section.label}
                   </td>
                 </tr>
@@ -688,11 +699,11 @@ export function PatientMedicationTable({
                         ? "bg-rose-50/70"
                         : item.on_hold
                           ? "bg-amber-50/70"
-                          : "hover:bg-muted/30",
+                        : "even:bg-muted/20 hover:bg-muted/45",
                     )}
                   >
-                    <td className={cn(bodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
-                    <td className={cn(bodyCell, "font-medium")}>
+                    <td className={cn(bodyCell, "whitespace-pre-line font-medium")}>{item.wirkstoff || "—"}</td>
+                    <td className={bodyCell}>
                       {item.handelsname || tx("Без названия", "Ohne Namen")}
                       {item.einnahme_bis ? (
                         <span className={cn(
@@ -723,16 +734,20 @@ export function PatientMedicationTable({
                       </td>
                     ) : (
                       <>
-                        <td className={bodyDoseCell}>{dose(item.dose_morgens)}</td>
-                        <td className={bodyDoseCell}>{dose(item.dose_mittags)}</td>
-                        <td className={bodyDoseCell}>{dose(item.dose_abends)}</td>
-                        <td className={bodyDoseCell}>{dose(item.dose_nachts)}</td>
+                        <td className={bodyDoseCell}>{doseValue(item.dose_morgens)}</td>
+                        <td className={bodyDoseCell}>{doseValue(item.dose_mittags)}</td>
+                        <td className={bodyDoseCell}>{doseValue(item.dose_abends)}</td>
+                        <td className={bodyDoseCell}>{doseValue(item.dose_nachts)}</td>
                       </>
                     )}
                     <td className={cn(bodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
                     <td className={bodyCell}>
                       {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
-                      {attribution ? <span className="mt-0.5 block break-words text-[10px] text-muted-foreground">{attribution}</span> : null}
+                      {attribution ? (
+                        <span className="mt-1 block max-w-full break-words text-[10px] leading-snug text-muted-foreground">
+                          {attribution}
+                        </span>
+                      ) : null}
                     </td>
                     <td className={bodyCell}>{item.grund || ""}</td>
                     {canManage ? <td className="px-2 py-2 text-right align-top">{renderActions(item, index)}</td> : null}

@@ -4,22 +4,43 @@ import {
   localizedNotificationCopy,
   notificationHrefForRole,
   oldestNewLead,
+  sortNewLeadQueue,
   type Notification,
 } from "./topbar-data";
+
+const queueLead = (id: string, createdAt: string) => ({
+  id,
+  first_name: id,
+  last_name: "Lead",
+  country: null,
+  created_at: createdAt,
+});
 
 describe("oldestNewLead", () => {
   it("selects the earliest unprocessed lead for FIFO handling", () => {
     expect(
       oldestNewLead([
-        { id: "lead-newest", created_at: "2026-09-04T10:00:00Z" },
-        { id: "lead-oldest", created_at: "2026-08-30T10:00:00Z" },
-        { id: "lead-middle", created_at: "2026-09-01T10:00:00Z" },
+        queueLead("lead-newest", "2026-09-04T10:00:00Z"),
+        queueLead("lead-oldest", "2026-08-30T10:00:00Z"),
+        queueLead("lead-middle", "2026-09-01T10:00:00Z"),
       ])?.id,
     ).toBe("lead-oldest");
   });
 
   it("returns null for an empty queue", () => {
     expect(oldestNewLead([])).toBeNull();
+  });
+});
+
+describe("sortNewLeadQueue", () => {
+  it("orders the selectable queue from oldest to newest", () => {
+    expect(
+      sortNewLeadQueue([
+        queueLead("lead-newest", "2026-09-04T10:00:00Z"),
+        queueLead("lead-oldest", "2026-08-30T10:00:00Z"),
+        queueLead("lead-middle", "2026-09-01T10:00:00Z"),
+      ]).map((lead) => lead.id),
+    ).toEqual(["lead-oldest", "lead-middle", "lead-newest"]);
   });
 });
 

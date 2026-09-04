@@ -62,6 +62,9 @@ export interface ChatMessage {
 
 export interface NewLeadQueueItem {
   id: string;
+  first_name: string;
+  last_name: string;
+  country: string | null;
   created_at: string;
 }
 
@@ -76,10 +79,25 @@ export function oldestNewLead(items: NewLeadQueueItem[]) {
   }, null);
 }
 
-export async function fetchOldestNewLead() {
+export function sortNewLeadQueue(items: NewLeadQueueItem[]) {
+  return [...items].sort((left, right) => {
+    const leftTime = Date.parse(left.created_at);
+    const rightTime = Date.parse(right.created_at);
+    if (!Number.isFinite(leftTime)) return 1;
+    if (!Number.isFinite(rightTime)) return -1;
+    return leftTime - rightTime;
+  });
+}
+
+export async function fetchNewLeadQueue() {
   const items = await apiFetch<NewLeadQueueItem[]>("/leads?status=new", {
     forceFresh: true,
   });
+  return sortNewLeadQueue(items);
+}
+
+export async function fetchOldestNewLead() {
+  const items = await fetchNewLeadQueue();
   return oldestNewLead(items);
 }
 

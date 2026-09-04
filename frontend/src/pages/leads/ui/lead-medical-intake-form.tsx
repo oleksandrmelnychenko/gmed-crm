@@ -34,11 +34,11 @@ type LeadMedicalIntakeFormProps = {
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
   specializations: SpecializationItem[];
-  onNarrativeChange: (value: ClinicalNarrative) => void;
-  onDiagnosesChange: (value: ClinicalDiagnosis[]) => void;
-  onMedicationsChange: (value: ClinicalMedication[]) => void;
-  onAllergiesChange: (value: ClinicalWarning[]) => void;
-  onCavesChange: (value: ClinicalWarning[]) => void;
+  onNarrativeChange: (value: ClinicalNarrative) => void | Promise<void>;
+  onDiagnosesChange: (value: ClinicalDiagnosis[]) => void | Promise<void>;
+  onMedicationsChange: (value: ClinicalMedication[]) => void | Promise<void>;
+  onAllergiesChange: (value: ClinicalWarning[]) => void | Promise<void>;
+  onCavesChange: (value: ClinicalWarning[]) => void | Promise<void>;
 };
 
 function yesNoValue(value: boolean | null | undefined, tx: Tx) {
@@ -98,7 +98,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          onAllergiesChange(next);
+          await onAllergiesChange(next);
           return next;
         }}
       />
@@ -108,7 +108,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          onCavesChange(next);
+          await onCavesChange(next);
           return next;
         }}
       />
@@ -120,7 +120,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          onDiagnosesChange(next);
+          await onDiagnosesChange(next);
           return next;
         }}
       />
@@ -132,7 +132,7 @@ export function LeadMedicalIntakeForm({
           lang={lang}
           requireCurrent
           onSave={async (next) => {
-            onNarrativeChange(next);
+            await onNarrativeChange(next);
             return next;
           }}
           loadHistory={async () => (narrative ? [narrative] : [])}
@@ -144,7 +144,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          onMedicationsChange(next);
+          await onMedicationsChange(next);
           return next;
         }}
       />

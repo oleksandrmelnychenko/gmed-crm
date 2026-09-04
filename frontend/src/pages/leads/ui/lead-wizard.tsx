@@ -1285,6 +1285,54 @@ function mergePatientClinicalDraft(
   };
 }
 
+type LeadClinicalDraftSection =
+  | "narrative"
+  | "diagnoses"
+  | "medications"
+  | "allergies"
+  | "caves";
+
+const LEAD_CLINICAL_DRAFT_SECTIONS: readonly LeadClinicalDraftSection[] = [
+  "narrative",
+  "diagnoses",
+  "medications",
+  "allergies",
+  "caves",
+];
+
+function applyPersistedClinicalSection(
+  draft: Draft,
+  persisted: PatientClinicalProfile,
+  section: LeadClinicalDraftSection,
+): Draft {
+  switch (section) {
+    case "narrative":
+      return {
+        ...draft,
+        anamnese: persisted.narrative?.anamnese_aktuelle ?? "",
+        narrative: persisted.narrative,
+      };
+    case "diagnoses":
+      return { ...draft, diagnoses: persisted.diagnoses };
+    case "medications":
+      return { ...draft, medications: persisted.medications };
+    case "allergies":
+      return { ...draft, allergies: persisted.allergien };
+    case "caves":
+      return { ...draft, caves: persisted.cave };
+  }
+}
+
+function applyPersistedClinicalProfile(
+  draft: Draft,
+  persisted: PatientClinicalProfile,
+): Draft {
+  return LEAD_CLINICAL_DRAFT_SECTIONS.reduce(
+    (current, section) => applyPersistedClinicalSection(current, persisted, section),
+    draft,
+  );
+}
+
 function draftFromLead(lead: LeadDetail): Draft {
   const clinical = clinicalRowsFromLead(lead);
   return {
@@ -3199,14 +3247,89 @@ export function LeadWizard({
       }
       const persistedClinical = await fetchPatientClinical(patientId);
       setDraft((previous) => previous
-        ? mergePatientClinicalDraft(previous, persistedClinical, caseId)
-        : mergePatientClinicalDraft(safeDraft, persistedClinical, caseId));
+        ? applyPersistedClinicalProfile(previous, persistedClinical)
+        : applyPersistedClinicalProfile(safeDraft, persistedClinical));
       return caseId;
     };
     const queued = medicalSaveQueueRef.current.then(run, run);
     medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
     return queued;
   }, [ensureProspect, leadId, tx]);
+
+  const persistClinicalDraftSection = useCallback(async (
+    section: LeadClinicalDraftSection,
+    medicalDraft: Draft,
+  ) => {
+    const run = async () => {
+      if (!leadId) throw new Error("Lead is not selected");
+      const { patientId, caseId } = await ensureProspect(medicalDraft);
+      const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
+
+      switch (section) {
+        case "narrative":
+          if (!medicalDraft.narrative) {
+            throw new Error(tx("Анамнез не заполнен", "Anamnese ist nicht ausgefüllt"));
+          }
+          await savePatientNarrative(patientId, {
+            ...medicalDraft.narrative,
+            case_id: medicalDraft.narrative.case_id ?? caseId,
+            is_active: true,
+          });
+          break;
+        case "diagnoses":
+          await savePatientDiagnoses(
+            patientId,
+            medicalDraft.diagnoses.filter((item) => item.label.trim()),
+            saveMode,
+          );
+          break;
+        case "medications":
+          await savePatientMedications(
+            patientId,
+            medicalDraft.medications.filter((item) => item.wirkstoff?.trim()),
+            saveMode,
+          );
+          break;
+        case "allergies":
+          await savePatientClinicalWarnings(
+            patientId,
+            "allergie",
+            medicalDraft.allergies.filter((item) => item.label.trim()),
+            saveMode,
+          );
+          break;
+        case "caves":
+          await savePatientClinicalWarnings(
+            patientId,
+            "cave",
+            medicalDraft.caves.filter((item) => item.label.trim()),
+            saveMode,
+          );
+          break;
+      }
+
+      const persistedClinical = await fetchPatientClinical(patientId);
+      setDraft((previous) => applyPersistedClinicalSection(
+        previous ?? medicalDraft,
+        persistedClinical,
+        section,
+      ));
+      return caseId;
+    };
+
+    const queued = medicalSaveQueueRef.current.then(run, run);
+    medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
+    return queued;
+  }, [ensureProspect, leadId, tx]);
+
+  async function saveClinicalDraftChange(
+    section: LeadClinicalDraftSection,
+    nextDraft: Draft,
+  ) {
+    setError("");
+    clearServerValidation();
+    await persistClinicalDraftSection(section, nextDraft);
+  }
 
   const persistSnapshot = useCallback((
     snapshot: AutosaveSnapshot,
@@ -5462,19 +5585,15 @@ ${serviceCommentLines.join("\n")}`
                   providers={clinicalProviders}
                   allDoctors={allDoctors}
                   specializations={specialties}
-                  onNarrativeChange={(value) => {
-                    setError("");
-                    clearServerValidation();
-                    setDraft((current) => current ? {
-                      ...current,
-                      narrative: value,
-                      anamnese: value.anamnese_aktuelle ?? "",
-                    } : current);
-                  }}
-                  onDiagnosesChange={(value) => patch("diagnoses", value)}
-                  onMedicationsChange={(value) => patch("medications", value)}
-                  onAllergiesChange={(value) => patch("allergies", value)}
-                  onCavesChange={(value) => patch("caves", value)}
+                  onNarrativeChange={(value) => saveClinicalDraftChange("narrative", {
+                    ...draft,
+                    narrative: value,
+                    anamnese: value.anamnese_aktuelle ?? "",
+                  })}
+                  onDiagnosesChange={(value) => saveClinicalDraftChange("diagnoses", { ...draft, diagnoses: value })}
+                  onMedicationsChange={(value) => saveClinicalDraftChange("medications", { ...draft, medications: value })}
+                  onAllergiesChange={(value) => saveClinicalDraftChange("allergies", { ...draft, allergies: value })}
+                  onCavesChange={(value) => saveClinicalDraftChange("caves", { ...draft, caves: value })}
                 />
               </Suspense>
             </section>

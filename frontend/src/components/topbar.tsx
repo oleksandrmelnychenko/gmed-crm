@@ -41,11 +41,13 @@ import {
   type ChatMessage,
   type Notification,
   dismissActiveAnnouncement,
-  fetchOldestNewLead,
+  fetchNewLeadQueue,
+  type NewLeadQueueItem,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
 import { AiMark } from "@/components/ui/ai-mark";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import {
   Dialog,
   DialogContent,
@@ -164,11 +166,34 @@ export function Topbar() {
   );
   const newLeads = useNewLeadCounter(showLeadShortcut);
   const [leadShortcutBusy, setLeadShortcutBusy] = useState(false);
+  const [leadQueueMounted, setLeadQueueMounted] = useState(false);
+  const [leadQueueOpen, setLeadQueueOpen] = useState(false);
+  const [leadQueueClosing, setLeadQueueClosing] = useState(false);
+  const [leadQueue, setLeadQueue] = useState<NewLeadQueueItem[]>([]);
+  const [leadQueueError, setLeadQueueError] = useState(false);
+  const leadQueueCloseTimer = useRef<number | null>(null);
   const canOpenLeadWizard = user?.role === "ceo" || user?.role === "patient_manager";
+  const leadQueueCopy = lang === "de"
+    ? {
+        title: "Neue Leads",
+        choose: "Lead auswählen",
+        oldest: "Ältesten öffnen",
+        all: "Alle Leads",
+        empty: "Keine neuen Leads",
+        failed: "Lead-Liste konnte nicht geladen werden.",
+      }
+    : {
+        title: "Новые лиды",
+        choose: "Выберите лида",
+        oldest: "Открыть самого раннего",
+        all: "Все лиды",
+        empty: "Новых лидов нет",
+        failed: "Не удалось загрузить список лидов.",
+      };
   const leadShortcutTitle = newLeads > 0
     ? lang === "de"
-      ? `${newLeads} neue Leads. Ältesten öffnen`
-      : `${newLeads} новых лидов. Открыть самый ранний`
+      ? `${newLeads} neue Leads. Lead auswählen`
+      : `${newLeads} новых лидов. Выбрать лида`
     : t.leads_title;
   const onlineUsersWithSelf =
     !isPatientPortal && user
@@ -200,18 +225,66 @@ export function Topbar() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [usersOpen, setUsersOpen] = useState(false);
 
+  const openLead = useCallback((leadId: string) => {
+    const query = new URLSearchParams({ lead: leadId });
+    if (canOpenLeadWizard) query.set("view", "wizard");
+    navigate(`/leads?${query.toString()}`);
+  }, [canOpenLeadWizard, navigate]);
+
+  const closeLeadQueue = useCallback(() => {
+    setLeadQueueOpen(false);
+    setLeadQueueClosing(true);
+    if (leadQueueCloseTimer.current !== null) {
+      window.clearTimeout(leadQueueCloseTimer.current);
+    }
+    const configuredDuration = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"),
+    );
+    leadQueueCloseTimer.current = window.setTimeout(() => {
+      setLeadQueueMounted(false);
+      setLeadQueueClosing(false);
+      leadQueueCloseTimer.current = null;
+    }, Number.isFinite(configuredDuration) ? configuredDuration : 150);
+  }, []);
+
+  const showLeadQueue = useCallback(() => {
+    if (leadQueueCloseTimer.current !== null) {
+      window.clearTimeout(leadQueueCloseTimer.current);
+      leadQueueCloseTimer.current = null;
+    }
+    setLeadQueueMounted(true);
+    setLeadQueueClosing(false);
+    window.requestAnimationFrame(() => setLeadQueueOpen(true));
+    setLeadShortcutBusy(true);
+    setLeadQueueError(false);
+    void fetchNewLeadQueue()
+      .then(setLeadQueue)
+      .catch(() => {
+        setLeadQueue([]);
+        setLeadQueueError(true);
+      })
+      .finally(() => setLeadShortcutBusy(false));
+  }, []);
+
+  useEffect(() => () => {
+    if (leadQueueCloseTimer.current !== null) {
+      window.clearTimeout(leadQueueCloseTimer.current);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!notifOpen && !usersOpen) return;
+    if (!notifOpen && !usersOpen && !leadQueueMounted) return;
 
     const closePanelsOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setNotifOpen(false);
       setUsersOpen(false);
+      if (leadQueueMounted) closeLeadQueue();
     };
 
     document.addEventListener("keydown", closePanelsOnEscape);
     return () => document.removeEventListener("keydown", closePanelsOnEscape);
-  }, [notifOpen, usersOpen]);
+  }, [closeLeadQueue, leadQueueMounted, notifOpen, usersOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,7 +339,12 @@ export function Topbar() {
 
   return (
     <>
-      <header className="relative z-30 flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-2 sm:px-3">
+      <header
+        className={cn(
+          "relative flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-2 sm:px-3",
+          leadQueueMounted ? "z-[60]" : "z-30",
+        )}
+      >
         <div className="flex min-w-0 items-center gap-1">
           <TopbarIconButton onClick={toggleNav} title={t.ui_toggle_sidebar}>
             <PanelLeft className="size-[17px]" />
@@ -323,42 +401,139 @@ export function Topbar() {
           )}
 
           {showLeadShortcut ? (
-            <TopbarIconButton
-              onClick={() => {
-                setNotifOpen(false);
-                setUsersOpen(false);
-                if (leadShortcutBusy) return;
-                if (newLeads <= 0) {
-                  navigate("/leads");
-                  return;
-                }
-                setLeadShortcutBusy(true);
-                void fetchOldestNewLead()
-                  .then((lead) => {
-                    if (!lead) {
-                      navigate("/leads");
-                      return;
-                    }
-                    const query = new URLSearchParams({ lead: lead.id });
-                    if (canOpenLeadWizard) query.set("view", "wizard");
-                    navigate(`/leads?${query.toString()}`);
-                  })
-                  .catch(() => navigate("/leads"))
-                  .finally(() => setLeadShortcutBusy(false));
-              }}
-              title={leadShortcutTitle}
-            >
-              {leadShortcutBusy ? (
-                <LoaderCircle aria-hidden="true" className="size-[17px] animate-spin" />
-              ) : (
-                <UserRoundPlus aria-hidden="true" className="size-[17px]" />
-              )}
-              {newLeads > 0 ? (
-                <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[10px] font-semibold text-white">
-                  {newLeads > 99 ? "99+" : newLeads}
-                </span>
+            <div className="relative">
+              <TopbarIconButton
+                onClick={() => {
+                  setNotifOpen(false);
+                  setUsersOpen(false);
+                  if (newLeads <= 0) {
+                    navigate("/leads");
+                    return;
+                  }
+                  if (leadQueueMounted && leadQueueOpen) {
+                    closeLeadQueue();
+                    return;
+                  }
+                  showLeadQueue();
+                }}
+                title={leadShortcutTitle}
+              >
+                {leadShortcutBusy ? (
+                  <LoaderCircle aria-hidden="true" className="size-[17px] animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <UserRoundPlus aria-hidden="true" className="size-[17px]" />
+                )}
+                {newLeads > 0 ? (
+                  <span className="absolute right-0.5 top-0.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand)] px-1 text-[10px] font-semibold text-white">
+                    {newLeads > 99 ? "99+" : newLeads}
+                  </span>
+                ) : null}
+              </TopbarIconButton>
+
+              {leadQueueMounted ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label={t.common_close}
+                    className="fixed inset-0 z-40 cursor-default border-0 bg-transparent p-0"
+                    onClick={closeLeadQueue}
+                  />
+                  <div
+                    role="dialog"
+                    aria-label={leadQueueCopy.title}
+                    data-origin="top-right"
+                    className={cn(
+                      "t-dropdown absolute right-0 top-10 z-50 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-border bg-background shadow-xl",
+                      leadQueueOpen && "is-open",
+                      leadQueueClosing && "is-closing",
+                    )}
+                  >
+                    <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold">{leadQueueCopy.title}</p>
+                        <p className="text-[11px] text-muted-foreground">{leadQueueCopy.choose}</p>
+                      </div>
+                      <span className="rounded-full bg-[var(--brand-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--brand)]">
+                        {newLeads}
+                      </span>
+                    </div>
+
+                    {leadQueue.length > 0 ? (
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 border-b border-border px-4 py-2.5 text-left text-xs font-semibold text-[var(--brand)] transition-colors hover:bg-[var(--brand-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+                        onClick={() => {
+                          const lead = leadQueue[0];
+                          closeLeadQueue();
+                          openLead(lead.id);
+                        }}
+                      >
+                        {leadQueueCopy.oldest}
+                        <ChevronRight aria-hidden="true" className="size-4" />
+                      </button>
+                    ) : null}
+
+                    <div className="max-h-72 overflow-y-auto">
+                      {leadShortcutBusy ? (
+                        <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+                          <LoaderCircle aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+                          {t.common_loading}
+                        </div>
+                      ) : leadQueueError ? (
+                        <p className="px-4 py-8 text-center text-sm text-destructive">
+                          {leadQueueCopy.failed}
+                        </p>
+                      ) : leadQueue.length === 0 ? (
+                        <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                          {leadQueueCopy.empty}
+                        </p>
+                      ) : (
+                        leadQueue.map((lead) => {
+                          const fullName = [lead.first_name, lead.last_name].filter(Boolean).join(" ");
+                          const country = countryNameForDisplay(lead.country, lang);
+                          return (
+                            <button
+                              key={lead.id}
+                              type="button"
+                              className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+                              onClick={() => {
+                                closeLeadQueue();
+                                openLead(lead.id);
+                              }}
+                            >
+                              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] text-xs font-semibold text-[var(--brand)]">
+                                {initials(fullName)}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium">{fullName || "—"}</span>
+                                <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                  {country ? <span>{country}</span> : null}
+                                  {country ? <span aria-hidden="true">·</span> : null}
+                                  <span>{compactDt(lead.created_at, lang)}</span>
+                                </span>
+                              </span>
+                              <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-center gap-1.5 border-t border-border px-4 py-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+                      onClick={() => {
+                        closeLeadQueue();
+                        navigate("/leads");
+                      }}
+                    >
+                      {leadQueueCopy.all}
+                      <ChevronRight aria-hidden="true" className="size-3.5" />
+                    </button>
+                  </div>
+                </>
               ) : null}
-            </TopbarIconButton>
+            </div>
           ) : null}
 
           {/* Notifications */}
