@@ -29,7 +29,12 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
     ".[paddle,translation]"
 
-RUN python -m app.install_translation_model \
+RUN --mount=type=secret,id=translation_model_archive \
+    if [ -f /run/secrets/translation_model_archive ]; then \
+      python -m app.install_translation_model --archive /run/secrets/translation_model_archive; \
+    else \
+      python -m app.install_translation_model; \
+    fi \
     && python -c "from app.translation_runtime import translate_payload; from pathlib import Path; result = translate_payload({'text': 'No evidence of pneumonia.', 'candidates': {}}, Path('models/translate-en_de-1_3')); assert result['text']"
 
 ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1 \
