@@ -97,11 +97,12 @@ uv run python -m app.install_translation_model
 ```
 
 Set `PARSER_TRANSLATION_MODEL_DIR` to use the installed model directory elsewhere.
-If the model download host is unavailable, supply an existing archive during the
-Docker build with `--secret id=translation_model_archive,src=/path/to/translate-en_de-1_3.argosmodel`.
+If the model download host is unavailable, place an existing archive at
+`services/clinical-document-parser/translation-model.argosmodel` before building.
 The build verifies the same pinned SHA-256 checksum before extracting it and
-still runs the inference check. The archive is a build input; no model download
-is needed at runtime.
+still runs the inference check. This ignored file is mounted read-only during
+the build and is not copied into an image layer; only the extracted inference
+artifacts are retained. No model download is needed at runtime.
 
 The default is `models/translate-en_de-1_3` beside this README. Source text plus
 candidate text is limited to 60,000 characters per translation, output to 180,000,

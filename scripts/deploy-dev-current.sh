@@ -110,6 +110,14 @@ done
 cp "$RELEASE_ENV" "$STAGING_DIR/release.env"
 chmod 600 "$STAGING_DIR/release.env"
 
+# Keep the optional public model archive across source-only releases. The image
+# build verifies its pinned checksum before using it, so an unavailable model
+# download host does not block subsequent DEV deployments.
+model_archive="services/clinical-document-parser/translation-model.argosmodel"
+if [[ -f "$REPO_DIR/$model_archive" ]]; then
+  cp "$REPO_DIR/$model_archive" "$STAGING_DIR/$model_archive"
+fi
+
 upsert_env() {
   local key="$1"
   local value="$2"

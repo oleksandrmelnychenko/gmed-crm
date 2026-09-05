@@ -29,9 +29,9 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
     ".[paddle,translation]"
 
-RUN --mount=type=secret,id=translation_model_archive \
-    if [ -f /run/secrets/translation_model_archive ]; then \
-      python -m app.install_translation_model --archive /run/secrets/translation_model_archive; \
+RUN --mount=type=bind,target=/build-input,readonly \
+    if [ -f /build-input/translation-model.argosmodel ]; then \
+      python -m app.install_translation_model --archive /build-input/translation-model.argosmodel; \
     else \
       python -m app.install_translation_model; \
     fi \
