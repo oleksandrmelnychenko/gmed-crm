@@ -28,13 +28,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim AS runtime
 
+ARG DEBIAN_SECURITY_REFRESH=local
 ARG GMED_RUNTIME_UID=100
 ARG GMED_RUNTIME_GID=101
 
 # Keep the runtime identity stable across package changes. The uploads volume
 # stores numeric ownership, so allowing apt packages to shift this UID/GID can
 # make existing private documents unwritable after an image upgrade.
-RUN addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
+RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
+    && addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
     && adduser --system --uid "${GMED_RUNTIME_UID}" --ingroup gmed --home /app gmed \
     && apt-get update \
     && apt-get upgrade -y \
@@ -49,6 +51,7 @@ RUN addgroup --system --gid "${GMED_RUNTIME_GID}" gmed \
         tesseract-ocr-eng \
         tesseract-ocr-rus \
         tesseract-ocr-ukr \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libssh2-1)" ge '1.10.0-3+deb12u1' \
     && freshclam --quiet \
     && rm -rf /var/lib/apt/lists/*
 
