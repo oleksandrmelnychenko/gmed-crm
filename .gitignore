@@ -16,6 +16,9 @@ node_modules/
 /uploads/
 /frontend/test-results/
 /frontend/playwright-report/
+/frontend/.playwright-live-state.json
+__pycache__/
+*.py[cod]
 /plans/
 /.audit/
 /tmp/
