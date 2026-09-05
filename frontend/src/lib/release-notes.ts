@@ -169,126 +169,84 @@ const DAILY_RELEASE_NOTES: CustomerReleaseNote[] = [
 ];
 
 const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
-  ...DAILY_RELEASE_NOTES,
   {
-    commit: "448f24b",
-    title: {
-      ru: "Рабочее место Concierge",
-      de: "Concierge-Arbeitsbereich",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Распознавание и проверка инвойсов", de: "Rechnungserkennung und Prüfung" },
     description: {
-      ru: "Сервисные запросы, события и следующие действия собраны в одном адаптивном рабочем месте. Доступны доска, список, календарь и карта без медицинской информации.",
-      de: "Serviceanfragen, Termine und nächste Schritte sind in einem responsiven Arbeitsbereich gebündelt. Verfügbar sind Board, Liste, Kalender und Karte ohne medizinische Daten.",
+      ru: "Импорт PDF, изображений и электронных счетов XML. Оригинал и распознанные поля открываются рядом; найденный клиент подставляется для проверки, доступны ручные исправления и сохранение исходного документа.",
+      de: "PDF, Bilder und elektronische XML-Rechnungen importieren. Original und erkannte Felder stehen nebeneinander; gefundene Patienten werden zur Prüfung vorgeschlagen. Manuelle Korrekturen und das Speichern des Originals sind möglich.",
     },
   },
   {
-    commit: "8dd1554",
-    title: {
-      ru: "Менеджер задач",
-      de: "Aufgabenmanager",
-    },
+    commit: "e3f7a96",
+    title: { ru: "DATEV: отдельный экран и профиль бухгалтерии", de: "DATEV: Administration und Buchhaltungsprofil" },
     description: {
-      ru: "Добавлены задачи и события с ответственными, сроками, приоритетами, чек-листами, комментариями и историей. Изменения обновляются для участников автоматически.",
-      de: "Aufgaben und Ereignisse enthalten Zuständigkeiten, Fristen, Prioritäten, Checklisten, Kommentare und Verlauf. Änderungen werden für Beteiligte automatisch aktualisiert.",
+      ru: "В администрировании добавлены Unternehmen online и шесть модулей вашей бухгалтерии. Профиль сохраняется в GMed; доступны переход в кабинет и список вопросов на немецком. Автоматический обмен ожидает регистрации приложения и разрешений DATEV.",
+      de: "Die Administration enthält Unternehmen online und die sechs Buchhaltungsmodule. Das Profil wird in GMed gespeichert; Portalzugang und deutsche Checkliste sind verfügbar. Automatischer Datenaustausch setzt App-Registrierung und DATEV-Berechtigungen voraus.",
     },
   },
   {
-    commit: "3d4d50e",
-    title: {
-      ru: "Маршруты и адреса",
-      de: "Routen und Adressen",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Электронные подписи через Skribble", de: "Elektronische Signaturen mit Skribble" },
     description: {
-      ru: "Задачи и сервисные события объединяются в дневной маршрут. Можно выбрать остановки, изменить их порядок и открыть готовый маршрут с несколькими адресами в Google Maps.",
-      de: "Aufgaben und Serviceereignisse werden zu einer Tagesroute verbunden. Stopps lassen sich auswählen, sortieren und als Route mit mehreren Adressen in Google Maps öffnen.",
+      ru: "Добавлены настройки немецкого аккаунта, выбор подписантов, статусы запросов и получение подписанного PDF с протоколом. DEMO отделено от рабочих подписей. Отправка станет доступна после подключения собственного аккаунта.",
+      de: "Einstellungen für ein deutsches Konto, Auswahl der Unterzeichnenden, Anfragestatus sowie signiertes PDF und Protokoll wurden ergänzt. DEMO ist von produktiven Signaturen getrennt. Der Versand benötigt ein eigenes verbundenes Konto.",
     },
   },
   {
-    commit: "1d68325",
-    title: {
-      ru: "Партнёры, бронирования и ключи",
-      de: "Partner, Buchungen und Schlüssel",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Счета компании и обновление финансов", de: "Unternehmensrechnungen und Finanzaktualisierung" },
     description: {
-      ru: "Concierge может подобрать ресторан, водителя, гостиницу или другого исполнителя, зафиксировать контакт и бронирование. Передача и возврат ключей сохраняются с ответственным и полной историей.",
-      de: "Concierge kann Restaurant, Fahrer, Hotel oder andere Leistungserbringer auswählen sowie Kontakt und Buchung dokumentieren. Schlüsselübergabe und Rückgabe werden mit Zuständigkeit und Verlauf gespeichert.",
+      ru: "Счета поставщиков на GMed можно учитывать как расходы компании без привязки к пациенту или заказу. Улучшены выписки, взаиморасчёты и обновление финансовых данных после изменений.",
+      de: "Lieferantenrechnungen an GMed lassen sich ohne Patient oder Auftrag als Unternehmensausgaben erfassen. Kontoauszüge, Abrechnungen und die Aktualisierung der Finanzdaten wurden verbessert.",
     },
   },
   {
-    commit: "30a5203",
-    title: {
-      ru: "Расходы и чеки Concierge",
-      de: "Concierge-Auslagen und Belege",
-    },
+    commit: "ff4f4bf",
+    title: { ru: "Каталог услуг, цены и описания", de: "Leistungskatalog, Preise und Beschreibungen" },
     description: {
-      ru: "К сервису можно приложить фотографию или файл чека за гостиницу, транспорт и другие расходы, указать сумму, налог, плательщика и дату. До проверки бухгалтером запись не меняет баланс.",
-      de: "Zu einem Service können Foto oder Datei eines Belegs für Hotel, Transport und weitere Auslagen mit Betrag, Steuer, Zahler und Datum erfasst werden. Vor Prüfung durch die Buchhaltung ändert sich kein Saldo.",
+      ru: "Добавлен явный выбор цены услуги. Описание можно редактировать отдельными пунктами; согласованные тексты и цены сохраняются в заказе и используются в документах.",
+      de: "Leistungspreise können ausdrücklich ausgewählt werden. Beschreibungen sind in einzelnen Punkten bearbeitbar; vereinbarte Texte und Preise bleiben im Auftrag erhalten und werden in Dokumenten verwendet.",
     },
   },
   {
-    commit: "5deda33",
-    title: {
-      ru: "Проверка расходов бухгалтером",
-      de: "Prüfung durch die Buchhaltung",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Чат и защищённые вложения", de: "Chat und geschützte Anhänge" },
     description: {
-      ru: "В финансах компании появилась очередь чеков Concierge. Руководитель или бухгалтер видит документ, связывает расход с заказом и услугой, затем подтверждает, отклоняет или отменяет проведение.",
-      de: "In den Unternehmensfinanzen gibt es eine Prüfliste für Concierge-Belege. Geschäftsführung oder Buchhaltung sieht den Beleg, ordnet ihn Auftrag und Leistung zu und kann ihn buchen, ablehnen oder stornieren.",
+      ru: "Обновлены переписка, список чатов и отправка вложений. Доработаны настройка защищённого устройства, восстановление состояния сообщений и отображение чата на телефоне.",
+      de: "Unterhaltungen, Chatliste und Anhänge wurden überarbeitet. Die Einrichtung geschützter Geräte, die Wiederherstellung des Nachrichtenstatus und die mobile Chatansicht wurden verbessert.",
     },
   },
   {
-    commit: "60869f9",
-    title: {
-      ru: "Баланс компании",
-      de: "Unternehmenssaldo",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Медицинский OCR и перевод с английского", de: "Medizinische Texterkennung und Englisch-Übersetzung" },
     description: {
-      ru: "Добавлены денежные счета компании, внутренние переводы и единый обзор поступлений, выплат, открытых обязательств и доступных средств с фильтрами по периоду и валюте.",
-      de: "Unternehmenskonten, interne Umbuchungen und eine Gesamtübersicht über Einnahmen, Auszahlungen, offene Verpflichtungen und verfügbare Mittel mit Zeitraum- und Währungsfiltern wurden ergänzt.",
+      ru: "Улучшено распознавание медицинских отчётов, дат, лабораторных таблиц и истории анализов. Для английских документов добавлен немецкий перевод с сохранением оригинала для проверки.",
+      de: "Die Erkennung medizinischer Berichte, Datumsangaben, Labortabellen und Laborverläufe wurde verbessert. Für englische Dokumente ist eine deutsche Übersetzung verfügbar; das Original bleibt zum Abgleich erhalten.",
     },
   },
   {
-    commit: "b0d06ed",
-    title: {
-      ru: "Баланс пациента и взаиморасчёты",
-      de: "Patientensaldo und Abrechnung",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Защита изменений в формах", de: "Schutz ungespeicherter Formulare" },
     description: {
-      ru: "Счета, частичные оплаты, предоплаты, возвраты, корректировки и кредитовые документы объединены в проверяемую историю. Система отдельно показывает задолженность пациента и его переплату.",
-      de: "Rechnungen, Teilzahlungen, Vorauszahlungen, Erstattungen, Korrekturen und Gutschriften sind in einem prüfbaren Verlauf zusammengeführt. Patientenschuld und Guthaben werden getrennt ausgewiesen.",
+      ru: "Окна редактирования предупреждают о потере изменённых данных. Уточнена работа вложенных окон, выпадающих списков и выбора файлов в документах, пациентах, заказах и задачах.",
+      de: "Bearbeitungsfenster warnen vor dem Verlust geänderter Daten. Verschachtelte Fenster, Auswahllisten und Dateiauswahl in Dokumenten, Patientenakten, Aufträgen und Aufgaben wurden verbessert.",
     },
   },
   {
-    commit: "3ce7678",
-    title: {
-      ru: "Расчёты с партнёрами и исполнителями",
-      de: "Abrechnung mit Partnern und Leistungserbringern",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Проекты и понятные статусы задач", de: "Projekte und verständliche Aufgabenstatus" },
     description: {
-      ru: "Для партнёров и исполнителей доступны выписки, начисления, произведённые выплаты и остаток к выплате. Расход пациента и обязательство компании учитываются без двойного начисления.",
-      de: "Für Partner und Leistungserbringer stehen Kontoauszüge, Belastungen, geleistete Zahlungen und offene Beträge bereit. Patientenforderung und Unternehmensverpflichtung werden ohne Doppelzählung erfasst.",
+      ru: "В проектах и связанных задачах уточнены отображение workflow, исполнителей и статусов. Названия действий и состояний согласованы с выбранным языком интерфейса.",
+      de: "Workflow, Zuständige und Status werden in Projekten und verknüpften Aufgaben klarer dargestellt. Aktions- und Statusbezeichnungen folgen der gewählten Oberflächensprache.",
     },
   },
   {
-    commit: "3d4d50e",
-    title: {
-      ru: "Экономика заказа",
-      de: "Auftragswirtschaftlichkeit",
-    },
+    commit: "e3f7a96",
+    title: { ru: "Документы и карточки пациентов", de: "Dokumente und Patientenakten" },
     description: {
-      ru: "По заказу видны плановые и фактические расходы, поступления от пациента, неоплаченные суммы и финансовый результат. Суммы разделены по услугам и валютам.",
-      de: "Pro Auftrag werden geplante und tatsächliche Kosten, Patienteneingänge, offene Beträge und Ergebnis dargestellt. Beträge sind nach Leistungen und Währungen getrennt.",
-    },
-  },
-  {
-    commit: "f0391d5",
-    title: {
-      ru: "Уведомления и автоматическое обновление",
-      de: "Benachrichtigungen und automatische Aktualisierung",
-    },
-    description: {
-      ru: "Бухгалтер получает уведомление о новом чеке с переходом прямо к проверке. Concierge получает решение по расходу, а очереди и рабочие экраны обновляются автоматически.",
-      de: "Die Buchhaltung erhält bei einem neuen Beleg eine Benachrichtigung mit direktem Link zur Prüfung. Concierge erhält die Entscheidung; Listen und Arbeitsbereiche aktualisieren sich automatisch.",
+      ru: "Доработаны предпросмотр документов, выбор связанного договора и редактирование привязок. Обновлены карточка пациента и формы лида, услуг и заказа.",
+      de: "Dokumentenvorschau, Auswahl verknüpfter Verträge und Bearbeitung von Zuordnungen wurden erweitert. Patientenübersicht sowie Lead-, Leistungs- und Auftragsformulare wurden überarbeitet.",
     },
   },
 ];
@@ -334,12 +292,12 @@ export function resolveCustomerRelease(environment: ReleaseEnvironment): Custome
 
   return {
     channel: environment.mode,
-    build: environment.buildNumber?.trim() || "2026.08.11.1",
-    builtAt: environment.buildTimestamp?.trim() || "2026-08-11T20:20:00+03:00",
+    build: environment.buildNumber?.trim() || (isDevelopment ? "2026.09.05.1" : "2026.08.11.1"),
+    builtAt: environment.buildTimestamp?.trim() || (isDevelopment ? "2026-09-05T20:00:00+03:00" : "2026-08-11T20:20:00+03:00"),
     title: isDevelopment
       ? {
-          ru: "Обновления за сегодня",
-          de: "Heutige Aktualisierungen",
+          ru: "Обновления за 5 сентября 2026",
+          de: "Aktualisierungen vom 5. September 2026",
         }
       : {
           ru: "Изменения в PROD-сборке",

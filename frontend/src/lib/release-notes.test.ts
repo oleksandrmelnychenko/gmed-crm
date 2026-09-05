@@ -37,10 +37,10 @@ describe("customer release notes", () => {
     expect(development.channel).toBe("development");
     expect(development.build).toBe("dev-42");
     expect(development.builtAt).toBe("2026-08-10T10:15:00Z");
-    expect(development.title.ru).toBe("Обновления за сегодня");
+    expect(development.title.ru).toBe("Обновления за 5 сентября 2026");
     expect(development.notes[0]).toMatchObject({
-      commit: "846b6f4",
-      title: { ru: "Проекты и наглядный workflow" },
+      commit: "e3f7a96",
+      title: { ru: "Распознавание и проверка инвойсов" },
     });
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
