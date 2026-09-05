@@ -201,27 +201,24 @@ test.describe("secure chat live workflows", () => {
         ),
       ]);
 
-      const patientKeyResponse = patientPage.waitForResponse(
-        (nextResponse) =>
-          nextResponse.url().includes("/api/v1/messages/e2e-key") &&
-          nextResponse.request().method() === "POST",
-        { timeout: 15_000 },
-      );
-      await patientPage.goto("/chat");
-      await expect(
-        patientPage.getByRole("heading", { name: /^Chat$/i }),
-      ).toBeVisible();
-      expect((await patientKeyResponse).ok()).toBeTruthy();
-
-      const conciergeKeyResponse = conciergePage.waitForResponse(
-        (nextResponse) =>
-          nextResponse.url().includes("/api/v1/messages/e2e-key") &&
-          nextResponse.request().method() === "POST",
-        { timeout: 15_000 },
-      );
-      await conciergePage.goto("/chat");
-      await expect(conciergePage.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
-      expect((await conciergeKeyResponse).ok()).toBeTruthy();
+      // Sign-in now registers the device on every authenticated screen. The
+      // POST may already have completed before opening Chat; verify the active
+      // key state instead of requiring another registration request.
+      await Promise.all([patientPage, conciergePage].map(async (page) => {
+        await page.goto("/chat");
+        await expect(page.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
+        await expect.poll(async () => page.evaluate(async () => {
+          const token = window.localStorage.getItem("gmed_access_token");
+          const response = await fetch("/api/v1/messages/e2e-key", {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!response.ok) return false;
+          const key = await response.json();
+          return key?.is_active === true &&
+            key.algorithm === "p256-hkdf-aes256gcm-v1" &&
+            typeof key.fingerprint === "string" && key.fingerprint.length > 0;
+        }), { timeout: 15_000 }).toBe(true);
+      }));
 
       await patientPage
         .getByRole("button", { name: /Neue Nachricht|Новое сообщение/i })

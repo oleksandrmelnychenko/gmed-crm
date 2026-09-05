@@ -36,6 +36,7 @@ GIT_BRANCH="${GIT_BRANCH:-main}"
 LOG_FILE="${LOG_FILE:-/var/log/gmed-deploy.log}"
 TMP_ENV=""
 IMPORT_BOOTSTRAP_DIRECTORY=false
+UPGRADE_ONLY=false
 
 if [[ "$#" -gt 1 ]]; then
   echo "ERROR: deploy-prod.sh accepts at most one argument." >&2
@@ -43,6 +44,8 @@ if [[ "$#" -gt 1 ]]; then
 fi
 if [[ "${1:-}" == "--import-bootstrap-directory" ]]; then
   IMPORT_BOOTSTRAP_DIRECTORY=true
+elif [[ "${1:-}" == "--upgrade-only" ]]; then
+  UPGRADE_ONLY=true
 elif [[ "$#" -eq 1 ]]; then
   echo "ERROR: unsupported deploy-prod.sh argument: $1" >&2
   exit 1
@@ -87,6 +90,14 @@ for path in "$REPO_DIR/.git" "$AGE_KEY_FILE" "$REPO_DIR/$IMAGE_PINS_PATH"; do
     exit 1
   fi
 done
+
+if [[ "$UPGRADE_ONLY" == "true" ]]; then
+  upgrade_backup_dir="/var/backups/gmed/releases/$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "$REPO_DIR" rev-parse --short=12 HEAD)"
+  install -d -m 700 "$upgrade_backup_dir"
+  install -m 600 "$RELEASE_ENV" "$upgrade_backup_dir/previous-release.env"
+  install -m 600 "$REPO_DIR/$IMAGE_PINS_PATH" "$upgrade_backup_dir/previous-images.pins"
+  docker ps --format '{{.Names}} {{.Image}}' > "$upgrade_backup_dir/previous-containers.txt"
+fi
 
 # Refresh the repo. `git reset --hard` discards any local drift; PROD
 # treats the repo as a read-only artifact.
@@ -152,6 +163,31 @@ set -a
 # shellcheck disable=SC1090
 . "$REPO_DIR/$IMAGE_PINS_PATH"
 set +a
+
+# An ordinary release upgrade must never become a first-install data reset,
+# even if the host's bootstrap marker is missing or its old SOPS flags remain.
+if [[ "$UPGRADE_ONLY" == "true" ]]; then
+  PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY=false
+  PROD_EMPTY_DATABASE_FORCE=false
+  export PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY PROD_EMPTY_DATABASE_FORCE
+fi
+
+# Keep the internal OCR credential on this host when it is not supplied in SOPS.
+# The generated value is reused across releases and never enters frontend builds.
+if [[ -z "${GMED_INVOICE_PARSER_API_KEY:-}" ]]; then
+  invoice_parser_key_file=/etc/gmed/invoice-parser.key
+  if [[ ! -s "$invoice_parser_key_file" ]]; then
+    (umask 077; openssl rand -hex 32 > "$invoice_parser_key_file")
+  fi
+  chmod 600 "$invoice_parser_key_file"
+  GMED_INVOICE_PARSER_API_KEY="$(cat "$invoice_parser_key_file")"
+  if [[ ! "$GMED_INVOICE_PARSER_API_KEY" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: invalid stored internal invoice parser key." >&2
+    exit 1
+  fi
+  export GMED_INVOICE_PARSER_API_KEY
+  printf '\nGMED_INVOICE_PARSER_API_KEY=%s\n' "$GMED_INVOICE_PARSER_API_KEY" >> "$RELEASE_ENV"
+fi
 
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
   if [[ -z "${PROD_ADMIN_EMAIL:-}" || -z "${PROD_ADMIN_NAME:-}" || -z "${PROD_ADMIN_PASSWORD:-}" ]]; then
@@ -222,8 +258,8 @@ fi
 # (`@sha256:...`). Floating tags would race the verify/pull window —
 # we'd verify one digest and `docker pull` could resolve a different
 # one if the tag rotated between calls.
-for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE; do
-  ref="${!image_var}"
+for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE GMED_INVOICE_PARSER_IMAGE; do
+  ref="${!image_var:-}"
   case "$image_var" in
     GMED_BACKEND_IMAGE)
       expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-server"
@@ -233,6 +269,9 @@ for image_var in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE; do
       ;;
     GMED_PARSER_IMAGE)
       expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser"
+      ;;
+    GMED_INVOICE_PARSER_IMAGE)
+      expected_repository="ghcr.io/oleksandrmelnychenko/gmed-crm-invoice-parser"
       ;;
   esac
   expected_prefix="${expected_repository}@sha256:"
@@ -439,6 +478,13 @@ SQL
   echo "Production DB verified: users=1 active_ceo=1 patients=0 leads=0 cases=0 orders=0 invoices=0 documents=0 appointments=0 tasks=0"
 }
 
+if [[ "$UPGRADE_ONLY" == "true" ]]; then
+  install -m 600 "$RELEASE_ENV" "$upgrade_backup_dir/release.env"
+  docker inspect gmed-postgres > "$upgrade_backup_dir/postgres-container.json"
+  python3 "$REPO_DIR/scripts/preflight-prod-migrations.py" \
+    --migrations "$REPO_DIR/migrations" --backup-dir "$upgrade_backup_dir"
+fi
+
 sanitized_this_run=false
 prepare_upload_volume
 if [[ "${PROD_EMPTY_DATABASE_ON_FIRST_DEPLOY:-false}" == "true" ]]; then
@@ -458,6 +504,9 @@ fi
 # Bring (or keep) services up only after any first-deploy sanitization. No
 # --build: production pulls cosign-verified images and never builds locally.
 compose_up_or_diagnose
+wait_for_compose_service_healthy backend
+wait_for_compose_service_healthy invoice-parser
+wait_for_compose_service_healthy frontend
 
 # The 2026-08-31 authentication correction must also take effect when PROD is
 # still running the previously signed backend image. Apply the repository SQL
@@ -513,4 +562,12 @@ fi
 docker image prune -f --filter "until=24h"
 
 date -u +%Y-%m-%dT%H:%M:%SZ > /etc/gmed/deploy.last
+git rev-parse HEAD > /etc/gmed/deploy.revision
+docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
+  psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "${POSTGRES_DB:-gmed}" \
+  -c "SELECT 'Successful migrations: ' || count(*) FROM _sqlx_migrations WHERE success"
+for service in backend frontend clinical-document-parser invoice-parser; do
+  cid="$("${compose_cmd[@]}" ps -q "$service")"
+  docker inspect -f '{{.Name}} {{.Config.Image}} status={{.State.Status}} restarts={{.RestartCount}} {{if .State.Health}}health={{.State.Health.Status}}{{end}}' "$cid"
+done
 echo "Deploy complete."

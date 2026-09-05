@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+ARG DEBIAN_SECURITY_REFRESH=local
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
@@ -7,7 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMP_THREAD_LIMIT=1 \
     INVOICE_PARSER_TEMPLATE_DIR=/app/templates
 
-RUN apt-get update \
+RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
+    && apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
        tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
        tesseract-ocr-ukr tesseract-ocr-rus fonts-dejavu-core \

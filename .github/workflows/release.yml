@@ -132,6 +132,9 @@ jobs:
       - name: Print binding audit
         run: python scripts/audit_print_bindings.py
 
+      - name: Production migration preflight checks
+        run: python -m unittest discover -s scripts -p test_preflight_prod_migrations.py
+
       - name: Repository hygiene
         run: python scripts/check_repo_hygiene.py
 
@@ -180,8 +183,34 @@ jobs:
           --required-cohort medication
           --minimum-required-cohort-cases 1
 
+  invoice-parser-quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/invoice-parser/pyproject.toml
+      - name: Install CPU OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Install invoice parser test dependencies
+        run: python -m pip install -e 'services/invoice-parser[dev]'
+      - name: Invoice API, fields, structured formats and OCR tests
+        working-directory: services/invoice-parser
+        run: python -m pytest -q
+      - name: Validate standalone Compose configuration
+        env:
+          INVOICE_PARSER_API_KEY: synthetic-compose-validation-key-000000000
+        run: docker compose -f services/invoice-parser/compose.yml config --quiet
+
   build-and-sign:
-    needs: [application-quality-gate, parser-quality-gate]
+    needs: [application-quality-gate, parser-quality-gate, invoice-parser-quality-gate]
     # DEV and PROD Hetzner hosts use x86_64 CPX instances, so release
     # images are built for linux/amd64. Add linux/arm64 only if the
     # fleet moves back to CAX/ARM or you intentionally run mixed hosts.
@@ -203,6 +232,10 @@ jobs:
             env_name: PARSER
             dockerfile: services/clinical-document-parser/Dockerfile
             context: services/clinical-document-parser
+          - name: invoice-parser
+            env_name: INVOICE_PARSER
+            dockerfile: services/invoice-parser/Dockerfile
+            context: .
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -243,6 +276,15 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=UNLICENSED
 
+      - name: Download and verify the pinned translation model
+        if: matrix.name == 'clinical-document-parser'
+        run: |
+          set -euo pipefail
+          archive=services/clinical-document-parser/translation-model.argosmodel
+          curl --fail --show-error --location --retry 3 --max-time 300 \
+            https://argos-net.com/v1/translate-en_de-1_3.argosmodel --output "$archive"
+          echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@v7
@@ -275,7 +317,20 @@ jobs:
         run: |
           set -euo pipefail
           test "$(docker run --rm --entrypoint id "$IMAGE_REF" -u)" -ne 0
-          docker run --rm --entrypoint python "$IMAGE_REF" -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _get_paddle_runtime, _run_paddle; from app.parser import parse_clinical_text; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Diagnosen\nArterielle Hypertonie',font=font,fill='black',spacing=28); outcome=_run_paddle(image,time.monotonic()+120); image.close(); _get_paddle_runtime().close(); draft=parse_clinical_text(outcome.text); recognized=outcome.text.casefold(); assert outcome.engine == 'paddle' and not outcome.timed_out and all(token in recognized for token in ('diagnosen','hypertonie')) and any(candidate.target == 'diagnosis' and 'hypertonie' in candidate.value.casefold() for candidate in draft.candidates)"
+          docker run --rm --network none --entrypoint python "$IMAGE_REF" -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _get_paddle_runtime, _run_paddle; from app.parser import parse_clinical_text; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Diagnosen\nArterielle Hypertonie',font=font,fill='black',spacing=28); outcome=_run_paddle(image,time.monotonic()+120); image.close(); _get_paddle_runtime().close(); draft=parse_clinical_text(outcome.text); recognized=outcome.text.casefold(); assert outcome.engine == 'paddle' and not outcome.timed_out and all(token in recognized for token in ('diagnosen','hypertonie')) and any(candidate.target == 'diagnosis' and 'hypertonie' in candidate.value.casefold() for candidate in draft.candidates)"
+          docker run --rm --network none --entrypoint python "$IMAGE_REF" -c "from app.translation_runtime import translate_payload; from pathlib import Path; result=translate_payload({'text':'No evidence of pneumonia.','candidates':{}},Path('/app/models/translate-en_de-1_3')); assert result['text'] and result['text'] != 'No evidence of pneumonia.'"
+
+      - name: Verify invoice parser runtime before signing
+        if: matrix.name == 'invoice-parser'
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id "$IMAGE_REF" -u)" -ne 0
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=256m \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -v "$PWD/services/invoice-parser/examples:/examples:ro" \
+            --entrypoint python "$IMAGE_REF" - < services/invoice-parser/tests/smoke.py
 
       # Trivy gate runs AFTER push but BEFORE sign. If the scan fails,
       # the image lives in GHCR unsigned — and the host's cosign verify
@@ -348,7 +403,7 @@ jobs:
             echo "## ${{ matrix.name }}"
             echo "Digest: \`${{ steps.build.outputs.digest }}\`"
             echo ""
-            echo "Pin in PROD release.env:"
+            echo "Pin in PROD release-images.pins:"
             echo '```'
             echo "GMED_${{ matrix.env_name }}_IMAGE=${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}"
             echo '```'

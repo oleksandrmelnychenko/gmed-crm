@@ -22,153 +22,7 @@ type ReleaseEnvironment = {
   buildTimestamp?: string;
 };
 
-const DAILY_RELEASE_NOTES: CustomerReleaseNote[] = [
-  {
-    commit: "846b6f4",
-    title: {
-      ru: "Проекты и наглядный workflow",
-      de: "Projekte und visueller Workflow",
-    },
-    description: {
-      ru: "Добавлен единый раздел проектов с владельцем, командой, сроками и связанными задачами. На схеме workflow видны зависимости, блокирующие задачи, прогресс и просрочки.",
-      de: "Ein zentraler Projektbereich bündelt Projektleitung, Team, Termine und Aufgaben. Der visuelle Workflow zeigt Abhängigkeiten, blockierende Aufgaben, Fortschritt und Überfälligkeiten.",
-    },
-  },
-  {
-    commit: "846b6f4",
-    title: {
-      ru: "Обновлённое рабочее место Concierge",
-      de: "Aktualisierter Concierge-Arbeitsbereich",
-    },
-    description: {
-      ru: "Сервисные запросы и операционные задачи стали компактнее и обновляются в реальном времени. Доступные роли могут безопасно удалять ошибочно созданные запросы с проверкой актуальности данных.",
-      de: "Serviceanfragen und operative Aufgaben sind kompakter und werden in Echtzeit aktualisiert. Berechtigte Rollen können irrtümlich erstellte Anfragen mit Versionsprüfung sicher entfernen.",
-    },
-  },
-  {
-    commit: "846b6f4",
-    title: {
-      ru: "Несколько доверенных контактов пациента",
-      de: "Mehrere Vertrauenskontakte pro Patient",
-    },
-    description: {
-      ru: "В карточке пациента теперь можно хранить несколько доверенных и экстренных контактов с типом связи, телефоном и заметкой. Данные согласованно сохраняются при создании и редактировании профиля.",
-      de: "In der Patientenakte können mehrere Vertrauens- und Notfallkontakte mit Beziehung, Telefonnummer und Notiz gepflegt werden. Die Daten werden beim Erstellen und Bearbeiten konsistent gespeichert.",
-    },
-  },
-  {
-    commit: "f278135",
-    title: {
-      ru: "Защищённый чат и стабильные обновления",
-      de: "Geschützter Chat und stabile Aktualisierungen",
-    },
-    description: {
-      ru: "Усилена защита ключей, сообщений и вложений в чатах, добавлены лимиты метаданных и ранняя проверка подключений. Непрочитанные сообщения и события задач доставляются стабильнее.",
-      de: "Der Schutz von Schlüsseln, Nachrichten und Anhängen wurde verstärkt; Metadatenlimits und eine frühe Verbindungsprüfung wurden ergänzt. Ungelesene Nachrichten und Aufgabenereignisse werden zuverlässiger zugestellt.",
-    },
-  },
-  {
-    commit: "846b6f4",
-    title: {
-      ru: "Точнее управление пользователями и профилями",
-      de: "Präzisere Benutzer- und Profilverwaltung",
-    },
-    description: {
-      ru: "Формы пользователей и пациентов лучше контролируют несохранённые изменения, пароль и подтверждение. Новые разделы появляются в навигации только у сотрудников с подходящей ролью.",
-      de: "Benutzer- und Patientenformulare prüfen ungespeicherte Änderungen, Passwort und Bestätigung genauer. Neue Bereiche erscheinen nur für Mitarbeitende mit passender Rolle in der Navigation.",
-    },
-  },
-  {
-    commit: "dfbe82d",
-    title: {
-      ru: "Импорт медицинских документов и анализов",
-      de: "Import medizinischer Dokumente und Laborwerte",
-    },
-    description: {
-      ru: "Обновлены распознавание и повторное сканирование документов, предпросмотр источника и импорт лабораторных таблиц. Результаты сохраняют связь с документом и показывают лабораторию как источник.",
-      de: "Dokumentenerkennung, erneutes Scannen, Quellenvorschau und der Import von Labortabellen wurden aktualisiert. Ergebnisse bleiben mit dem Dokument verknüpft und zeigen das Labor als Quelle.",
-    },
-  },
-  {
-    commit: "edacb62",
-    title: {
-      ru: "Задачи, события и файлы",
-      de: "Aufgaben, Ereignisse und Dateien",
-    },
-    description: {
-      ru: "Задачи получили читаемые номера, вложения, комментарии, архив и связи с пациентами и провайдерами. Исполнитель может менять статус своей задачи, а история действий и уведомления сохраняются.",
-      de: "Aufgaben haben lesbare Nummern, Anhänge, Kommentare, Archivierung sowie Verknüpfungen mit Patienten und Providern erhalten. Zuständige können den Status eigener Aufgaben ändern; Verlauf und Benachrichtigungen bleiben erhalten.",
-    },
-  },
-  {
-    commit: "d06d0c4",
-    title: {
-      ru: "Чат и уведомления",
-      de: "Chat und Benachrichtigungen",
-    },
-    description: {
-      ru: "Улучшена отправка сообщений, отображение непрочитанных чатов и онлайн-пользователей. События задач, комментарии и новые сообщения собраны в центре уведомлений.",
-      de: "Nachrichtenversand, ungelesene Chats und die Anzeige aktiver Benutzer wurden verbessert. Aufgabenereignisse, Kommentare und neue Nachrichten erscheinen im Benachrichtigungszentrum.",
-    },
-  },
-  {
-    commit: "577ec21",
-    title: {
-      ru: "Concierge и взаиморасчёты",
-      de: "Concierge und Abrechnung",
-    },
-    description: {
-      ru: "Запросы Concierge можно редактировать и сразу превращать в связанную задачу. Доработаны расходы с чеками, расчётом нетто, налога и брутто, финансовой проверкой и отражением на балансе пациента.",
-      de: "Concierge-Anfragen lassen sich bearbeiten und direkt in eine verknüpfte Aufgabe überführen. Auslagen mit Belegen, Netto-, Steuer- und Bruttoberechnung, Finanzprüfung und Patientenbelastung wurden erweitert.",
-    },
-  },
-  {
-    commit: "26f22bf",
-    title: {
-      ru: "Повторный маршрут пациента",
-      de: "Erneuter Patientenprozess",
-    },
-    description: {
-      ru: "Для существующего пациента можно запустить повторный визард прямо из профиля, проверить актуальность данных и создать новый заказ без повторного превращения пациента в лид.",
-      de: "Für bestehende Patienten kann der erneute Assistent direkt aus dem Profil gestartet werden, um Daten zu prüfen und einen neuen Auftrag ohne erneute Lead-Erfassung anzulegen.",
-    },
-  },
-  {
-    commit: "f694c51",
-    title: {
-      ru: "Профили пациентов и провайдеров",
-      de: "Patienten- und Providerprofile",
-    },
-    description: {
-      ru: "В профилях собраны связанные задачи, документы и открытые действия. Медицинские документы можно связать одновременно с пациентом и провайдером, а доверенные контакты пациента больше не ограничены одной записью.",
-      de: "Profile bündeln zugeordnete Aufgaben, Dokumente und offene Aktionen. Medizinische Dokumente lassen sich gleichzeitig Patient und Provider zuordnen; Vertrauenskontakte sind nicht mehr auf einen Eintrag begrenzt.",
-    },
-  },
-  {
-    commit: "dfbe82d",
-    title: {
-      ru: "Документы с индивидуальным текстом",
-      de: "Dokumente mit individuellem Text",
-    },
-    description: {
-      ru: "Добавлено создание PDF-документа для пациента с собственным вступлением, основным текстом и заключительной заметкой. Форма показывает только действительно обязательные поля.",
-      de: "PDF-Dokumente für Patienten können mit eigener Einleitung, Haupttext und Schlussbemerkung erstellt werden. Das Formular kennzeichnet nur tatsächlich erforderliche Felder.",
-    },
-  },
-  {
-    commit: "dfbe82d",
-    title: {
-      ru: "Языки пациента",
-      de: "Patientensprachen",
-    },
-    description: {
-      ru: "Список языков пациента синхронизирован между интерфейсом и сервером. Поддерживаются стандартные двухбуквенные коды, включая узбекский язык.",
-      de: "Die Liste der Patientensprachen ist zwischen Oberfläche und Server synchronisiert. Standardisierte zweistellige Sprachcodes einschließlich Usbekisch werden unterstützt.",
-    },
-  },
-];
-
-const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
+const RELEASE_NOTES: CustomerReleaseNote[] = [
   {
     commit: "e3f7a96",
     title: { ru: "Распознавание и проверка инвойсов", de: "Rechnungserkennung und Prüfung" },
@@ -251,59 +105,23 @@ const DEVELOPMENT_RELEASE_NOTES: CustomerReleaseNote[] = [
   },
 ];
 
-const PRODUCTION_RELEASE_NOTES: CustomerReleaseNote[] = [
-  ...DAILY_RELEASE_NOTES,
-  {
-    commit: "e47e5ab",
-    title: { ru: "Рабочие панели", de: "Arbeitsbereiche" },
-    description: {
-      ru: "Исправлены переходы между клиническими разделами и применение ролевых ограничений на рабочих экранах.",
-      de: "Die Navigation zwischen klinischen Bereichen und die rollenbasierten Einschränkungen wurden korrigiert.",
-    },
-  },
-  {
-    commit: "5bffe15",
-    title: { ru: "Документы пациента", de: "Patientendokumente" },
-    description: {
-      ru: "Добавлен просмотр документа прямо в системе. Скачивание доступно отдельной кнопкой.",
-      de: "Dokumente können direkt im System angesehen und über eine separate Aktion heruntergeladen werden.",
-    },
-  },
-  {
-    commit: "3159464",
-    title: { ru: "Медицинский профиль", de: "Medizinisches Profil" },
-    description: {
-      ru: "В карточке пациента объединены диагнозы, план медикаментов и обследования с сохранением связи с пациентом.",
-      de: "Diagnosen, Medikationsplan und Untersuchungen wurden in der Patientenakte zusammengeführt und bleiben dem Patienten zugeordnet.",
-    },
-  },
-  {
-    commit: "4472d33",
-    title: { ru: "Права доступа", de: "Zugriffsrechte" },
-    description: {
-      ru: "Усилена проверка прав для документов и клинических данных, включая проверку входных данных на сервере.",
-      de: "Die Zugriffsprüfung für Dokumente und klinische Daten wurde einschließlich serverseitiger Eingabeprüfung verschärft.",
-    },
-  },
-];
-
 export function resolveCustomerRelease(environment: ReleaseEnvironment): CustomerRelease {
   const isDevelopment = environment.mode === "development";
 
   return {
     channel: environment.mode,
-    build: environment.buildNumber?.trim() || (isDevelopment ? "2026.09.05.1" : "2026.08.11.1"),
-    builtAt: environment.buildTimestamp?.trim() || (isDevelopment ? "2026-09-05T20:00:00+03:00" : "2026-08-11T20:20:00+03:00"),
+    build: environment.buildNumber?.trim() || "2026.09.05.1",
+    builtAt: environment.buildTimestamp?.trim() || "2026-09-05T20:00:00+03:00",
     title: isDevelopment
       ? {
           ru: "Обновления за 5 сентября 2026",
           de: "Aktualisierungen vom 5. September 2026",
         }
       : {
-          ru: "Изменения в PROD-сборке",
-          de: "Änderungen im PROD-Build",
+          ru: "Релиз от 5 сентября 2026",
+          de: "Release vom 5. September 2026",
         },
-    notes: isDevelopment ? DEVELOPMENT_RELEASE_NOTES : PRODUCTION_RELEASE_NOTES,
+    notes: RELEASE_NOTES,
   };
 }
 
@@ -325,8 +143,8 @@ export const CURRENT_CUSTOMER_RELEASE = resolveCustomerRelease({
 /*
  * Deployment overrides:
  * VITE_RELEASE_CHANNEL=dev | production
- * VITE_BUILD_NUMBER=2026.08.11.1
- * VITE_BUILD_TIMESTAMP=2026-08-11T20:20:00+03:00
+ * VITE_BUILD_NUMBER=2026.09.05.1
+ * VITE_BUILD_TIMESTAMP=2026-09-05T20:00:00+03:00
  */
 
 export function localizeReleaseText(text: LocalizedText, lang: Lang): string {

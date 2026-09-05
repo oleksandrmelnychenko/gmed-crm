@@ -240,7 +240,13 @@ jobs:
         run: docker build --file frontend/Dockerfile --tag gmed-frontend:ci frontend
 
       - name: Build clinical document parser image
-        run: docker build --file services/clinical-document-parser/Dockerfile --tag gmed-clinical-document-parser:ci services/clinical-document-parser
+        run: |
+          set -euo pipefail
+          archive=services/clinical-document-parser/translation-model.argosmodel
+          curl --fail --show-error --location --retry 3 --max-time 300 \
+            https://argos-net.com/v1/translate-en_de-1_3.argosmodel --output "$archive"
+          echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
+          docker build --file services/clinical-document-parser/Dockerfile --tag gmed-clinical-document-parser:ci services/clinical-document-parser
 
       - name: Verify parser image is non-root
         run: test "$(docker run --rm --entrypoint id gmed-clinical-document-parser:ci -u)" -ne 0
@@ -281,6 +287,8 @@ jobs:
           GMED_BACKEND_IMAGE: ghcr.io/example/gmed-server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           GMED_FRONTEND_IMAGE: ghcr.io/example/gmed-frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           GMED_PARSER_IMAGE: ghcr.io/example/gmed-clinical-document-parser@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          GMED_INVOICE_PARSER_IMAGE: ghcr.io/example/gmed-invoice-parser@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+          GMED_INVOICE_PARSER_API_KEY: synthetic-compose-validation-key-000000000
         run: >-
           docker compose
           -f docker-compose.yml

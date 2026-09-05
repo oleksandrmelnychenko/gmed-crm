@@ -1,0 +1,10 @@
+{
+  "backendPid": 40240,
+  "frontendPid": 24780,
+  "dbContainerName": "",
+  "dbProvisioner": "external",
+  "dbUrl": "postgres://gmed:gmed@127.0.0.1:55439/gmed_e2e?sslmode=disable",
+  "backendUrl": "http://127.0.0.1:3300",
+  "frontendUrl": "http://127.0.0.1:4174",
+  "secret": "gmed-e2e-support-secret"
+}

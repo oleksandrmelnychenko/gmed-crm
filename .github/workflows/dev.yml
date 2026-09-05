@@ -91,6 +91,15 @@ jobs:
             org.opencontainers.image.licenses=UNLICENSED
             org.opencontainers.image.version=dev-sha-${{ steps.source.outputs.short_sha }}
 
+      - name: Download and verify the pinned translation model
+        if: matrix.name == 'clinical-document-parser'
+        run: |
+          set -euo pipefail
+          archive=services/clinical-document-parser/translation-model.argosmodel
+          curl --fail --show-error --location --retry 3 --max-time 300 \
+            https://argos-net.com/v1/translate-en_de-1_3.argosmodel --output "$archive"
+          echo "6cd847f0c06c9c66013e6b0932e07fd54a6d90894659c02bf6c5247b72fb25b1  $archive" | sha256sum --check
+
       - name: Build and push DEV image
         id: build
         uses: docker/build-push-action@v7

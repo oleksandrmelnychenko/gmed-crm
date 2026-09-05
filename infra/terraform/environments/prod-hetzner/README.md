@@ -120,7 +120,7 @@ sudo git clone --depth 50 \
 ### 8. First deploy
 
 ```bash
-sudo /opt/gmed/repo/scripts/deploy-prod.sh
+sudo /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only
 ```
 
 The script:
@@ -207,7 +207,7 @@ entry and the next run at 02:30 UTC produces the first backup.
 sops -e -i secrets.sops.yaml
 git commit -am "prod: enable off-host backups"
 git push
-ssh gmed@console.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-prod.sh
+ssh gmed@console.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only
 ```
 
 **e. Smoke-test the cron immediately.** Don't wait until tomorrow
@@ -267,6 +267,13 @@ host.
 
 ### Redeploy after a code or secret change
 
+Use `--upgrade-only` for an existing installation. It disables first-install
+sanitization, preserves the previous environment and image references, writes a
+consistent `pg_dump` snapshot under `/var/backups/gmed/releases/`, and rehearses
+all pending migrations on a temporary database clone before changing services.
+Applied migration checksums must match; a failed rehearsal stops the deployment.
+The clone is removed afterward, while protected backups and diagnostics remain.
+
 **Step 1.** (If secrets changed) re-encrypt locally:
 
 ```bash
@@ -280,7 +287,7 @@ git push
 
 ```bash
 ssh gmed@console.gmed-health.com
-sudo /opt/gmed/repo/scripts/deploy-prod.sh
+sudo /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only
 ```
 
 **Step 3.** If `GMED_MESSAGE_ENCRYPTION_KEYS` was rotated, run the
@@ -415,7 +422,7 @@ Dependabot / `cargo deny` instead of blocking every release.
 GitHub Actions for a manual promotion. A normal push to `main` produces
 only DEV images through `Dev Build`; it cannot produce an image trusted
 by PROD. The release workflow runs `Build and push` + `Sign image
-(keyless)` for all three application images and prints the digests in
+(keyless)` for all four application images and prints the digests in
 the run summary:
 
 ```text
@@ -433,6 +440,11 @@ Pin in PROD release.env:
 Digest: `sha256:789abc...`
 Pin in PROD release.env:
   GMED_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-clinical-document-parser@sha256:789abc...
+
+## invoice-parser
+Digest: `sha256:012def...`
+Pin in PROD release-images.pins:
+  GMED_INVOICE_PARSER_IMAGE=ghcr.io/oleksandrmelnychenko/gmed-crm-invoice-parser@sha256:012def...
 ```
 
 **Step 2.** Optional but recommended: promote the same digest-pinned
@@ -440,13 +452,13 @@ refs to DEV first by setting `GMED_BACKEND_IMAGE`,
 `GMED_FRONTEND_IMAGE`, and `GMED_PARSER_IMAGE` in the DEV SOPS bundle, then running
 `scripts/deploy-dev.sh` on the DEV host.
 
-**Step 3.** Update PROD `secrets.sops.yaml`:
+**Step 3.** Update the public PROD `release-images.pins` file:
 
 ```bash
 cd infra/terraform/environments/prod-hetzner
-sops secrets.sops.yaml
+# Edit release-images.pins; image digests are public metadata.
 # Paste the digest-pinned refs into GMED_BACKEND_IMAGE,
-# GMED_FRONTEND_IMAGE, and GMED_PARSER_IMAGE.
+# GMED_FRONTEND_IMAGE, GMED_PARSER_IMAGE, and GMED_INVOICE_PARSER_IMAGE.
 
 git commit -am "prod: pin release sha-abc123"
 git push
@@ -456,7 +468,7 @@ git push
 It pulls + verifies + reconciles compose:
 
 ```bash
-ssh gmed@console.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-prod.sh
+ssh gmed@console.gmed-health.com sudo /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only
 ```
 
 The script will:
@@ -464,7 +476,7 @@ The script will:
 1. Pull the repo with the updated pin.
 2. Decrypt secrets, validate required keys.
 3. Install `cosign` (idempotent, pinned version `v2.4.1`).
-4. `cosign verify` all three digests against the repo's release workflow
+4. `cosign verify` all four digests against the repo's release workflow
    identity. **Refuses to proceed if verification fails or if a pin
    is not digest-form (`@sha256:...`).**
 5. `docker compose ... up -d` (no `--build`, no local image building).
@@ -473,7 +485,7 @@ The script will:
 #### Rollback
 
 A rollback is identical to a forward roll: pick an older digest from
-the GHA history, paste it into sops, redeploy. Old digests stay
+the GHA history, update `release-images.pins`, and redeploy. Old digests stay
 addressable in GHCR until they are explicitly deleted (set a
 retention policy in the GHCR package settings if image storage
 becomes a concern).

@@ -45,10 +45,10 @@ describe("customer release notes", () => {
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
     expect(production.builtAt).toBe("2026-08-11T11:30:00Z");
-    expect(production.title.ru).toBe("Изменения в PROD-сборке");
+    expect(production.title.ru).toBe("Релиз от 5 сентября 2026");
     expect(production.notes[0]).toMatchObject({
-      commit: "846b6f4",
-      title: { ru: "Проекты и наглядный workflow" },
+      commit: "e3f7a96",
+      title: { ru: "Распознавание и проверка инвойсов" },
     });
   });
 });
