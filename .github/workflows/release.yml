@@ -48,8 +48,8 @@ env:
 jobs:
   application-quality-gate:
     runs-on: ubuntu-latest
-    # The full Rust workspace gate currently takes a little over 60 minutes
-    # before the frontend release checks run, so keep enough headroom for both.
+    # Keep the full workspace gate; browser checks run alongside it so UI
+    # failures are reported without waiting for the longer Rust suite.
     timeout-minutes: 120
     permissions:
       contents: read
@@ -91,6 +91,23 @@ jobs:
             echo "::error file=.github/workflows/release.yml,title=Rust tests failed::$details"
           fi
           exit "$test_status"
+
+  frontend-quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust for the live backend
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -137,6 +154,14 @@ jobs:
 
       - name: Repository hygiene
         run: python scripts/check_repo_hygiene.py
+
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-diagnostics
+          path: frontend/test-results
+          retention-days: 7
 
   parser-quality-gate:
     runs-on: ubuntu-latest
@@ -210,7 +235,7 @@ jobs:
         run: docker compose -f services/invoice-parser/compose.yml config --quiet
 
   build-and-sign:
-    needs: [application-quality-gate, parser-quality-gate, invoice-parser-quality-gate]
+    needs: [application-quality-gate, frontend-quality-gate, parser-quality-gate, invoice-parser-quality-gate]
     # DEV and PROD Hetzner hosts use x86_64 CPX instances, so release
     # images are built for linux/amd64. Add linux/arm64 only if the
     # fleet moves back to CAX/ARM or you intentionally run mixed hosts.

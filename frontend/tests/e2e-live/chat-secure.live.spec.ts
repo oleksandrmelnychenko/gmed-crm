@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 import {
   bootstrapFullSmokeScenario,
-  ensureLiveBackendHealthy,
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
@@ -46,42 +45,6 @@ async function waitForConversationContent(
   content: string,
 ) {
   const contentPattern = new RegExp(escapeRegExp(content), "i");
-  const deadline = Date.now() + 35_000;
-
-  async function pollForMessage(): Promise<void> {
-    if (Date.now() >= deadline) {
-      return;
-    }
-
-    const textBubbleLocator = page
-      .locator('[data-testid^="chat-message-text-"]')
-      .filter({ hasText: content })
-      .first();
-    const secureAttachmentButton = page
-      .getByRole("button", { name: contentPattern })
-      .first();
-    const attachmentLink = page
-      .getByRole("link", { name: contentPattern })
-      .first();
-    return Promise.all([
-      textBubbleLocator.isVisible().catch(() => false),
-      secureAttachmentButton.isVisible().catch(() => false),
-      attachmentLink.isVisible().catch(() => false),
-    ]).then(async ([textVisible, buttonVisible, linkVisible]) => {
-      if (textVisible || buttonVisible || linkVisible) {
-        return;
-      }
-
-      await ensureLiveBackendHealthy().catch(() => undefined);
-      await refreshOwnChatKey(page).catch(() => undefined);
-      await reopenConversation(page, peer).catch(() => undefined);
-      await page.waitForTimeout(750);
-      return pollForMessage();
-    });
-  }
-
-  await pollForMessage();
-
   const textBubbleLocator = page
     .locator('[data-testid^="chat-message-text-"]')
     .filter({ hasText: content })
@@ -92,18 +55,11 @@ async function waitForConversationContent(
   const attachmentLink = page
     .getByRole("link", { name: contentPattern })
     .first();
-  if (await secureAttachmentButton.isVisible().catch(() => false)) {
-    await expect(secureAttachmentButton).toBeVisible();
-    return;
-  }
-  if (await attachmentLink.isVisible().catch(() => false)) {
-    await expect(attachmentLink).toBeVisible();
-    return;
-  }
-  // The polling loop already spent the full delivery budget. Keep the final
-  // assertion short so a missing/decryption-failed message reports its real
-  // locator instead of consuming a second full timeout window.
-  await expect(textBubbleLocator).toBeVisible({ timeout: 1_000 });
+  // Let in-flight history/key requests finish. Reloading every 750 ms aborts
+  // them on a slower connection and can prevent decryption indefinitely.
+  await expect(page.getByText(peer.name).first()).toBeVisible();
+  await expect(textBubbleLocator.or(secureAttachmentButton).or(attachmentLink).first())
+    .toBeVisible({ timeout: 35_000 });
 }
 
 async function refreshOwnChatKey(page: import("@playwright/test").Page) {
@@ -324,7 +280,7 @@ test.describe("secure chat live workflows", () => {
         { timeout: 15_000 },
       );
       await conciergePage
-        .getByRole("button", { name: /patient-secure-note\.pdf/i })
+        .getByRole("button", { name: "Herunterladen: patient-secure-note.pdf", exact: true })
         .click();
       expect((await attachmentDownloadResponse).ok()).toBeTruthy();
       await expect

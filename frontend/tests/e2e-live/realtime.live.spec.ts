@@ -34,13 +34,18 @@ async function waitForRealtime(page: Page) {
   ).toBeVisible({ timeout: 30_000 });
 }
 
-function waitForApiGet(page: Page, path: string): Promise<Response> {
+function waitForApiGet(
+  page: Page,
+  path: string,
+  matches?: (response: Response) => Promise<boolean>,
+): Promise<Response> {
   return page.waitForResponse(
-    (response) => {
+    async (response) => {
       const url = new URL(response.url());
       return (
         response.request().method() === "GET" &&
-        url.pathname === `/api/v1${path}`
+        url.pathname === `/api/v1${path}` &&
+        (!matches || await matches(response))
       );
     },
     { timeout: 15_000 },
@@ -176,6 +181,11 @@ test.describe("realtime live propagation", () => {
       const appointmentRefreshPromise = waitForApiGet(
         page,
         "/appointments",
+        // Opening the patient filter can leave an earlier list request in
+        // flight. The realtime response must include this unique new item.
+        async (response) => response.ok() &&
+          ((await response.json()) as AppointmentListItem[])
+            .some((item) => item.title === appointmentTitle),
       );
       await browserApiPost(mutatorPage, "/appointments", {
         patient_id: scenario.patient.id,
@@ -239,6 +249,9 @@ test.describe("realtime live propagation", () => {
       const taskRefreshPromise = waitForApiGet(
         operationsPage,
         "/concierge-operational-items",
+        async (response) => response.ok() &&
+          ((await response.json()) as TaskListItem[])
+            .some((item) => item.title === taskTitle),
       );
       const taskRequestId = await mutatorPage.evaluate(() => crypto.randomUUID());
       await browserApiPost(mutatorPage, "/concierge-operational-items", {
