@@ -1,7 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 
-import { OrderServiceGroupPanel } from "./order-service-group-panel";
+import {
+  OrderServiceGroupPanel,
+  OrderServiceGroupWizard,
+  serviceGroupPriceChoiceLabel,
+} from "./order-service-group-panel";
 
 describe("OrderServiceGroupPanel", () => {
   it("previews one generated billing line per doctor participant", () => {
@@ -96,5 +102,80 @@ describe("OrderServiceGroupPanel", () => {
     expect(html).toContain("Существующая строка");
     expect(html).toContain("leistung-1");
     expect(html).toContain("без дублей");
+  });
+});
+
+describe("OrderServiceGroupWizard catalog pricing", () => {
+  it("formats a price version with period and recommended marker", () => {
+    const label = serviceGroupPriceChoiceLabel(
+      {
+        id: "price-1",
+        name: "Standard",
+        unit_price: "120",
+        currency: "EUR",
+        vat_rate: "19",
+        valid_from: "2026-07-01",
+        valid_to: null,
+        created_at: "2026-06-01T10:00:00Z",
+        is_effective: true,
+        is_catalog_fallback: false,
+      },
+      "ru-RU",
+      "бессрочно",
+      "Рекомендуется на дату услуги",
+    );
+
+    expect(label).toContain("120,00");
+    expect(label).toContain("01.07.2026 — бессрочно");
+    expect(label).toContain("Рекомендуется на дату услуги");
+  });
+
+  it("renders catalog service and price selectors in the embedded wizard", () => {
+    const html = renderToStaticMarkup(
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <OrderServiceGroupWizard
+          embedded
+          providers={[]}
+          taxonomyNodes={[]}
+          providerDoctors={{}}
+          orderDate="2026-07-15"
+          agencyServices={[
+            {
+              id: "service-1",
+              service_key: "consultation",
+              service_name: "Consultation",
+              description: "Catalog consultation",
+              unit_label: "hour",
+              unit_price: "100",
+              currency: "EUR",
+              vat_rate: "19",
+              is_active: true,
+              valid_from: "2026-01-01",
+              valid_to: null,
+              created_at: "2026-01-01T10:00:00Z",
+              updated_at: null,
+              price_versions: [
+                {
+                  id: "price-1",
+                  name: "Standard",
+                  unit_price: "120",
+                  currency: "EUR",
+                  vat_rate: "19",
+                  valid_from: "2026-07-01",
+                  valid_to: null,
+                  created_at: "2026-06-01T10:00:00Z",
+                },
+              ],
+            },
+          ]}
+          onCreate={() => undefined}
+        />
+      </LocalizationProvider>,
+    );
+
+    expect(html).toContain("Услуга каталога");
+    expect(html).toContain("Цена каталога");
+    expect(html).toContain("Ручная группа без позиции каталога");
+    expect(html).toContain("Сначала выберите услугу каталога");
   });
 });

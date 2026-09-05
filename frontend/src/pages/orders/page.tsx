@@ -135,7 +135,10 @@ import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
 import { fetchAgencyServices } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
-import { resolveAgencyServicePrice } from "@/pages/contracts/model/contracts-model";
+import {
+  listAgencyServicePriceChoices,
+  resolveAgencyServicePrice,
+} from "@/pages/contracts/model/contracts-model";
 import {
   DEFAULT_FILTERS,
   EXTERNAL_INVOICE_STATUSES,
@@ -1290,6 +1293,30 @@ function useOrdersPageContent() {
   const pendingCreateAgencyService = requestedAgencyServiceId
     ? agencyServices.find((item) => item.id === requestedAgencyServiceId) ?? null
     : null;
+  const selectedLeistungAgencyService = useMemo(
+    () =>
+      leistungForm.agencyServiceId
+        ? agencyServices.find((item) => item.id === leistungForm.agencyServiceId) ?? null
+        : null,
+    [agencyServices, leistungForm.agencyServiceId],
+  );
+  const recommendedLeistungPriceVersion = useMemo(
+    () =>
+      selectedLeistungAgencyService
+        ? resolveAgencyServicePrice(
+            selectedLeistungAgencyService,
+            orderDetail?.date_from || undefined,
+          )
+        : null,
+    [orderDetail?.date_from, selectedLeistungAgencyService],
+  );
+  const leistungPriceVersions = useMemo(() => {
+    if (!selectedLeistungAgencyService) return [];
+    return listAgencyServicePriceChoices(
+      selectedLeistungAgencyService,
+      orderDetail?.date_from || undefined,
+    ).filter((price) => price.id || price.is_effective);
+  }, [orderDetail?.date_from, selectedLeistungAgencyService]);
 
   const orderTableColumns: ColumnDef<OrderSummary>[] = [
     {
@@ -1716,11 +1743,16 @@ function useOrdersPageContent() {
 
   function resetLeistungDialog(open: boolean) {
     setLeistungOpen(open);
-    if (!open) {
-      setLeistungError(null);
-      setLeistungForm(blankLeistungForm());
-      setLeistungSaving(false);
-    }
+    setLeistungError(null);
+    setLeistungForm(
+      open
+        ? {
+            ...blankLeistungForm(),
+            currency: orderDetail?.currency || "EUR",
+          }
+        : blankLeistungForm(),
+    );
+    setLeistungSaving(false);
   }
 
   function resetExternalInvoiceDialog(open: boolean) {
@@ -2115,7 +2147,27 @@ function useOrdersPageContent() {
     const effectivePrice = service
       ? resolveAgencyServicePrice(service, orderDetail.date_from || undefined)
       : null;
-    if (!service || !effectivePrice) {
+    const selectedPrice = service
+      ? (
+          effectivePrice
+          && (
+            !orderDetail.currency
+            || effectivePrice.currency.toUpperCase() === orderDetail.currency.toUpperCase()
+          )
+            ? effectivePrice
+            : listAgencyServicePriceChoices(
+                service,
+                orderDetail.date_from || undefined,
+              ).find((price) => (
+                (price.id || price.is_effective)
+                && (
+                !orderDetail.currency
+                || price.currency.toUpperCase() === orderDetail.currency.toUpperCase()
+                )
+              ))
+        )
+      : null;
+    if (!service || !selectedPrice) {
       setDetailError(
         lang === "de"
           ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
@@ -2128,13 +2180,15 @@ function useOrdersPageContent() {
     setLeistungForm({
       ...blankLeistungForm(),
       agencyServiceId: service.id,
+      agencyServicePriceVersionId: selectedPrice.id,
       description: agencyServiceNameLabel(
         service.service_key,
         service.service_name,
         t,
       ),
-      unitPrice: String(effectivePrice.unit_price ?? ""),
-      vatRate: String(effectivePrice.vat_rate ?? "0"),
+      unitPrice: String(selectedPrice.unit_price ?? ""),
+      currency: selectedPrice.currency || orderDetail.currency || "EUR",
+      vatRate: String(selectedPrice.vat_rate ?? "0"),
     });
     setLeistungOpen(true);
   }, [
@@ -2775,6 +2829,9 @@ function useOrdersPageContent() {
     try {
       await createOrderLeistung(selectedOrderId, {
         agency_service_id: optString(leistungForm.agencyServiceId),
+        agency_service_price_version_id: optString(
+          leistungForm.agencyServicePriceVersionId,
+        ),
         description: leistungForm.description.trim(),
         quantity,
         unit_price: unitPrice,
@@ -7590,6 +7647,9 @@ function useOrdersPageContent() {
               providers={providers}
               taxonomyNodes={taxonomyNodes}
               providerDoctors={providerDoctors}
+              agencyServices={agencyServices}
+              orderDate={orderDetail?.date_from}
+              orderCurrency={orderDetail?.currency}
               creating={serviceGroupCreating}
               error={serviceGroupWizardError}
               onLoadProviderDoctors={(providerId) =>
@@ -8143,9 +8203,32 @@ function useOrdersPageContent() {
                             orderDetail?.date_from || undefined,
                           )
                         : null;
+                      const selectedPrice = service
+                        ? (
+                            effectivePrice
+                            && (
+                              !orderDetail?.currency
+                              || effectivePrice.currency.toUpperCase()
+                                === orderDetail.currency.toUpperCase()
+                            )
+                              ? effectivePrice
+                              : listAgencyServicePriceChoices(
+                                  service,
+                                  orderDetail?.date_from || undefined,
+                                ).find((price) => (
+                                  (price.id || price.is_effective)
+                                  && (
+                                    !orderDetail?.currency
+                                    || price.currency.toUpperCase()
+                                      === orderDetail.currency.toUpperCase()
+                                  )
+                                ))
+                          )
+                        : null;
                       setLeistungForm((current) => ({
                         ...current,
                         agencyServiceId,
+                        agencyServicePriceVersionId: selectedPrice?.id ?? "",
                         description: service
                           ? agencyServiceNameLabel(
                               service.service_key,
@@ -8153,11 +8236,14 @@ function useOrdersPageContent() {
                               t,
                             )
                           : current.description,
-                        unitPrice: effectivePrice
-                          ? String(effectivePrice.unit_price ?? "")
+                        unitPrice: selectedPrice
+                          ? String(selectedPrice.unit_price ?? "")
                           : current.unitPrice,
-                        vatRate: effectivePrice
-                          ? String(effectivePrice.vat_rate ?? "0")
+                        currency: selectedPrice?.currency
+                          || orderDetail?.currency
+                          || current.currency,
+                        vatRate: selectedPrice
+                          ? String(selectedPrice.vat_rate ?? "0")
                           : current.vatRate,
                       }));
                     }}
@@ -8169,19 +8255,28 @@ function useOrdersPageContent() {
                         : "Индивидуальная услуга без позиции каталога"}
                     </option>
                     {agencyServices.map((service) => {
-                      const effectivePrice = resolveAgencyServicePrice(
+                      const compatiblePrices = listAgencyServicePriceChoices(
                         service,
                         orderDetail?.date_from || undefined,
-                      );
+                      ).filter((price) => (
+                        (price.id || price.is_effective)
+                        && (
+                          !orderDetail?.currency
+                          || price.currency.toUpperCase() === orderDetail.currency.toUpperCase()
+                        )
+                      ));
+                      const previewPrice = compatiblePrices.find(
+                        (price) => price.is_effective,
+                      ) ?? compatiblePrices[0];
                       return (
-                        <option key={service.id} value={service.id} disabled={!effectivePrice}>
+                        <option key={service.id} value={service.id} disabled={!previewPrice}>
                           {agencyServiceNameLabel(
                             service.service_key,
                             service.service_name,
                             t,
                           )}
-                          {effectivePrice
-                            ? ` · ${formatMoney(effectivePrice.unit_price, effectivePrice.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`
+                          {previewPrice
+                            ? ` · ${formatMoney(previewPrice.unit_price, previewPrice.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`
                             : " · —"}
                         </option>
                       );
@@ -8204,6 +8299,64 @@ function useOrdersPageContent() {
                     </p>
                   ) : null}
                 </Field>
+                {selectedLeistungAgencyService ? (
+                  <Field
+                    label={lang === "de" ? "Katalogpreis" : "Цена каталога"}
+                    className="md:col-span-4"
+                  >
+                    <NativeComboboxSelect
+                      value={leistungForm.agencyServicePriceVersionId}
+                      onChange={(event) => {
+                        const agencyServicePriceVersionId = event.target.value;
+                        const priceVersion = leistungPriceVersions.find(
+                          (version) => version.id === agencyServicePriceVersionId,
+                        );
+                        if (!priceVersion) return;
+                        setLeistungForm((current) => ({
+                          ...current,
+                          agencyServicePriceVersionId,
+                          unitPrice: String(priceVersion.unit_price ?? ""),
+                          currency: priceVersion.currency || current.currency,
+                          vatRate: String(priceVersion.vat_rate ?? "0"),
+                        }));
+                      }}
+                      className={selectClassName}
+                    >
+                      {leistungPriceVersions.map((priceVersion) => {
+                        const isRecommended =
+                          priceVersion.id === recommendedLeistungPriceVersion?.id;
+                        const period = `${formatDateOnlyLabel(priceVersion.valid_from)} — ${
+                          priceVersion.valid_to
+                            ? formatDateOnlyLabel(priceVersion.valid_to)
+                            : t.finance_catalog_open_ended
+                        }`;
+                        const versionName = priceVersion.name?.trim();
+                        return (
+                          <option
+                            key={priceVersion.id || "catalog-fallback"}
+                            value={priceVersion.id}
+                            disabled={Boolean(
+                              orderDetail?.currency
+                                && priceVersion.currency.toUpperCase()
+                                  !== orderDetail.currency.toUpperCase(),
+                            )}
+                          >
+                            {formatMoney(priceVersion.unit_price, priceVersion.currency)}
+                            {versionName ? ` · ${versionName}` : ""}
+                            {` · ${period}`}
+                            {isRecommended
+                              ? ` · ${
+                                  lang === "de"
+                                    ? "Empfohlen zum Auftragsdatum"
+                                    : "Рекомендуется на дату заказа"
+                                }`
+                              : ""}
+                          </option>
+                        );
+                      })}
+                    </NativeComboboxSelect>
+                  </Field>
+                ) : null}
                 <Field label={t.orders_service_description} className="md:col-span-2">
                   <Input
                     required
@@ -8246,9 +8399,13 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label={t.orders_service_unit_price}>
+                <Field
+                  label={`${t.orders_service_unit_price} (${leistungForm.currency})`}
+                >
                   <Input
                     value={leistungForm.unitPrice}
+                    readOnly={Boolean(leistungForm.agencyServiceId)}
+                    disabled={Boolean(leistungForm.agencyServiceId)}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
                         ...current,
@@ -8261,6 +8418,8 @@ function useOrdersPageContent() {
                 <Field label={t.orders_service_vat_percent}>
                   <Input
                     value={leistungForm.vatRate}
+                    readOnly={Boolean(leistungForm.agencyServiceId)}
+                    disabled={Boolean(leistungForm.agencyServiceId)}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
                         ...current,

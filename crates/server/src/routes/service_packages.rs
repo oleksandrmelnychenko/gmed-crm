@@ -58,6 +58,7 @@ pub fn router() -> Router<AppState> {
 struct ServicePackageItemInput {
     id: Option<Uuid>,
     agency_service_id: Option<Uuid>,
+    agency_service_price_version_id: Option<Uuid>,
     service_key: Option<String>,
     description: String,
     included_quantity: Option<Decimal>,
@@ -368,12 +369,16 @@ async fn load_service_package_payloads(
 
     if !package_ids.is_empty() {
         let item_rows = sqlx::query(
-            r#"SELECT spi.id, spi.package_id, spi.agency_service_id, spi.service_key,
+            r#"SELECT spi.id, spi.package_id, spi.agency_service_id,
+                      spi.agency_service_price_version_id, spi.service_key,
                       spi.description, spi.included_quantity, spi.unit_label,
                       spi.overage_unit_price_net, spi.tax_profile_id,
                       spi.requires_patient_approval, spi.sort_order,
                       c.service_name AS agency_service_name,
                       CASE
+                          WHEN pinned_price.id IS NOT NULL THEN pinned_price.unit_price
+                          WHEN spi.overage_unit_price_net IS NOT NULL
+                              THEN spi.overage_unit_price_net
                           WHEN current_price.id IS NOT NULL THEN current_price.unit_price
                           WHEN c.valid_from <= CURRENT_DATE
                                AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
@@ -381,6 +386,7 @@ async fn load_service_package_payloads(
                           ELSE NULL
                       END AS agency_service_unit_price,
                       CASE
+                          WHEN pinned_price.id IS NOT NULL THEN pinned_price.currency
                           WHEN current_price.id IS NOT NULL THEN current_price.currency
                           WHEN c.valid_from <= CURRENT_DATE
                                AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
@@ -388,6 +394,7 @@ async fn load_service_package_payloads(
                           ELSE NULL
                       END AS agency_service_currency,
                       CASE
+                          WHEN pinned_price.id IS NOT NULL THEN pinned_price.vat_rate
                           WHEN current_price.id IS NOT NULL THEN current_price.vat_rate
                           WHEN c.valid_from <= CURRENT_DATE
                                AND (c.valid_to IS NULL OR c.valid_to >= CURRENT_DATE)
@@ -399,6 +406,9 @@ async fn load_service_package_payloads(
                       tp.vat_rate AS tax_profile_vat_rate
                FROM service_package_items spi
                LEFT JOIN agency_service_catalog c ON c.id = spi.agency_service_id
+               LEFT JOIN agency_service_price_versions pinned_price
+                 ON pinned_price.id = spi.agency_service_price_version_id
+                AND pinned_price.agency_service_id = spi.agency_service_id
                LEFT JOIN LATERAL (
                    SELECT version.id, version.unit_price, version.currency, version.vat_rate
                    FROM agency_service_price_versions version
@@ -429,6 +439,7 @@ async fn load_service_package_payloads(
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "package_id": package_id,
                 "agency_service_id": row.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
+                "agency_service_price_version_id": row.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
                 "agency_service_name": row.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
                 "agency_service_unit_price": row.try_get::<Option<Decimal>, _>("agency_service_unit_price").unwrap_or_default().map(decimal_to_string),
                 "agency_service_currency": row.try_get::<Option<String>, _>("agency_service_currency").unwrap_or_default(),
@@ -491,19 +502,21 @@ async fn replace_package_items(
             let result = sqlx::query(
                 r#"UPDATE service_package_items
                    SET agency_service_id = $3,
-                       service_key = $4,
-                       description = $5,
-                       included_quantity = $6,
-                       unit_label = $7,
-                       overage_unit_price_net = $8,
-                       tax_profile_id = $9,
-                       requires_patient_approval = $10,
-                       sort_order = $11
+                       agency_service_price_version_id = $4,
+                       service_key = $5,
+                       description = $6,
+                       included_quantity = $7,
+                       unit_label = $8,
+                       overage_unit_price_net = $9,
+                       tax_profile_id = $10,
+                       requires_patient_approval = $11,
+                       sort_order = $12
                    WHERE id = $1 AND package_id = $2"#,
             )
             .bind(item_id)
             .bind(package_id)
             .bind(item.agency_service_id)
+            .bind(item.agency_service_price_version_id)
             .bind(service_key)
             .bind(description)
             .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
@@ -523,14 +536,16 @@ async fn replace_package_items(
         } else {
             let row = sqlx::query(
                 r#"INSERT INTO service_package_items (
-                        package_id, agency_service_id, service_key, description,
+                        package_id, agency_service_id, agency_service_price_version_id,
+                        service_key, description,
                         included_quantity, unit_label, overage_unit_price_net,
                         tax_profile_id, requires_patient_approval, sort_order
-                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                    RETURNING id"#,
             )
             .bind(package_id)
             .bind(item.agency_service_id)
+            .bind(item.agency_service_price_version_id)
             .bind(service_key)
             .bind(description)
             .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
@@ -588,6 +603,18 @@ fn validate_package_items(
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "overage_unit_price_net must be non-negative",
+            ));
+        }
+        if item.agency_service_price_version_id.is_some() && item.overage_unit_price_net.is_some() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "agency_service_price_version_id and overage_unit_price_net are mutually exclusive",
+            ));
+        }
+        if item.agency_service_price_version_id.is_some() && item.agency_service_id.is_none() {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "agency_service_id is required for an explicit catalog price version",
             ));
         }
     }
@@ -686,6 +713,55 @@ async fn validate_package_item_references(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Package item agency service not found",
             ));
+        }
+    }
+
+    let price_version_ids = items
+        .iter()
+        .filter_map(|item| item.agency_service_price_version_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !price_version_ids.is_empty() {
+        let rows = sqlx::query(
+            "SELECT id, agency_service_id FROM agency_service_price_versions WHERE id = ANY($1)",
+        )
+        .bind(&price_version_ids)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "validate service package item price versions");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate package item price versions",
+            )
+        })?;
+        let versions_by_id = rows
+            .into_iter()
+            .filter_map(|row| {
+                Some((
+                    row.try_get::<Uuid, _>("id").ok()?,
+                    row.try_get::<Uuid, _>("agency_service_id").ok()?,
+                ))
+            })
+            .collect::<HashMap<_, _>>();
+
+        for item in items {
+            let Some(price_version_id) = item.agency_service_price_version_id else {
+                continue;
+            };
+            let Some(expected_service_id) = item.agency_service_id else {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "agency_service_id is required for an explicit catalog price version",
+                ));
+            };
+            if versions_by_id.get(&price_version_id) != Some(&expected_service_id) {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Agency service price version does not belong to package item service",
+                ));
+            }
         }
     }
 
@@ -2049,17 +2125,34 @@ async fn create_package_consumption(
     let item_context = if let Some(package_item_id) = body.package_item_id {
         match sqlx::query(
             r#"SELECT item.id, item.included_quantity, item.requires_patient_approval,
+                      -- Pricing precedence is intentionally stable:
+                      -- pinned catalog version, manual package override, then the
+                      -- catalog version effective on the consumption date.
                       CASE
-                          WHEN item.overage_unit_price_net IS NULL THEN price.id
+                          WHEN pinned_price.id IS NOT NULL THEN pinned_price.id
+                          WHEN item.overage_unit_price_net IS NULL THEN automatic_price.id
                           ELSE NULL
                       END AS agency_service_price_version_id,
-                      COALESCE(item.overage_unit_price_net, price.unit_price, catalog.unit_price, 0)
+                      COALESCE(
+                          pinned_price.unit_price,
+                          item.overage_unit_price_net,
+                          automatic_price.unit_price,
+                          catalog.unit_price,
+                          0
+                      )
                           AS unit_price_net,
-                      UPPER(COALESCE(price.currency, catalog.currency, package.currency, 'EUR'))
+                      UPPER(COALESCE(
+                          pinned_price.currency,
+                          automatic_price.currency,
+                          catalog.currency,
+                          package.currency,
+                          'EUR'
+                      ))
                           AS currency,
                       COALESCE(
                           item_tax.vat_rate,
-                          price.vat_rate,
+                          pinned_price.vat_rate,
+                          automatic_price.vat_rate,
                           catalog.vat_rate,
                           package_tax.vat_rate,
                           0
@@ -2072,6 +2165,9 @@ async fn create_package_consumption(
                FROM service_package_items item
                JOIN service_packages package ON package.id = item.package_id
                LEFT JOIN agency_service_catalog catalog ON catalog.id = item.agency_service_id
+               LEFT JOIN agency_service_price_versions pinned_price
+                 ON pinned_price.id = item.agency_service_price_version_id
+                AND pinned_price.agency_service_id = item.agency_service_id
                LEFT JOIN tax_profiles item_tax ON item_tax.id = item.tax_profile_id
                LEFT JOIN tax_profiles package_tax ON package_tax.id = package.tax_profile_id
                LEFT JOIN LATERAL (
@@ -2082,13 +2178,14 @@ async fn create_package_consumption(
                      AND (version.valid_to IS NULL OR version.valid_to >= CURRENT_DATE)
                    ORDER BY version.valid_from DESC, version.created_at DESC
                    LIMIT 1
-               ) price ON true
+               ) automatic_price ON true
                WHERE item.id = $1
                  AND item.package_id = $2
                  AND (
-                       item.overage_unit_price_net IS NOT NULL
+                       pinned_price.id IS NOT NULL
+                       OR item.overage_unit_price_net IS NOT NULL
                        OR item.agency_service_id IS NULL
-                       OR price.id IS NOT NULL
+                       OR automatic_price.id IS NOT NULL
                        OR (
                            catalog.valid_from <= CURRENT_DATE
                            AND (catalog.valid_to IS NULL OR catalog.valid_to >= CURRENT_DATE)

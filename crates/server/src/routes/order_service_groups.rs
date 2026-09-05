@@ -56,6 +56,7 @@ struct CreateOrderServiceGroup {
     group_title: String,
     service_key: Option<String>,
     agency_service_id: Option<Uuid>,
+    agency_service_price_version_id: Option<Uuid>,
     description: Option<String>,
     service_date: Option<String>,
     quantity: Option<f64>,
@@ -220,6 +221,12 @@ async fn create_order_service_group(
         .filter(|value| !value.is_empty())
         .unwrap_or("EUR")
         .to_uppercase();
+    if body.agency_service_price_version_id.is_some() && body.agency_service_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Agency service is required when selecting a price version",
+        );
+    }
 
     if let Err(resp) = validate_appointment_order_link(&state, order_id, body.appointment_id).await
     {
@@ -245,8 +252,29 @@ async fn create_order_service_group(
         tax_profile_id,
         vat_source,
     ) = if let Some(agency_service_id) = body.agency_service_id {
-        match sqlx::query(
-            r#"SELECT price.id AS price_version_id,
+        let result = if let Some(price_version_id) = body.agency_service_price_version_id {
+            sqlx::query(
+                r#"SELECT version.id AS price_version_id,
+                          version.unit_price,
+                          UPPER(version.currency) AS currency,
+                          version.vat_rate,
+                          catalog.tax_profile_id
+                   FROM orders ord
+                   JOIN agency_service_catalog catalog ON catalog.id = $2
+                   JOIN agency_service_price_versions version
+                     ON version.agency_service_id = catalog.id
+                    AND version.id = $3
+                   WHERE ord.id = $1
+                     AND catalog.is_active"#,
+            )
+            .bind(order_id)
+            .bind(agency_service_id)
+            .bind(price_version_id)
+            .fetch_optional(&mut *tx)
+            .await
+        } else {
+            sqlx::query(
+                r#"SELECT price.id AS price_version_id,
                           COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
                           UPPER(COALESCE(price.currency, catalog.currency)) AS currency,
                           COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate,
@@ -277,13 +305,14 @@ async fn create_order_service_group(
                                )
                            )
                          )"#,
-        )
-        .bind(order_id)
-        .bind(agency_service_id)
-        .bind(service_date)
-        .fetch_optional(&mut *tx)
-        .await
-        {
+            )
+            .bind(order_id)
+            .bind(agency_service_id)
+            .bind(service_date)
+            .fetch_optional(&mut *tx)
+            .await
+        };
+        match result {
             Ok(Some(row)) => {
                 let resolved_currency = row
                     .try_get::<String, _>("currency")
@@ -326,7 +355,11 @@ async fn create_order_service_group(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Agency service has no active price for the service date",
+                    if body.agency_service_price_version_id.is_some() {
+                        "Agency service price version does not belong to service"
+                    } else {
+                        "Agency service has no active price for the service date"
+                    },
                 );
             }
             Err(error) => {

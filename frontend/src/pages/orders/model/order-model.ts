@@ -135,9 +135,11 @@ export function blankCreateOrderForm(): CreateOrderFormState {
 export function blankLeistungForm(): LeistungFormState {
   return {
     agencyServiceId: "",
+    agencyServicePriceVersionId: "",
     description: "",
     quantity: "1",
     unitPrice: "",
+    currency: "EUR",
     vatRate: "19",
     plannedPartnerCostNet: "",
     plannedPartnerCostVat: "",

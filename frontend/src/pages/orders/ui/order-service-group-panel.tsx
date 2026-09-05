@@ -1,6 +1,7 @@
 ﻿import { useMemo, useState, type FormEvent } from "react";
 
 import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,16 @@ import {
 import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-labels";
 import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
+import { fetchAgencyServices } from "@/pages/contracts/data/contracts-api";
+import {
+  listAgencyServicePriceChoices,
+  type AgencyServicePriceChoice,
+} from "@/pages/contracts/model/contracts-model";
+import type { AgencyServiceItem } from "@/pages/contracts/model/types";
+import {
+  agencyServiceDescriptionLabel,
+  agencyServiceNameLabel,
+} from "@/lib/agency-service-labels";
 import type {
   CreateOrderServiceGroupInput,
   OrderServiceGroup,
@@ -72,6 +83,8 @@ type WizardParticipant = {
 };
 
 type WizardForm = {
+  agency_service_id: string;
+  agency_service_price_version_id: string;
   group_title: string;
   description: string;
   service_date: string;
@@ -89,6 +102,9 @@ type OrderServiceGroupWizardProps = {
   creating?: boolean;
   error?: string | null;
   embedded?: boolean;
+  agencyServices?: AgencyServiceItem[];
+  orderDate?: string | null;
+  orderCurrency?: string | null;
   onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
   onCreate: (input: CreateOrderServiceGroupInput) => void | Promise<void>;
   onCreated?: () => void;
@@ -115,6 +131,8 @@ function createBlankParticipant(): WizardParticipant {
 
 function createBlankWizardForm(): WizardForm {
   return {
+    agency_service_id: "",
+    agency_service_price_version_id: "",
     group_title: "",
     description: "",
     service_date: "",
@@ -143,6 +161,39 @@ const SERVICE_GROUP_LINE_ACTION_LABEL_KEYS: Partial<Record<string, TranslationKe
 
 function formatCountMessage(template: string, count: number) {
   return template.replace(/\{count\}/g, String(count));
+}
+
+function formatCatalogDate(value: string, locale: string) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(locale).format(date);
+}
+
+export function serviceGroupPriceChoiceLabel(
+  choice: AgencyServicePriceChoice,
+  locale: string,
+  openEndedLabel: string,
+  recommendedLabel: string,
+) {
+  const numericPrice = Number(choice.unit_price);
+  const price = Number.isFinite(numericPrice)
+    ? new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: choice.currency,
+      }).format(numericPrice)
+    : `${String(choice.unit_price)} ${choice.currency}`;
+  const period = `${formatCatalogDate(choice.valid_from, locale)} — ${
+    choice.valid_to
+      ? formatCatalogDate(choice.valid_to, locale)
+      : openEndedLabel
+  }`;
+  return [
+    price,
+    choice.name?.trim() || null,
+    period,
+    choice.is_effective ? recommendedLabel : null,
+  ].filter(Boolean).join(" · ");
 }
 
 function serviceGroupStatusLabel(status: string, translations: Translations) {
@@ -381,17 +432,63 @@ export function OrderServiceGroupWizard({
   creating = false,
   error,
   embedded = false,
+  agencyServices: providedAgencyServices,
+  orderDate,
+  orderCurrency,
   onLoadProviderDoctors,
   onCreate,
   onCreated,
 }: OrderServiceGroupWizardProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<WizardForm>(createBlankWizardForm);
   const [localError, setLocalError] = useState("");
+  const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>(
+    providedAgencyServices ?? [],
+  );
+  const effectivePriceDate = form.service_date || orderDate || undefined;
+  const selectedAgencyService = useMemo(
+    () =>
+      form.agency_service_id
+        ? agencyServices.find((service) => service.id === form.agency_service_id) ?? null
+        : null,
+    [agencyServices, form.agency_service_id],
+  );
+  const priceChoices = useMemo(
+    () =>
+      selectedAgencyService
+        ? listAgencyServicePriceChoices(selectedAgencyService, effectivePriceDate).filter(
+            (choice) => (choice.id || choice.is_effective) && (
+              !orderCurrency
+              || choice.currency.toUpperCase() === orderCurrency.toUpperCase()
+            ),
+          )
+        : [],
+    [effectivePriceDate, orderCurrency, selectedAgencyService],
+  );
   const selectedDoctorCount = form.participants.filter(
     (item) => item.provider_id && item.doctor_id,
   ).length;
+
+  useEffect(() => {
+    if (providedAgencyServices !== undefined) {
+      setAgencyServices(providedAgencyServices);
+      return;
+    }
+
+    let cancelled = false;
+    void fetchAgencyServices("/agency-services?active_only=true", { forceFresh: true })
+      .then((services) => {
+        if (!cancelled) setAgencyServices(services.filter((service) => service.is_active));
+      })
+      .catch(() => {
+        if (!cancelled) setAgencyServices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [providedAgencyServices]);
 
   const duplicateDoctorCount = useMemo(() => {
     const selected = form.participants.flatMap((participant) =>
@@ -438,6 +535,10 @@ export function OrderServiceGroupWizard({
     try {
       await onCreate({
         group_title: title,
+        service_key: selectedAgencyService?.service_key ?? null,
+        agency_service_id: form.agency_service_id || null,
+        agency_service_price_version_id:
+          form.agency_service_price_version_id || null,
         description: form.description.trim() || null,
         service_date: form.service_date || null,
         quantity: numberOrNull(form.quantity) ?? 1,
@@ -464,8 +565,15 @@ export function OrderServiceGroupWizard({
     <OrderServiceGroupWizardForm
       form={form}
       translations={t}
+      lang={lang}
+      locale={locale}
       basisTitle={uiTextLabel(t, "orders_basis")}
       costTitle={uiTextLabel(t, "orders_kosten")}
+      agencyServices={agencyServices}
+      effectivePriceDate={effectivePriceDate}
+      orderDate={orderDate}
+      orderCurrency={orderCurrency}
+      priceChoices={priceChoices}
       providers={providers}
       taxonomyNodes={taxonomyNodes}
       providerDoctors={providerDoctors}
@@ -511,8 +619,15 @@ export function OrderServiceGroupWizard({
 function OrderServiceGroupWizardForm({
   form,
   translations: t,
+  lang,
+  locale,
   basisTitle,
   costTitle,
+  agencyServices,
+  effectivePriceDate,
+  orderDate,
+  orderCurrency,
+  priceChoices,
   providers,
   taxonomyNodes,
   providerDoctors,
@@ -528,8 +643,15 @@ function OrderServiceGroupWizardForm({
 }: {
   form: WizardForm;
   translations: Translations;
+  lang: string;
+  locale: string;
   basisTitle: ReactNode;
   costTitle: ReactNode;
+  agencyServices: AgencyServiceItem[];
+  effectivePriceDate?: string;
+  orderDate?: string | null;
+  orderCurrency?: string | null;
+  priceChoices: AgencyServicePriceChoice[];
   providers: ProviderOption[];
   taxonomyNodes: ProviderTaxonomyNode[];
   providerDoctors: Record<string, DoctorOption[]>;
@@ -554,6 +676,13 @@ function OrderServiceGroupWizardForm({
         setForm={setForm}
         title={basisTitle}
         translations={t}
+        lang={lang}
+        locale={locale}
+        agencyServices={agencyServices}
+        effectivePriceDate={effectivePriceDate}
+        orderDate={orderDate}
+        orderCurrency={orderCurrency}
+        priceChoices={priceChoices}
       />
       <WizardCostSection
         form={form}
@@ -587,15 +716,158 @@ function WizardBasicsSection({
   setForm,
   title,
   translations: t,
+  lang,
+  locale,
+  agencyServices,
+  effectivePriceDate,
+  orderDate,
+  orderCurrency,
+  priceChoices,
 }: {
   form: WizardForm;
   setForm: WizardFormSetter;
   title: ReactNode;
   translations: Translations;
+  lang: string;
+  locale: string;
+  agencyServices: AgencyServiceItem[];
+  effectivePriceDate?: string;
+  orderDate?: string | null;
+  orderCurrency?: string | null;
+  priceChoices: AgencyServicePriceChoice[];
 }) {
+  const selectedAgencyService = form.agency_service_id
+    ? agencyServices.find((service) => service.id === form.agency_service_id) ?? null
+    : null;
+  const recommendedLabel = form.service_date
+    ? (lang === "de"
+        ? "Empfohlen zum Leistungsdatum"
+        : "Рекомендуется на дату услуги")
+    : orderDate
+      ? (lang === "de"
+          ? "Empfohlen zum Auftragsdatum"
+          : "Рекомендуется на дату заказа")
+      : (lang === "de"
+          ? "Aktuell empfohlener Preis"
+          : "Текущая рекомендуемая цена");
+
+  function selectAgencyService(agencyServiceId: string) {
+    const service = agencyServices.find((candidate) => candidate.id === agencyServiceId);
+    if (!service) {
+      setForm((current) => ({
+        ...current,
+        agency_service_id: "",
+        agency_service_price_version_id: "",
+      }));
+      return;
+    }
+
+    const choices = listAgencyServicePriceChoices(service, effectivePriceDate).filter(
+      (choice) => (choice.id || choice.is_effective) && (
+        !orderCurrency
+        || choice.currency.toUpperCase() === orderCurrency.toUpperCase()
+      ),
+    );
+    const selectedPrice = choices.find((choice) => choice.is_effective) ?? choices[0];
+    setForm((current) => ({
+      ...current,
+      agency_service_id: service.id,
+      agency_service_price_version_id: selectedPrice?.id ?? "",
+      group_title: agencyServiceNameLabel(
+        service.service_key,
+        service.service_name,
+        t,
+      ),
+      description: service.description
+        ? agencyServiceDescriptionLabel(service.service_key, service.description, t)
+        : current.description,
+      unit_price: selectedPrice
+        ? String(selectedPrice.unit_price ?? "")
+        : current.unit_price,
+      currency: selectedPrice?.currency || current.currency,
+      vat_rate: selectedPrice
+        ? String(selectedPrice.vat_rate ?? "0")
+        : current.vat_rate,
+    }));
+  }
+
+  function selectPriceVersion(priceVersionId: string) {
+    const selectedPrice = priceChoices.find((choice) => choice.id === priceVersionId);
+    if (!selectedPrice) return;
+    setForm((current) => ({
+      ...current,
+      agency_service_price_version_id: selectedPrice.id,
+      unit_price: String(selectedPrice.unit_price ?? ""),
+      currency: selectedPrice.currency,
+      vat_rate: String(selectedPrice.vat_rate ?? "0"),
+    }));
+  }
+
   return (
     <SheetSectionCard title={title}>
       <div className="grid gap-3 md:grid-cols-4">
+        <Field
+          label={lang === "de" ? "Katalogleistung" : "Услуга каталога"}
+          className="md:col-span-2"
+        >
+          <NativeComboboxSelect
+            value={form.agency_service_id}
+            onChange={(event) => selectAgencyService(event.target.value)}
+            className={selectClass}
+          >
+            <option value="">
+              {lang === "de"
+                ? "Manuelle Gruppe ohne Katalogbezug"
+                : "Ручная группа без позиции каталога"}
+            </option>
+            {agencyServices.map((service) => {
+              const choices = listAgencyServicePriceChoices(service, effectivePriceDate).filter(
+                (choice) => (choice.id || choice.is_effective) && (
+                  !orderCurrency
+                  || choice.currency.toUpperCase() === orderCurrency.toUpperCase()
+                ),
+              );
+              const recommendedPrice = choices.find((choice) => choice.is_effective);
+              return (
+                <option key={service.id} value={service.id} disabled={choices.length === 0}>
+                  {agencyServiceNameLabel(service.service_key, service.service_name, t)}
+                  {recommendedPrice
+                    ? ` · ${String(recommendedPrice.unit_price)} ${recommendedPrice.currency}`
+                    : ""}
+                </option>
+              );
+            })}
+          </NativeComboboxSelect>
+        </Field>
+        <Field
+          label={lang === "de" ? "Katalogpreis" : "Цена каталога"}
+          className="md:col-span-2"
+        >
+          <NativeComboboxSelect
+            value={form.agency_service_price_version_id}
+            onChange={(event) => selectPriceVersion(event.target.value)}
+            disabled={!selectedAgencyService || priceChoices.length === 0}
+            className={selectClass}
+          >
+            {!selectedAgencyService ? (
+              <option value="">
+                {lang === "de"
+                  ? "Zuerst Katalogleistung wählen"
+                  : "Сначала выберите услугу каталога"}
+              </option>
+            ) : null}
+            {priceChoices.map((choice) => (
+              <option key={choice.id || "catalog-fallback"} value={choice.id}>
+                {serviceGroupPriceChoiceLabel(
+                  choice,
+                  locale,
+                  t.finance_catalog_open_ended,
+                  recommendedLabel,
+                )}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </Field>
         <Field label={t.orders_service_group_title} className="md:col-span-2">
           <Input
             value={form.group_title}
@@ -668,6 +940,8 @@ function WizardCostSection({
         <Field label={t.orders_service_group_unit_price}>
           <Input
             value={form.unit_price}
+            readOnly={Boolean(form.agency_service_id)}
+            disabled={Boolean(form.agency_service_id)}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
@@ -680,6 +954,8 @@ function WizardCostSection({
         <Field label={t.orders_service_group_vat_percent}>
           <Input
             value={form.vat_rate}
+            readOnly={Boolean(form.agency_service_id)}
+            disabled={Boolean(form.agency_service_id)}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
@@ -692,6 +968,8 @@ function WizardCostSection({
         <Field label={t.orders_service_group_currency}>
           <Input
             value={form.currency}
+            readOnly={Boolean(form.agency_service_id)}
+            disabled={Boolean(form.agency_service_id)}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,

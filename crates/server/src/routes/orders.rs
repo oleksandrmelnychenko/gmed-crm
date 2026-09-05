@@ -196,6 +196,7 @@ struct UpdateOrderFollowupFlowRequest {
 struct AddLeistungRequest {
     patient_id: Option<Uuid>,
     agency_service_id: Option<Uuid>,
+    agency_service_price_version_id: Option<Uuid>,
     description: String,
     quantity: f64,
     unit_price: f64,
@@ -6848,6 +6849,12 @@ async fn add_leistung(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    if body.agency_service_price_version_id.is_some() && body.agency_service_id.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Agency service is required when selecting a price version",
+        );
+    }
 
     let service_patient_id = match ensure_order_service_patient_allowed(
         &state,
@@ -6883,8 +6890,26 @@ async fn add_leistung(
         };
 
     let resolved_agency_price = if let Some(agency_service_id) = body.agency_service_id {
-        match sqlx::query(
-            r#"SELECT price.id AS price_version_id,
+        let result = if let Some(price_version_id) = body.agency_service_price_version_id {
+            sqlx::query(
+                r#"SELECT version.id AS price_version_id,
+                          version.unit_price,
+                          UPPER(version.currency) AS currency,
+                          version.vat_rate
+                   FROM agency_service_catalog catalog
+                   JOIN agency_service_price_versions version
+                     ON version.agency_service_id = catalog.id
+                   WHERE catalog.id = $1
+                     AND catalog.is_active
+                     AND version.id = $2"#,
+            )
+            .bind(agency_service_id)
+            .bind(price_version_id)
+            .fetch_optional(&state.db)
+            .await
+        } else {
+            sqlx::query(
+                r#"SELECT price.id AS price_version_id,
                       COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
                       UPPER(COALESCE(price.currency, catalog.currency)) AS currency,
                       COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate
@@ -6907,12 +6932,13 @@ async fn add_leistung(
                            AND (catalog.valid_to IS NULL OR catalog.valid_to >= $2)
                        )
                  )"#,
-        )
-        .bind(agency_service_id)
-        .bind(effective_price_date)
-        .fetch_optional(&state.db)
-        .await
-        {
+            )
+            .bind(agency_service_id)
+            .bind(effective_price_date)
+            .fetch_optional(&state.db)
+            .await
+        };
+        match result {
             Ok(Some(row)) => {
                 let currency = row
                     .try_get::<String, _>("currency")
@@ -6935,7 +6961,11 @@ async fn add_leistung(
             Ok(None) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "Agency service has no active price for the order date",
+                    if body.agency_service_price_version_id.is_some() {
+                        "Agency service price version does not belong to service"
+                    } else {
+                        "Agency service has no active price for the order date"
+                    },
                 );
             }
             Err(error) => {

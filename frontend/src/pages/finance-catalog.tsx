@@ -170,6 +170,7 @@ type PriceVersionForm = {
 type ServicePackageItem = {
   id: string;
   agency_service_id?: string | null;
+  agency_service_price_version_id?: string | null;
   agency_service_name?: string | null;
   agency_service_unit_price?: string | null;
   agency_service_currency?: string | null;
@@ -186,6 +187,8 @@ type ServicePackageItem = {
   requires_patient_approval: boolean;
   sort_order: number;
 };
+
+export type PackageItemPricingMode = "automatic" | "specific" | "manual";
 
 type TaxProfileForm = {
   profileKey: string;
@@ -214,6 +217,8 @@ const BLANK_TAX_PROFILE_FORM: TaxProfileForm = {
 type ServicePackageItemForm = {
   formKey: string;
   agencyServiceId: string;
+  agencyServicePriceVersionId: string;
+  pricingMode: PackageItemPricingMode;
   description: string;
   serviceKey: string;
   includedQuantity: string;
@@ -247,6 +252,8 @@ function nextPackageItemFormKey() {
 const BLANK_PACKAGE_ITEM_FORM: ServicePackageItemForm = {
   formKey: "package-item-form-template",
   agencyServiceId: "",
+  agencyServicePriceVersionId: "",
+  pricingMode: "automatic",
   description: "",
   serviceKey: "",
   includedQuantity: "1",
@@ -404,6 +411,12 @@ function packageItemToForm(
   return {
     formKey: item.id || nextPackageItemFormKey(),
     agencyServiceId: item.agency_service_id ?? "",
+    agencyServicePriceVersionId: item.agency_service_price_version_id ?? "",
+    pricingMode: item.agency_service_price_version_id
+      ? "specific"
+      : item.overage_unit_price_net != null
+        ? "manual"
+        : "automatic",
     description: item.description,
     serviceKey: item.service_key ?? "",
     includedQuantity: item.included_quantity,
@@ -447,6 +460,8 @@ export function packageItemPatchFromAgencyService(
 ) {
   return {
     agencyServiceId: service.id,
+    agencyServicePriceVersionId: "",
+    pricingMode: "automatic" as const,
     description: service.description?.trim() || service.service_name,
     serviceKey: service.service_key,
     unitLabel: service.unit_label || defaultUnitLabel,
@@ -455,6 +470,28 @@ export function packageItemPatchFromAgencyService(
     // an explicit package-specific overage price.
     overageUnitPriceNet: "",
   };
+}
+
+export function recommendedPackageItemPriceVersion(
+  service: Pick<AgencyServiceItem, "price_versions"> | null | undefined,
+  today = todayInputDate(),
+  currency?: string,
+) {
+  return packageItemSelectablePriceVersions(service, currency, today).find(
+    (version) => pricePeriodState(version.valid_from, version.valid_to, today) === "current",
+  );
+}
+
+export function packageItemSelectablePriceVersions(
+  service: Pick<AgencyServiceItem, "price_versions"> | null | undefined,
+  currency?: string,
+  today = todayInputDate(),
+) {
+  const normalizedCurrency = currency?.trim().toUpperCase();
+  return sortPriceVersionsForDisplay(service?.price_versions ?? [], today).filter(
+    (version) =>
+      !normalizedCurrency || version.currency.trim().toUpperCase() === normalizedCurrency,
+  );
 }
 
 export function createPackageItemFromAgencyService(
@@ -2139,7 +2176,12 @@ function useFinanceCatalogPageContent() {
   function applyAgencyServiceToPackageItem(index: number, serviceId: string) {
     const service = agencyServices.find((item) => item.id === serviceId);
     if (!service) {
-      updatePackageItem(index, { agencyServiceId: "" });
+      updatePackageItem(index, {
+        agencyServiceId: "",
+        agencyServicePriceVersionId: "",
+        pricingMode: "automatic",
+        overageUnitPriceNet: "",
+      });
       return;
     }
 
@@ -2148,6 +2190,29 @@ function useFinanceCatalogPageContent() {
         service,
         t.finance_catalog_unit_default,
       ),
+    });
+  }
+
+  function setPackageItemPricingMode(index: number, pricingMode: PackageItemPricingMode) {
+    const item = packageForm.items[index];
+    const service = agencyServices.find((candidate) => candidate.id === item?.agencyServiceId);
+    const effectiveDate = packageForm.validFrom || todayInputDate();
+    const versions = packageItemSelectablePriceVersions(
+      service,
+      packageForm.currency,
+      effectiveDate,
+    );
+    const recommended = recommendedPackageItemPriceVersion(
+      service,
+      effectiveDate,
+      packageForm.currency,
+    );
+
+    updatePackageItem(index, {
+      pricingMode,
+      agencyServicePriceVersionId:
+        pricingMode === "specific" ? recommended?.id || versions[0]?.id || "" : "",
+      overageUnitPriceNet: pricingMode === "manual" ? item?.overageUnitPriceNet ?? "" : "",
     });
   }
 
@@ -2160,6 +2225,8 @@ function useFinanceCatalogPageContent() {
     );
     const isEmptyDefaultItem = (item: ServicePackageItemForm) =>
       !item.agencyServiceId &&
+      !item.agencyServicePriceVersionId &&
+      item.pricingMode === "automatic" &&
       !item.description.trim() &&
       !item.serviceKey.trim() &&
       (!item.includedQuantity.trim() || item.includedQuantity.trim() === "1") &&
@@ -2207,13 +2274,29 @@ function useFinanceCatalogPageContent() {
       packageForm.items.some(
         (item) =>
           !decimalInputIsValid(item.includedQuantity) ||
-          Boolean(
-            item.overageUnitPriceNet.trim() &&
-              !decimalInputIsValid(item.overageUnitPriceNet),
-          ),
+          (item.pricingMode === "manual" &&
+            (!item.overageUnitPriceNet.trim() ||
+              !decimalInputIsValid(item.overageUnitPriceNet) ||
+              Number(item.overageUnitPriceNet.replace(",", ".")) < 0)),
       )
     ) {
       setPackageError(t.finance_catalog_error_item_numbers);
+      return;
+    }
+    if (
+      packageForm.items.some(
+        (item) =>
+          item.pricingMode === "specific" &&
+          (!item.agencyServiceId ||
+            !item.agencyServicePriceVersionId ||
+            !packageItemSelectablePriceVersions(
+              agencyServices.find((service) => service.id === item.agencyServiceId),
+              packageForm.currency,
+              packageForm.validFrom || todayInputDate(),
+            ).some((version) => version.id === item.agencyServicePriceVersionId)),
+      )
+    ) {
+      setPackageError(t.finance_catalog_error_specific_price_required);
       return;
     }
 
@@ -2234,11 +2317,16 @@ function useFinanceCatalogPageContent() {
             ? null
             : item.formKey,
           agency_service_id: item.agencyServiceId || null,
+          agency_service_price_version_id:
+            item.pricingMode === "specific"
+              ? item.agencyServicePriceVersionId || null
+              : null,
           description: item.description.trim(),
           service_key: item.serviceKey.trim() || null,
           included_quantity: decimalPayload(item.includedQuantity, 1),
           unit_label: item.unitLabel.trim() || t.finance_catalog_unit_default,
-          overage_unit_price_net: item.overageUnitPriceNet.trim()
+          overage_unit_price_net:
+            item.pricingMode === "manual" && item.overageUnitPriceNet.trim()
             ? decimalPayload(item.overageUnitPriceNet)
             : null,
           tax_profile_id: item.taxProfileId || null,
@@ -3827,18 +3915,90 @@ function useFinanceCatalogPageContent() {
                               disabled={packageBusy}
                             />
                           </Field>
-                          <Field label={t.finance_catalog_overage_net_price}>
-                            <Input
-                              value={item.overageUnitPriceNet}
+                          <Field label={t.finance_catalog_package_item_pricing_mode}>
+                            <NativeComboboxSelect
+                              value={item.pricingMode}
                               onChange={(event) =>
-                                updatePackageItem(index, {
-                                  overageUnitPriceNet: event.target.value,
-                                })
+                                setPackageItemPricingMode(
+                                  index,
+                                  event.target.value as PackageItemPricingMode,
+                                )
                               }
-                              className={inputClass}
+                              className={selectClass}
                               disabled={packageBusy}
-                            />
+                            >
+                              <option value="automatic">
+                                {t.finance_catalog_package_item_pricing_automatic}
+                              </option>
+                              <option value="specific" disabled={!item.agencyServiceId}>
+                                {t.finance_catalog_package_item_pricing_specific}
+                              </option>
+                              <option value="manual">
+                                {t.finance_catalog_package_item_pricing_manual}
+                              </option>
+                            </NativeComboboxSelect>
                           </Field>
+                          {item.pricingMode === "specific" ? (
+                            <Field label={t.finance_catalog_package_item_specific_price}>
+                              <NativeComboboxSelect
+                                value={item.agencyServicePriceVersionId}
+                                onChange={(event) =>
+                                  updatePackageItem(index, {
+                                    agencyServicePriceVersionId: event.target.value,
+                                  })
+                                }
+                                className={selectClass}
+                                disabled={packageBusy || !item.agencyServiceId}
+                              >
+                                <option value="">
+                                  {t.finance_catalog_package_item_choose_price}
+                                </option>
+                                {packageItemSelectablePriceVersions(
+                                  agencyServices.find(
+                                    (service) => service.id === item.agencyServiceId,
+                                  ),
+                                  packageForm.currency,
+                                  packageForm.validFrom || todayInputDate(),
+                                ).map((version) => {
+                                  const isRecommended =
+                                    recommendedPackageItemPriceVersion(
+                                      agencyServices.find(
+                                        (service) => service.id === item.agencyServiceId,
+                                      ),
+                                      packageForm.validFrom || todayInputDate(),
+                                      packageForm.currency,
+                                    )?.id === version.id;
+                                  return (
+                                    <option key={version.id} value={version.id}>
+                                      {version.name?.trim() || t.finance_catalog_price_name} ·{" "}
+                                      {formatMoney(
+                                        version.unit_price as string | number,
+                                        version.currency,
+                                      )} · {version.valid_from} —{" "}
+                                      {version.valid_to || t.finance_catalog_open_ended}
+                                      {isRecommended
+                                        ? ` · ${t.finance_catalog_package_item_recommended}`
+                                        : ""}
+                                    </option>
+                                  );
+                                })}
+                              </NativeComboboxSelect>
+                            </Field>
+                          ) : null}
+                          {item.pricingMode === "manual" ? (
+                            <Field label={t.finance_catalog_overage_net_price}>
+                              <Input
+                                value={item.overageUnitPriceNet}
+                                onChange={(event) =>
+                                  updatePackageItem(index, {
+                                    overageUnitPriceNet: event.target.value,
+                                  })
+                                }
+                                className={inputClass}
+                                disabled={packageBusy}
+                              />
+                            </Field>
+                          ) : null}
                           <Field label={t.finance_catalog_item_vat_profile}>
                             <NativeComboboxSelect
                               value={item.taxProfileId || "__none__"}

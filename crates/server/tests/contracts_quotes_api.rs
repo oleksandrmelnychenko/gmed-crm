@@ -1694,8 +1694,8 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
         original_description
     );
     assert_eq!(saved_line["agency_service_unit_label"], "transfer");
-    assert_eq!(saved_line["unit_price"], "88");
-    assert_eq!(saved_line["unit_price_snapshot"], "88");
+    assert_eq!(saved_line["unit_price"], "90");
+    assert_eq!(saved_line["unit_price_snapshot"], "90");
     assert_eq!(saved_line["vat_rate_snapshot"], "19");
 
     let (status, quote) = json_request(
@@ -1727,6 +1727,364 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
             .await
             .unwrap();
     assert!(!is_active);
+}
+
+#[tokio::test]
+async fn order_service_can_select_an_explicit_catalog_price_version() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("explicit-agency-price");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, first_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("explicit_price_{tag}"),
+            "service_name": format!("Explicit price {tag}"),
+            "unit_label": "unit",
+            "unit_price": 90.0,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {first_service}");
+    let first_service_id = first_service["id"].as_str().expect("service id");
+
+    let (status, future_price) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{first_service_id}/price-versions"),
+        &billing_bearer,
+        Some(json!({
+            "name": "Contracted future price",
+            "unit_price": 150,
+            "currency": "EUR",
+            "vat_rate": 7,
+            "valid_from": "2027-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {future_price}");
+    let future_price_id = future_price["id"].as_str().expect("price version id");
+
+    let (status, second_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("wrong_price_owner_{tag}"),
+            "service_name": format!("Wrong price owner {tag}"),
+            "unit_label": "unit",
+            "unit_price": 70.0,
+            "currency": "EUR",
+            "vat_rate": 19.0,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {second_service}");
+    let second_service_id = second_service["id"].as_str().expect("service id");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Explicit catalog price selection",
+            "date_from": "2026-09-04"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().expect("order id");
+
+    let (status, version_without_service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "agency_service_price_version_id": future_price_id,
+            "description": "Missing service",
+            "quantity": 1,
+            "unit_price": 1
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {version_without_service}"
+    );
+
+    let (status, wrong_service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "agency_service_id": second_service_id,
+            "agency_service_price_version_id": future_price_id,
+            "description": "Wrong service version",
+            "quantity": 1,
+            "unit_price": 1
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {wrong_service}"
+    );
+
+    let (status, line) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "agency_service_id": first_service_id,
+            "agency_service_price_version_id": future_price_id,
+            "description": "Explicit future price",
+            "quantity": 2,
+            "unit_price": 1,
+            "vat_rate": 19
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {line}");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {detail}");
+    let saved_line = &detail["leistungen"][0];
+    assert_eq!(saved_line["agency_service_id"], first_service_id);
+    assert_eq!(
+        saved_line["agency_service_price_version_id"],
+        future_price_id
+    );
+    assert_eq!(saved_line["unit_price"], "150");
+    assert_eq!(saved_line["unit_price_snapshot"], "150");
+    assert_eq!(saved_line["vat_rate"], "7");
+    assert_eq!(saved_line["vat_rate_snapshot"], "7");
+}
+
+#[tokio::test]
+async fn service_group_can_select_an_explicit_catalog_price_version() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("group-explicit-price");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, first_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("group_explicit_{tag}"),
+            "service_name": format!("Group explicit {tag}"),
+            "unit_label": "doctor",
+            "unit_price": 90,
+            "currency": "EUR",
+            "vat_rate": 19,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {first_service}");
+    let first_service_id = first_service["id"].as_str().expect("service id");
+
+    let (status, future_price) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{first_service_id}/price-versions"),
+        &billing_bearer,
+        Some(json!({
+            "name": "Contracted group price",
+            "unit_price": 175,
+            "currency": "EUR",
+            "vat_rate": 7,
+            "valid_from": "2027-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {future_price}");
+    let future_price_id = future_price["id"].as_str().expect("price version id");
+
+    let (status, second_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("group_wrong_owner_{tag}"),
+            "service_name": format!("Group wrong owner {tag}"),
+            "unit_label": "doctor",
+            "unit_price": 70,
+            "currency": "EUR",
+            "vat_rate": 19,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {second_service}");
+    let second_service_id = second_service["id"].as_str().expect("service id");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Explicit group price selection",
+            "date_from": "2026-09-04"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().expect("order id");
+
+    let (status, version_without_service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/service-groups"),
+        &pm_bearer,
+        Some(json!({
+            "group_title": "Missing service",
+            "agency_service_price_version_id": future_price_id
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {version_without_service}"
+    );
+
+    let (status, wrong_service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/service-groups"),
+        &pm_bearer,
+        Some(json!({
+            "group_title": "Wrong service",
+            "agency_service_id": second_service_id,
+            "agency_service_price_version_id": future_price_id
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {wrong_service}"
+    );
+
+    let (status, group) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/service-groups"),
+        &pm_bearer,
+        Some(json!({
+            "group_title": "Explicit future group price",
+            "agency_service_id": first_service_id,
+            "agency_service_price_version_id": future_price_id,
+            "service_date": "2026-09-04",
+            "quantity": 2,
+            "unit_price": 1,
+            "vat_rate": 19,
+            "participants": [{
+                "provider_id": provider_id,
+                "doctor_id": doctor_id
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {group}");
+    let group_id = group["id"].as_str().expect("service group id");
+
+    let (status, group_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/order-service-groups/{group_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {group_detail}");
+    assert_eq!(group_detail["agency_service_id"], first_service_id);
+    assert_eq!(
+        group_detail["agency_service_price_version_id"],
+        future_price_id
+    );
+    assert_eq!(group_detail["unit_price"], "175");
+    assert_eq!(group_detail["vat_rate"], "7");
+
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/order-service-groups/{group_id}/generate-lines"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {generated}");
+    assert_eq!(generated["generated_count"], 1);
+
+    let (status, order_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {order_detail}");
+    let generated_line = &order_detail["leistungen"][0];
+    assert_eq!(generated_line["agency_service_id"], first_service_id);
+    assert_eq!(
+        generated_line["agency_service_price_version_id"],
+        future_price_id
+    );
+    assert_eq!(generated_line["unit_price"], "175");
+    assert_eq!(generated_line["unit_price_snapshot"], "175");
+    assert_eq!(generated_line["vat_rate"], "7");
+    assert_eq!(generated_line["vat_rate_snapshot"], "7");
 }
 
 #[tokio::test]

@@ -145,6 +145,48 @@ export function resolveAgencyServicePrice(
   return null;
 }
 
+export type AgencyServicePriceChoice = AgencyServicePriceVersion & {
+  is_effective: boolean;
+  is_catalog_fallback: boolean;
+};
+
+/** Returns every selectable catalog price and marks the automatic price. */
+export function listAgencyServicePriceChoices(
+  service: AgencyServiceItem,
+  effectiveOn = localTodayInputDate(),
+): AgencyServicePriceChoice[] {
+  const effectivePrice = resolveAgencyServicePrice(service, effectiveOn);
+  const versions = [...(service.price_versions ?? [])]
+    .sort((left, right) => {
+      const byStart = right.valid_from.localeCompare(left.valid_from);
+      if (byStart !== 0) return byStart;
+      return (right.created_at ?? "").localeCompare(left.created_at ?? "");
+    });
+  const catalogFallback: AgencyServicePriceVersion & { is_catalog_fallback: boolean } = {
+    id: "",
+    name: null,
+    unit_price: service.unit_price,
+    currency: service.currency,
+    vat_rate: service.vat_rate,
+    valid_from: service.valid_from ?? effectiveOn,
+    valid_to: service.valid_to,
+    created_at: service.created_at,
+    is_catalog_fallback: true,
+  };
+  const candidates: Array<AgencyServicePriceVersion & { is_catalog_fallback: boolean }> =
+    versions.map((version) => ({ ...version, is_catalog_fallback: false }));
+  if (effectivePrice !== null && !effectivePrice.id) {
+    candidates.push(catalogFallback);
+  }
+
+  return candidates.map((candidate) => ({
+    ...candidate,
+    is_effective: effectivePrice !== null && (
+      candidate.id ? candidate.id === effectivePrice.id : !effectivePrice.id
+    ),
+  }));
+}
+
 export function blankContractForm(patientId = ""): ContractFormState {
   return {
     patientId,

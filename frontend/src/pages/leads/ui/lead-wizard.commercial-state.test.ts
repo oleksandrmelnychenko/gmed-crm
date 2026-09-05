@@ -13,6 +13,7 @@ import {
 const storedLine = (price: string): ServiceLine => ({
   id: "wizard-line",
   agencyServiceId: "service-id",
+  agencyServicePriceVersionId: "price-version-id",
   clientReference: "lead-wizard:lead-id:wizard-line",
   managedByWizard: true,
   description: "Concierge Service Essential (1 Tag)",
@@ -31,6 +32,7 @@ describe("lead wizard commercial source of truth", () => {
       [{
         id: "order-line",
         agency_service_id: "service-id",
+        agency_service_price_version_id: "persisted-price-version-id",
         client_reference: "lead-wizard:lead-id:wizard-line",
         description: "Concierge Service Essential (1 Tag)",
         quantity: "7",
@@ -42,6 +44,7 @@ describe("lead wizard commercial source of truth", () => {
 
     expect(persisted).toHaveLength(1);
     expect(persisted[0]?.price).toBe("130");
+    expect(persisted[0]?.agencyServicePriceVersionId).toBe("persisted-price-version-id");
     expect(persisted[0]?.managedByWizard).toBe(true);
     expect(calculateServiceLineEstimate(persisted)).toEqual({
       net: 910,

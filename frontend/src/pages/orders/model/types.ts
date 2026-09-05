@@ -721,9 +721,11 @@ export type CreateOrderFormState = {
 
 export type LeistungFormState = {
   agencyServiceId: string;
+  agencyServicePriceVersionId: string;
   description: string;
   quantity: string;
   unitPrice: string;
+  currency: string;
   vatRate: string;
   plannedPartnerCostNet: string;
   plannedPartnerCostVat: string;

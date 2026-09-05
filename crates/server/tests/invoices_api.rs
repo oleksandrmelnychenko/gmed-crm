@@ -1110,6 +1110,239 @@ async fn service_package_rejects_unknown_item_references() {
 }
 
 #[tokio::test]
+async fn service_package_pinned_catalog_price_is_validated_persisted_and_snapshotted() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("package-pinned-price");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+
+    let (status, first_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("package_pinned_{tag}"),
+            "service_name": "Pinned package service",
+            "unit_label": "hour",
+            "unit_price": 90,
+            "currency": "EUR",
+            "vat_rate": 19,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {first_service}");
+    let first_service_id = first_service["id"].as_str().expect("first service id");
+
+    // This version is deliberately outside the current period. Selecting it
+    // explicitly must still freeze its own amount and VAT at consumption time.
+    let (status, pinned_price) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/agency-services/{first_service_id}/price-versions"),
+        &billing_bearer,
+        Some(json!({
+            "name": "Contracted future package price",
+            "unit_price": 150,
+            "currency": "EUR",
+            "vat_rate": 7,
+            "valid_from": "2027-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {pinned_price}");
+    let pinned_price_id = pinned_price["id"].as_str().expect("pinned price id");
+
+    let (status, second_service) = json_request(
+        &app,
+        "POST",
+        "/api/v1/agency-services",
+        &billing_bearer,
+        Some(json!({
+            "service_key": format!("package_wrong_owner_{tag}"),
+            "service_name": "Other package service",
+            "unit_label": "hour",
+            "unit_price": 70,
+            "currency": "EUR",
+            "vat_rate": 19,
+            "is_active": true,
+            "valid_from": "2026-01-01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {second_service}");
+    let second_service_id = second_service["id"].as_str().expect("second service id");
+
+    let (status, wrong_owner) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_wrong_price_{tag}"),
+            "name": "Wrong pinned price owner",
+            "currency": "EUR",
+            "base_price_net": 100,
+            "items": [{
+                "agency_service_id": second_service_id,
+                "agency_service_price_version_id": pinned_price_id,
+                "description": "Wrong service version",
+                "included_quantity": 0,
+                "unit_label": "hour"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {wrong_owner}"
+    );
+
+    let (status, conflicting_mode) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_conflicting_price_{tag}"),
+            "name": "Conflicting package price mode",
+            "currency": "EUR",
+            "base_price_net": 100,
+            "items": [{
+                "agency_service_id": first_service_id,
+                "agency_service_price_version_id": pinned_price_id,
+                "description": "Two price modes",
+                "included_quantity": 0,
+                "unit_label": "hour",
+                "overage_unit_price_net": 20
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {conflicting_mode}"
+    );
+
+    let (status, package) = json_request(
+        &app,
+        "POST",
+        "/api/v1/service-packages",
+        &billing_bearer,
+        Some(json!({
+            "package_key": format!("pkg_pinned_price_{tag}"),
+            "name": "Pinned price package",
+            "currency": "EUR",
+            "base_price_net": 100,
+            "items": [{
+                "agency_service_id": first_service_id,
+                "agency_service_price_version_id": pinned_price_id,
+                "description": "Pinned future-priced hour",
+                "included_quantity": 0,
+                "unit_label": "hour"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {package}");
+    assert_eq!(
+        package["items"][0]["agency_service_price_version_id"],
+        pinned_price_id
+    );
+    let package_id = package["id"].as_str().expect("package id");
+    let package_item_id = package["items"][0]["id"].as_str().expect("package item id");
+    let persisted_price_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT agency_service_price_version_id FROM service_package_items WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(package_item_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        persisted_price_id,
+        Some(Uuid::parse_str(pinned_price_id).unwrap())
+    );
+
+    let (status, assigned) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages"),
+        &billing_bearer,
+        Some(json!({
+            "package_id": package_id,
+            "order_id": order_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {assigned}");
+    let patient_package_id = assigned["id"].as_str().expect("patient package id");
+
+    let (status, consumption) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/service-packages/{patient_package_id}/consume"),
+        &billing_bearer,
+        Some(json!({
+            "package_item_id": package_item_id,
+            "order_id": order_id,
+            "quantity": 1
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {consumption}");
+
+    let snapshot = sqlx::query(
+        r#"SELECT agency_service_price_version_id, unit_price_net_snapshot,
+                  vat_rate_snapshot, currency_snapshot
+           FROM service_package_consumptions
+           WHERE patient_service_package_id = $1 AND package_item_id = $2
+           ORDER BY created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(Uuid::parse_str(patient_package_id).unwrap())
+    .bind(Uuid::parse_str(package_item_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        snapshot
+            .try_get::<Option<Uuid>, _>("agency_service_price_version_id")
+            .unwrap(),
+        Some(Uuid::parse_str(pinned_price_id).unwrap())
+    );
+    assert_eq!(
+        snapshot
+            .try_get::<rust_decimal::Decimal, _>("unit_price_net_snapshot")
+            .unwrap()
+            .normalize()
+            .to_string(),
+        "150"
+    );
+    assert_eq!(
+        snapshot
+            .try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
+            .unwrap()
+            .normalize()
+            .to_string(),
+        "7"
+    );
+    assert_eq!(
+        snapshot.try_get::<String, _>("currency_snapshot").unwrap(),
+        "EUR"
+    );
+}
+
+#[tokio::test]
 async fn invoice_detail_explains_mixed_vat_sources() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

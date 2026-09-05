@@ -89,6 +89,7 @@ export type CreateOrderServiceGroupInput = {
   group_title: string;
   service_key?: string | null;
   agency_service_id?: string | null;
+  agency_service_price_version_id?: string | null;
   description?: string | null;
   service_date?: string | null;
   quantity?: number | null;

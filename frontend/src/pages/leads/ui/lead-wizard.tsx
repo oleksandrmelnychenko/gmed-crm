@@ -88,7 +88,9 @@ import {
   updateQuoteStatus,
 } from "@/pages/contracts/data/contracts-api";
 import type { AgencyServiceItem, ContractItem, QuoteItem } from "@/pages/contracts/model/types";
-import { resolveAgencyServicePrice } from "@/pages/contracts/model/contracts-model";
+import {
+  listAgencyServicePriceChoices,
+} from "@/pages/contracts/model/contracts-model";
 import {
   createDocumentPreviewObjectUrl,
   deleteStoredDocumentFile,
@@ -277,6 +279,7 @@ type Draft = {
 export type ServiceLine = {
   id: string;
   agencyServiceId: string | null;
+  agencyServicePriceVersionId: string | null;
   clientReference: string | null;
   managedByWizard?: boolean;
   description: string;
@@ -677,6 +680,10 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
           id: inputString(line.id, `stored-line-${index + 1}`),
           agencyServiceId:
             typeof line.agency_service_id === "string" ? line.agency_service_id : null,
+          agencyServicePriceVersionId:
+            typeof line.agency_service_price_version_id === "string"
+              ? line.agency_service_price_version_id
+              : null,
           clientReference:
             typeof line.client_reference === "string" ? line.client_reference : null,
           managedByWizard: line.managed_by_wizard !== false,
@@ -791,6 +798,7 @@ function autosavePayload(
         lines: lines.map((line) => ({
           id: line.id,
           agency_service_id: line.agencyServiceId,
+          agency_service_price_version_id: line.agencyServicePriceVersionId,
           client_reference: line.clientReference,
           managed_by_wizard: line.managedByWizard !== false,
           description: line.description,
@@ -1570,6 +1578,7 @@ function newLine(index = 1): ServiceLine {
   return {
     id: "line-" + Date.now().toString(36) + "-" + index,
     agencyServiceId: null,
+    agencyServicePriceVersionId: null,
     clientReference: null,
     managedByWizard: true,
     description: "",
@@ -1579,6 +1588,21 @@ function newLine(index = 1): ServiceLine {
     quantity: "1",
     price: "",
     vat: "19",
+  };
+}
+
+const SERVICE_PRICE_OPTION_SEPARATOR = "::price::";
+
+function servicePriceOptionValue(serviceId: string, priceVersionId: string) {
+  return `${serviceId}${SERVICE_PRICE_OPTION_SEPARATOR}${priceVersionId}`;
+}
+
+function parseServicePriceOptionValue(value: string) {
+  const separatorIndex = value.indexOf(SERVICE_PRICE_OPTION_SEPARATOR);
+  if (separatorIndex < 0) return null;
+  return {
+    serviceId: value.slice(0, separatorIndex),
+    priceVersionId: value.slice(separatorIndex + SERVICE_PRICE_OPTION_SEPARATOR.length),
   };
 }
 
@@ -2042,6 +2066,7 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
   return {
     id: item.id,
     agencyServiceId: item.agency_service_id ?? null,
+    agencyServicePriceVersionId: item.agency_service_price_version_id ?? null,
     clientReference: item.client_reference ?? null,
     managedByWizard: item.client_reference?.startsWith("lead-wizard:") ?? false,
     description: item.description,
@@ -4569,6 +4594,7 @@ ${serviceCommentLines.join("\n")}`
         currentServiceLines.map(({ line, clientReference }) =>
           createOrderLeistung(orderId, {
             agency_service_id: line.agencyServiceId,
+            agency_service_price_version_id: requestedAgencyServicePriceId(line),
             description: line.description.trim(),
             quantity: money(line.quantity),
             unit_price: money(line.price),
@@ -5113,14 +5139,80 @@ ${serviceCommentLines.join("\n")}`
     setLines((current) => current.map((line) => line.id === id ? { ...line, ...patchValue } : line));
   }
 
-  function addAgencyService(serviceId: string) {
-    const service = agencyServiceById.get(serviceId);
-    if (!service) return;
-    const effectivePrice = resolveAgencyServicePrice(
+  function servicePriceChoiceLabel(
+    price: ReturnType<typeof listAgencyServicePriceChoices>[number],
+  ) {
+    const period = `${germanDateLabel(price.valid_from)} — ${
+      price.valid_to
+        ? germanDateLabel(price.valid_to)
+        : tx("бессрочно", "unbefristet")
+    }`;
+    return [
+      `${formatMoneyValue(money(inputString(price.unit_price)), lang)} ${price.currency}`,
+      price.name?.trim(),
+      period,
+      price.is_effective ? tx("рекомендуемая", "empfohlen") : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function applyAgencyServicePrice(
+    lineId: string,
+    service: AgencyServiceItem,
+    priceVersionId: string,
+  ) {
+    const price = listAgencyServicePriceChoices(
+      service,
+      draft?.programDateFrom || undefined,
+    ).find((candidate) => candidate.id === priceVersionId);
+    if (!price || price.currency.toUpperCase() !== "EUR") {
+      return;
+    }
+    setCommercialSaveFeedback(null);
+    updateLine(lineId, {
+      agencyServicePriceVersionId: price.id || null,
+      currency: price.currency || "EUR",
+      price: inputString(price.unit_price),
+      vat: inputString(price.vat_rate, "19"),
+    });
+  }
+
+  function selectedAgencyServicePriceId(line: ServiceLine, service: AgencyServiceItem) {
+    if (line.agencyServicePriceVersionId) return line.agencyServicePriceVersionId;
+    const choices = listAgencyServicePriceChoices(
       service,
       draft?.programDateFrom || undefined,
     );
-    if (!effectivePrice) return;
+    const matchingSnapshot = choices.find((candidate) => (
+      candidate.currency === line.currency
+      && Math.abs(money(candidate.unit_price) - money(line.price)) < 0.005
+      && Math.abs(money(candidate.vat_rate) - money(line.vat)) < 0.005
+    ));
+    return matchingSnapshot?.id
+      ?? choices.find((candidate) => candidate.is_effective)?.id
+      ?? "";
+  }
+
+  function requestedAgencyServicePriceId(line: ServiceLine) {
+    if (!line.agencyServiceId) return null;
+    const service = agencyServiceById.get(line.agencyServiceId);
+    return service
+      ? selectedAgencyServicePriceId(line, service) || null
+      : line.agencyServicePriceVersionId;
+  }
+
+  function addAgencyService(selection: string) {
+    const parsedSelection = parseServicePriceOptionValue(selection);
+    if (!parsedSelection) return;
+    const service = agencyServiceById.get(parsedSelection.serviceId);
+    if (!service) return;
+    const selectedPrice = listAgencyServicePriceChoices(
+      service,
+      draft?.programDateFrom || undefined,
+    ).find((candidate) => candidate.id === parsedSelection.priceVersionId);
+    if (
+      !selectedPrice
+      || selectedPrice.currency.toUpperCase() !== "EUR"
+    ) return;
     setCommercialSaveFeedback(null);
     setLines((current) => {
       if (current.some((line) => line.agencyServiceId === service.id)) return current;
@@ -5129,12 +5221,13 @@ ${serviceCommentLines.join("\n")}`
         {
           ...newLine(current.length + 1),
           agencyServiceId: service.id,
+          agencyServicePriceVersionId: selectedPrice.id || null,
           description: service.service_name,
           catalogDescription: service.description?.trim() ?? "",
           catalogUnitLabel: service.unit_label?.trim() ?? "",
-          currency: effectivePrice.currency || "EUR",
-          price: inputString(effectivePrice.unit_price),
-          vat: inputString(effectivePrice.vat_rate, "19"),
+          currency: selectedPrice.currency || "EUR",
+          price: inputString(selectedPrice.unit_price),
+          vat: inputString(selectedPrice.vat_rate, "19"),
         },
       ];
     });
@@ -5314,7 +5407,7 @@ ${serviceCommentLines.join("\n")}`
       accessor: (line) => money(line.price),
       sortable: false,
       align: "right",
-      width: 170,
+      width: 280,
       render: (line) => {
         const catalogService = line.agencyServiceId
           ? agencyServiceById.get(line.agencyServiceId)
@@ -5323,6 +5416,45 @@ ${serviceCommentLines.join("\n")}`
           line.catalogUnitLabel || catalogService?.unit_label,
           tx,
         );
+        if (catalogService) {
+          const priceChoices = listAgencyServicePriceChoices(
+            catalogService,
+            draft?.programDateFrom || undefined,
+          );
+          const selectedPriceId = selectedAgencyServicePriceId(line, catalogService);
+          return (
+            <NativeComboboxSelect
+              aria-label={`${tx("Цена каталога", "Katalogpreis")}: ${line.description}`}
+              name={`service_price_${line.id}`}
+              value={selectedPriceId}
+              disabled={isBusy}
+              className="h-8 min-w-60 bg-field pr-8 text-right font-mono text-xs tabular-nums"
+              title={tx(
+                "Выберите конкретную версию цены каталога",
+                "Wählen Sie eine konkrete Katalogpreisversion",
+              )}
+              onChange={(event) => applyAgencyServicePrice(
+                line.id,
+                catalogService,
+                event.target.value,
+              )}
+            >
+              {priceChoices.map((price) => (
+                <option
+                  key={price.id || "catalog-price"}
+                  value={price.id}
+                  disabled={
+                    (!price.id && !price.is_effective)
+                    || price.currency.toUpperCase()
+                      !== "EUR"
+                  }
+                >
+                  {servicePriceChoiceLabel(price)} / {unit}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          );
+        }
         return (
           <span className="whitespace-nowrap">
             {formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}/{unit}
@@ -7001,28 +7133,41 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => addAgencyService(event.target.value)}
                     className={cn(selectClass, "w-full md:max-w-2xl")}
                   >
-                    <option value="">{tx("Выберите услугу из каталога", "Leistung aus dem Katalog auswählen")}</option>
+                    <option value="">{tx("Выберите услугу и цену", "Leistung und Preis auswählen")}</option>
                     {agencyServices.map((service) => {
-                      const effectivePrice = resolveAgencyServicePrice(
+                      const priceChoices = listAgencyServicePriceChoices(
                         service,
                         draft.programDateFrom || undefined,
                       );
+                      const alreadySelected = lines.some(
+                        (line) => line.agencyServiceId === service.id,
+                      );
                       return (
-                        <option
-                          key={service.id}
-                          value={service.id}
-                          disabled={
-                            !effectivePrice ||
-                            lines.some((line) => line.agencyServiceId === service.id)
-                          }
-                        >
-                          {service.service_name} · {effectivePrice
-                            ? `${formatMoneyValue(money(inputString(effectivePrice.unit_price)), lang)} ${effectivePrice.currency}`
-                            : "—"}/{serviceBillingUnitLabel(service.unit_label, tx)}
-                        </option>
+                        <optgroup key={service.id} label={service.service_name}>
+                          {priceChoices.map((price) => (
+                            <option
+                              key={price.id || `${service.id}-catalog-price`}
+                              value={servicePriceOptionValue(service.id, price.id)}
+                              disabled={
+                                alreadySelected
+                                || (!price.id && !price.is_effective)
+                                || price.currency.toUpperCase()
+                                  !== "EUR"
+                              }
+                            >
+                              {servicePriceChoiceLabel(price)} / {serviceBillingUnitLabel(service.unit_label, tx)}
+                            </option>
+                          ))}
+                        </optgroup>
                       );
                     })}
                   </NativeComboboxSelect>
+                  <p className="text-[11px] text-muted-foreground">
+                    {tx(
+                      "Рекомендуемая цена определяется по дате начала программы; при необходимости можно выбрать другую версию.",
+                      "Der empfohlene Preis richtet sich nach dem Programmbeginn; bei Bedarf kann eine andere Version gewählt werden.",
+                    )}
+                  </p>
                 </div>
                 {lines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>

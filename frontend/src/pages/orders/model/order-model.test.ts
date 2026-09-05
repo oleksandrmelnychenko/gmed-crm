@@ -40,9 +40,11 @@ describe("blankLeistungForm", () => {
   it("starts as a manual service until a catalog item is selected", () => {
     expect(blankLeistungForm()).toMatchObject({
       agencyServiceId: "",
+      agencyServicePriceVersionId: "",
       description: "",
       quantity: "1",
       unitPrice: "",
+      currency: "EUR",
       vatRate: "19",
     });
   });

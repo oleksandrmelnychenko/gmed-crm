@@ -5,8 +5,10 @@ import {
   agencyServicePackageUsagesByServiceId,
   createPackageItemFromAgencyService,
   packageItemPatchFromAgencyService,
+  packageItemSelectablePriceVersions,
   packageItemVatRate,
   pricePeriodState,
+  recommendedPackageItemPriceVersion,
   sortPriceVersionsForDisplay,
   validateAgencyServiceForm,
 } from "./finance-catalog";
@@ -108,6 +110,8 @@ describe("packageItemPatchFromAgencyService", () => {
       ),
     ).toEqual({
       agencyServiceId: "service-1",
+      agencyServicePriceVersionId: "",
+      pricingMode: "automatic",
       description: "Interpreter support per hour",
       serviceKey: "interpreter_hours",
       unitLabel: "h",
@@ -130,6 +134,8 @@ describe("packageItemPatchFromAgencyService", () => {
       ),
     ).toEqual({
       agencyServiceId: "service-2",
+      agencyServicePriceVersionId: "",
+      pricingMode: "automatic",
       description: "Transfer",
       serviceKey: "transfer",
       unitLabel: "ед.",
@@ -154,6 +160,8 @@ describe("createPackageItemFromAgencyService", () => {
 
     expect(item).toMatchObject({
       agencyServiceId: "service-1",
+      agencyServicePriceVersionId: "",
+      pricingMode: "automatic",
       description: "Interpreter support per hour",
       serviceKey: "interpreter_hours",
       includedQuantity: "1",
@@ -163,6 +171,56 @@ describe("createPackageItemFromAgencyService", () => {
       requiresPatientApproval: false,
     });
     expect(item.formKey).toMatch(/^package-item-form-/);
+  });
+});
+
+describe("recommendedPackageItemPriceVersion", () => {
+  it("recommends only the catalog version effective today", () => {
+    const service = {
+      price_versions: [
+        {
+          id: "past",
+          currency: "EUR",
+          valid_from: "2026-01-01",
+          valid_to: "2026-08-31",
+        },
+        {
+          id: "current",
+          currency: "EUR",
+          valid_from: "2026-09-01",
+          valid_to: "2026-09-30",
+        },
+        {
+          id: "future",
+          currency: "EUR",
+          valid_from: "2026-10-01",
+          valid_to: null,
+        },
+      ],
+    };
+
+    expect(recommendedPackageItemPriceVersion(service as never, "2026-09-04")?.id).toBe(
+      "current",
+    );
+    expect(recommendedPackageItemPriceVersion(service as never, "2027-01-01")?.id).toBe(
+      "future",
+    );
+    expect(recommendedPackageItemPriceVersion(service as never, "2025-01-01")).toBeUndefined();
+  });
+
+  it("filters versions that do not match the package currency", () => {
+    const service = {
+      price_versions: [
+        { id: "eur", currency: "EUR", valid_from: "2026-01-01", valid_to: null },
+        { id: "usd", currency: "USD", valid_from: "2026-01-01", valid_to: null },
+      ],
+    };
+
+    expect(
+      packageItemSelectablePriceVersions(service as never, "eur", "2026-09-04").map(
+        (version) => version.id,
+      ),
+    ).toEqual(["eur"]);
   });
 });
 

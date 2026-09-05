@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   blankContractForm,
   contractActionErrorMessage,
+  listAgencyServicePriceChoices,
   resolveAgencyServicePrice,
   validateCreateContractForm,
   validateContractStatusForm,
@@ -70,6 +71,63 @@ describe("resolveAgencyServicePrice", () => {
 
   it("returns no price when neither history nor the catalog row covers the date", () => {
     expect(resolveAgencyServicePrice(datedService, "2025-12-31")).toBeNull();
+  });
+});
+
+describe("listAgencyServicePriceChoices", () => {
+  it("returns every version and marks the automatic price for the commercial date", () => {
+    const choices = listAgencyServicePriceChoices(datedService, "2026-07-01");
+
+    expect(choices.map((choice) => choice.id)).toEqual(["price-2", "price-1"]);
+    expect(choices.find((choice) => choice.is_effective)?.id).toBe("price-2");
+    expect(choices.every((choice) => !choice.is_catalog_fallback)).toBe(true);
+  });
+
+  it("keeps a legacy catalog price selectable when it has no version rows", () => {
+    const choices = listAgencyServicePriceChoices({
+      ...datedService,
+      price_versions: [],
+      unit_price: "95",
+      valid_from: "2026-01-01",
+      valid_to: null,
+    }, "2026-08-01");
+
+    expect(choices).toHaveLength(1);
+    expect(choices[0]).toMatchObject({
+      id: "",
+      unit_price: "95",
+      is_catalog_fallback: true,
+      is_effective: true,
+    });
+  });
+
+  it("includes the catalog fallback when dated versions leave a gap", () => {
+    const choices = listAgencyServicePriceChoices({
+      ...datedService,
+      unit_price: "110",
+      valid_from: "2026-01-01",
+      valid_to: null,
+      price_versions: datedService.price_versions?.map((version) => (
+        version.id === "price-2"
+          ? { ...version, valid_from: "2026-08-01" }
+          : version
+      )),
+    }, "2026-07-15");
+
+    expect(choices.map((choice) => choice.id)).toEqual(["price-2", "price-1", ""]);
+    expect(choices.find((choice) => choice.is_effective)).toMatchObject({
+      id: "",
+      unit_price: "110",
+      is_catalog_fallback: true,
+    });
+  });
+
+  it("does not expose an inactive legacy fallback as a selectable price", () => {
+    expect(listAgencyServicePriceChoices({
+      ...datedService,
+      price_versions: [],
+      valid_from: "2026-02-01",
+    }, "2026-01-15")).toEqual([]);
   });
 });
 

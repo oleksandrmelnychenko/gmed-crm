@@ -68,6 +68,14 @@ export interface RevenueTranslations {
   finance_catalog_unit_label: string;
   finance_catalog_unit_default: string;
   finance_catalog_overage_net_price: string;
+  finance_catalog_package_item_pricing_mode: string;
+  finance_catalog_package_item_pricing_automatic: string;
+  finance_catalog_package_item_pricing_specific: string;
+  finance_catalog_package_item_pricing_manual: string;
+  finance_catalog_package_item_specific_price: string;
+  finance_catalog_package_item_choose_price: string;
+  finance_catalog_package_item_recommended: string;
+  finance_catalog_error_specific_price_required: string;
   finance_catalog_item_vat_profile: string;
   finance_catalog_use_package_default_vat: string;
   finance_catalog_approval_required: string;
@@ -868,6 +876,15 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_unit_label: "Единица",
   finance_catalog_unit_default: "ед.",
   finance_catalog_overage_net_price: "Цена превышения нетто",
+  finance_catalog_package_item_pricing_mode: "Расчет цены превышения",
+  finance_catalog_package_item_pricing_automatic: "Автоматически по дате оказания",
+  finance_catalog_package_item_pricing_specific: "Конкретная версия цены каталога",
+  finance_catalog_package_item_pricing_manual: "Фиксированная цена вручную",
+  finance_catalog_package_item_specific_price: "Версия цены каталога",
+  finance_catalog_package_item_choose_price: "Выберите версию цены",
+  finance_catalog_package_item_recommended: "рекомендуется",
+  finance_catalog_error_specific_price_required:
+    "Для конкретной цены выберите услугу каталога и версию цены.",
   finance_catalog_item_vat_profile: "Профиль НДС позиции",
   finance_catalog_use_package_default_vat: "Использовать НДС пакета или по умолчанию",
   finance_catalog_approval_required: "Требуется согласование",
@@ -1225,6 +1242,15 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_unit_label: "Einheit",
   finance_catalog_unit_default: "Einheit",
   finance_catalog_overage_net_price: "Mehrleistung netto",
+  finance_catalog_package_item_pricing_mode: "Preisberechnung der Mehrleistung",
+  finance_catalog_package_item_pricing_automatic: "Automatisch nach Leistungsdatum",
+  finance_catalog_package_item_pricing_specific: "Bestimmte Katalogpreisversion",
+  finance_catalog_package_item_pricing_manual: "Fester manueller Preis",
+  finance_catalog_package_item_specific_price: "Katalogpreisversion",
+  finance_catalog_package_item_choose_price: "Preisversion auswählen",
+  finance_catalog_package_item_recommended: "empfohlen",
+  finance_catalog_error_specific_price_required:
+    "Für einen bestimmten Preis müssen Katalogleistung und Preisversion ausgewählt werden.",
   finance_catalog_item_vat_profile: "USt.-Profil der Position",
   finance_catalog_use_package_default_vat: "Paket- oder Standard-USt. verwenden",
   finance_catalog_approval_required: "Freigabe erforderlich",
