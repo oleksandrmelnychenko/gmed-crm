@@ -120,7 +120,7 @@ sudo git clone --depth 50 \
 ### 8. First deploy
 
 ```bash
-sudo /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only
+sudo /opt/gmed/repo/scripts/deploy-prod.sh
 ```
 
 The script:
