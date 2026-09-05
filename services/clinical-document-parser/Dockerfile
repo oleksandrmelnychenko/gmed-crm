@@ -50,6 +50,10 @@ RUN test -d /root/.paddlex \
     && mv /root/.paddlex /home/gmed/.paddlex \
     && chown -R gmed:gmed /home/gmed/.paddlex
 
+# Build contexts can come from restrictive workstation/deployment umasks.
+# Application code and bundled public models must be readable by the worker.
+RUN chmod -R a+rX /app
+
 USER gmed:gmed
 
 EXPOSE 8090

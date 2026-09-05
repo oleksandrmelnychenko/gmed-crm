@@ -27,6 +27,9 @@ COPY services/invoice-parser/invoice_parser ./invoice_parser
 COPY services/invoice-parser/templates ./templates
 RUN pip install --no-cache-dir .
 
+# Preserve non-root runtime access even when the build context has a strict umask.
+RUN chmod -R a+rX /app
+
 USER 10001:10001
 EXPOSE 8091
 CMD ["uvicorn", "invoice_parser.api:app", "--host", "0.0.0.0", "--port", "8091", "--workers", "1", "--no-access-log"]

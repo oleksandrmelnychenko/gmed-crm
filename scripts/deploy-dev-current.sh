@@ -98,7 +98,7 @@ if [[ ! -f "$RELEASE_ENV" ]]; then
 fi
 
 STAGING_DIR="$(mktemp -d "$DEPLOY_DIR/gmed-crm-release.XXXXXX")"
-tar -xzf "$archive_real" -C "$STAGING_DIR"
+tar --same-permissions -xzf "$archive_real" -C "$STAGING_DIR"
 
 for required_path in Cargo.toml frontend docker-compose.dev-hetzner.yml; do
   if [[ ! -e "$STAGING_DIR/$required_path" ]]; then
