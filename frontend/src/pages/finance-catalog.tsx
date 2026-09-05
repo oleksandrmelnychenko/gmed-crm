@@ -1,3 +1,6 @@
+import { hasFormChanges } from "@/lib/form-changes";
+import { ServiceDescriptionEditor } from "@/components/service-description-editor";
+import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
 import {
   useCallback,
   useEffect,
@@ -69,6 +72,7 @@ import {
 } from "@/lib/i18n";
 import {
   agencyServiceToForm,
+  hasAgencyServiceFormChanges,
   blankAgencyServiceForm,
   toOptional,
   valueToInput,
@@ -659,7 +663,7 @@ function createFinanceCatalogFieldPatch<K extends keyof FinanceCatalogState>(
 
 function useFinanceCatalogPageContent() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const vatCategoryLabel = (value: string | null | undefined) =>
     formatEnumLabelFromKeys(value, VAT_CATEGORY_LABEL_KEYS, t);
   const vatSourceLabel = (value: string | null | undefined) =>
@@ -817,6 +821,12 @@ function useFinanceCatalogPageContent() {
     filteredAgencyServices,
     catalogSearch,
   );
+  const [initialAgencyForm, setInitialAgencyForm] = useState<AgencyServiceFormState | null>(null);
+  const [initialPackageForm, setInitialPackageForm] = useState<ServicePackageForm | null>(null);
+  const [initialTaxForm, setInitialTaxForm] = useState<TaxProfileForm | null>(null);
+  const agencyFormDirty = initialAgencyForm !== null && hasAgencyServiceFormChanges(agencyServiceForm, initialAgencyForm);
+  const packageFormDirty = initialPackageForm !== null && hasFormChanges(packageForm, initialPackageForm);
+  const taxFormDirty = initialTaxForm !== null && hasFormChanges(taxEditForm, initialTaxForm);
   const selectedAgencyService = agencyServiceForm.id
     ? agencyServices.find((item) => item.id === agencyServiceForm.id) ?? null
     : null;
@@ -1333,18 +1343,30 @@ function useFinanceCatalogPageContent() {
               </span>
             </div>
           ) : (
+            <span className="block truncate font-mono text-xs font-medium text-foreground">
+              {row.name}
+            </span>
+          ),
+      },
+      {
+        id: "prices",
+        label: t.finance_catalog_prices_column,
+        accessor: (row) => row.kind === "package" ? row.pkg?.price_versions?.length ?? 0 : null,
+        filterType: "number",
+        sortable: true,
+        align: "left",
+        width: 130,
+        render: (row) => row.kind === "package" ? (
             <button
               type="button"
-              className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              className="flex w-fit items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               aria-expanded={expandedPackages.has(row.rowId)}
+              disabled={row.childCount === 0}
               onClick={(event) => {
                 event.stopPropagation();
                 togglePackageExpanded(row.rowId);
               }}
             >
-              <span className="truncate font-mono text-xs font-medium text-foreground">
-                {row.name}
-              </span>
               <Badge
                 variant="outline"
                 className="h-5 shrink-0 rounded-full border-orange-200 bg-orange-50 px-2 py-0 text-[10px] font-semibold text-orange-700 tabular-nums"
@@ -1363,7 +1385,7 @@ function useFinanceCatalogPageContent() {
                 />
               ) : null}
             </button>
-          ),
+          ) : null,
       },
       {
         id: "items",
@@ -1552,25 +1574,43 @@ function useFinanceCatalogPageContent() {
             );
           }
           const item = row.service;
-          const priceCount = item.price_versions?.length ?? 0;
           return (
-            <button
-              type="button"
-              className="flex w-full min-w-0 items-center gap-1.5 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-              aria-expanded={expandedAgencyServices.has(row.rowId)}
+            <span
+              className="block truncate font-mono text-xs text-foreground"
               title={
                 item.description
                   ? agencyServiceDescriptionLabel(item.service_key, item.description, t)
                   : undefined
               }
+            >
+              {agencyServiceNameLabel(item.service_key, item.service_name, t)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "prices",
+        label: t.finance_catalog_prices_column,
+        accessor: (row) => row.kind === "service" ? row.service.price_versions?.length ?? 0 : null,
+        filterType: "number",
+        sortable: true,
+        align: "left",
+        width: 130,
+        render: (row) => {
+          if (row.kind !== "service") return null;
+          const item = row.service;
+          const priceCount = item.price_versions?.length ?? 0;
+          return (
+            <button
+              type="button"
+              className="flex w-fit items-center gap-1.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+              aria-expanded={expandedAgencyServices.has(row.rowId)}
+              disabled={priceCount === 0}
               onClick={(event) => {
                 event.stopPropagation();
                 toggleAgencyServiceExpanded(row.rowId);
               }}
             >
-              <span className="truncate font-mono text-xs text-foreground">
-                {agencyServiceNameLabel(item.service_key, item.service_name, t)}
-              </span>
               <Badge
                 variant="outline"
                 className="h-5 shrink-0 rounded-full border-orange-200 bg-orange-50 px-2 py-0 text-[10px] font-semibold text-orange-700 tabular-nums"
@@ -1868,6 +1908,7 @@ function useFinanceCatalogPageContent() {
 
   async function handleSaveTaxProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!taxFormDirty || taxEditBusy) return;
     if (!editingTaxProfileId) return;
     setTaxEditError("");
 
@@ -1934,7 +1975,9 @@ function useFinanceCatalogPageContent() {
     setAgencyServiceFormOpen(false);
     setAgencyServiceError("");
     setEditingTaxProfileId(profile.id);
-    setTaxEditForm(taxProfileToForm(profile));
+    const initialForm = taxProfileToForm(profile);
+    setInitialTaxForm(initialForm);
+    setTaxEditForm(initialForm);
     setTaxEditError("");
   }
 
@@ -1959,7 +2002,9 @@ function useFinanceCatalogPageContent() {
     setEditingTaxProfileId("");
     setAgencyServiceFormOpen(false);
     setAgencyServiceError("");
-    setPackageForm(packageToForm(item, t.finance_catalog_unit_default));
+    const initialForm = packageToForm(item, t.finance_catalog_unit_default);
+    setInitialPackageForm(initialForm);
+    setPackageForm(initialForm);
     setPackageError("");
     setPackageFormOpen(true);
   }
@@ -1985,7 +2030,9 @@ function useFinanceCatalogPageContent() {
     setEditingTaxProfileId("");
     setPackageFormOpen(false);
     setAgencyServiceError("");
-    setAgencyServiceForm(agencyServiceToForm(item));
+    const initialForm = agencyServiceToForm(item);
+    setInitialAgencyForm(initialForm);
+    setAgencyServiceForm(initialForm);
     setAgencyServiceFormOpen(true);
   }
 
@@ -2256,6 +2303,7 @@ function useFinanceCatalogPageContent() {
 
   async function handleSaveServicePackage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (packageBusy || (packageForm.id && !packageFormDirty)) return;
     setPackageError("");
 
     if (!packageForm.packageKey.trim() || !packageForm.name.trim()) {
@@ -2356,6 +2404,7 @@ function useFinanceCatalogPageContent() {
 
   async function handleSaveAgencyService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (agencyServiceBusy || (agencyServiceForm.id && !agencyFormDirty)) return;
     setAgencyServiceError("");
     const validationError = validateAgencyServiceForm(agencyServiceForm, {
       required: t.finance_catalog_error_agency_service_required,
@@ -2376,7 +2425,8 @@ function useFinanceCatalogPageContent() {
           method: "POST",
           body: JSON.stringify({
             service_name: agencyServiceForm.serviceName.trim(),
-            description: toOptional(agencyServiceForm.description),
+            description_items: serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)
+              .map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text),
             unit_label: toOptional(agencyServiceForm.unitLabel),
             unit_price: decimalPayload(agencyServiceForm.unitPrice),
             currency: toOptional(agencyServiceForm.currency),
@@ -2468,6 +2518,7 @@ function useFinanceCatalogPageContent() {
           </>
         }
         rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
+        rowActionsWidth={44}
         rowActions={
           canManageTaxProfiles
             ? (profile) => (
@@ -2615,7 +2666,8 @@ function useFinanceCatalogPageContent() {
             {canManageTaxProfiles ? (
               <Button
                 type="button"
-                className={createButtonClassName}
+                size="sm"
+                className="h-8 rounded-md px-3 text-sm"
                 onClick={openCreatePackage}
               >
                 <Plus className="size-4" />
@@ -2625,43 +2677,31 @@ function useFinanceCatalogPageContent() {
           </>
         }
         rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
+        rowActionsWidth={44}
         rowActions={
           canManageTaxProfiles
             ? (row) =>
                 row.pkg ? (
                   <div className="flex items-center gap-1">
-                    {row.kind === "package" ? (
+                    {row.kind !== "item" ? (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="size-7 rounded-full text-[var(--brand)] hover:bg-orange-50 hover:text-[var(--brand)]"
-                        onClick={() => row.pkg && openServicePackagePriceVersion(row.pkg)}
-                        aria-label={t.finance_catalog_add_price_version}
-                        title={t.finance_catalog_add_price_version}
+                        className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          if (!row.pkg) return;
+                          if (row.kind === "price" && row.priceVersion) {
+                            openServicePackagePriceVersion(row.pkg, row.priceVersion);
+                          } else {
+                            openEditPackage(row.pkg);
+                          }
+                        }}
+                        aria-label={t.finance_catalog_edit}
+                        title={t.finance_catalog_edit}
                       >
-                        <BadgeEuro className="size-4" />
+                        <Pencil className="size-3.5" />
                       </Button>
-                    ) : null}
-                    {row.kind !== "item" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      if (!row.pkg) return;
-                      if (row.kind === "price" && row.priceVersion) {
-                        openServicePackagePriceVersion(row.pkg, row.priceVersion);
-                      } else {
-                        openEditPackage(row.pkg);
-                      }
-                    }}
-                    aria-label={t.finance_catalog_edit}
-                    title={t.finance_catalog_edit}
-                  >
-                    <Pencil className="size-3.5" />
-                  </Button>
                     ) : null}
                   </div>
                 ) : null
@@ -2700,6 +2740,7 @@ function useFinanceCatalogPageContent() {
       />
 
       <Dialog
+        requireChanges={Boolean(priceVersionForm.versionId)}
         open={priceVersionForm.open && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closePriceVersionForm();
@@ -3092,6 +3133,8 @@ function useFinanceCatalogPageContent() {
       </Sheet>
 
       <Sheet
+        requireChanges
+        dirty={taxFormDirty}
         open={Boolean(editingTaxProfileId) && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closeEditTaxProfile();
@@ -3271,12 +3314,17 @@ function useFinanceCatalogPageContent() {
       </Sheet>
 
       <Sheet
+        dirty={agencyServiceForm.id ? agencyFormDirty : undefined}
+        requireChanges={Boolean(agencyServiceForm.id)}
         open={agencyServiceFormOpen && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closeAgencyServiceForm();
         }}
       >
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        <SheetContent
+          side="right"
+          className="w-full border-l border-border p-0 data-[side=right]:sm:w-[50vw] data-[side=right]:sm:max-w-[50vw]"
+        >
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveAgencyService}>
             <AdminSheetScaffold
               title={
@@ -3410,7 +3458,7 @@ function useFinanceCatalogPageContent() {
                         storageKey="finance-catalog-agency-price-list"
                         rowActionsAlwaysVisible
                         rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
-                        rowActionsWidth={80}
+                        rowActionsWidth={44}
                         rowActions={(version) => (
                           <Button
                             type="button"
@@ -3522,20 +3570,14 @@ function useFinanceCatalogPageContent() {
                 </Section>
 
                 <Section title={t.revenue_agency_service_description_status}>
-                  <Field label={t.revenue_agency_service_description_label}>
-                    <textarea
-                      value={agencyServiceForm.description}
-                      onChange={(event) =>
-                        setAgencyServiceForm((current) => ({
-                          ...current,
-                          description: event.target.value,
-                        }))
-                      }
-                      className={cn(textareaClass, "min-h-56 resize-y")}
-                      rows={9}
-                      disabled={agencyServiceBusy}
-                    />
-                  </Field>
+                  <ServiceDescriptionEditor
+                    items={serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)}
+                    onChange={(descriptionItems) => setAgencyServiceForm((current) => ({
+                      ...current, descriptionItems, description: serviceDescriptionText(descriptionItems),
+                    }))}
+                    lang={lang}
+                    disabled={agencyServiceBusy}
+                  />
                 </Section>
               </div>
             </AdminSheetScaffold>
@@ -3564,6 +3606,8 @@ function useFinanceCatalogPageContent() {
       />
 
       <Sheet
+        dirty={packageForm.id ? packageFormDirty : undefined}
+        requireChanges={Boolean(packageForm.id)}
         open={packageFormOpen && canManageTaxProfiles}
         onOpenChange={(open) => {
           if (!open) closePackageForm();
@@ -3654,7 +3698,7 @@ function useFinanceCatalogPageContent() {
                         storageKey="finance-catalog-package-price-list"
                         rowActionsAlwaysVisible
                         rowActionsLabel={<span className="sr-only">{t.table_actions}</span>}
-                        rowActionsWidth={48}
+                        rowActionsWidth={44}
                         rowActions={(version) => (
                           <Button
                             type="button"

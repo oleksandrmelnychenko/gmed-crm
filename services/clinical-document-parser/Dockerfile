@@ -27,7 +27,10 @@ COPY app ./app
 COPY rules ./rules
 RUN pip install --no-cache-dir \
     --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/ \
-    ".[paddle]"
+    ".[paddle,translation]"
+
+RUN python -m app.install_translation_model \
+    && python -c "from app.translation_runtime import translate_payload; from pathlib import Path; result = translate_payload({'text': 'No evidence of pneumonia.', 'candidates': {}}, Path('models/translate-en_de-1_3')); assert result['text']"
 
 ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1 \
     PADDLE_PDX_MODEL_SOURCE=bos

@@ -25,19 +25,47 @@ services:
   frontend:
     build:
       args:
-        VITE_ENABLE_DEV_LOGIN_DEFAULTS: "true"
-        VITE_DEV_LOGIN_EMAIL: "admin@gmed.de"
-        VITE_DEV_LOGIN_PASSWORD: "admin123"
         VITE_DEFAULT_LANG: "ru"
         VITE_RELEASE_CHANNEL: "dev"
 
   backend:
+    environment:
+      INVOICE_PARSER_URL: "http://invoice-parser:8091"
+      INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the DEV invoice parser service key}"
+    networks: [default, invoice-internal]
     # Publish the metrics-only listener so monitoring's Prometheus can
     # scrape `gmed-dev:9091` via tailnet. The main API port (3000)
     # stays internal to the docker network — Caddy is the only public
     # ingress for /api on DEV too.
     ports:
       - "9091:9091"
+
+  invoice-parser:
+    build:
+      context: .
+      dockerfile: services/invoice-parser/Dockerfile
+    environment:
+      INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the DEV invoice parser service key}"
+      PARSER_MAX_PDF_PAGES: "20"
+      PARSER_MAX_IMAGE_PIXELS: "25000000"
+      PARSER_MAX_EXTRACTED_TEXT_CHARS: "200000"
+      PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS: "150"
+    networks: [invoice-internal]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    pids_limit: 96
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # --- Observability exporters --------------------------------------
   # Identical to PROD's sidecars in shape, with DEV-specific config.
@@ -138,3 +166,7 @@ services:
 
 volumes:
   promtail_positions:
+
+networks:
+  invoice-internal:
+    internal: true

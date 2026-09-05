@@ -18,6 +18,8 @@ const SHEET_WIDTH_BY_PRESET: Record<PatientSheetWidthPreset, string> = {
 
 export function PatientSheetScaffold({
   open,
+  dirty,
+  requireChanges,
   onOpenChange,
   title,
   description,
@@ -31,6 +33,8 @@ export function PatientSheetScaffold({
   bodyWrapperClassName,
 }: {
   open: boolean;
+  dirty?: boolean;
+  requireChanges?: boolean;
   onOpenChange: (open: boolean) => void;
   title: ReactNode;
   description?: ReactNode;
@@ -61,7 +65,7 @@ export function PatientSheetScaffold({
   );
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} dirty={dirty} requireChanges={requireChanges}>
       <SheetContent
         side="right"
         className={cn(

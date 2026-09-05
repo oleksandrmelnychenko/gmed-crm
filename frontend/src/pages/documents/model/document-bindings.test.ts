@@ -450,6 +450,19 @@ describe("document template binding payloads", () => {
     }
   });
 
+  it("round-trips description objects and multiline notes when editing a new version", () => {
+    const lines = [{
+      description: "Coordination | Support", fee: "100 EUR", quantity: "2", vat_rate: "7",
+      note: "First paragraph\n\nSecond paragraph",
+      description_items: [
+        { id: "second", text: "A single point\n\nwith paragraphs" },
+        { id: "first", text: "Another point" },
+      ],
+    }];
+    const hydrated = hydrateDocumentBindings("single_order", { service_lines: lines }, null);
+    expect(buildBindingsPayload("single_order", hydrated)?.service_lines).toEqual(lines);
+  });
+
   it("hydrates every persisted scalar and structured binding for a new version", () => {
     expect(
       hydrateDocumentBindings(

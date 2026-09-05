@@ -202,7 +202,7 @@ export function ConciergeServiceRequestDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog requireChanges open={open} onOpenChange={onOpenChange}>
         <DialogContent className={conciergeDialogContentClassName}>
           <ConciergeDialogHeader
             tone="dot"

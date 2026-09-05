@@ -1044,7 +1044,7 @@ function useAdminSettingsPageContent() {
                 <Button
                   type="button"
                   className="h-9 rounded-lg"
-                  disabled={!selectedGroup || sheetState.saving}
+                  disabled={!selectedGroup || sheetState.saving || !groupHasChanges}
                   onClick={() => void saveSelectedGroup()}
                 >
                   {sheetState.saving ? <LoaderCircle className="size-4 animate-spin" /> : null}

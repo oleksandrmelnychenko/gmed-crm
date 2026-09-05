@@ -103,8 +103,10 @@ function isActivePreviewType(contentType: string) {
   );
 }
 
-async function safePreviewBlob(blob: Blob, contentType: string) {
-  if (!isActivePreviewType(contentType)) return blob;
+async function safePreviewBlob(blob: Blob, contentType: string, filename?: string | null) {
+  const invoiceXmlDownload = contentType.split(";", 1)[0]?.trim().toLowerCase() === "application/octet-stream"
+    && filename?.toLowerCase().endsWith(".xml");
+  if (!isActivePreviewType(contentType) && !invoiceXmlDownload) return blob;
   return new Blob([await blob.text()], { type: "text/plain;charset=utf-8" });
 }
 
@@ -157,10 +159,10 @@ export async function openDocumentPreview(
   popupBlockedMessage: string,
   previewWindow?: Window | null,
 ) {
-  const { blob, contentType } = await fetchDocumentBlob(id, true);
+  const { blob, contentType, filename } = await fetchDocumentBlob(id, true);
   const opened = openBlobPreviewWindow(
     previewWindow ?? null,
-    await safePreviewBlob(blob, contentType),
+    await safePreviewBlob(blob, contentType, filename ?? undefined),
   );
   if (!opened) {
     if (previewWindow) previewWindow.close();
@@ -171,8 +173,8 @@ export async function openDocumentPreview(
 export async function createDocumentPreviewObjectUrl(
   id: string,
 ): Promise<DocumentPreviewObjectUrl> {
-  const { blob, contentType } = await fetchDocumentBlob(id, true);
-  const previewBlob = await safePreviewBlob(blob, contentType);
+  const { blob, contentType, filename } = await fetchDocumentBlob(id, true);
+  const previewBlob = await safePreviewBlob(blob, contentType, filename ?? undefined);
 
   return {
     contentType: previewBlob.type || "application/octet-stream",

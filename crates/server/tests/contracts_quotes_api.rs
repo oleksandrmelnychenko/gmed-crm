@@ -882,6 +882,25 @@ async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_acce
     assert_eq!(body["paid_amount"], "119");
     assert!(body["paid_at"].as_str().is_some());
 
+    sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE order_id = $1")
+        .bind(Uuid::parse_str(&order_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, recalculated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {recalculated}");
+    assert_eq!(recalculated["status"], "draft");
+    assert_eq!(recalculated["total_gross"], "130.9");
+    assert_eq!(recalculated["paid_amount"], "119");
+    assert!(recalculated["paid_at"].as_str().is_some());
+
     let (status, body) = json_request(
         &app,
         "GET",
@@ -1606,7 +1625,11 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
     let billing_bearer = auth_header_for(billing_id, "billing");
 
     let original_name = format!("Concierge transfer {tag}");
-    let original_description = "Airport pickup with driver and waiting time";
+    let original_description = "Airport pickup\n\nwith driver\n\nWaiting time";
+    let original_items = json!([
+        { "id": "pickup", "text": "Airport pickup\n\nwith driver" },
+        { "id": "waiting", "text": "Waiting time" }
+    ]);
     let (status, service) = json_request(
         &app,
         "POST",
@@ -1616,6 +1639,7 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
             "service_key": format!("concierge_transfer_{tag}"),
             "service_name": original_name.clone(),
             "description": original_description,
+            "description_items": original_items,
             "unit_label": "transfer",
             "unit_price": 90.0,
             "currency": "EUR",
@@ -1694,6 +1718,10 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
         original_description
     );
     assert_eq!(saved_line["agency_service_unit_label"], "transfer");
+    assert_eq!(
+        saved_line["agency_service_description_items_snapshot"],
+        original_items
+    );
     assert_eq!(saved_line["unit_price"], "90");
     assert_eq!(saved_line["unit_price_snapshot"], "90");
     assert_eq!(saved_line["vat_rate_snapshot"], "19");
@@ -1708,6 +1736,7 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {quote}");
     assert_eq!(quote["line_items"][0]["notes"], original_description);
+    assert_eq!(quote["line_items"][0]["description_items"], original_items);
 
     let (status, removed) = json_request(
         &app,

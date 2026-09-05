@@ -15,6 +15,7 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
+import { localizeTaskTitle } from "@/lib/task-labels";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 
 import {
@@ -337,14 +338,14 @@ export function LinkedTasksSection({
               key={task.id}
               type="button"
               role="listitem"
-              aria-label={`${labels.openTask}: ${task.title}`}
+              aria-label={`${labels.openTask}: ${localizeTaskTitle(task.title, lang)}`}
               className="group grid w-full min-w-0 gap-2 border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-orange-50/30 md:grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] md:items-center md:gap-3"
               onClick={() => staffGo(`/task-manager?task=${encodeURIComponent(task.id)}`)}
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="shrink-0 font-mono text-[10px] font-medium text-muted-foreground">{conciergeTaskCode(task)}</span>
-                  <p className="truncate text-sm font-semibold text-foreground">{task.title}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{localizeTaskTitle(task.title, lang)}</p>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {task.kind === "event" ? labels.event_kind : labels.task_kind}

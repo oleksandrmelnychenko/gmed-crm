@@ -1,0 +1,38 @@
+services:
+  invoice-parser:
+    build:
+      context: ../..
+      dockerfile: services/invoice-parser/Dockerfile
+    environment:
+      INVOICE_PARSER_API_KEY: "${INVOICE_PARSER_API_KEY:?Set a random service key of at least 32 characters}"
+      INVOICE_PARSER_MAX_CONCURRENCY: "2"
+      INVOICE_PARSER_TIMEOUT_SECONDS: "180"
+      PARSER_MAX_PDF_PAGES: "20"
+      PARSER_MAX_IMAGE_PIXELS: "25000000"
+      PARSER_MAX_EXTRACTED_TEXT_CHARS: "200000"
+      PARSER_OCR_PAGE_TIMEOUT_SECONDS: "30"
+      PARSER_OCR_DOCUMENT_TIMEOUT_SECONDS: "150"
+    ports:
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - ./templates:/app/templates:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    pids_limit: 96
+    mem_limit: 2g
+    cpus: 2.0
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [invoice-internal]
+
+networks:
+  invoice-internal:
+    internal: true

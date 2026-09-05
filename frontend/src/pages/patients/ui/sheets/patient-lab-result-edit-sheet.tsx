@@ -594,6 +594,7 @@ export function PatientLabResultEditSheet({
       onOpenChange={(nextOpen) => {
         if (!busy) onOpenChange(nextOpen);
       }}
+      requireChanges
       width="form-heavy"
       onSubmit={handleSubmit}
       title={tx("Исправить результат анализа", "Laborwert korrigieren")}

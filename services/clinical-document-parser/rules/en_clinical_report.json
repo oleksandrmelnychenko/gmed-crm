@@ -1,0 +1,53 @@
+{
+  "translation_terms": {
+    "Status post right hemicolectomy": "Zustand nach Hemikolektomie rechts",
+    "Status post left hemicolectomy": "Zustand nach Hemikolektomie links",
+    "Status post hemicolectomy": "Zustand nach Hemikolektomie"
+  },
+  "translation_term_repairs": [
+    {"source": "ascending colon adenoma", "translated": "aufsteigendem Kolonadenom", "german": "einem Adenom des Colon ascendens"},
+    {"source": "solitary reactive lymph node", "translated": "einsamen reaktiven Lymphknoten", "german": "solitären reaktiven Lymphknoten"}
+  ],
+  "translation_headings": {
+    "Discharge summary": "Entlassungsbericht",
+    "Diagnosis": "Diagnose",
+    "Diagnoses": "Diagnosen",
+    "Discharge diagnoses": "Entlassungsdiagnosen",
+    "Admission diagnoses": "Aufnahmediagnosen",
+    "Past medical history": "Eigenanamnese",
+    "History of present illness": "Aktuelle Anamnese",
+    "Family history": "Familienanamnese",
+    "Social history": "Sozialanamnese",
+    "Current medications": "Aktuelle Medikation",
+    "Discharge medications": "Entlassungsmedikation",
+    "Physical examination": "Körperliche Untersuchung",
+    "Findings": "Befund",
+    "Impression": "Beurteilung",
+    "Recommendations": "Empfehlungen",
+    "Hospital course": "Therapie und Verlauf",
+    "Laboratory results": "Laborbefunde",
+    "Treatment plan": "Therapieplan",
+    "Summary": "Zusammenfassung",
+    "Report Summary": "Befundbericht",
+    "Medical Summary": "Medizinische Zusammenfassung",
+    "Thyroid Sonography": "Schilddrüsensonographie",
+    "Yours sincerely": "Mit freundlichen Grüßen",
+    "Laboratory": "Laborbefunde",
+    "Conclusion": "Beurteilung",
+    "Therapy recommendations": "Therapieempfehlungen"
+  },
+  "section_aliases": {
+    "diagnosis": ["Diagnosis", "Diagnoses", "Discharge diagnosis", "Discharge diagnoses", "Admission diagnosis", "Admission diagnoses", "Primary diagnosis", "Secondary diagnoses", "Problem list"],
+    "anamnesis": ["History", "Medical history", "Past medical history", "History of present illness", "Presenting complaint", "Clinical history", "Clinical indication", "Indication", "Family history", "Social history", "Allergies"],
+    "medication": ["Medication", "Medications", "Current medications", "Current medication", "Discharge medications", "Discharge medication", "Medications on discharge", "Medication list", "Medication plan", "Home medications"],
+    "examination": ["Findings", "Examination", "Physical examination", "Investigations", "Results", "Impression", "Assessment", "Summary", "Medical Summary", "Thyroid Sonography", "Hospital course", "Treatment and course", "Laboratory", "Laboratory results", "Laboratory findings", "Lab results", "Echocardiography", "Electrocardiogram", "Ultrasound"],
+    "recommendation": ["Recommendations", "Recommendation", "Conclusion", "Therapy recommendations", "Plan", "Treatment plan", "Follow-up", "Follow up", "Discharge instructions"]
+  },
+  "document_type_hints": {
+    "oncology_report": ["Oncology report", "Oncological diagnoses", "Tumor board", "Tumour board"],
+    "radiology_report": ["Radiology report", "Radiology findings", "Magnetic resonance imaging"],
+    "cardiology_report": ["Cardiology", "Echocardiography", "Echocardiogram"],
+    "discharge_summary": ["Discharge summary", "Discharge diagnoses", "Discharge diagnosis"],
+    "laboratory_report": ["Laboratory report", "Laboratory results", "Reference range"]
+  }
+}

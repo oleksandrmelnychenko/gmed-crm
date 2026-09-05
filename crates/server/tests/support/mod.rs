@@ -40,6 +40,39 @@ struct SuiteDatabase {
     admin_id: Uuid,
 }
 
+/// A disposable database for route suites that supply their own minimal schema.
+/// Uses the same Docker/env discovery and cleanup as the full migration suites.
+#[allow(dead_code)]
+pub struct IsolatedSchemaDatabase {
+    pub pool: PgPool,
+    _suite_db: SuiteDatabase,
+}
+
+#[allow(dead_code)]
+pub async fn isolated_schema_database() -> Result<IsolatedSchemaDatabase, String> {
+    let backend = get_or_create_test_backend().await?;
+    let admin_pool = connect_pool(&backend.admin_database_url, "postgres", 1)
+        .await
+        .map_err(|error| format!("connect test admin database: {error}"))?;
+    let database_name = format!("gmed_schema_test_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!(r#"CREATE DATABASE "{database_name}""#))
+        .execute(&admin_pool)
+        .await
+        .map_err(|error| format!("create schema test database: {error}"))?;
+    let pool = connect_pool(&backend.admin_database_url, &database_name, 2)
+        .await
+        .map_err(|error| format!("connect schema test database: {error}"))?;
+    Ok(IsolatedSchemaDatabase {
+        pool: pool.clone(),
+        _suite_db: SuiteDatabase {
+            backend,
+            database_name,
+            pool,
+            admin_id: Uuid::nil(),
+        },
+    })
+}
+
 pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
     let backend = match get_or_create_test_backend().await {
         Ok(backend) => backend,

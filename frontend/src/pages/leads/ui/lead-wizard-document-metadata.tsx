@@ -12,7 +12,7 @@ type LeadWizardDocumentMetadataProps = {
   document: Pick<
     DocumentItem,
     "created_at" | "document_number" | "file_size" | "generated_template_id" | "id"
-  >;
+  > & Partial<Pick<DocumentItem, "version_number" | "version_count" | "is_latest_version">>;
   lang: Lang;
 };
 
@@ -39,6 +39,10 @@ export function LeadWizardDocumentMetadata({
   lang,
 }: LeadWizardDocumentMetadataProps) {
   const sizeLabel = formatFileSize(document.file_size, lang);
+  const versionNumber = Number(document.document_number?.match(/-V(\d+)$/i)?.[1])
+    || document.version_number
+    || 1;
+  const showVersion = versionNumber > 1 || (document.version_count ?? 1) > 1;
   const generatedAtLabel = document.generated_template_id?.trim()
     ? formatDateTime(
         document.created_at,
@@ -49,9 +53,15 @@ export function LeadWizardDocumentMetadata({
 
   return (
     <>
-      <Badge variant="outline" className={cn(metadataPillClass, STATUS_TONE.brand)}>
+      <Badge variant="outline" title={document.document_number} className={cn(metadataPillClass, STATUS_TONE.brand)}>
         {leadWizardDocumentNumber(document)}
       </Badge>
+      {showVersion ? (
+        <span>
+          {lang === "de" ? "Version" : "Версия"} {versionNumber}
+          {document.is_latest_version === false ? (lang === "de" ? " · vorherige" : " · предыдущая") : ""}
+        </span>
+      ) : null}
       {sizeLabel ? <span className="font-mono tabular-nums">{sizeLabel}</span> : null}
       {generatedAtLabel ? (
         <Badge

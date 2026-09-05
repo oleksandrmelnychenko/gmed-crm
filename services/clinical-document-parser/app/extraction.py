@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
 import logging
@@ -345,6 +345,15 @@ def _extract_native_page_text(page: object) -> str:
         return legacy_text
     layout_visible = _visible_character_count(layout_text)
     legacy_visible = _visible_character_count(legacy_text)
+    numeric_tokens = r"\d+(?:[.,/]\d+)*"
+    if (
+        legacy_visible >= layout_visible * 0.98
+        and Counter(re.findall(numeric_tokens, layout_text)) != Counter(re.findall(numeric_tokens, legacy_text))
+    ):
+        # Layout mode can insert kerning spaces inside dates and measurements
+        # (e.g. '1 72.4' instead of '172.4'). Prefer the complete original
+        # text stream when layout changes its numbers; never guess a repair.
+        return legacy_text
     if layout_visible >= legacy_visible * 0.98:
         return layout_text
     return legacy_text
@@ -589,6 +598,15 @@ def _ocr_pil_image(image: object, deadline: float, text_hint: str) -> _OcrOutcom
             script,
             script_confidence,
         )
+        # Sparse ruled histories need physical cell positions. A generic OCR
+        # reading order discards empty columns and shifts values to other dates.
+        from .lab_grid import ruled_history_columns
+
+        grid_columns = ruled_history_columns(deskewed)
+        if grid_columns and time.monotonic() < page_deadline:
+            grid_outcome = _ocr_ruled_history(deskewed, grid_columns, primary_languages, page_deadline)
+            if grid_outcome.text or grid_outcome.timed_out:
+                return _replace_ocr_geometry(grid_outcome, rotation, deskew_angle)
         primary = _run_ocr_engine(deskewed, primary_languages, page_deadline)
         primary = _replace_ocr_geometry(primary, rotation, deskew_angle)
 
@@ -745,13 +763,13 @@ def _remove_table_rules(image: object) -> tuple[object, int]:
         dark_threshold = 180
         horizontal_min = max(1, round(width * 0.35))
         vertical_min = max(1, round(height * 0.35))
-        horizontal_rows = [
+        horizontal_candidates = [
             y
             for y in range(height)
             if sum(1 for x in range(width) if pixels[x, y] < dark_threshold)
             >= horizontal_min
         ]
-        vertical_columns = [
+        vertical_candidates = [
             x
             for x in range(width)
             if sum(1 for y in range(height) if pixels[x, y] < dark_threshold)
@@ -759,13 +777,45 @@ def _remove_table_rules(image: object) -> tuple[object, int]:
         ]
 
         draw = ImageDraw.Draw(cleaned)
-        for y in horizontal_rows:
-            draw.line((0, y, width - 1, y), fill=255, width=3)
-        for x in vertical_columns:
-            draw.line((x, 0, x, height - 1), fill=255, width=3)
-        return cleaned, len(horizontal_rows) + len(vertical_columns)
+        removed = 0
+        for y in horizontal_candidates:
+            # A dense line of small text (especially a laboratory legend) can
+            # contain as much ink as a rule. Require an actual continuous or
+            # narrowly dashed span, rather than deleting the whole baseline.
+            for start, end in _rule_spans(
+                [pixels[x, y] < dark_threshold for x in range(width)],
+                horizontal_min, max(2, round(width * 0.0015)),
+            ):
+                draw.line((start, y, end, y), fill=255, width=1)
+                removed += 1
+        for x in vertical_candidates:
+            spans = _rule_spans(
+                [pixels[x, y] < dark_threshold for y in range(height)],
+                max(8, round(height * 0.0083)), 0,
+            )
+            if sum(end - start + 1 for start, end in spans) >= height * 0.20:
+                for start, end in spans:
+                    draw.line((x, start, x, end), fill=255, width=1)
+                removed += 1
+        return cleaned, removed
     finally:
         grayscale.close()
+
+
+def _rule_spans(ink: list[bool], minimum: int, gap: int) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    last = -1
+    for index, dark in enumerate([*ink, *([False] * (gap + 1))]):
+        if dark:
+            if start is None:
+                start = index
+            last = index
+        elif start is not None and index - last > gap:
+            if last - start + 1 >= minimum:
+                spans.append((start, last))
+            start = None
+    return spans
 
 
 def _detect_orientation(
@@ -1012,6 +1062,10 @@ def _scale_paddle_outcome(
         return outcome
     scale_x = float(source_size[0]) / float(input_shape[1])
     scale_y = float(source_size[1]) / float(input_shape[0])
+    return _rescale_ocr_blocks(outcome, scale_x, scale_y)
+
+
+def _rescale_ocr_blocks(outcome: _OcrOutcome, scale_x: float, scale_y: float) -> _OcrOutcome:
     if abs(scale_x - 1.0) < 0.001 and abs(scale_y - 1.0) < 0.001:
         return outcome
     blocks = tuple(
@@ -1469,6 +1523,7 @@ def _run_tesseract(
     deadline: float,
     *,
     page_segmentation_mode: int = 3,
+    grid_columns: list[int] | None = None,
 ) -> _OcrOutcome:
     import pytesseract
 
@@ -1490,6 +1545,11 @@ def _run_tesseract(
                 output_type=output,
                 timeout=timeout,
             )
+            if grid_columns:
+                if OCR_MULTIPASS_ENABLED:
+                    from .lab_grid import refine_unit_cells
+                    refine_unit_cells(image, data, grid_columns, languages, deadline)
+                return _outcome_from_grid_data(data, languages, grid_columns)
             return _outcome_from_tesseract_data(data, languages)
         except RuntimeError as exc:
             return _empty_ocr_outcome(languages, timed_out="timeout" in str(exc).casefold())
@@ -1517,6 +1577,109 @@ def _run_tesseract(
         word_count=quality.word_count,
         blocks=(),
         text_quality=quality,
+    )
+
+
+def _ocr_ruled_history(
+    image: object, columns: list[int], languages: str, deadline: float
+) -> _OcrOutcome:
+    from PIL import Image, ImageDraw
+
+    scaled = image
+    cleaned = None
+    scale = max(1.0, min(2.0, 3300 / image.width))
+    try:
+        if scale > 1:
+            size = (round(image.width * scale), round(image.height * scale))
+            _check_image_size(*size)
+            scaled = image.resize(size, Image.Resampling.LANCZOS)
+        cleaned, _ = _remove_table_rules(scaled)
+        # Remove the antialiased edges of the proven vertical rules as well.
+        # Work only along long strokes, leaving the free-text legend intact.
+        draw = ImageDraw.Draw(cleaned)
+        pixels = scaled.load()
+        for column in columns:
+            x = round(column * scale)
+            spans = _rule_spans(
+                [pixels[x, y] < 180 for y in range(scaled.height)],
+                max(8, round(scaled.height * 0.0083)), 1,
+            )
+            for start, end in spans:
+                draw.line((x, start, x, end), fill=255, width=max(3, round(scale * 3)))
+        outcome = _run_tesseract(
+            cleaned, languages, deadline, page_segmentation_mode=6,
+            grid_columns=[round(column * scale) for column in columns],
+        )
+        # Return block coordinates in the same post-deskew space as other OCR.
+        return _rescale_ocr_blocks(outcome, 1 / scale, 1 / scale)
+    finally:
+        _close_resource(cleaned)
+        if scaled is not image:
+            _close_resource(scaled)
+
+
+def _outcome_from_grid_data(
+    data: dict[str, Any], languages: str, columns: list[int]
+) -> _OcrOutcome:
+    from .lab_grid import analyte_name_column, grid_word_rows
+
+    parts: list[str] = []
+    blocks: list[OcrBlockMetadata] = []
+    weights: list[tuple[float, int]] = []
+    cursor = total = low = 0
+    rows = grid_word_rows(data, columns)
+    name_column = analyte_name_column(rows, columns)
+    for row in rows:
+        if parts:
+            parts.append("\n")
+            cursor += 1
+        last = max(index for index, words in enumerate(row) if words)
+        if last >= 3:
+            last = len(row) - 1
+        for index, words in enumerate(row[: last + 1]):
+            if index:
+                parts.append("\t")
+                cursor += 1
+            if not words:
+                continue
+            text = ""
+            previous_word = None
+            for word in words:
+                if previous_word is not None:
+                    gap = word["left"] - previous_word["left"] - previous_word["width"]
+                    char_width = max(1, previous_word["width"] / len(previous_word["text"]))
+                    code_boundary = (
+                        name_column is not None and last >= 3
+                        and previous_word["left"] < name_column <= word["left"]
+                    )
+                    text += "  " if index == 0 and (code_boundary or (name_column is None and gap > char_width * 1.8)) else " "
+                text += str(word["text"])
+                previous_word = word
+            confidence = [
+                (float(word["confidence"]), max(1, len(word["text"])))
+                for word in words if word["confidence"] is not None
+            ]
+            weights.extend(confidence)
+            total += len(words)
+            low += sum(word["confidence"] is None or word["confidence"] < OCR_LOW_CONFIDENCE_THRESHOLD for word in words)
+            blocks.append(OcrBlockMetadata(
+                block_number=len(blocks) + 1, bbox=_words_bbox(words),
+                start_char=cursor, end_char=cursor + len(text),
+                confidence=_weighted_confidence(confidence), word_count=len(words),
+            ))
+            parts.append(text)
+            cursor += len(text)
+        if last >= 3:
+            # A closing rule keeps trailing empty cells through whitespace
+            # normalization. It is structure, not a recognized result token.
+            parts.append(" |")
+            cursor += 2
+    text = "".join(parts)
+    return _OcrOutcome(
+        text=text, confidence=_weighted_confidence(weights),
+        low_confidence_word_ratio=low / total if total else None,
+        languages=languages, engine="tesseract", word_count=total,
+        blocks=tuple(blocks), text_quality=_assess_text_quality(text),
     )
 
 

@@ -1,4 +1,5 @@
 import { countryNameForGermanDocument } from "@/components/ui/country-select";
+import type { ServiceDescriptionItem } from "@/lib/service-description";
 
 export type BindingFieldKind =
   | "text"
@@ -538,7 +539,24 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
   ],
 };
 
-function parseBindingServiceLines(text: string, templateId: string) {
+export type BindingServiceLine = {
+  description: string;
+  fee?: string;
+  quantity?: string;
+  line_total?: string;
+  vat_rate?: string;
+  note?: string;
+  description_items?: ServiceDescriptionItem[];
+};
+
+export function parseBindingServiceLines(text: string, templateId: string): BindingServiceLine[] {
+  if (text.trim().startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.filter((line): line is BindingServiceLine =>
+        !!line && typeof line === "object" && typeof line.description === "string");
+    } catch { /* Older bindings use one pipe-separated service per line. */ }
+  }
   const isCostEstimate = templateId === "cost_estimate";
   return text
     .split("\n")
@@ -618,7 +636,13 @@ export function buildBindingsPayload(
       bindings.service_lines_text ?? "",
       templateId,
     );
-    if (serviceLines.length) out.service_lines = serviceLines;
+    const populatedLines = serviceLines.filter((line) => line.description.trim()).map((line) => ({
+      ...line,
+      ...(line.description_items ? {
+        description_items: line.description_items.map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text),
+      } : {}),
+    }));
+    if (populatedLines.length) out.service_lines = populatedLines;
   }
   if (fieldKeys.has("clinics_text")) {
     const clinics = parseBindingClinics(bindings.clinics_text ?? "");
@@ -683,6 +707,11 @@ function pipeRow(values: unknown[]) {
 function persistedStructuredBindings(value: Record<string, unknown>) {
   const bindings: DocumentBindingForm = {};
   if (Array.isArray(value.service_lines)) {
+    const needsStructuredEncoding = value.service_lines.some((line) =>
+      line && typeof line === "object" && (
+        "description_items" in line || "vat_rate" in line ||
+        Object.values(line).some((field) => typeof field === "string" && /[\n\r|]/u.test(field))
+      ));
     const rows = value.service_lines
       .map((entry) => {
         if (!entry || typeof entry !== "object" || Array.isArray(entry)) return "";
@@ -696,7 +725,9 @@ function persistedStructuredBindings(value: Record<string, unknown>) {
         ]);
       })
       .filter(Boolean);
-    if (rows.length) bindings.service_lines_text = rows.join("\n");
+    if (rows.length) bindings.service_lines_text = needsStructuredEncoding
+      ? JSON.stringify(value.service_lines)
+      : rows.join("\n");
   }
   if (Array.isArray(value.clinics)) {
     const rows = value.clinics

@@ -283,18 +283,18 @@ export function FilesPage() {
           </div>
         ) : (
           <div role="table" aria-label={labels.title}>
-            <div role="row" className="hidden grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1fr)_minmax(11rem,0.9fr)_minmax(10rem,0.75fr)_5rem] gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground lg:grid">
+            <div role="row" className="hidden grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1fr)_minmax(11rem,0.9fr)_minmax(10rem,0.75fr)_2.75rem] gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground lg:grid">
               <span role="columnheader">{labels.file}</span>
               <span role="columnheader">{labels.related}</span>
               <span role="columnheader">{labels.profile}</span>
               <span role="columnheader">{labels.uploaded}</span>
-              <span role="columnheader" className="text-right">{labels.actions}</span>
+              <span role="columnheader" className="text-right"><span className="sr-only">{labels.actions}</span></span>
             </div>
             {filteredRows.map((row) => (
               <div
                 key={row.id}
                 role="row"
-                className="grid min-w-0 gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 lg:grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1fr)_minmax(11rem,0.9fr)_minmax(10rem,0.75fr)_5rem] lg:items-center"
+                className="grid min-w-0 gap-3 border-b border-border/60 px-4 py-3 last:border-b-0 lg:grid-cols-[minmax(12rem,1.1fr)_minmax(12rem,1fr)_minmax(11rem,0.9fr)_minmax(10rem,0.75fr)_2.75rem] lg:items-center"
               >
                 <div role="cell" className="flex min-w-0 items-center gap-2.5">
                   <FileIcon mimeType={row.mime_type} />

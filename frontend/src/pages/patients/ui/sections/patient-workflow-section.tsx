@@ -474,7 +474,7 @@ function WorkflowContent({
           </Button>
         ) : null
       }
-      rowActionsWidth={70}
+      rowActionsWidth={44}
     />
   );
 }

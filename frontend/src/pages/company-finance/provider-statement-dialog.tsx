@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import {
 import { Banner as ShellBanner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
 import { fetchCompanyProviderStatement } from "./data";
 import type {
@@ -113,19 +114,31 @@ export function ProviderStatementDialog({
   const [statement, setStatement] = useState<CompanyProviderStatement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const providerId = provider?.provider_id;
+  const { from, to, currency: filterCurrency } = filters;
+  const loadedQueryRef = useRef("");
+  useFinanceAutoRefresh(() => setReloadToken((current) => current + 1), loading, Boolean(providerId));
 
   useEffect(() => {
-    if (!provider?.provider_id) {
+    if (!providerId) {
       setStatement(null);
       setError(null);
+      setLoading(false);
+      loadedQueryRef.current = "";
       return;
     }
     let active = true;
+    const query = JSON.stringify([providerId, from, to, filterCurrency]);
+    if (query !== loadedQueryRef.current) setStatement(null);
     setLoading(true);
-    setError(null);
-    void fetchCompanyProviderStatement(provider.provider_id, filters, true)
+    void fetchCompanyProviderStatement(providerId, { from, to, currency: filterCurrency }, true)
       .then((result) => {
-        if (active) setStatement(result);
+        if (active) {
+          loadedQueryRef.current = query;
+          setStatement(result);
+          setError(null);
+        }
       })
       .catch((requestError: unknown) => {
         if (!active) return;
@@ -137,7 +150,7 @@ export function ProviderStatementDialog({
     return () => {
       active = false;
     };
-  }, [filters, provider, text.loadFailed]);
+  }, [from, to, filterCurrency, providerId, reloadToken, text.loadFailed]);
 
   const currency = statement?.currency ?? filters.currency ?? "EUR";
   const closingBalance = Number(statement?.summary.closing_balance ?? 0);
@@ -154,7 +167,7 @@ export function ProviderStatementDialog({
         </DialogHeader>
 
         {error ? <ShellBanner tone="error">{error}</ShellBanner> : null}
-        {loading ? (
+        {loading && !statement ? (
           <div className="flex justify-center py-16"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : statement ? (
           <div className="space-y-4">

@@ -156,6 +156,296 @@ async fn seed_order(pool: &PgPool, patient_id: Uuid, created_by: Uuid, tag: &str
 }
 
 #[tokio::test]
+async fn imported_invoice_source_must_match_patient_and_order_and_cannot_be_reused() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("invoice-source");
+    let patient = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+    let order = seed_order(&pool, patient, admin_id, &tag).await;
+    let document: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (patient_id, order_id, auto_name, art, category, uploaded_by, id, version_root_document_id)
+           VALUES ($1, $2, 'Invoice original', 'invoice_document', 'finance', $3, $4, $4) RETURNING id"#,
+    ).bind(patient).bind(order).bind(admin_id).bind(Uuid::new_v4()).fetch_one(&pool).await.unwrap();
+    let bearer = auth_header_for(admin_id, "ceo");
+    let path = format!("/api/v1/orders/{order}/external-invoices");
+    let mut payload = json!({ "patient_id": other_patient, "source_document_id": document,
+        "external_invoice_number": format!("EXT-{tag}"), "invoice_date": "2026-09-01",
+        "amount_net": 100, "amount_vat": 19, "amount_gross": 119, "currency": "EUR", "status": "received" });
+    let (status, _) = json_request(&app, "POST", &path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    payload["patient_id"] = json!(patient);
+    payload["source_document_id"] = json!(Uuid::new_v4());
+    let (status, _) = json_request(&app, "POST", &path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    payload["source_document_id"] = json!(document);
+    let (status, created) = json_request(&app, "POST", &path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        detail["external_invoices"][0]["source_document_id"],
+        json!(document)
+    );
+    payload["external_invoice_number"] = json!(format!("EXT-{tag}-duplicate"));
+    let (status, _) = json_request(&app, "POST", &path, &bearer, Some(payload)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let moved = sqlx::query("UPDATE documents SET patient_id = $2 WHERE id = $1")
+        .bind(document)
+        .bind(other_patient)
+        .execute(&pool)
+        .await;
+    assert!(
+        moved.is_err(),
+        "Imported original must not move to another patient"
+    );
+}
+
+#[tokio::test]
+async fn company_invoice_import_does_not_require_patient_or_order() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("company-invoice");
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               auto_name, art, category, uploaded_by, id, version_root_document_id
+           ) VALUES (
+               $1, 'invoice_document', 'finance', $2, $3, $3
+           )"#,
+    )
+    .bind(format!("FIN-Rechnung {tag}.pdf"))
+    .bind(admin_id)
+    .bind(document_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let bearer = auth_header_for(admin_id, "ceo");
+    let payload = json!({
+        "source_document_id": document_id,
+        "supplier_name": "K.B.M. GmbH",
+        "external_invoice_number": format!("RE-{tag}"),
+        "invoice_date": "2026-05-10",
+        "due_date": "2026-05-24",
+        "amount_net": 655.0,
+        "amount_vat": 124.45,
+        "amount_gross": 779.45,
+        "currency": "EUR",
+        "notes": "Incoming supplier invoice addressed to GMED"
+    });
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/external-invoices/company",
+        &bearer,
+        Some(payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let invoice_id = Uuid::parse_str(created["id"].as_str().expect("company invoice id")).unwrap();
+
+    let saved = sqlx::query(
+        r#"SELECT invoice_scope, patient_id, order_id, supplier_name,
+                  amount_net, amount_vat, amount_gross, status, paid_by
+           FROM external_invoices
+           WHERE id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        saved.try_get::<String, _>("invoice_scope").unwrap(),
+        "company"
+    );
+    assert_eq!(
+        saved.try_get::<Option<Uuid>, _>("patient_id").unwrap(),
+        None
+    );
+    assert_eq!(saved.try_get::<Option<Uuid>, _>("order_id").unwrap(), None);
+    assert_eq!(
+        saved.try_get::<String, _>("supplier_name").unwrap(),
+        "K.B.M. GmbH"
+    );
+    assert_eq!(saved.try_get::<String, _>("status").unwrap(), "approved");
+    assert_eq!(saved.try_get::<String, _>("paid_by").unwrap(), "unpaid");
+
+    sqlx::query(
+        r#"INSERT INTO accounting_entries (
+               entry_kind, direction, category, source_external_invoice_id,
+               entry_date, description, amount_net, amount_vat, amount_gross,
+               currency, created_by
+           ) VALUES (
+               'external_invoice_payment', 'expense', 'provider_expense', $1,
+               '2026-05-10', $2, 655.00, 124.45, 779.45,
+               'EUR', $3
+           )"#,
+    )
+    .bind(invoice_id)
+    .bind(format!("Company invoice payment RE-{tag}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, ledger) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/accounting-ledger?year=2026",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ledger}");
+    let ledger_entry = ledger["entries"]
+        .as_array()
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry["external_invoice_id"] == invoice_id.to_string())
+        })
+        .expect("company invoice payment in accounting ledger");
+    assert_eq!(ledger_entry["source_document_id"], document_id.to_string());
+    assert_eq!(
+        ledger_entry["source_document_name"],
+        format!("FIN-Rechnung {tag}.pdf")
+    );
+    assert!(ledger_entry["invoice_id"].is_null());
+    assert!(ledger_entry["order_id"].is_null());
+    assert!(ledger_entry["patient_id"].is_null());
+
+    let (status, position) = json_request(
+        &app,
+        "GET",
+        "/api/v1/company-financial-position?currency=EUR",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{position}");
+    let liability = position["provider_liabilities"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"] == invoice_id.to_string())
+        })
+        .expect("company invoice in provider liabilities");
+    assert_eq!(liability["provider_name"], "K.B.M. GmbH");
+    assert!(liability["patient_id"].is_null());
+    assert!(liability["order_id"].is_null());
+    assert_eq!(liability["remaining_gross"], "779.45");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/external-invoices/company",
+        &bearer,
+        Some(payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &bearer,
+        Some(json!({ "reason": "Must remain attached to imported invoice" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let patient_id = seed_patient(&pool, admin_id, &format!("{tag}-patient")).await;
+    let moved = sqlx::query("UPDATE documents SET patient_id = $2 WHERE id = $1")
+        .bind(document_id)
+        .bind(patient_id)
+        .execute(&pool)
+        .await;
+    assert!(
+        moved.is_err(),
+        "Company invoice original must remain outside patient context"
+    );
+}
+
+#[tokio::test]
+async fn billing_can_discard_only_its_own_unfinished_invoice_original() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("replace-invoice-source");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               auto_name, art, category, ursprung, uploaded_by, id,
+               version_root_document_id
+           ) VALUES (
+               $1, 'invoice_document', 'finance', 'invoice_import', $2, $3, $3
+           )"#,
+    )
+    .bind(format!("Unfinished invoice {tag}"))
+    .bind(billing_id)
+    .bind(document_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &billing_bearer,
+        Some(json!({ "reason": "Replaced before invoice import completion" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let deleted = sqlx::query_scalar::<_, bool>(
+        "SELECT file_deleted_at IS NOT NULL FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(deleted);
+
+    let unrelated_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               auto_name, art, category, uploaded_by, id, version_root_document_id
+           ) VALUES (
+               $1, 'invoice_document', 'finance', $2, $3, $3
+           )"#,
+    )
+    .bind(format!("Unrelated invoice {tag}"))
+    .bind(admin_id)
+    .bind(unrelated_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{unrelated_id}/delete"),
+        &billing_bearer,
+        Some(json!({ "reason": "Not owned by billing user" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn external_invoices_round_trip_through_order_detail_and_status_update() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

@@ -1,0 +1,26 @@
+{
+  "lab_observations": 232,
+  "lab_numeric_date_marker_tuples_unchanged": 232,
+  "lab_metadata_rows_manually_transcribed": 118,
+  "lab_metadata_rows_matched": 118,
+  "lab_metadata_failures": [],
+  "lab_review_reasons": {
+    "laboratory_marker_reference_conflict": 1,
+    "laboratory_unit_requires_confirmation": 2
+  },
+  "documents": 6,
+  "pages": 13,
+  "parser_version": "rules-0.10.4",
+  "invoice_header_fields_matched": 32,
+  "invoice_positions_matched": 9,
+  "invoice_line_field_checks_passed": 24,
+  "invoice_total_reconciliations_passed": 4,
+  "collection_date_kept_separate": true,
+  "translation_numeric_tokens_preserved": 59,
+  "translation_candidates_passing_checks": 12,
+  "translation_candidates_total": 12,
+  "translation_warnings": [],
+  "translation_original_draft_unchanged": true,
+  "translation_status": "review_required",
+  "isolated_invoice_runtime_smoke_passed": true
+}

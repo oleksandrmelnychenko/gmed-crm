@@ -71,6 +71,7 @@ type DocumentsGridProps = {
   onToggleSelection: (id: string, checked: boolean) => void;
   onOpenDocument: (id: string) => void;
   onPreviewDocument?: (id: string, title: string) => void;
+  onSigned?: () => void;
   statusBadge: (value: string) => string;
   visibilityBadge: (value: string) => string;
   sensitivityBadge: (value: string) => string;
@@ -312,6 +313,7 @@ export function DocumentsGrid({
   onSelectionChange,
   onOpenDocument,
   onPreviewDocument,
+  onSigned,
   statusBadge,
   visibilityBadge,
   sensitivityBadge,
@@ -346,6 +348,7 @@ export function DocumentsGrid({
             getTitle: (item) =>
               item.original_filename ?? localizeCode(item.auto_name),
             label: previewLabel,
+            onSigned,
             onPreview: (item) =>
               onPreviewDocument(
                 item.id,
@@ -499,6 +502,7 @@ export function DocumentsGrid({
     needsCategorization,
     notSet,
     onPreviewDocument,
+    onSigned,
     patientLabel,
     pidFallback,
     previewLabel,

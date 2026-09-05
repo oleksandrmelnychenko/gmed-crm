@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button"
 import {
   createConfirmedDismissEventDetails,
   isOverlayDirty,
+  isOwnOverlayEvent,
   isCancelDismissControl,
   isInternalOverlayInteractionEvent,
   OverlayDirtyContext,
   shouldConfirmDirtyDismiss,
   useOverlayDirtyNativeListeners,
 } from "@/components/ui/dismissal-guard"
+import { createOverlayDirtyTracker } from "@/components/ui/overlay-dirty-tracker"
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog"
 import { useLang } from "@/lib/i18n"
 import { XIcon } from "lucide-react"
@@ -21,38 +23,43 @@ import { XIcon } from "lucide-react"
 type DialogRootProps = DialogPrimitive.Root.Props & {
   allowImplicitDismissal?: boolean
   dirty?: boolean
+  requireChanges?: boolean
 }
 
 function Dialog({
   allowImplicitDismissal = false,
+  requireChanges = false,
   dirty,
   onOpenChange,
   open,
   ...props
 }: DialogRootProps) {
   const { t } = useLang()
-  const isDirtyRef = React.useRef(false)
+  const [dirtyTracker] = React.useState(createOverlayDirtyTracker)
   const actionsRef = React.useRef<DialogPrimitive.Root.Actions | null>(null)
   const allowConfirmedDismissRef = React.useRef(false)
   const pendingConfirmActionRef = React.useRef<(() => void) | null>(null)
   const [internalDirty, setInternalDirty] = React.useState(false)
+  const [resetVersion, bumpResetVersion] = React.useReducer((version: number) => version + 1, 0)
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const getCurrentDirty = React.useCallback(
-    () => isOverlayDirty(dirty, internalDirty || isDirtyRef.current),
-    [dirty, internalDirty],
+    () => isOverlayDirty(dirty, dirtyTracker.isDirty()),
+    [dirty, dirtyTracker],
   )
 
   React.useEffect(() => {
-    if (dirty === false) {
-      isDirtyRef.current = false
+    if (dirty === false || open === false) {
+      dirtyTracker.reset()
+      bumpResetVersion()
       setInternalDirty(false)
     }
-  }, [dirty])
+  }, [dirty, dirtyTracker, open])
 
   const resetInternalDirty = React.useCallback(() => {
-    isDirtyRef.current = false
+    dirtyTracker.reset()
+    bumpResetVersion()
     setInternalDirty(false)
-  }, [])
+  }, [dirtyTracker])
 
   const closeAfterConfirmedDismiss = React.useCallback(() => {
     if (open !== undefined) {
@@ -108,13 +115,18 @@ function Dialog({
     pendingConfirmActionRef.current = null
     setConfirmOpen(false)
   }, [])
-  const markDirty = React.useCallback(() => {
-    isDirtyRef.current = true
-    setInternalDirty(true)
-  }, [])
+  const updateField = React.useCallback((key: unknown, previous: string, current: string) => {
+    const previousDirty = dirtyTracker.isDirty()
+    dirtyTracker.update(key, previous, current)
+    // Native capture runs before React commits the field value. Publish after
+    // its onChange handler, while getCurrentDirty can still read synchronously.
+    if (previousDirty !== dirtyTracker.isDirty()) {
+      window.setTimeout(() => setInternalDirty(dirtyTracker.isDirty()), 0)
+    }
+  }, [dirtyTracker])
   const dirtyContext = React.useMemo(
-    () => ({ confirmDismiss, markDirty, resetDirty: resetInternalDirty }),
-    [confirmDismiss, markDirty, resetInternalDirty],
+    () => ({ confirmDismiss, updateField, resetDirty: resetInternalDirty, resetVersion, requireChanges, isDirty: isOverlayDirty(dirty, internalDirty) }),
+    [confirmDismiss, dirty, internalDirty, updateField, resetInternalDirty, resetVersion, requireChanges],
   )
 
   const handleOpenChange = React.useCallback<
@@ -222,6 +234,7 @@ function DialogContent({
   onChangeCapture,
   onClickCapture,
   onInputCapture,
+  onSubmitCapture,
   overlayClassName,
   showOverlay = true,
   showCloseButton = true,
@@ -234,26 +247,14 @@ function DialogContent({
   const { t } = useLang()
   const dirtyContext = React.useContext(OverlayDirtyContext)
   const contentRef = useOverlayDirtyNativeListeners<HTMLDivElement>()
-
-  const handleChangeCapture = React.useCallback<
-    React.FormEventHandler<HTMLDivElement>
-  >(
-    (event) => {
-      dirtyContext?.markDirty()
-      ;(onChangeCapture as ((event: unknown) => void) | undefined)?.(event)
-    },
-    [dirtyContext, onChangeCapture]
-  )
-
-  const handleInputCapture = React.useCallback<
-    React.FormEventHandler<HTMLDivElement>
-  >(
-    (event) => {
-      dirtyContext?.markDirty()
-      ;(onInputCapture as ((event: unknown) => void) | undefined)?.(event)
-    },
-    [dirtyContext, onInputCapture]
-  )
+  const handleSubmitCapture: React.FormEventHandler<HTMLDivElement> = (event) => {
+    if (isOwnOverlayEvent(event) && dirtyContext?.requireChanges && !dirtyContext.isDirty) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    ;(onSubmitCapture as ((event: unknown) => void) | undefined)?.(event)
+  }
 
   const handleClickCapture = React.useCallback<
     React.MouseEventHandler<HTMLDivElement>
@@ -261,6 +262,7 @@ function DialogContent({
     (event) => {
       if (
         dirtyContext &&
+        isOwnOverlayEvent(event) &&
         isCancelDismissControl(event.target, t.common_cancel) &&
         !dirtyContext.confirmDismiss()
       ) {
@@ -284,9 +286,10 @@ function DialogContent({
           "fixed left-2 right-2 bottom-2 z-50 grid max-h-[calc(100dvh-1rem)] w-auto max-w-none gap-4 overflow-y-auto overscroll-contain rounded-xl bg-popover p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/10 duration-100 outline-none motion-reduce:animate-none sm:left-1/2 sm:right-auto sm:top-1/2 sm:bottom-auto sm:w-full sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:pb-4 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
-        onChangeCapture={handleChangeCapture}
+        onChangeCapture={onChangeCapture}
         onClickCapture={handleClickCapture}
-        onInputCapture={handleInputCapture}
+        onInputCapture={onInputCapture}
+        onSubmitCapture={handleSubmitCapture}
         {...props}
       >
         {children}

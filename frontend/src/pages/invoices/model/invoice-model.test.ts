@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculateInvoiceSelectionTotals,
+  blankCreateForm,
+  createInvoiceLineSelection,
   invoiceLineQuantityAvailable,
+  isInvoiceSelectionValid,
 } from "./invoice-model";
 import type { InvoiceLineItem } from "./types";
 
@@ -41,5 +44,46 @@ describe("invoice creation totals", () => {
     expect(invoiceLineQuantityAvailable(quoteLine, "advance")).toBe(3);
     expect(invoiceLineQuantityAvailable(quoteLine, "interim")).toBe(1);
     expect(invoiceLineQuantityAvailable(quoteLine, "final")).toBe(1);
+  });
+});
+
+describe("invoice creation selection", () => {
+  const lines = [line({ quantity: "3", remaining_quantity: "1" }), line({ remaining_quantity: "0" })];
+
+  it("initializes final invoices with only the remaining quantities", () => {
+    expect(createInvoiceLineSelection(lines, "final")).toEqual({
+      selectedLineIndexes: [0], lineQuantities: { "0": "1", "1": "0" },
+    });
+    expect(createInvoiceLineSelection(lines, "advance")).toEqual({
+      selectedLineIndexes: [0, 1], lineQuantities: { "0": "3", "1": "2" },
+    });
+  });
+
+  it.each(["", "0", "-1", "1.01", "NaN", "Infinity"])("rejects an invalid selected quantity: %s", (quantity) => {
+    expect(isInvoiceSelectionValid(lines, {
+      ...blankCreateForm("quote"), invoiceType: "interim", selectedLineIndexes: [0], lineQuantities: { "0": quantity },
+    })).toBe(false);
+  });
+
+  it("allows partial interim quantities but requires the full remainder for final invoices", () => {
+    const form = { ...blankCreateForm("quote"), selectedLineIndexes: [0], lineQuantities: { "0": "0.5" } };
+    expect(isInvoiceSelectionValid(lines, { ...form, invoiceType: "interim" })).toBe(true);
+    expect(isInvoiceSelectionValid(lines, form)).toBe(false);
+    expect(isInvoiceSelectionValid(lines, { ...form, lineQuantities: { "0": "1" } })).toBe(true);
+  });
+
+  it("rejects a final invoice missing a remaining line", () => {
+    expect(isInvoiceSelectionValid([line(), line()], {
+      ...blankCreateForm("quote"), selectedLineIndexes: [0], lineQuantities: { "0": "2" },
+    })).toBe(false);
+  });
+
+  it("rejects unavailable, duplicate and nonexistent selections", () => {
+    for (const selectedLineIndexes of [[], [1], [0, 0], [5]]) {
+      expect(isInvoiceSelectionValid(lines, {
+        ...blankCreateForm("quote"), invoiceType: "interim", selectedLineIndexes,
+        lineQuantities: { "0": "1", "1": "1", "5": "1" },
+      })).toBe(false);
+    }
   });
 });

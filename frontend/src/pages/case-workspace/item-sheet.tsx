@@ -11,6 +11,7 @@ import { Banner } from "./primitives";
 
 type CaseItemEditSheetProps = {
   open: boolean;
+  dirty?: boolean;
   onOpenChange: (open: boolean) => void;
   mode: "create" | "edit";
   title: string;
@@ -28,6 +29,7 @@ type CaseItemEditSheetProps = {
 
 export function CaseItemEditSheet({
   open,
+  dirty,
   onOpenChange,
   mode,
   title,
@@ -49,7 +51,7 @@ export function CaseItemEditSheet({
       : t.cases_workspace_item_submit_edit;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet dirty={dirty} requireChanges={mode === "edit"} open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className={cn(
@@ -94,6 +96,7 @@ export function CaseItemEditSheet({
                     <Button
                       type="button"
                       className="h-9 rounded-lg"
+                      requireChanges={mode === "edit"}
                       disabled={busy || !canSubmit}
                       onClick={() => void onSubmit()}
                     >
@@ -113,4 +116,3 @@ export function CaseItemEditSheet({
     </Sheet>
   );
 }
-

@@ -24,6 +24,8 @@ pub struct AppState {
     pub message_keys: Arc<KeyRegistry>,
     pub audit_sender: AuditSender,
     pub medication_ai: Arc<MedicationAiProvider>,
+    pub document_signatures: Option<Arc<crate::document_signatures::provider::Provider>>,
+    pub document_signature_cache: Arc<crate::document_signatures::connection::Cache>,
 }
 
 impl AppState {
@@ -55,6 +57,8 @@ impl AppState {
             message_keys: Arc::new(message_keys),
             audit_sender: AuditSender::noop(),
             medication_ai: Arc::new(MedicationAiProvider::new(MedicationAiConfig::default())),
+            document_signatures: None,
+            document_signature_cache: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -72,6 +76,14 @@ impl AppState {
 
     pub fn jwt_secret(&self) -> &str {
         self.jwt_secret.expose_secret()
+    }
+
+    pub fn with_document_signatures(
+        mut self,
+        provider: Option<crate::document_signatures::provider::Provider>,
+    ) -> Self {
+        self.document_signatures = provider.map(Arc::new);
+        self
     }
 }
 

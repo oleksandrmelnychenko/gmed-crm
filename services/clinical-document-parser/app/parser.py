@@ -17,6 +17,8 @@ from .models import (
     Target,
 )
 from .rules import load_rules
+from .english_dates import normalize_english_date
+from .english_sections import prose_diagnosis_rows, prose_paragraphs, therapy_recommendation_rows
 
 
 SUPPORTED_TARGETS = {
@@ -63,11 +65,14 @@ CONFIDENCE_SIGNALS: dict[str, float] = {
 }
 
 SUSPICION_RE = re.compile(
-    r"(?:^|[\s:;(])(?:V\s*\.?\s*a\s*\.?|Verdacht(?:\s+auf)?|suspekt(?:e[rsnm]?)?)(?=\s|$|[,:;.])",
+    r"(?:^|[\s:;(])(?:V\s*\.?\s*a\s*\.?|Verdacht(?:\s+auf)?|suspekt(?:e[rsnm]?)?|"
+    r"suspected|possible|probable|suspicious\s+for|cannot\s+(?:be\s+)?excluded?|cannot\s+rule\s+out|"
+    r"can(?:not|'t)\s+be\s+ruled\s+out|not\s+(?:yet\s+)?(?:excluded|ruled\s+out))(?=\s|$|[,:;.])",
     re.IGNORECASE,
 )
 RULE_OUT_RE = re.compile(
-    r"(?:^|[\s:;(])(?:zum\s+)?Ausschluss(?:\s+(?:von|einer?|des))?(?=\s|$|[,:;.])",
+    r"(?:^|[\s:;(])(?:(?:zum\s+)?Ausschluss(?:\s+(?:von|einer?|des))?|"
+    r"(?<!cannot\s)(?<!not\s)rule\s+out|exclusion\s+of|r/o)(?=\s|$|[,:;.])",
     re.IGNORECASE,
 )
 NEGATION_RE = re.compile(
@@ -80,22 +85,25 @@ NEGATION_RE = re.compile(
     r"\bausgeschlossen\b|"
     r"\bnichts\s+beweisend(?:e[rsnm]?)?\b|"
     r"\bunauff[aä]llig(?:e[rsnm]?)?\b|"
-    r"\bregelrecht(?:e[rsnm]?)?\b"
+    r"\bregelrecht(?:e[rsnm]?)?\b|\bno\b|\bwithout\b|\bnegative\s+for\b|"
+    r"\bdenies\b|\bnot\s+(?:seen|detected|identified|present)\b|\bruled\s+out\b"
     r")",
     re.IGNORECASE,
 )
 LEADING_NEGATION_RE = re.compile(
     r"^\s*(?:kein(?:e|en|em|er|es)?|ohne|unauff[aä]llig(?:e[rsnm]?)?|"
-    r"regelrecht(?:e[rsnm]?)?|negativ(?:e[rsnm]?)?)\b",
+    r"regelrecht(?:e[rsnm]?)?|negativ(?:e[rsnm]?)?|no|without|negative\s+for|denies)\b",
     re.IGNORECASE,
 )
 NEGATED_PREDICATE_RE = re.compile(
     r"\b(?:ausgeschlossen|nicht\s+(?:nachweisbar|vorhanden|erkennbar)|"
-    r"verneint(?:e[rsnm]?)?)\b",
+    r"verneint(?:e[rsnm]?)?|not\s+(?:seen|detected|detectable|identified|present)|"
+    r"(?<!be\s)ruled\s+out|(?<!be\s)excluded)\b",
     re.IGNORECASE,
 )
 HISTORY_RE = re.compile(
-    r"(?:^|[\s:;(])(?:Z\s*\.?\s*n\s*\.?|Zustand\s+nach|anamnestisch|in\s+der\s+Vorgeschichte)(?=\s|$|[,:;.])",
+    r"(?:^|[\s:;(])(?:Z\s*\.?\s*n\s*\.?|Zustand\s+nach|anamnestisch|in\s+der\s+Vorgeschichte|"
+    r"history\s+of|past\s+history\s+of|status\s+post|s/p)(?=\s|$|[,:;.])",
     re.IGNORECASE,
 )
 FAMILY_HISTORY_RE = re.compile(
@@ -103,7 +111,7 @@ FAMILY_HISTORY_RE = re.compile(
     r"\bFamilienanamnese\b|"
     r"\bfamili[aä]re\s+(?:Anamnese|Belastung)\b|"
     r"\bin\s+der\s+Familie\b|"
-    r"\bbei\s+(?:Mutter|Vater|Eltern|Bruder|Schwester|Gro[ßs]eltern)\b"
+    r"\bbei\s+(?:Mutter|Vater|Eltern|Bruder|Schwester|Gro[ßs]eltern)\b|\bfamily\s+history\b"
     r")",
     re.IGNORECASE,
 )
@@ -165,22 +173,26 @@ def parse_clinical_text(text: str) -> ParseDraft:
     clean = _normalize_text(layout)
     language = _detect_language(clean)
     document_type = _detect_document_type(clean)
-    sections = _split_sections(layout)
+    sections = _split_sections(layout, preserve_paragraphs=language == "en")
     admission_date, discharge_date = _document_stay_dates(clean)
+    history_candidates, remaining_layout, history_warnings = _history_laboratory_candidates(layout)
+    if remaining_layout != layout:
+        document_type = "laboratory_report"
     candidates: list[ClinicalCandidate] = _vital_candidates(
         sections,
         document_text=clean,
         admission_date=admission_date,
     )
+    candidates.extend(history_candidates)
     candidates.extend(
         _laboratory_candidates(
-            layout,
+            remaining_layout,
             admission_date=admission_date,
             discharge_date=discharge_date,
             laboratory_name=_laboratory_name(layout),
         )
     )
-    warnings: list[str] = []
+    warnings: list[str] = list(history_warnings)
 
     for section in sections:
         role = _section_role(section.heading)
@@ -188,6 +200,7 @@ def parse_clinical_text(text: str) -> ParseDraft:
             candidates.extend(
                 _diagnosis_candidates(
                     section,
+                    english_prose=language == "en",
                     fold_wrapped=(
                         document_type in {"oncology_report", "discharge_summary"}
                         or (
@@ -227,6 +240,10 @@ def parse_clinical_text(text: str) -> ParseDraft:
             # Structured rows already preserve this section at analyte level.
             # Do not also create one large, duplicate examination paragraph.
             continue
+        elif language == "en":
+            candidates.extend(_english_section_candidates(section))
+            if document_type == "radiology_report" and role == "impression":
+                candidates.extend(_radiology_diagnosis_candidates(section))
         else:
             candidate = _section_candidate(section)
             if candidate:
@@ -241,6 +258,16 @@ def parse_clinical_text(text: str) -> ParseDraft:
             )
         else:
             warnings.append("No supported clinical sections were recognized; manual review is required.")
+    if language == "en":
+        # English rules preserve source facts. They are not a German translation
+        # and must be reviewed before any clinical persistence.
+        for candidate in candidates:
+            candidate.selected = False
+            candidate.normalized["auto_select"] = False
+            reasons = candidate.normalized.setdefault("review_reasons", [])
+            if "english_source_requires_review" not in reasons:
+                reasons.append("english_source_requires_review")
+        warnings.append("English source text requires review; the original clinical facts have not been translated.")
     return ParseDraft(
         document_type=document_type,
         source_language=language,
@@ -285,7 +312,7 @@ SUBJECT_DOB_RAW_RE = re.compile(
 def _subject_name(value: str) -> tuple[str, str] | None:
     compact = " ".join(value.strip().strip(",;:").split())
     compact = re.sub(
-        r"^(?:Herr|Frau|Patient(?:in)?|Dr\.?|Prof\.?)\s+",
+        r"^(?:Herr|Frau|Patient(?:in)?|Dr\.?|Prof\.?|Mr\.?|Mrs\.?|Ms\.?|Miss)\s+",
         "",
         compact,
         flags=re.IGNORECASE,
@@ -351,8 +378,8 @@ def _extract_document_subject(text: str) -> DocumentSubject | None:
                 add("last_name", last_match.group("value"), 0.99, page_number, line)
 
             full_match = re.match(
-                r"^(?:Patient(?:in)?|Patientenname|Name)\s*:\s*(?P<value>.+?)"
-                r"(?=\s*,?\s*(?:geb(?:oren)?\.?|Geburtsdatum)\s*:|$)",
+                r"^(?:Patient(?:in)?|Patient\s+name|Patientenname|Name)\s*:\s*(?P<value>.+?)"
+                r"(?=\s*,?\s*(?:geb(?:oren)?\.?|Geburtsdatum|DOB|Date\s+of\s+birth)\s*:|$)",
                 line,
                 re.IGNORECASE,
             )
@@ -391,8 +418,19 @@ def _extract_document_subject(text: str) -> DocumentSubject | None:
                     evidence.append((page_number, line))
                     invalid_birth_date = True
 
+            english_dob = re.search(
+                r"\b(?:DOB|Date\s+of\s+birth)\s*:\s*(?P<date>[^;\n]+)$", line, re.IGNORECASE
+            ) if (full_match or re.match(r"^(?:DOB|Date\s+of\s+birth)\b", line, re.IGNORECASE)) else None
+            if english_dob:
+                birth_date = normalize_english_date(english_dob.group("date"))
+                if birth_date:
+                    add("birth_date", birth_date, 0.99, page_number, line)
+                else:
+                    evidence.append((page_number, line))
+                    invalid_birth_date = True
+
             identifier = re.match(
-                r"^(?:Patienten(?:nummer|-?ID)|Patient(?:en)?-?Nr\.?|Pat\.?-?Nr\.?)\s*:\s*"
+                r"^(?:Patienten(?:nummer|-?ID)|Patient(?:en)?-?Nr\.?|Pat\.?-?Nr\.?|Patient\s+ID|MRN)\s*:\s*"
                 r"(?P<value>[A-Za-z0-9][A-Za-z0-9./_-]{2,63})\s*$",
                 line,
                 re.IGNORECASE,
@@ -452,6 +490,9 @@ LAB_REFERENCE_RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 LAB_REFERENCE_LIMIT_RE = re.compile(r"(?P<comparator><=|>=|<|>)\s*(?P<number>[+-]?[\d.,]+)")
+LAB_REFERENCE_WORD_LIMIT_RE = re.compile(
+    r"^(?P<direction>ab|bis)\s+(?P<number>\d+(?:[.,]\d+)?)$", re.IGNORECASE
+)
 LAB_DATE_RE = re.compile(
     r"(?:Untersuchung|Labor(?:befund)?|Befund|Entnahme)\s+(?:vom|am)\s+(?P<date>\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))(?!\d)",
     re.IGNORECASE,
@@ -613,7 +654,7 @@ VITAL_CANONICAL_UNITS = {
     "bmi": "kg/m²",
 }
 VITAL_LABEL_RE = re.compile(
-    r"\b(?:RR|Blutdruck|blood\s+pressure|Puls|Herzfrequenz|heart\s+rate|HF|Hf|"
+    r"\b(?:RR|Blutdruck|blood\s+pressure|Puls|pulse(?:\s+rate)?|Herzfrequenz|heart\s+rate|HF|Hf|"
     r"Temperatur|temperature|Temp\.?|SpO\s*2|Sauerstoffs[aä]ttigung|oxygen\s+saturation|"
     r"Atemfrequenz|respiratory\s+rate|AF|Gewicht|weight|Entlassgewicht|"
     r"Gr[oö](?:ß|ss)e|Groesse|K[oö]rpergr[oö](?:ß|ss)e|height|BMI)\b",
@@ -670,8 +711,8 @@ def _vital_lines(section: Section) -> list[tuple[str, int | None]]:
         ):
             index += 1
             line = f"{line[:-1]}{_repair_native_pdf_spacing_artifacts(' '.join(raw_lines[index].split()))}"
-        if line:
-            rows.append((line, page))
+        # Preserve paragraph breaks so a following unit cannot bind across one.
+        rows.append((line, page))
         index += 1
     return rows
 
@@ -704,7 +745,7 @@ def _vital_source_clusters(section: Section) -> list[tuple[str, int | None]]:
         # OCR/native text may wrap exactly between a label and its numeric
         # value (``spO2:\n92%`` or ``AF\n19/min``). Join only that immediate
         # continuation; never merge distant measurements by page or date.
-        if index + 1 < len(lines) and (
+        if index + 1 < len(lines) and lines[index + 1][1] == page and (
             re.search(
                 r"(?:SpO\s*2|Sauerstoffs[aä]ttigung|Puls|Herzfrequenz|HF|Hf|"
                 r"Atemfrequenz|AF|Temperatur|Temp\.?|Gewicht|Gr[oö](?:ß|ss)e)\s*:?\s*$",
@@ -712,6 +753,10 @@ def _vital_source_clusters(section: Section) -> list[tuple[str, int | None]]:
                 re.IGNORECASE,
             )
             or re.match(rf"^\s*{VITAL_NUMBER_PATTERN}\s*(?:%|/\s*min|bpm|°?\s*C|kg|cm)\b", lines[index + 1][0], re.IGNORECASE)
+            or (
+                re.search(rf"{VITAL_NUMBER_PATTERN}$", line)
+                and re.match(r"^(?:mm\s*Hg|kPa|kg|cm|bpm|/\s*min)(?=$|[\s,;.])", lines[index + 1][0], re.I)
+            )
         ):
             index += 1
             parts.append(lines[index][0])
@@ -944,7 +989,7 @@ def _normalized_vital_measurements(
         (
             "heart_rate",
             re.compile(
-                rf"\b(?:Puls|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
+                rf"\b(?:Puls|pulse(?:\s+rate)?|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
                 rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>bpm|/\s*min|min-?1|Hz)?(?!\s*[A-Za-z])",
                 re.IGNORECASE,
             ),
@@ -1053,7 +1098,7 @@ def _normalized_vital_measurements(
         (
             "heart_rate",
             re.compile(
-                rf"\b(?:Puls|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
+                rf"\b(?:Puls|pulse(?:\s+rate)?|Herzfrequenz|heart\s+rate|HF|Hf)\b\s*:?\s*"
                 rf"(?P<number>{VITAL_NUMBER_PATTERN})\s*(?P<unit>[A-Za-z][A-Za-z0-9/²-]*)",
                 re.IGNORECASE,
             ),
@@ -1215,6 +1260,10 @@ def _lab_reference(value: str) -> tuple[float | None, float | None]:
         )
     limit_match = LAB_REFERENCE_LIMIT_RE.search(compact)
     if not limit_match:
+        word_limit = LAB_REFERENCE_WORD_LIMIT_RE.fullmatch(compact)
+        if word_limit:
+            number = _parse_localized_number(word_limit.group("number"))
+            return (None, number) if word_limit.group("direction").casefold() == "bis" else (number, None)
         return None, None
     number = _parse_localized_number(limit_match.group("number"))
     if limit_match.group("comparator").startswith("<"):
@@ -1255,7 +1304,7 @@ def _looks_like_lab_unit(value: str) -> bool:
             r"pmol|µmol|μmol|mmol|mol|U|IU|I\.E\.|G|T|"
             r"(?:Mio\.?|Tsd\.?)?/(?:nl|nL|pl|pL|ul|µl|μl)|"
             r"ml/min(?:/1[.,]73m2)?|"
-            r"(?:AU|m?IU|m?IE|g|mg|ng|µg|μg|ug|pmol|µmol|μmol|mmol|mol|"
+            r"(?:AU|m?IU|m?IE|g|mg|ng|pg|µg|μg|ug|pmol|µmol|μmol|mmol|mol|"
             r"U|IU|[uµμ]UI|µIU|μIU|G|T)/(?:l|L|I|dl|ml))",
             compact,
             re.IGNORECASE,
@@ -2199,6 +2248,188 @@ def _narrative_laboratory_candidates(
     return candidates
 
 
+def _history_laboratory_candidates(
+    text: str,
+) -> tuple[list[ClinicalCandidate], str, list[str]]:
+    """Parse explicit, sparse Testbezeichnung/Toleranz/Einheit/date grids.
+
+    Empty cells are positional. A compact OCR row with the wrong column count
+    is never assigned dates by guessing. The printed marker legend, not the
+    analyte name or the reference interval, determines prefix sign semantics.
+    """
+    candidates: list[ClinicalCandidate] = []
+    remaining_pages: list[str] = []
+    warnings: list[str] = []
+    dates: list[str | None] = []
+    panel = "Labor"
+    recognized = False
+    legend_match = re.search(
+        r"Grenzwertindikatoren[\s\S]{0,900}vorangestellt", text, re.IGNORECASE
+    )
+    legend_text = " ".join(legend_match.group().split()) if legend_match else ""
+    legend = bool(
+        re.search(r"\+.*?erh[oö]ht", legend_text, re.I)
+        and re.search(r"-.*?erniedrigt", legend_text, re.I)
+    )
+    for page_number, page in enumerate(text.split("\f"), 1):
+        remaining: list[str] = []
+        active = False
+        # Only continue into a page that begins with a panel and cell-shaped
+        # rows. An unrelated following letter must not inherit old lab dates.
+        nonempty = [line for line in page.splitlines() if line.strip()]
+        if dates and nonempty:
+            active = bool(
+                "\t" not in nonempty[0] and nonempty[0].strip().isupper()
+                and any(len(line.split("\t")) == len(dates) + 3 for line in nonempty[1:5])
+            )
+        for raw_line in page.splitlines():
+            cells = [cell.strip(" |") for cell in raw_line.split("\t")]
+            if not raw_line.strip():
+                remaining.append(raw_line)
+                continue
+            header = bool(
+                len(cells) >= 5
+                and re.fullmatch(r"testbezeichnun[ga]|bezeichnung|parameter", _heading_key(cells[0]), re.I)
+                and cells[1].casefold() == "toleranz"
+                and cells[2].casefold() == "einheit"
+            )
+            if header:
+                recognized = True
+                dates = [
+                    _normalize_german_date(cell) if LAB_COLUMN_DATE_RE.fullmatch(cell) else None
+                    for cell in cells[3:]
+                ]
+                active = True
+                if not all(dates) or len(set(dates)) != len(dates):
+                    warnings.append(f"Laboratory date columns on page {page_number} require confirmation.")
+                continue
+            if not active:
+                remaining.append(raw_line)
+                continue
+            first = cells[0]
+            if re.match(r"(?:Den\s+Werten|Grenzwertindikatoren|oder\s+['\"]?!)", first, re.I):
+                active = False
+                dates = []
+                continue
+            if len(cells) == 1:
+                if first.isupper() and len(first) < 100:
+                    panel = first
+                    continue
+                # Paragraphs or a new clinical section end the table.
+                if first and not re.fullmatch(r"[-_= ]+", first):
+                    active = False
+                    dates = []
+                    remaining.append(raw_line)
+                continue
+            if not first or not re.search(r"[A-Za-zÄÖÜäöüß]", first):
+                continue
+            if len(cells) != len(dates) + 3:
+                warnings.append(f"Laboratory row on page {page_number} has ambiguous column positions; verify the source table.")
+                continue
+            analyte = first
+            source_code: str | None = None
+            coded = re.match(r"^(\S+(?:\s+(?:II|III|1c))?) {2,}(.+)$", first)
+            if coded:
+                source_code, analyte = coded.groups()
+            analyte = " ".join(analyte.split())
+            source_analyte = analyte
+            analyte = load_rules()["laboratory_analyte_ocr_aliases"].get(analyte, analyte)
+            if not re.search(r"[A-Za-zÄÖÜäöüß]", analyte):
+                continue
+            source_unit = cells[2] or None
+            unit, unit_reasons = _history_laboratory_unit(source_unit)
+            reference = cells[1] or None
+            for raw_result, measured_on in zip(cells[3:], dates, strict=True):
+                if not raw_result:
+                    continue
+                # Decimal punctuation split into several OCR words remains
+                # decimal punctuation. Never join two independent numbers.
+                result = re.sub(r"\s*([,.])\s*(?=\d)", r"\1", raw_result)
+                result = re.sub(r"^(<=|>=|<|>|!\+|!-|\+{1,2}|-{1,2}|!)\s+", r"\1", result)
+                reasons = list(unit_reasons)
+                marker_match = re.match(r"^(!\+|!-|\+{1,2}|-{1,2}|!)(?=\d)", result)
+                marker = marker_match.group(1) if marker_match and legend else None
+                numeric_text = result[len(marker):] if marker else result
+                if marker_match and not legend:
+                    reasons.append("laboratory_signed_result_requires_confirmation")
+                numeric_match = LAB_RESULT_RE.fullmatch(numeric_text)
+                textual_match = LAB_TEXT_RESULT_RE.fullmatch(numeric_text)
+                if not numeric_match and not textual_match:
+                    # Isolated punctuation in an otherwise empty cell is a
+                    # scan artifact, not a clinical observation.
+                    if not re.search(r"[\w]", result):
+                        continue
+                    reasons.append("laboratory_result_requires_confirmation")
+                    warnings.append(f"An unreadable laboratory result on page {page_number} requires confirmation.")
+                if not all(dates) or len(set(dates)) != len(dates):
+                    reasons.append("laboratory_date_requires_confirmation")
+                candidate = _lab_candidate(
+                    analyte=analyte, result_text=numeric_text, unit=unit,
+                    reference_text=reference, measured_on=measured_on,
+                    panel=panel, page_number=page_number, source_text=raw_line,
+                    review_reasons=tuple(dict.fromkeys(reasons)),
+                )
+                candidate.normalized.update({
+                    # The clinical API validates numeric_result against this
+                    # value. Keep the printed flag separately so '-1,2' used
+                    # as a low marker cannot become a negative measurement.
+                    "result_text": numeric_text,
+                    "source_result_text": raw_result,
+                    "source_unit": source_unit,
+                    "source_analyte_code": source_code,
+                    "source_analyte_name": source_analyte,
+                    "source_row": raw_line,
+                    "table_layout": "ruled_laboratory_history",
+                    "source_abnormal_marker": marker,
+                })
+                if marker:
+                    flag = (
+                        "high" if "+" in marker else "low" if "-" in marker else "abnormal"
+                    )
+                    inferred = candidate.normalized["abnormal_flag"]
+                    if inferred not in {"unknown", flag}:
+                        candidate.normalized["review_reasons"].append("laboratory_marker_reference_conflict")
+                        candidate.normalized["auto_select"] = False
+                        candidate.selected = False
+                    candidate.normalized["abnormal_flag"] = flag
+                # Display the exact result, including its printed marker.
+                candidate.value = f"{analyte}: {raw_result}" + (f" {unit}" if unit else "")
+                if reference:
+                    candidate.value += f" (Referenz: {reference})"
+                candidate.source.text = raw_line.strip()
+                candidates.append(candidate)
+        remaining_pages.append("\n".join(remaining))
+        if not active:
+            dates = []
+    if warnings:
+        for candidate in candidates:
+            candidate.selected = False
+            candidate.normalized["auto_select"] = False
+            candidate.normalized["review_reasons"].append("incomplete_laboratory_table")
+    return candidates, "\f".join(remaining_pages) if recognized else text, list(dict.fromkeys(warnings))
+
+
+def _history_laboratory_unit(raw: str | None) -> tuple[str | None, list[str]]:
+    if not raw:
+        return None, []
+    # Narrow glyph repairs inside a known unit grammar; the original token is
+    # retained. A missing micro-prefix or an unknown numerator is never guessed.
+    unit = re.sub(r"mo[1I]", "mol", raw)
+    unit = re.sub(r"(?<=/)([dmnµμu]?)?[1I\]\)]$", lambda m: (m.group(1) or "") + "l", unit)
+    unit = re.sub(r"^([kmunpµμ]?)[uU]/", r"\1U/", unit)
+    unit = re.sub(r"^[iI][uU]/", "IU/", unit)
+    unit = re.sub(r"^ku/", "kU/", unit)
+    unit = re.sub(r"(?<=l)[\]\)]$", "", unit)
+    unit = re.sub(r"^u(?=(?:g|mol)/)", "µ", unit)
+    unit = re.sub(r"(?<=/mmol )Cho[1I\]]$", "Chol", unit)
+    supported = _looks_like_lab_unit(unit) or bool(re.fullmatch(
+        r"(?:kU/l|nmol/l|mmol/mol|Zellen/nl|[µμu]mol/mmol Chol)", unit, re.I
+    ))
+    if supported:
+        return unit, []
+    return raw, ["laboratory_unit_requires_confirmation"]
+
+
 def _single_result_laboratory_candidates(text: str) -> list[ClinicalCandidate]:
     """Parse vertical one-result-per-row laboratory tables.
 
@@ -2677,12 +2908,14 @@ def _laboratory_candidates(
         retained.append(candidate)
         preceding_by_group[group] = candidate
     candidates = retained
-    deduplicated: dict[tuple[int | None, str, str], ClinicalCandidate] = {}
+    deduplicated: dict[tuple[int | None, str, str, str, str], ClinicalCandidate] = {}
     for candidate in candidates:
         key = (
             candidate.source.page,
             str(candidate.normalized.get("analyte_name") or "").casefold(),
             str(candidate.normalized.get("result_text") or ""),
+            str(candidate.normalized.get("measured_on") or ""),
+            str(candidate.normalized.get("unit") or ""),
         )
         previous = deduplicated.get(key)
         if previous is not None:
@@ -2698,12 +2931,14 @@ def _laboratory_candidates(
 
 
 def _detect_language(text: str) -> str | None:
-    lowered = f" {text.lower()} "
+    lowered = f" {' '.join(text.lower().split())} "
     scores = {
         "de": sum(lowered.count(token) for token in (" der ", " die ", " und ", " keine ", " befund ")),
         "ru": sum(lowered.count(token) for token in (" и ", " диагноз", " анамнез", " пациент")),
         "uk": sum(lowered.count(token) for token in (" та ", " діагноз", " анамнез", " пацієнт")),
-        "en": sum(lowered.count(token) for token in (" the ", " and ", " diagnosis", " patient")),
+        "en": sum(lowered.count(token) for token in (" the ", " and ", " diagnosis", " diagnoses ",
+            " findings ", " impression ", " discharge ", " history ", " medication", " patient ",
+            " recommendations ", " examination ", " laboratory ", " clinical ", " follow-up ")),
     }
     language, score = max(scores.items(), key=lambda item: item[1])
     return language if score else None
@@ -2711,7 +2946,6 @@ def _detect_language(text: str) -> str | None:
 
 def _detect_document_type(text: str) -> str:
     lowered = text.casefold()
-
     # These section combinations are substantially more specific than individual
     # modality words such as CT, which often also appear in oncology letters.
     if any(
@@ -2720,9 +2954,15 @@ def _detect_document_type(text: str) -> str:
             "unverbindliche voraussichtliche kostenschätzung",
             "orientierungsangebot für medizinische leistungen",
             "ориентировочный расчёт стоимости медицинских услуг",
+            "estimated cost of medical services",
+            "medical cost estimate",
         )
     ):
         return "administrative_cost_estimate"
+    if re.search(r"^\s*Report Summary\s*:?\s*$", text, re.I | re.M) and re.search(
+        r"^\s*Medical Summary\s*:?\s*$", text, re.I | re.M
+    ):
+        return "medical_report"
     if re.search(
         r"(?:Bezeichnung|Parameter|Messwert)[^\n\f]*(?:Wert|Ergebnis)"
         r"[^\n\f]*Einheit[^\n\f]*(?:Normbereich|Referenzbereich)",
@@ -2755,9 +2995,9 @@ def _detect_document_type(text: str) -> str:
     radiology_headings = sum(
         bool(re.search(pattern, lowered, re.MULTILINE))
         for pattern in (
-            r"^\s*klinische angaben\s*:?\s*$",
-            r"^\s*befund\s*:?\s*$",
-            r"^\s*beurteilung\s*:?\s*$",
+            r"^\s*(?:klinische angaben|clinical history)\s*:?\s*$",
+            r"^\s*(?:befund|findings)\s*:?\s*$",
+            r"^\s*(?:beurteilung|impression)\s*:?\s*$",
         )
     )
     if radiology_headings >= 2:
@@ -2841,6 +3081,12 @@ def _match_heading(line: str, aliases: dict[str, Target]) -> tuple[Target, str, 
     target = aliases.get(_heading_key(without_colon))
     if target:
         return target, without_colon, ""
+
+    annotated_heading = re.fullmatch(r"(?P<heading>[^():]+)\s*\([^\n]+\)\s*:?", stripped)
+    if annotated_heading:
+        target = aliases.get(_heading_key(annotated_heading.group("heading")))
+        if target:
+            return target, without_colon, ""
 
     if ":" in stripped:
         prefix, remainder = stripped.split(":", 1)
@@ -2928,7 +3174,7 @@ def _match_contextual_ocr_heading(
     return "anamnesis", "Anamnese", ""
 
 
-def _split_sections(text: str) -> list[Section]:
+def _split_sections(text: str, *, preserve_paragraphs: bool = False) -> list[Section]:
     aliases = _alias_map()
     pages = text.split("\f")
     sections: list[Section] = []
@@ -2940,10 +3186,16 @@ def _split_sections(text: str) -> list[Section]:
         for line_index, raw_line in enumerate(lines):
             line = raw_line.strip()
             if not line:
+                if preserve_paragraphs and current and current.text and not current.text.endswith("\n"):
+                    current.text += "\n"
+                    current.line_pages.append(page_number)
                 continue
             if skip_rest_of_page:
                 continue
             if _is_signoff_line(line):
+                if current and current.text.strip():
+                    sections.append(current)
+                current = None
                 skip_rest_of_page = True
                 continue
             if _is_repeated_page_noise(line, line_index, len(lines)):
@@ -2981,7 +3233,11 @@ def _append_section_line(section: Section, line: str, page: int) -> None:
 
 
 def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool:
-    normalized = " ".join(line.casefold().split())
+    normalized = " ".join(line.casefold().split()).strip("<>")
+    if re.match(r"^(?:(?:signature|stamp)$|end of translation\b)", normalized):
+        return True
+    if re.match(r"^doctor['’]s letter dated\s+", normalized):
+        return True
     if line_index <= 2 and re.fullmatch(r"(?:seite\s*)?\d+(?:\s*(?:/|von)\s*\d+)?", normalized):
         return True
     if re.fullmatch(r"(?:seite|page)\s+\d+(?:\s*(?:/|von|of)\s*\d+)?", normalized):
@@ -3014,6 +3270,14 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
 
 
 def _is_signoff_line(line: str) -> bool:
+    if re.match(r"^Should (?:questions|uncertainties)\b", line.strip(), re.I):
+        return True
+    if re.match(r"^I\s+am\s+available\s+.*(?:questions|appointments)", line.strip(), re.IGNORECASE):
+        return True
+    if re.fullmatch(r"with\s+(?:warm|kind|best)\s+regards[,.]?", line.strip(), re.IGNORECASE):
+        return True
+    if re.fullmatch(r"(?:yours\s+(?:sincerely|faithfully)|sincerely|kind\s+regards|best\s+regards)[,.]?", line.strip(), re.IGNORECASE):
+        return True
     if _heading_key(line.rstrip(":")) == "wichtigerhinweis":
         return True
     return bool(
@@ -3033,23 +3297,27 @@ def _section_role(heading: str) -> str:
         "fragestellung",
         "vorstellungsgrund",
         "untersuchungsanlass",
+        "clinicalhistory",
+        "clinicalindication",
+        "indication",
+        "presentingcomplaint",
     }:
         return "indication"
-    if key == "familienanamnese":
+    if key in {"familienanamnese", "familyhistory"}:
         return "family_history"
-    if key in {"eigenanamnese", "vorgeschichte"}:
+    if key in {"eigenanamnese", "vorgeschichte", "pastmedicalhistory", "medicalhistory"}:
         return "personal_history"
-    if key == "sozialanamnese":
+    if key in {"sozialanamnese", "socialhistory"}:
         return "social_history"
-    if key == "befund":
+    if key in {"befund", "findings"}:
         return "finding"
-    if key == "beurteilung":
+    if key in {"beurteilung", "impression"}:
         return "impression"
     if key.startswith("zusammenfassendebeurteilun"):
         return "assessment"
     if key.startswith("chronologie"):
         return "chronology"
-    if key.startswith("labor"):
+    if key.startswith("labor") or key == "labresults":
         return "laboratory"
     if key in {"körpermaße", "körpermasse", "koerpermasse", "karnofskyindex"}:
         return "measurement"
@@ -3152,10 +3420,19 @@ def _diagnosis_has_negation(value: str) -> bool:
     Leading negation and explicit negated predicates remain safety-sensitive.
     """
 
+    if SUSPICION_RE.search(value) and re.search(r"\b(?:cannot|can't|not\s+(?:yet\s+)?(?:excluded|ruled\s+out))\b", value, re.IGNORECASE):
+        return False
     return bool(LEADING_NEGATION_RE.search(value) or NEGATED_PREDICATE_RE.search(value))
 
 
 def _diagnosis_semantics(value: str) -> DiagnosisSemantics:
+    if re.match(r"^(?:Normal\s+.+\b(?:supply|markers|values|levels|function)\b|Therapeutically\s+improved\b|Normalized\b)", value, re.IGNORECASE):
+        return DiagnosisSemantics(
+            target="examination", assertion="documented", semantic_role="finding",
+            certainty=None, auto_select=False,
+            review_reasons=("finding_is_not_an_active_diagnosis",),
+            confidence_signals=("recognized_heading", "redirected_from_diagnosis", "requires_clinical_confirmation"),
+        )
     if FAMILY_HISTORY_RE.search(value):
         return DiagnosisSemantics(
             target="anamnesis",
@@ -3281,7 +3558,8 @@ def _split_diagnosis_assertion_clauses(value: str) -> list[str]:
     split_clauses: list[str] = []
     assertion_after_comma = re.compile(
         r",\s+(?=(?:kein(?:e|en|em|er|es)?|ohne|verneint|Ausschluss|"
-        r"Z\s*\.?\s*n\s*\.?|Zustand\s+nach|V\s*\.?\s*a\s*\.?|Verdacht)\b)",
+        r"Z\s*\.?\s*n\s*\.?|Zustand\s+nach|V\s*\.?\s*a\s*\.?|Verdacht|"
+        r"no|negative\s+for|denies|rule\s+out|history\s+of|suspected|possible|probable)\b)",
         re.IGNORECASE,
     )
     for clause in clauses:
@@ -3370,9 +3648,11 @@ def _diagnosis_candidates(
     section: Section,
     *,
     fold_wrapped: bool = False,
+    english_prose: bool = False,
 ) -> list[ClinicalCandidate]:
     rows: list[ClinicalCandidate] = []
-    for row_value, page in _diagnosis_rows(section, fold_wrapped=fold_wrapped):
+    source_rows = prose_diagnosis_rows(section.text, section.line_pages, section.page) if english_prose else _diagnosis_rows(section, fold_wrapped=fold_wrapped)
+    for row_value, page in source_rows:
         if not row_value or len(row_value) < 3:
             continue
         candidate_section = _section_at_page(section, page)
@@ -3428,18 +3708,20 @@ MEDICATION_NEGATION_RE = re.compile(
 )
 MEDICATION_EMPTY_ROW_RE = re.compile(
     r"^\s*(?:(?:keine|ohne)\s+(?:(?:aktuelle|dauer|entlassungs|h[aä]usliche)\s*)?"
-    r"(?:medikation|medikamente|arzneimittel)|keine|nein|ohne)\s*[.!]?\s*$",
+    r"(?:medikation|medikamente|arzneimittel)|keine|nein|ohne|none|nil|"
+    r"no\s+(?:(?:current|regular|home)\s+)?medications?)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 MEDICATION_STOPPED_RE = re.compile(
-    r"\b(?:abgesetzt|beendet|gestoppt|nicht\s+mehr\s+einnehmen|ausgeschlichen)\b",
+    r"\b(?:abgesetzt|beendet|gestoppt|nicht\s+mehr\s+einnehmen|ausgeschlichen|"
+    r"discontinued|stopped|stop\s+taking|no\s+longer\s+taking)\b",
     re.IGNORECASE,
 )
 MEDICATION_PAUSED_RE = re.compile(
-    r"\b(?:pausiert|pause|vor[uü]bergehend\s+ausgesetzt|Einnahme\s+ausgesetzt|ruhend)\b",
+    r"\b(?:pausiert|pause|vor[uü]bergehend\s+ausgesetzt|Einnahme\s+ausgesetzt|ruhend|on\s+hold|withheld)\b",
     re.IGNORECASE,
 )
-MEDICATION_PLANNED_RE = re.compile(r"\b(?:geplant|vorgesehen|soll\s+beginnen)\b", re.IGNORECASE)
+MEDICATION_PLANNED_RE = re.compile(r"\b(?:geplant|vorgesehen|soll\s+beginnen|planned|to\s+be\s+started)\b", re.IGNORECASE)
 MEDICATION_ACTIVE_RE = re.compile(
     r"\b(?:Status\s*[:=-]?\s*(?:aktiv|active)|aktive\s+Einnahme|"
     r"wird\s+aktuell\s+eingenommen|weiter(?:hin)?\s+einnehmen|"
@@ -3480,6 +3762,21 @@ MEDICATION_FORM_PATTERNS: tuple[tuple[re.Pattern[str], str, str | None], ...] = 
     (re.compile(r"\b(?:Pflaster|transdermal)\b", re.IGNORECASE), "Pflaster", "transdermal"),
 )
 MEDICATION_HEADER_FIELDS = {
+    "activeingredient": "wirkstoff",
+    "genericname": "wirkstoff",
+    "brandname": "handelsname",
+    "drug": "handelsname",
+    "strength": "staerke",
+    "dosageform": "form",
+    "route": "einnahmeform",
+    "morning": "dose_morgens",
+    "noon": "dose_mittags",
+    "evening": "dose_abends",
+    "night": "dose_nachts",
+    "unit": "einheit",
+    "instructions": "hinweis",
+    "frequency": "hinweis",
+    "indication": "grund",
     "wirkstoff": "wirkstoff",
     "arzneimittelwirkstoff": "wirkstoff",
     "handelsname": "handelsname",
@@ -4699,6 +4996,25 @@ def _is_non_diagnostic_assessment(value: str) -> bool:
             re.IGNORECASE,
         )
     )
+
+
+def _english_section_candidates(section: Section) -> list[ClinicalCandidate]:
+    # Prose recommendations may contain alternative products, titration and
+    # historical values. Preserve their complete context without synthesizing
+    # a current medication schedule or a measured laboratory observation.
+    paragraphs = (
+        therapy_recommendation_rows
+        if _heading_key(section.heading).startswith("therapyrecommendations")
+        else prose_paragraphs
+    )(section.text, section.line_pages, section.page)
+    candidates: list[ClinicalCandidate] = []
+    for value, evidence, page in paragraphs:
+        paragraph = Section(target=section.target, heading=section.heading, text=value, page=page)
+        candidate = _section_candidate(paragraph)
+        if candidate:
+            candidate.source.text = evidence
+            candidates.append(candidate)
+    return candidates
 
 
 def _section_candidate(section: Section) -> ClinicalCandidate | None:

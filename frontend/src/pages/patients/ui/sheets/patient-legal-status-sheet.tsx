@@ -1,3 +1,4 @@
+import { hasFormChanges } from "@/lib/form-changes";
 import { useReducer, useState, type FormEvent, type SetStateAction } from "react";
 import { Check, LoaderCircle } from "lucide-react";
 
@@ -118,7 +119,7 @@ function PatientLegalStatusSheetContent({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges dirty={hasFormChanges(form, initial)}
       open={open}
       onOpenChange={onOpenChange}
       title={t.patient_legal_sheet_title}

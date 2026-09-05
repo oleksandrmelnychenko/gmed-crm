@@ -354,6 +354,7 @@ struct GeneratedMedicationSummaryContext {
 
 #[derive(Clone)]
 struct GeneratedContractLineItem {
+    description_items: Option<Vec<crate::service_description::ServiceDescriptionItem>>,
     localized_sections: Vec<(String, String)>,
     description: String,
     quantity: String,
@@ -1506,6 +1507,7 @@ pub fn router() -> Router<AppState> {
     let upload_routes = Router::new()
         .route("/me/documents/upload", post(upload_my_document))
         .route("/documents/upload", post(upload_document))
+        .route("/invoices/import-document", post(upload_invoice_document))
         .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024));
 
     Router::new()
@@ -2313,6 +2315,8 @@ struct AmlEnhancedDueDiligenceBindings {
 
 #[derive(Deserialize, Serialize, Default, Clone)]
 struct ServiceLineInput {
+    #[serde(default)]
+    description_items: Option<Vec<crate::service_description::ServiceDescriptionItem>>,
     description: String,
     #[serde(default)]
     fee: Option<String>,
@@ -4058,6 +4062,9 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                 return None;
             }
             Some(GeneratedContractLineItem {
+                description_items: object
+                    .get("description_items")
+                    .and_then(|value| serde_json::from_value(value.clone()).ok()),
                 localized_sections: Vec::new(),
                 description,
                 quantity: object
@@ -9837,6 +9844,37 @@ struct DocumentTranslationQueueQuery {
     patient_id: Option<Uuid>,
 }
 
+/// Signing exports the PDF and changes its version, so all three capabilities
+/// must pass, including explicit record denies and patient assignment rules.
+pub(crate) async fn signature_document_access(
+    state: &AppState,
+    auth: &AuthUser,
+    id: Uuid,
+    write: bool,
+) -> Result<sqlx::postgres::PgRow, axum::response::Response> {
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])?;
+    let assignments = load_assignment_set(state, auth).await?;
+    let row = fetch_document_row(state, id, auth.user_id)
+        .await?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Document not found"))?;
+    let baseline = can_view_document_row(auth, &row, &assignments);
+    let capabilities = if write {
+        vec![
+            AccessCapability::View,
+            AccessCapability::Download,
+            AccessCapability::Edit,
+        ]
+    } else {
+        vec![AccessCapability::View, AccessCapability::Download]
+    };
+    for capability in capabilities {
+        if !document_row_capability_allowed(state, auth, &row, capability, baseline).await? {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+    }
+    Ok(row)
+}
+
 async fn fetch_document_row(
     state: &AppState,
     document_id: Uuid,
@@ -12281,6 +12319,14 @@ async fn generate_document(
         .map(ToOwned::to_owned);
 
     let mut bindings = body.bindings.clone().unwrap_or_default();
+    for line in &mut bindings.service_lines {
+        if let Some(items) = line.description_items.take() {
+            line.description_items = match crate::service_description::normalize_items(items) {
+                Ok(items) => Some(items),
+                Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+            };
+        }
+    }
     if template.id == "privacy_consents"
         && bindings
             .extra_release_recipients
@@ -14632,6 +14678,19 @@ fn single_order_party_lines(party: &DocPartyBlock) -> Vec<String> {
 }
 
 fn single_order_scope_points(item: &GeneratedContractLineItem) -> Vec<String> {
+    if let Some(items) = &item.description_items {
+        if items.is_empty() {
+            return (!item.description.trim().is_empty())
+                .then(|| item.description.trim().to_string())
+                .into_iter()
+                .collect();
+        }
+        return items
+            .iter()
+            .map(|item| item.text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .collect();
+    }
     let note = item.notes.as_deref().map(str::trim).unwrap_or_default();
     let normalized_note = note.to_ascii_lowercase();
     let source = if note.is_empty()
@@ -17608,6 +17667,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
         .iter()
         .filter(|line| !line.description.trim().is_empty())
         .map(|line| GeneratedContractLineItem {
+            description_items: line.description_items.clone(),
             localized_sections: Vec::new(),
             description: line.description.trim().to_string(),
             quantity: line.quantity.clone().unwrap_or_default(),
@@ -17814,6 +17874,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         let price_range = format_eur_range(min_price, max_price);
         let line_total_range = format_eur_range(min_price * duration, max_price * duration);
         line_items.push(GeneratedContractLineItem {
+            description_items: None,
             localized_sections,
             description: String::new(),
             quantity: duration_hours.to_string(),
@@ -20572,16 +20633,38 @@ async fn upload_my_document(
 async fn upload_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    mut multipart: Multipart,
+    multipart: Multipart,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    upload_document_with_mode(state, auth, multipart, false).await
+}
+
+async fn upload_invoice_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    multipart: Multipart,
+) -> axum::response::Response {
+    upload_document_with_mode(state, auth, multipart, true).await
+}
+
+async fn upload_document_with_mode(
+    state: AppState,
+    auth: AuthUser,
+    mut multipart: Multipart,
+    invoice_import: bool,
+) -> axum::response::Response {
+    let allowed = if invoice_import {
+        &[Role::PatientManager, Role::Billing, Role::Ceo][..]
+    } else {
+        &[
+            Role::Ceo,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::ItAdmin,
+        ][..]
+    };
+    if let Err(resp) = auth.require_any_role(allowed) {
         return resp;
     }
 
@@ -20615,6 +20698,7 @@ async fn upload_document(
     let mut payment_due_date: Option<NaiveDate> = None;
     let mut payment_date: Option<NaiveDate> = None;
     let mut payment_method: Option<String> = None;
+    let mut invoice_scope: Option<String> = None;
     let mut manual_intake = false;
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -20769,6 +20853,7 @@ async fn upload_document(
                     Err(resp) => return resp,
                 }
             }
+            "invoice_scope" => invoice_scope = parse_optional_text_field(field).await,
             "manual_intake" => {
                 manual_intake = parse_optional_text_field(field)
                     .await
@@ -20784,10 +20869,26 @@ async fn upload_document(
         Some(data) if !data.is_empty() => data,
         _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
     };
-    match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
-        Ok(Some(validated_mime)) => mime_type = validated_mime,
-        Ok(None) => {}
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    let invoice_xml = invoice_import
+        && matches!(
+            mime_type.split(';').next().unwrap_or_default().trim(),
+            "application/xml" | "text/xml"
+        )
+        && file_name
+            .as_deref()
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".xml"));
+    if invoice_xml {
+        if let Err(response) = super::invoice_imports::validate_xml_invoice_source(&data).await {
+            return response;
+        }
+        // Preserve original XML bytes but never serve them as an active XML page.
+        mime_type = "application/octet-stream".to_string();
+    } else {
+        match validate_upload_magic_bytes(file_name.as_deref(), Some(mime_type.as_str()), &data) {
+            Ok(Some(validated_mime)) => mime_type = validated_mime,
+            Ok(None) => {}
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
     }
     match scan_upload_bytes(file_name.as_deref(), &data).await {
         Ok(FileScanOutcome::Clean) => {}
@@ -20795,6 +20896,59 @@ async fn upload_document(
             tracing::warn!(filename = ?file_name, "virus scanner unavailable; document scan skipped");
         }
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    }
+    let invoice_scope = invoice_scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("patient_order");
+    if invoice_import && !matches!(invoice_scope, "patient_order" | "company") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice scope");
+    }
+    let company_invoice_import = invoice_import && invoice_scope == "company";
+    if invoice_import {
+        if company_invoice_import {
+            if patient_id.is_some()
+                || order_id.is_some()
+                || lead_id.is_some()
+                || appointment_id.is_some()
+            {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Company invoice cannot use patient or order context",
+                );
+            }
+        } else if patient_id.is_none()
+            || order_id.is_none()
+            || lead_id.is_some()
+            || appointment_id.is_some()
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order invoice requires a patient and their order",
+            );
+        }
+        if !invoice_xml
+            && !matches!(
+                mime_type.as_str(),
+                "application/pdf" | "image/png" | "image/jpeg"
+            )
+        {
+            return err(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "Invoice must be a PDF, PNG, JPEG or supported invoice XML",
+            );
+        }
+        manual_intake = false;
+        auto_name_generated = false;
+        art = "invoice_document".to_string();
+        category = Some("finance".to_string());
+        status = "active".to_string();
+        visibility = "internal".to_string();
+        is_medical_override = Some(false);
+        document_direction = Some("incoming".to_string());
+        access_category = Some("internal".to_string());
+        ursprung = Some("invoice_import".to_string());
     }
     let auto_name_was_supplied = !auto_name.trim().is_empty();
     if !auto_name_was_supplied {
@@ -20856,6 +21010,7 @@ async fn upload_document(
         && lead_id.is_none()
         && order_id.is_none()
         && appointment_id.is_none()
+        && !company_invoice_import
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -21716,7 +21871,12 @@ async fn delete_document_file(
     Path(id): Path<Uuid>,
     Json(body): Json<DeleteDocumentFileRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::Billing,
+        Role::ItAdmin,
+    ]) {
         return resp;
     }
 
@@ -21733,6 +21893,46 @@ async fn delete_document_file(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(resp) => return resp,
     };
+    if auth.role == Role::Billing {
+        let uploaded_by = current
+            .try_get::<Option<Uuid>, _>("uploaded_by")
+            .unwrap_or_default();
+        let art = current.try_get::<String, _>("art").unwrap_or_default();
+        let origin = current
+            .try_get::<Option<String>, _>("ursprung")
+            .unwrap_or_default();
+        if uploaded_by != Some(auth.user_id)
+            || art != "invoice_document"
+            || origin.as_deref() != Some("invoice_import")
+        {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Billing can only replace its own unfinished invoice import",
+            );
+        }
+    }
+    let invoice_source_in_use = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM external_invoices WHERE source_document_id = $1)",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "validate invoice source before delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate document references",
+            );
+        }
+    };
+    if invoice_source_in_use {
+        return err(
+            StatusCode::CONFLICT,
+            "Invoice source document is already in use",
+        );
+    }
     let assignment_set = match load_assignment_set(&state, &auth).await {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -24100,7 +24300,7 @@ mod tests {
 
     #[test]
     fn admin_signature_grid_starts_near_top_on_dedicated_page() {
-        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let (_document, regular, bold) = new_admin_pdf().unwrap();
         let mut layout = TreatmentPlanPdfLayout::new_legal(Vec::new(), regular, bold);
         layout.text_block(
             "Previous page content",
@@ -24149,6 +24349,7 @@ mod tests {
     #[test]
     fn single_order_scope_points_preserve_catalog_description_items() {
         let item = GeneratedContractLineItem {
+            description_items: None,
             localized_sections: Vec::new(),
             description: "Concierge Service Essential (1 Tag)".to_string(),
             quantity: "1".to_string(),
@@ -24171,6 +24372,30 @@ mod tests {
                 "Security services",
             ]
         );
+    }
+
+    #[test]
+    fn single_order_scope_points_use_explicit_items_without_splitting_their_text() {
+        let lines: Vec<super::ServiceLineInput> = serde_json::from_value(serde_json::json!([{
+            "description": "Support",
+            "note": "Old fallback text",
+            "description_items": [
+                {"id": "second", "text": "One point\n\nwith paragraphs\n- and a nested line"},
+                {"id": "first", "text": "Another point"}
+            ]
+        }]))
+        .unwrap();
+        let items = super::service_lines_to_items(&lines);
+        assert_eq!(
+            single_order_scope_points(&items[0]),
+            vec![
+                "One point\n\nwith paragraphs\n- and a nested line",
+                "Another point"
+            ]
+        );
+        let persisted = serde_json::to_value(&lines).unwrap();
+        let restored: Vec<super::ServiceLineInput> = serde_json::from_value(persisted).unwrap();
+        assert_eq!(restored[0].description_items, lines[0].description_items);
     }
 
     #[test]
@@ -24206,6 +24431,16 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
+                    description_items: Some(vec![
+                        crate::service_description::ServiceDescriptionItem {
+                            id: "contacts".to_string(),
+                            text: "Herstellung von Kontakten\n\nund Terminvereinbarungen.".to_string(),
+                        },
+                        crate::service_description::ServiceDescriptionItem {
+                            id: "coordination".to_string(),
+                            text: "Koordination der interdisziplinären Zusammenarbeit.".to_string(),
+                        },
+                    ]),
                     localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte) (im Zeitraum 17.12.2025 bis 19.12.2025)".to_string(),
                     quantity: "5".to_string(),
@@ -24218,6 +24453,7 @@ mod tests {
                     ),
                 },
                 GeneratedContractLineItem {
+                    description_items: None,
                     localized_sections: Vec::new(),
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
@@ -24228,6 +24464,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
+                    description_items: None,
                     localized_sections: Vec::new(),
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
@@ -24387,6 +24624,7 @@ mod tests {
             order_number: Some("A-2026-0099".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
+                description_items: None,
                 localized_sections: vec![(
                     "Kardiologische Untersuchung".to_string(),
                     "Klinische Untersuchung".to_string(),
@@ -24428,6 +24666,7 @@ mod tests {
             order_number: Some("A-2026-0100".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![GeneratedContractLineItem {
+                description_items: None,
                 localized_sections: vec![
                     (
                         "Kardiologische Untersuchung".to_string(),
@@ -24587,6 +24826,7 @@ mod tests {
     #[test]
     fn manual_line_totals_multiply_unit_price_by_quantity() {
         let totals = compute_line_item_totals(&[GeneratedContractLineItem {
+            description_items: None,
             localized_sections: Vec::new(),
             description: "Dolmetscher".to_string(),
             quantity: "4".to_string(),
@@ -24607,6 +24847,7 @@ mod tests {
         let snapshot = generated_binding_snapshot(&DocumentBindingOverrides {
             party_sign_place: Some("Paris".to_string()),
             service_lines: vec![ServiceLineInput {
+                description_items: None,
                 description: "Dolmetscher".to_string(),
                 fee: Some("100,00 EUR/1 Stunde".to_string()),
                 ..Default::default()
@@ -24664,6 +24905,7 @@ mod tests {
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: vec![
                 GeneratedContractLineItem {
+                    description_items: None,
                     localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte)".to_string(),
                     quantity: "5".to_string(),
@@ -24673,6 +24915,7 @@ mod tests {
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
+                    description_items: None,
                     localized_sections: Vec::new(),
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
@@ -24683,6 +24926,7 @@ mod tests {
                     notes: None,
                 },
                 GeneratedContractLineItem {
+                    description_items: None,
                     localized_sections: Vec::new(),
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),

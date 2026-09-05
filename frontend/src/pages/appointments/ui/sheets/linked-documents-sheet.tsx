@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { DocumentsGrid } from "@/components/documents-grid";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { Banner, EmptyCell } from "@/components/ui-shell";
 import {
   Dialog,
@@ -169,6 +170,7 @@ function LinkedDocumentsSheet({
             <DialogDescription className="truncate">
               {preview?.contentType ?? ""}
             </DialogDescription>
+            {preview ? <div className="pt-2"><DocumentSignatureAction documentId={preview.id} title={preview.title} /></div> : null}
           </DialogHeader>
           <div className="min-h-0 flex-1 bg-slate-50 p-3">
             {preview ? (

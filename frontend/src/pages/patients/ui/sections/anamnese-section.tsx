@@ -304,7 +304,6 @@ export function AnamneseSection({
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
                 className="h-8 rounded-lg"
                 onClick={() => openNew(blankVersion())}
               >

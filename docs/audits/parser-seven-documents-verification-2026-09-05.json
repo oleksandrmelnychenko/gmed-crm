@@ -1,0 +1,36 @@
+{
+  "parser_version": "rules-0.10.5",
+  "unique_pdfs": 7,
+  "pages": 16,
+  "zip_duplicates_verified": 4,
+  "clinical": {
+    "lab": {
+      "pages": 4,
+      "candidates": 232
+    },
+    "letter": {
+      "pages": 3,
+      "candidates": 34,
+      "translation_candidates_passing_checks": 34,
+      "translation_numeric_tokens_preserved": 106,
+      "translation_status": "review_required"
+    },
+    "report": {
+      "pages": 2,
+      "candidates": 11,
+      "translation_candidates_passing_checks": 11,
+      "translation_numeric_tokens_preserved": 59,
+      "translation_status": "review_required",
+      "vital_fields_verified": 6,
+      "measurement_date_requires_review": true
+    }
+  },
+  "invoices": {
+    "headers_verified_in_ui": 32,
+    "positions_verified_in_ui": 9,
+    "reconciled_totals": 4,
+    "quantity_unit_price_and_total_kept_separate": true
+  },
+  "browser_real_documents_passed": 7,
+  "browser_api_mode": "mocked; actual parser drafts; no database writes"
+}

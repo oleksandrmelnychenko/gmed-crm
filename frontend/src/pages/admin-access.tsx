@@ -31,7 +31,6 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -227,8 +226,6 @@ function resolveAdminAccessStateAction<T>(action: SetStateAction<T>, current: T)
 function useAdminAccessPageContent() {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
-  const closeUnsavedConfirmMessage =
-    t.common_discard_unsaved_confirm;
 
   const [accessState, dispatchAccessState] = useReducer(
     adminAccessReducer,
@@ -486,11 +483,10 @@ function useAdminAccessPageContent() {
     updatePolicy,
   ]);
 
-  const handleDetailOpenChange = useSheetDirtyGuard({
-    isDirty: saveBusyToken !== "",
-    onClose: () => setSelectedField(null),
-    confirmMessage: closeUnsavedConfirmMessage,
-  });
+  // Policies save immediately. An in-flight request is busy, not a local draft.
+  const handleDetailOpenChange = useCallback((open: boolean) => {
+    if (!open && !saveBusyToken) setSelectedField(null);
+  }, [saveBusyToken]);
 
   return (
     <>
@@ -621,7 +617,7 @@ function useAdminAccessPageContent() {
       <Sheet
         open={Boolean(selectedField)}
         onOpenChange={handleDetailOpenChange}
-        dirty={saveBusyToken !== ""}
+        dirty={false}
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <AdminSheetScaffold
@@ -633,6 +629,7 @@ function useAdminAccessPageContent() {
                   variant="outline"
                   className="h-9 rounded-lg"
                   onClick={() => handleDetailOpenChange(false)}
+                  disabled={Boolean(saveBusyToken)}
                 >
                   {t.common_cancel}
                 </Button>

@@ -41,6 +41,7 @@ export interface Translations
   nav_company_finance: string;
   nav_finance_catalog: string;
   nav_admin: string;
+  nav_signatures: string;
   nav_users_roles: string;
   nav_access_matrix: string;
   nav_logout: string;

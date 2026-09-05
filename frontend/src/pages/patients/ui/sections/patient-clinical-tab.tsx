@@ -680,8 +680,8 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
             <th scope="col" className={headCell}>{tx("Источник", "Quelle")}</th>
             {canManage ? (
-              <th scope="col" className="px-2.5 py-2 text-right text-xs font-medium text-muted-foreground">
-                {tx("Действия", "Aktionen")}
+              <th scope="col" className="w-[72px] px-1 py-2 text-right text-xs font-medium text-muted-foreground">
+                <span className="sr-only">{tx("Действия", "Aktionen")}</span>
               </th>
             ) : null}
           </tr>
@@ -1939,7 +1939,7 @@ function PatientLabHistoryTable({
           </div>
         ) : undefined}
         rowActionsLabel={tx("Действия", "Aktionen")}
-        rowActionsWidth={80}
+        rowActionsWidth={72}
         className="w-full min-w-0 shadow-none"
       />
 
@@ -2120,7 +2120,7 @@ function PatientVitalsHistoryTable({
         )
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
-      rowActionsWidth={88}
+      rowActionsWidth={72}
       className="rounded-lg border-border/60 bg-white shadow-none"
     />
   );
@@ -2237,7 +2237,7 @@ function PatientRiskScoresTable({
         </>
       ) : undefined}
       rowActionsLabel={tx("Действия", "Aktionen")}
-      rowActionsWidth={88}
+      rowActionsWidth={72}
       className="rounded-lg border-border/60 bg-white shadow-none"
     />
   );

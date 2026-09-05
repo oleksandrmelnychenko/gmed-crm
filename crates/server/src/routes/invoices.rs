@@ -4295,11 +4295,21 @@ async fn get_accounting_ledger(
     let rows = match sqlx::query(
         r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
+                  ae.source_invoice_id, ae.source_external_invoice_id,
+                  ae.order_id, ae.patient_id,
                   i.invoice_number, ei.external_invoice_number, o.order_number,
+                  source_document.id AS source_document_id,
+                  COALESCE(
+                      NULLIF(BTRIM(source_document.original_filename), ''),
+                      source_document.auto_name
+                  ) AS source_document_name,
                   p.patient_id AS patient_pid, p.first_name, p.last_name
            FROM accounting_entries ae
            LEFT JOIN invoices i ON i.id = ae.source_invoice_id
            LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
+           LEFT JOIN documents source_document
+                  ON source_document.id = ei.source_document_id
+                 AND source_document.file_deleted_at IS NULL
            LEFT JOIN orders o ON o.id = ae.order_id
            LEFT JOIN patients p ON p.id = ae.patient_id
            WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
@@ -4379,6 +4389,12 @@ async fn get_accounting_ledger(
             "amount_vat": decimal_to_string(amount_vat),
             "amount_gross": decimal_to_string(amount_gross),
             "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+            "invoice_id": row.try_get::<Option<Uuid>, _>("source_invoice_id").unwrap_or_default(),
+            "external_invoice_id": row.try_get::<Option<Uuid>, _>("source_external_invoice_id").unwrap_or_default(),
+            "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
+            "source_document_name": row.try_get::<Option<String>, _>("source_document_name").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
             "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
             "external_invoice_number": row.try_get::<Option<String>, _>("external_invoice_number").unwrap_or_default(),
             "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),

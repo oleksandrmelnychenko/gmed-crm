@@ -1,0 +1,31 @@
+issuer: GMED Musterklinik
+keywords:
+  - GMED Musterklinik
+  - Rechnung
+exclude_keywords:
+  - Gutschrift
+fields:
+  invoice_number:
+    parser: regex
+    regex: 'Rechnungsnummer:\s*([A-Z0-9-]+)'
+  date:
+    parser: regex
+    regex: 'Rechnungsdatum:\s*([0-9.]+)'
+  due_date:
+    parser: regex
+    regex: 'Zahlbar bis:\s*([0-9.]+)'
+  amount_untaxed:
+    parser: regex
+    regex: 'Nettobetrag:\s*([0-9.,]+)'
+  amount_tax:
+    parser: regex
+    regex: 'Umsatzsteuer:\s*([0-9.,]+)'
+  amount:
+    parser: regex
+    regex: 'Gesamtbetrag:\s*([0-9.,]+)'
+  currency:
+    parser: regex
+    regex: 'Waehrung:\s*([A-Z]{3})'
+options:
+  decimal_separator: ','
+  date_formats: ['%d.%m.%Y']

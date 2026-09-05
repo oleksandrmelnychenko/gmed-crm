@@ -123,6 +123,11 @@ upsert_env() {
 upsert_env CADDY_HOSTNAME "$CADDY_HOSTNAME_VALUE"
 upsert_env GMED_CORS_ORIGIN "$GMED_CORS_ORIGIN_VALUE"
 
+# Generate the internal OCR credential on DEV, never in the browser bundle.
+if ! grep -q '^GMED_INVOICE_PARSER_API_KEY=.' "$STAGING_DIR/release.env"; then
+  upsert_env GMED_INVOICE_PARSER_API_KEY "$(openssl rand -hex 32)"
+fi
+
 required_keys=(
   GMED_DATABASE_URL
   GMED_JWT_SECRET
@@ -180,7 +185,7 @@ tag_running_image gmed-crm-clinical-document-parser-1 "gmed-dev-rollback-parser:
 
 echo "Building DEV images with the host Docker cache..."
 export COMPOSE_BAKE=true
-compose "$STAGING_DIR" build backend frontend clinical-document-parser
+compose "$STAGING_DIR" build backend frontend clinical-document-parser invoice-parser
 unset COMPOSE_BAKE
 prepare_upload_volume "$STAGING_DIR"
 
@@ -193,7 +198,7 @@ SWAPPED=1
 # Start the data and API tier first. The frontend declares a healthy-backend
 # dependency, and asking Compose to start everything at once can fail before
 # the backend's migrations and first health probe have had time to complete.
-compose "$REPO_DIR" up -d --no-build postgres clinical-document-parser backend
+compose "$REPO_DIR" up -d --no-build postgres clinical-document-parser invoice-parser backend
 
 backend_healthy=0
 # Migrations and the first ClamAV-backed startup can occasionally take longer

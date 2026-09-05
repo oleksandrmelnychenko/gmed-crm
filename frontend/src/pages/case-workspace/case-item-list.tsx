@@ -1,3 +1,4 @@
+import { hasFormChanges } from "@/lib/form-changes";
 import {
   useCallback,
   useEffect,
@@ -97,6 +98,9 @@ export function CaseItemList<T>({
   const [form, setForm] = useState<T>(() => cloneItem(blankItem));
   const [sheetError, setSheetError] = useState("");
 
+  const [initialForm, setInitialForm] = useState(form);
+  const dirty = hasFormChanges(form, initialForm);
+
   const closeSheet = useCallback(() => {
     setSheet({ mode: "closed" });
     setSheetError("");
@@ -119,7 +123,9 @@ export function CaseItemList<T>({
 
   function openCreate() {
     if (!canEdit) return;
-    setForm({ ...blankItem });
+    const initial = cloneItem(blankItem);
+    setInitialForm(initial);
+    setForm(initial);
     setSheetError("");
     setSheet({ mode: "create" });
   }
@@ -127,13 +133,15 @@ export function CaseItemList<T>({
   function openEdit(index: number) {
     const item = items[index];
     if (!item) return;
-    setForm(cloneItem(item));
+    const initial = cloneItem(item);
+    setInitialForm(initial);
+    setForm(initial);
     setSheetError("");
     setSheet({ mode: "edit", index });
   }
 
   async function handleSubmit() {
-    if (!canEdit) return;
+    if (!canEdit || busy || (sheet.mode === "edit" && !dirty)) return;
 
     if (!isValid(form)) {
       setSheetError(missingPrimaryMessage);
@@ -253,7 +261,7 @@ export function CaseItemList<T>({
           />
         </div>
 
-        <CaseItemEditSheet
+        <CaseItemEditSheet dirty={dirty}
           open={sheet.mode !== "closed"}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) closeSheet();
@@ -352,7 +360,7 @@ export function CaseItemList<T>({
         )}
       </Panel>
 
-      <CaseItemEditSheet
+      <CaseItemEditSheet dirty={dirty}
         open={sheet.mode !== "closed"}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) closeSheet();

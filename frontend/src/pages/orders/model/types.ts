@@ -96,6 +96,7 @@ export type Leistung = {
   agency_service_key_snapshot?: string | null;
   agency_service_name_snapshot?: string | null;
   agency_service_description_snapshot?: string | null;
+  agency_service_description_items_snapshot?: import("@/lib/service-description").ServiceDescriptionItem[] | null;
   agency_service_unit_label_snapshot?: string | null;
   unit_price_snapshot?: unknown;
   currency_snapshot?: string | null;
@@ -128,6 +129,7 @@ export type ExternalInvoice = {
   provider_taxonomy_node_name_de?: string | null;
   provider_taxonomy_node_name_ru?: string | null;
   external_invoice_number: string;
+  source_document_id?: string | null;
   invoice_date: string | null;
   due_date: string | null;
   amount_net: unknown;

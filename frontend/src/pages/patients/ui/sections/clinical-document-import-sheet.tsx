@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   Activity,
   AlertTriangle,
@@ -91,6 +92,8 @@ import {
 } from "@/pages/patients/data/medication-document-import";
 import { cn } from "@/lib/utils";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { ClinicalDocumentTranslationPanel } from "./clinical-document-translation";
+import { applyGermanCandidateDraft, germanCandidateDraft } from "../../data/clinical-document-translation";
 
 type ApplyResult = Record<string, number>;
 type BuilderTab = "all" | "source" | ClinicalDocumentImportTarget;
@@ -198,6 +201,8 @@ function labCandidateDisplay(normalized: Record<string, unknown>): string {
 }
 
 const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
+  english_source_requires_review: { ru: "Английский оригинал: проверьте смысл и перевод", de: "Englisches Original: Bedeutung und Übersetzung prüfen" },
+  finding_is_not_an_active_diagnosis: { ru: "Нормальный или улучшенный показатель: сохранён как результат обследования", de: "Normaler oder verbesserter Wert: als Befund erfasst" },
   medication_brand_without_active_ingredient: {
     ru: "В документе есть торговое название, но действующее вещество нужно указать вручную",
     de: "Handelsname erkannt, Wirkstoff muss manuell ergänzt werden",
@@ -311,6 +316,10 @@ const semanticLabels: Record<string, { ru: string; de: string }> = {
 };
 
 const draftWarningLabels: Record<string, { ru: string; de: string }> = {
+  "English source text requires review; the original clinical facts have not been translated.": {
+    ru: "Клинические данные извлечены из английского оригинала. Перед добавлением в карту проверьте каждую запись и её перевод.",
+    de: "Klinische Angaben wurden aus dem englischen Original extrahiert. Jeden Eintrag und seine Übersetzung vor der Übernahme prüfen.",
+  },
   "Administrative cost estimate recognized; no clinical facts were proposed.": {
     ru: "Распознан административный расчёт стоимости. Клинические данные не предлагаются.",
     de: "Administrative Kostenschätzung erkannt. Es werden keine klinischen Daten vorgeschlagen.",
@@ -2139,6 +2148,7 @@ export function ClinicalDocumentImportSheet({
               <span className="hidden truncate text-xs text-muted-foreground sm:block">
                 {documentImport.document_name}
               </span>
+              <DocumentSignatureAction documentId={documentImport.document_id} title={documentImport.document_name || tx("Документ", "Dokument")} iconOnly />
               {documentImport.status === "review_required" ? (
                 <Button type="button" size="sm" variant="outline" disabled={busy} onClick={rescan}>
                   {busy ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
@@ -2626,6 +2636,16 @@ export function ClinicalDocumentImportSheet({
                   </div>
                 ))}
 
+                {documentImport.draft.translation ? (
+                  <ClinicalDocumentTranslationPanel
+                    translation={documentImport.draft.translation}
+                    pageNumber={selectedSourcePage?.pageNumber ?? 1}
+                    textScope={selectedSourcePage?.textScope}
+                    expanded={activeTab === "source"}
+                    onExpand={() => setActiveTab("source")}
+                    lang={lang}
+                  />
+                ) : null}
                 {activeTab === "source" ? (
                   <section className="space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2918,6 +2938,20 @@ export function ClinicalDocumentImportSheet({
                                   />
                                 ) : null}
                                 <div className="min-w-0 flex-1">
+                                  {germanCandidateDraft(candidate, documentImport.draft.translation) ? (
+                                    <div className="mb-3 space-y-2 rounded-lg border border-blue-200 bg-blue-50/60 p-3">
+                                      <span className="text-xs font-medium text-blue-900">{tx("Немецкий черновик для проверки", "Deutscher Entwurf zur Prüfung")}</span>
+                                      <p lang="de" className="whitespace-pre-wrap break-words text-sm">{germanCandidateDraft(candidate, documentImport.draft.translation)}</p>
+                                      {!snapshotReadOnly && ["diagnosis", "anamnesis", "examination", "recommendation"].includes(candidate.target) ? (
+                                        <Button type="button" size="sm" variant="outline" onClick={(event) => {
+                                          event.stopPropagation();
+                                          patchCandidate(candidate.id, applyGermanCandidateDraft(candidate, documentImport.draft.translation));
+                                        }}>
+                                          {tx("Использовать текст перевода", "Übersetzungstext verwenden")}
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
                                   {candidate.target === "medication" ? (
                                     snapshotReadOnly ? (
                                       <div className="mb-3 flex flex-wrap items-center gap-3">

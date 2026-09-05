@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { LoaderCircle, Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
 import {
   createCompanyProviderPayment,
@@ -167,6 +168,12 @@ export function ProviderSettlementDialog({
     () => accounts.filter((account) => account.is_active),
     [accounts],
   );
+  const activeAccountsRef = useRef(activeAccounts);
+  useEffect(() => { activeAccountsRef.current = activeAccounts; }, [activeAccounts]);
+  const initializedIdRef = useRef<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const liabilityId = liability?.id ?? null;
+  useFinanceAutoRefresh(() => setReloadToken((current) => current + 1), loading || paymentBusy || reversalBusy, Boolean(liabilityId));
 
   async function reload(externalInvoiceId: string, forceFresh = false) {
     const result = await fetchCompanyProviderSettlement(externalInvoiceId, forceFresh);
@@ -175,21 +182,27 @@ export function ProviderSettlementDialog({
   }
 
   useEffect(() => {
-    if (!liability) {
+    if (!liabilityId) {
+      initializedIdRef.current = null;
       setSettlement(null);
       setLoadError(null);
       setReversal(null);
+      setLoading(false);
       return;
     }
     let active = true;
+    const initializeForm = initializedIdRef.current !== liabilityId;
+    if (initializeForm) setSettlement(null);
     setLoading(true);
-    setLoadError(null);
-    void fetchCompanyProviderSettlement(liability.id, true)
+    void fetchCompanyProviderSettlement(liabilityId, true)
       .then((result) => {
         if (!active) return;
+        setLoadError(null);
         setSettlement(result);
-        const defaultAccount = activeAccounts.find((account) => account.is_default)
-          ?? activeAccounts[0];
+        if (!initializeForm) return;
+        initializedIdRef.current = liabilityId;
+        const defaultAccount = activeAccountsRef.current.find((account) => account.is_default)
+          ?? activeAccountsRef.current[0];
         setPaymentForm({
           requestId: crypto.randomUUID(),
           accountId: defaultAccount?.id ?? "",
@@ -210,7 +223,7 @@ export function ProviderSettlementDialog({
     return () => {
       active = false;
     };
-  }, [activeAccounts, liability, text.loadFailed]);
+  }, [liabilityId, reloadToken, text.loadFailed]);
 
   const reversedPaymentIds = useMemo(
     () => new Set(
@@ -297,7 +310,7 @@ export function ProviderSettlementDialog({
         </DialogHeader>
 
         {loadError ? <ShellBanner tone="error">{loadError}</ShellBanner> : null}
-        {loading ? (
+        {loading && !settlement ? (
           <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : settlement ? (
           <div className="space-y-5">
@@ -345,7 +358,7 @@ export function ProviderSettlementDialog({
                 <label className="block space-y-1.5 text-sm"><span>{text.reference}</span><Input maxLength={200} value={paymentForm.reference} onChange={(event) => setPaymentForm((current) => ({ ...current, reference: event.target.value }))} /></label>
                 <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 <div className="flex justify-stretch sm:justify-end">
-                  <Button type="submit" className="w-full sm:w-auto" disabled={paymentBusy || !paymentForm.accountId || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
+                  <Button type="submit" className="w-full sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
                     {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.record}
                   </Button>
                 </div>

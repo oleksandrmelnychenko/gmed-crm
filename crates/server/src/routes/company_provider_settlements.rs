@@ -79,8 +79,8 @@ struct PaymentInput {
 
 struct ExternalInvoiceContext {
     id: Uuid,
-    order_id: Uuid,
-    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
     external_invoice_number: String,
     status: String,
     paid_by: String,
@@ -181,8 +181,12 @@ async fn load_external_invoice_for_update(
     .map(|row| {
         row.map(|row| ExternalInvoiceContext {
             id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            patient_id: row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            order_id: row
+                .try_get::<Option<Uuid>, _>("order_id")
+                .unwrap_or_default(),
+            patient_id: row
+                .try_get::<Option<Uuid>, _>("patient_id")
+                .unwrap_or_default(),
             external_invoice_number: row
                 .try_get::<String, _>("external_invoice_number")
                 .unwrap_or_default(),

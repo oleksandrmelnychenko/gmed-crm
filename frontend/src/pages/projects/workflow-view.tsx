@@ -1,3 +1,4 @@
+import { localizeTaskTitle } from "@/lib/task-labels";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -38,6 +39,7 @@ import {
   availablePrerequisites,
   buildProjectWorkflowGraph,
   projectWorkflowStats,
+  projectWorkflowBlockedTaskIds,
   WORKFLOW_NODE_HEIGHT,
   WORKFLOW_NODE_WIDTH,
   WORKFLOW_STAGE_START_X,
@@ -118,6 +120,7 @@ const workflowCopy = {
     zoomIn: "Увеличить канвас",
     zoomOut: "Уменьшить канвас",
     resetZoom: "Сбросить масштаб",
+    retry: "Повторить загрузку",
   },
   de: {
     project: "Projekt",
@@ -192,6 +195,7 @@ const workflowCopy = {
     zoomIn: "Canvas vergrößern",
     zoomOut: "Canvas verkleinern",
     resetZoom: "Zoom zurücksetzen",
+    retry: "Erneut laden",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
 
@@ -213,6 +217,7 @@ type ProjectWorkflowViewProps = {
   onOpenTask: (taskId: string) => void;
   onAddDependency: (taskId: string, dependsOnTaskId: string) => Promise<void>;
   onRemoveDependency: (dependencyId: string) => Promise<void>;
+  onRetry: () => void;
 };
 
 function formatDate(value: string | null, lang: Lang) {
@@ -280,7 +285,7 @@ function WorkflowTaskCard({
   return (
     <button
       type="button"
-      aria-label={`${taskCode(task)}: ${task.title}. ${statusLabel(task.status, labels)}${unresolvedCount ? `. ${labels.blocked}: ${unresolvedCount}` : ""}`}
+      aria-label={`${taskCode(task)}: ${localizeTaskTitle(task.title, lang)}. ${statusLabel(task.status, labels)}${unresolvedCount ? `. ${labels.blocked}: ${unresolvedCount}` : ""}`}
       className={cn(
         "group overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-[border-color,box-shadow] hover:border-orange-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400",
         selected && "border-orange-400 ring-2 ring-orange-100",
@@ -297,7 +302,7 @@ function WorkflowTaskCard({
             {statusLabel(task.status, labels)}
           </Badge>
         </span>
-        <span className="mt-2 line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-foreground">{task.title}</span>
+        <span className="mt-2 line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-foreground">{localizeTaskTitle(task.title, lang)}</span>
         <span className="mt-auto grid gap-1.5 border-t pt-2 text-xs text-muted-foreground">
           <span className="flex min-w-0 items-center gap-1.5"><UserRound className="size-3.5 shrink-0" /><span className="truncate">{task.assigned_to_name}</span></span>
           <span className="flex items-center justify-between gap-2">
@@ -314,6 +319,7 @@ function WorkflowCanvas({
   project,
   tasks,
   dependencies,
+  visibleTaskIds,
   selectedTaskId,
   labels,
   lang,
@@ -323,14 +329,15 @@ function WorkflowCanvas({
   tasks: ConciergeTask[];
   dependencies: ProjectWorkflowDependency[];
   selectedTaskId: string | null;
+  visibleTaskIds: ReadonlySet<string>;
   labels: WorkflowLabels;
   lang: Lang;
   onSelectTask: (taskId: string) => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const graph = useMemo(
-    () => buildProjectWorkflowGraph(tasks, dependencies),
-    [dependencies, tasks],
+    () => buildProjectWorkflowGraph(tasks, dependencies, visibleTaskIds),
+    [dependencies, tasks, visibleTaskIds],
   );
 
   useEffect(() => setZoom(1), [project.id]);
@@ -365,11 +372,11 @@ function WorkflowCanvas({
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-orange-700"><span className="size-2 rounded-full bg-orange-500" />{labels.start}</div>
             <p className="mt-3 line-clamp-2 text-sm font-semibold text-foreground">{project.name}</p>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{project.description || labels.startHint}</p>
-            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{tasks.length} {labels.tasks.toLocaleLowerCase()}</div>
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground"><FolderKanban className="size-3.5" />{graph.nodes.length} {labels.tasks.toLocaleLowerCase()}</div>
           </div>
 
           {graph.stages.map((stage, index) => {
-            const count = tasks.filter((task) => task.status === stage).length;
+            const count = graph.nodes.filter((node) => node.task.status === stage).length;
             return (
               <div key={stage}>
                 <div
@@ -438,7 +445,7 @@ function WorkflowCanvas({
                 <GitBranch className="size-3.5 text-orange-500" />
                 {node.incoming.map((dependency) => {
                   const prerequisite = tasks.find((task) => task.id === dependency.depends_on_task_id);
-                  return prerequisite ? <Badge key={dependency.id} variant="outline" className="max-w-full truncate bg-card">{prerequisite.title}</Badge> : null;
+                  return prerequisite ? <Badge key={dependency.id} variant="outline" className="max-w-full truncate bg-card">{localizeTaskTitle(prerequisite.title, lang)}</Badge> : null;
                 })}
               </div>
             ) : null}
@@ -455,6 +462,7 @@ function DependencyDialog({
   tasks,
   dependencies,
   labels,
+  unavailableError,
   onOpenChange,
   onSave,
 }: {
@@ -463,10 +471,12 @@ function DependencyDialog({
   tasks: ConciergeTask[];
   dependencies: ProjectWorkflowDependency[];
   labels: WorkflowLabels;
+  unavailableError: string;
   onOpenChange: (open: boolean) => void;
   onSave: (taskId: string, dependsOnTaskId: string) => Promise<void>;
 }) {
-  const [selectedTaskId, setSelectedTaskId] = useState(taskId ?? "");
+  const { lang } = useLang();
+  const [selectedTaskId, setSelectedTaskId] = useState(taskId ?? tasks[0]?.id ?? "");
   const [prerequisiteId, setPrerequisiteId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -475,24 +485,20 @@ function DependencyDialog({
     [dependencies, selectedTaskId, tasks],
   );
 
-  useEffect(() => {
-    if (!open) return;
-    setSelectedTaskId(taskId ?? tasks[0]?.id ?? "");
-    setPrerequisiteId("");
-    setError("");
-  }, [open, taskId, tasks]);
-
   function changeOpen(nextOpen: boolean) {
-    onOpenChange(nextOpen);
+    if (!saving) onOpenChange(nextOpen);
   }
 
+  const canSave = !unavailableError && tasks.some((task) => task.id === selectedTaskId)
+    && available.some((task) => task.id === prerequisiteId);
+
   async function save() {
-    if (!selectedTaskId || !prerequisiteId || saving) return;
+    if (!canSave || saving) return;
     setSaving(true);
     setError("");
     try {
       await onSave(selectedTaskId, prerequisiteId);
-      changeOpen(false);
+      onOpenChange(false);
     } catch (saveError) {
       setError(localizeWorkflowError(saveError, labels, labels.saveFailed));
     } finally {
@@ -502,32 +508,32 @@ function DependencyDialog({
 
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-xl" showCloseButton={!saving}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-orange-500" />{labels.addDependency}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
-          {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {error || unavailableError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{unavailableError || error}</div> : null}
           <label className="grid gap-1.5 text-sm font-medium">
             {labels.dependencyTask}
-            <NativeComboboxSelect value={selectedTaskId} onChange={(event) => { setSelectedTaskId(event.target.value); setPrerequisiteId(""); }}>
+            <NativeComboboxSelect value={selectedTaskId} disabled={saving} onChange={(event) => { setSelectedTaskId(event.target.value); setPrerequisiteId(""); }}>
               <option value="">{labels.selectTaskPlaceholder}</option>
-              {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+              {tasks.map((task) => <option key={task.id} value={task.id}>{localizeTaskTitle(task.title, lang)}</option>)}
             </NativeComboboxSelect>
           </label>
           <label className="grid gap-1.5 text-sm font-medium">
             {labels.prerequisite}
-            <NativeComboboxSelect value={prerequisiteId} disabled={!selectedTaskId || !available.length} onChange={(event) => setPrerequisiteId(event.target.value)}>
+            <NativeComboboxSelect value={prerequisiteId} disabled={saving || !selectedTaskId || !available.length} onChange={(event) => setPrerequisiteId(event.target.value)}>
               <option value="">{labels.selectPrerequisite}</option>
-              {available.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+              {available.map((task) => <option key={task.id} value={task.id}>{localizeTaskTitle(task.title, lang)}</option>)}
             </NativeComboboxSelect>
           </label>
           {selectedTaskId && !available.length ? <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">{labels.allLinked}</p> : null}
           <p className="text-xs text-muted-foreground">{labels.dependencyHelp}</p>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => changeOpen(false)}>{labels.cancel}</Button>
-          <Button type="button" disabled={!selectedTaskId || !prerequisiteId || saving} onClick={() => void save()}>{saving ? <LoaderCircle className="animate-spin" /> : <Link2 />}{labels.saveDependency}</Button>
+          <Button type="button" variant="outline" disabled={saving} onClick={() => changeOpen(false)}>{labels.cancel}</Button>
+          <Button type="button" disabled={!canSave || saving} onClick={() => void save()}>{saving ? <LoaderCircle className="animate-spin" /> : <Link2 />}{labels.saveDependency}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -549,6 +555,7 @@ export function ProjectWorkflowView({
   onOpenTask,
   onAddDependency,
   onRemoveDependency,
+  onRetry,
 }: ProjectWorkflowViewProps) {
   const { lang } = useLang();
   const labels = workflowCopy[lang];
@@ -564,16 +571,12 @@ export function ProjectWorkflowView({
   const incoming = selectedTask ? dependencies.filter((dependency) => dependency.task_id === selectedTask.id) : [];
   const outgoing = selectedTask ? dependencies.filter((dependency) => dependency.depends_on_task_id === selectedTask.id) : [];
   const stats = useMemo(() => projectWorkflowStats(tasks, dependencies), [dependencies, tasks]);
-  const blockedTaskIds = useMemo(() => new Set(
-    dependencies
-      .filter((dependency) => tasksById.get(dependency.depends_on_task_id)?.status !== "completed")
-      .map((dependency) => dependency.task_id),
-  ), [dependencies, tasksById]);
+  const blockedTaskIds = useMemo(() => projectWorkflowBlockedTaskIds(tasks, dependencies), [dependencies, tasks]);
   const visibleTasks = useMemo(() => {
     const normalizedQuery = taskQuery.trim().toLocaleLowerCase();
     const now = Date.now();
     return tasks.filter((task) => {
-      const matchesQuery = !normalizedQuery || [task.title, task.assigned_to_name, taskCode(task)]
+      const matchesQuery = !normalizedQuery || [task.title, localizeTaskTitle(task.title, lang), task.assigned_to_name, taskCode(task), task.id]
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
       if (!matchesQuery) return false;
       if (taskFilter === "active") return task.status !== "completed" && task.status !== "cancelled";
@@ -586,12 +589,17 @@ export function ProjectWorkflowView({
       }
       return true;
     });
-  }, [blockedTaskIds, taskFilter, taskQuery, tasks]);
+  }, [blockedTaskIds, lang, taskFilter, taskQuery, tasks]);
   const visibleTaskIds = useMemo(() => new Set(visibleTasks.map((task) => task.id)), [visibleTasks]);
-  const visibleDependencies = useMemo(
-    () => dependencies.filter((dependency) => visibleTaskIds.has(dependency.task_id) && visibleTaskIds.has(dependency.depends_on_task_id)),
-    [dependencies, visibleTaskIds],
-  );
+  const canEditDependencies = canManage && !loading && !dependencyError;
+
+  function selectRelatedTask(taskId: string) {
+    if (!visibleTaskIds.has(taskId)) {
+      setTaskQuery("");
+      setTaskFilter("all");
+    }
+    setSelectedTaskId(taskId);
+  }
 
   useEffect(() => {
     setSelectedTaskId(null);
@@ -648,15 +656,15 @@ export function ProjectWorkflowView({
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={labels.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.progress}><div className="h-full rounded-full bg-orange-500 transition-[width]" style={{ width: `${stats.progress}%` }} /></div>
               <div className="mt-3 flex flex-wrap justify-end gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={onCreateTask}><Plus />{labels.createTask}</Button>
-                {canManage && tasks.length > 1 ? <Button type="button" size="sm" onClick={() => setDependencyDialogOpen(true)}><Link2 />{labels.addDependency}</Button> : null}
+                <Button type="button" size="sm" variant="outline" disabled={loading} onClick={onCreateTask}><Plus />{labels.createTask}</Button>
+                {canEditDependencies && tasks.length > 1 ? <Button type="button" size="sm" onClick={() => setDependencyDialogOpen(true)}><Link2 />{labels.addDependency}</Button> : null}
               </div>
             </div>
           ) : projects.length ? <p className="text-sm text-muted-foreground">{labels.workflowHint}</p> : null}
         </div>
       </section>
 
-      {dependencyError || localError ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{localError || dependencyError}</div> : null}
+      {dependencyError || (localError && !deleteCandidate) ? <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"><span>{localError || dependencyError}</span>{dependencyError ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>{labels.retry}</Button> : null}</div> : null}
 
       {!selected ? (
         <div className="flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed bg-card px-6 text-center">
@@ -667,7 +675,7 @@ export function ProjectWorkflowView({
         </div>
       ) : loading ? (
         <div className="flex min-h-80 items-center justify-center rounded-2xl border bg-card text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.workflow}</div>
-      ) : tasks.length === 0 ? (
+      ) : dependencyError ? null : tasks.length === 0 ? (
         <div className="flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed bg-card px-6 text-center">
           <CircleDashed className="size-10 text-orange-500" />
           <h2 className="mt-3 font-semibold">{labels.emptyTitle}</h2>
@@ -694,8 +702,9 @@ export function ProjectWorkflowView({
           <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_20rem]">
             <WorkflowCanvas
               project={selected}
-              tasks={visibleTasks}
-              dependencies={visibleDependencies}
+              tasks={tasks}
+              dependencies={dependencies}
+              visibleTaskIds={visibleTaskIds}
               selectedTaskId={selectedTaskId}
               labels={labels}
               lang={lang}
@@ -708,7 +717,7 @@ export function ProjectWorkflowView({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-mono text-[10px] text-muted-foreground">{taskCode(selectedTask)}</p>
-                      <h3 className="mt-1 text-sm font-semibold leading-5">{selectedTask.title}</h3>
+                      <h3 className="mt-1 text-sm font-semibold leading-5">{localizeTaskTitle(selectedTask.title, lang)}</h3>
                     </div>
                     <Badge variant="outline" className={cn("shrink-0 text-[10px]", statusTone(selectedTask.status))}>{statusLabel(selectedTask.status, labels)}</Badge>
                   </div>
@@ -730,7 +739,7 @@ export function ProjectWorkflowView({
 
                   <div className="mt-4 flex items-center justify-between gap-2">
                     <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels.dependsOn}</h4>
-                    {canManage && tasks.length > 1 ? <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
+                    {canEditDependencies && tasks.length > 1 ? <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
                   </div>
                   <div className="mt-2 grid gap-2">
                     {incoming.length ? incoming.map((dependency) => {
@@ -740,8 +749,8 @@ export function ProjectWorkflowView({
                       return (
                         <div key={dependency.id} className="flex items-start gap-2 rounded-lg border p-2.5">
                           {resolved ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-orange-600" />}
-                          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setSelectedTaskId(task.id)}><span className="line-clamp-2 text-xs font-medium">{task.title}</span><span className={cn("mt-1 block text-[10px]", resolved ? "text-emerald-700" : "text-orange-700")}>{resolved ? labels.dependencyResolved : labels.dependencyBlocking}</span></button>
-                          {canManage ? <Button size="icon" variant="ghost" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={labels.removeDependency} onClick={() => setDeleteCandidate(dependency)}><Trash2 className="size-3.5" /></Button> : null}
+                          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectRelatedTask(task.id)}><span className="line-clamp-2 text-xs font-medium">{localizeTaskTitle(task.title, lang)}</span><span className={cn("mt-1 block text-[10px]", resolved ? "text-emerald-700" : "text-orange-700")}>{resolved ? labels.dependencyResolved : labels.dependencyBlocking}</span></button>
+                          {canEditDependencies ? <Button size="icon" variant="ghost" className="size-7 shrink-0 text-muted-foreground hover:text-destructive" aria-label={labels.removeDependency} onClick={() => { setLocalError(""); setDeleteCandidate(dependency); }}><Trash2 className="size-3.5" /></Button> : null}
                         </div>
                       );
                     }) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{labels.noDependencies}</p>}
@@ -751,7 +760,7 @@ export function ProjectWorkflowView({
                   <div className="mt-2 grid gap-1.5">
                     {outgoing.length ? outgoing.map((dependency) => {
                       const task = tasksById.get(dependency.task_id);
-                      return task ? <button key={dependency.id} type="button" className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs hover:border-orange-300" onClick={() => setSelectedTaskId(task.id)}><span className="size-1.5 shrink-0 rounded-full bg-orange-500" /><span className="min-w-0 flex-1 truncate">{task.title}</span><ArrowRight className="size-3.5 shrink-0 text-muted-foreground" /></button> : null;
+                      return task ? <button key={dependency.id} type="button" className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs hover:border-orange-300" onClick={() => selectRelatedTask(task.id)}><span className="size-1.5 shrink-0 rounded-full bg-orange-500" /><span className="min-w-0 flex-1 truncate">{localizeTaskTitle(task.title, lang)}</span><ArrowRight className="size-3.5 shrink-0 text-muted-foreground" /></button> : null;
                     }) : <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">{labels.noFollowing}</p>}
                   </div>
                   <Button className="mt-4 w-full" variant="outline" onClick={() => onOpenTask(selectedTask.id)}><ExternalLink />{labels.openTask}</Button>
@@ -761,7 +770,7 @@ export function ProjectWorkflowView({
                   <GitBranch className="size-8 text-orange-400" />
                   <h3 className="mt-3 text-sm font-semibold">{labels.details}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">{labels.selectTask}</p>
-                  {canManage && tasks.length > 1 ? <Button className="mt-4" size="sm" variant="outline" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
+                  {canEditDependencies && tasks.length > 1 ? <Button className="mt-4" size="sm" variant="outline" onClick={() => setDependencyDialogOpen(true)}><Plus />{labels.addDependency}</Button> : null}
                 </div>
               )}
             </aside>
@@ -777,20 +786,22 @@ export function ProjectWorkflowView({
         </>
       )}
 
-      <DependencyDialog
+      {dependencyDialogOpen ? <DependencyDialog
         open={dependencyDialogOpen}
         taskId={selectedTaskId}
         tasks={tasks}
         dependencies={dependencies}
         labels={labels}
+        unavailableError={dependencyError || (!canManage ? labels.workflowForbidden : "")}
         onOpenChange={setDependencyDialogOpen}
         onSave={onAddDependency}
-      />
+      /> : null}
 
       <Dialog open={Boolean(deleteCandidate)} onOpenChange={(open) => { if (!open && !deleteBusy) setDeleteCandidate(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-rose-500" />{labels.removeTitle}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{labels.removeHint}</p>
+          {localError ? <div role="alert" className="text-sm text-destructive">{localError}</div> : null}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={deleteBusy} onClick={() => setDeleteCandidate(null)}>{labels.cancel}</Button>
             <Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void removeDependency()}>{deleteBusy ? <LoaderCircle className="animate-spin" /> : <Trash2 />}{labels.remove}</Button>

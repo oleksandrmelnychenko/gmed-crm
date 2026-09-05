@@ -4,7 +4,7 @@ import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 
-import { useOverlayDirtyMarker } from "@/components/ui/dismissal-guard"
+import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { useLang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +33,8 @@ type ComboboxSelectProps = {
   className?: string
   triggerClassName?: string
   placeholder?: React.ReactNode
+  /** Compact trigger content; options retain their full labels for browsing and search. */
+  selectedLabel?: React.ReactNode
   searchPlaceholder?: string
   emptyLabel?: React.ReactNode
   missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
@@ -64,6 +66,7 @@ type NativeComboboxSelectProps = Omit<
   emptyLabel?: React.ReactNode
   missingValueLabel?: React.ReactNode | ((value: string) => React.ReactNode)
   onSearchChange?: (query: string) => void
+  selectedLabel?: React.ReactNode
   value?: PrimitiveValue | readonly string[] | null
 }
 
@@ -195,6 +198,7 @@ function ComboboxSelect({
   className,
   triggerClassName,
   placeholder,
+  selectedLabel,
   searchPlaceholder,
   emptyLabel,
   missingValueLabel,
@@ -207,13 +211,13 @@ function ComboboxSelect({
   ...ariaProps
 }: ComboboxSelectProps) {
   const { t } = useLang()
-  const markOverlayDirty = useOverlayDirtyMarker()
   const normalizedValue = normalizeValue(value)
   const normalizedDefaultValue = normalizeValue(defaultValue)
   const [uncontrolledValue, setUncontrolledValue] = React.useState(
     normalizedDefaultValue ?? options[0]?.value ?? "",
   )
   const selectedValue = normalizedValue ?? uncontrolledValue
+  const updateOverlayField = useOverlayDirtyField(selectedValue)
   const resolvedSearchPlaceholder =
     searchPlaceholder
       ? searchPlaceholder
@@ -263,7 +267,7 @@ function ComboboxSelect({
       const next = nextValue ?? ""
 
       if (next !== selectedValue) {
-        markOverlayDirty()
+        updateOverlayField(next)
       }
 
       if (normalizedValue == null) {
@@ -272,7 +276,7 @@ function ComboboxSelect({
 
       onValueChange?.(next)
     },
-    [markOverlayDirty, normalizedValue, onValueChange, selectedValue],
+    [updateOverlayField, normalizedValue, onValueChange, selectedValue],
   )
 
   return (
@@ -314,7 +318,7 @@ function ComboboxSelect({
         {...ariaProps}
       >
         <span className="min-w-0 flex-1 truncate text-left">
-          <ComboboxPrimitive.Value placeholder={placeholder} />
+          {selectedLabel ?? <ComboboxPrimitive.Value placeholder={placeholder} />}
         </span>
         <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
       </ComboboxPrimitive.Trigger>
@@ -331,7 +335,7 @@ function ComboboxSelect({
           >
             <div className="flex items-center gap-2 border-b border-border bg-popover px-2.5 py-2">
               <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-              <ComboboxPrimitive.Input
+              <ComboboxPrimitive.Input data-overlay-dirty-ignore=""
                 autoComplete={autoComplete}
                 placeholder={resolvedSearchPlaceholder}
                 className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/45"
@@ -403,6 +407,7 @@ function NativeComboboxSelect({
   onBlur,
   onFocus,
   onSearchChange,
+  selectedLabel,
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
@@ -425,6 +430,7 @@ function NativeComboboxSelect({
       searchPlaceholder={searchPlaceholder}
       emptyLabel={emptyLabel}
       missingValueLabel={missingValueLabel}
+      selectedLabel={selectedLabel}
       autoComplete={autoComplete}
       title={title}
       style={style}

@@ -1,3 +1,5 @@
+import { useOpenedFormDirty } from "@/hooks/use-opened-form-dirty";
+import { hasFormChanges } from "@/lib/form-changes";
 import {
   startTransition,
   useCallback,
@@ -4071,6 +4073,8 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       </Sheet>
 
       <Sheet
+        dirty={Boolean(detail && hasFormChanges(providerForm, providerToForm(detail)))}
+        requireChanges
         open={detailOpen}
         onOpenChange={(open) => {
           setDetailOpen(open);
@@ -5245,7 +5249,7 @@ function ProviderEditFormSheet({
   const { t } = useLang();
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet requireChanges dirty={hasFormChanges(form, providerToForm(detail))} open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
@@ -5318,6 +5322,7 @@ function ProviderDoctorFormSheet({
   onChange: (field: keyof DoctorFormState, value: string) => void;
   onContactsChange: (contacts: DoctorFormState["contacts"]) => void;
 }) {
+  const dirty = useOpenedFormDirty(open, form);
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const isMedicalProvider = providerType === "medical";
@@ -5330,7 +5335,7 @@ function ProviderDoctorFormSheet({
   const submitLabel = form.id ? t.common_save : createLabel;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
@@ -5624,11 +5629,12 @@ function ProviderServiceFormSheet({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
+  const dirty = useOpenedFormDirty(open, form);
   const { t } = useLang();
   const submitLabel = form.id ? t.common_save : t.providers_service_new;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
@@ -5680,12 +5686,13 @@ function ProviderStaffFormSheet({
   onChange: (field: keyof StaffFormState, value: string) => void;
   onContactsChange: (contacts: StaffFormState["contacts"]) => void;
 }) {
+  const dirty = useOpenedFormDirty(open, form);
   const { t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const submitLabel = form.id ? t.common_save : l("providers_staff_new");
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet dirty={dirty} requireChanges={Boolean(form.id)} open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold
@@ -5847,7 +5854,7 @@ function SpecializationManagerSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
+    <Sheet requireChanges={Boolean(editingId)} open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
           title={l("providers_specializations_title")}
@@ -6129,7 +6136,7 @@ function StaffRoleManagerSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
+    <Sheet requireChanges={Boolean(editingId)} open={open} onOpenChange={handleOpenChange} dirty={isDirty}>
       <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
         <AdminSheetScaffold
           title={l("providers_staff_roles_title")}

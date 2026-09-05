@@ -1,0 +1,31 @@
+[project]
+name = "gmed-invoice-parser"
+version = "0.1.0"
+description = "Local invoice OCR and review drafts for GMED"
+requires-python = ">=3.12"
+dependencies = [
+  "invoice2data==1.0.1",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "pydantic>=2.10,<3",
+  "psutil>=7,<8",
+  "pypdf==6.10.0",
+  "pypdfium2>=4.30,<5",
+  "pytesseract>=0.3.13,<1",
+  "Pillow>=11,<13",
+  "defusedxml==0.7.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "httpx>=0.28,<1"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["invoice_parser"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "../clinical-document-parser"]
+testpaths = ["tests"]

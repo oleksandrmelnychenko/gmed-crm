@@ -885,6 +885,7 @@ function useSopsPageContent() {
                   {text.actionOpenReview}
                 </Button>
               )}
+              rowActionsWidth={140}
               emptyState={
                 <EmptyState
                   title={text.queueEmptyTitle}
@@ -973,6 +974,7 @@ function useSopsPageContent() {
                   ) : null}
                 </div>
               )}
+              rowActionsWidth={420}
               emptyState={
                 <EmptyState
                   title={text.libraryEmptyTitle}
@@ -1186,7 +1188,7 @@ function useSopsPageContent() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+      <Sheet requireChanges={Boolean(editing)} open={formOpen} onOpenChange={setFormOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <form className="flex h-full min-h-0 flex-col" onSubmit={(event) => void submitForm(event)}>
             <AdminSheetScaffold

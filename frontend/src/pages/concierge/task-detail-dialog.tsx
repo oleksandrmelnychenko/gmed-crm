@@ -15,7 +15,6 @@ import {
   ReceiptText,
   Save,
   Trash2,
-  UserRound,
   X,
 } from "lucide-react";
 
@@ -31,6 +30,7 @@ import { useAuth } from "@/lib/auth";
 import type { Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
 import type {
   ConciergeTaskChecklistItem,
@@ -385,6 +385,8 @@ export function ConciergeTaskDetailDialog({
       || detail.item.assigned_by === user.id),
   );
   const canSubmitTaskExpense = canReadTaskExpenses;
+  const checklistDirty = Boolean(editingChecklistId && checklistDraft.trim() !== detail?.checklist.find((item) => item.id === editingChecklistId)?.label);
+  const commentDirty = Boolean(editingCommentId && commentDraft.trim() !== detail?.comments.find((item) => item.id === editingCommentId)?.body);
   const statusDirty = Boolean(detail && pendingStatus && pendingStatus !== detail.item.status);
 
   const load = useCallback(async () => {
@@ -597,7 +599,7 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function updateChecklistItem(item: ConciergeTaskChecklistItem) {
-    if (!taskId || !canCollaborate || busy || !checklistDraft.trim()) return;
+    if (!taskId || !canCollaborate || busy || !checklistDirty || !checklistDraft.trim()) return;
     setBusy(true);
     setError("");
     try {
@@ -621,7 +623,7 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function updateCommentItem(item: ConciergeTaskComment) {
-    if (!taskId || item.created_by !== user?.id || busy || !commentDraft.trim()) return;
+    if (!taskId || item.created_by !== user?.id || busy || !commentDirty || !commentDraft.trim()) return;
     setBusy(true);
     setError("");
     try {
@@ -779,15 +781,15 @@ export function ConciergeTaskDetailDialog({
     <>
       <Dialog
         open={open && !openExpenseOnLoad && !expenseDialogOpen}
-        dirty={statusDirty || Boolean(editingChecklistId) || Boolean(editingCommentId)}
+        dirty={statusDirty || checklistDirty || commentDirty || Boolean(comment.trim() || checklistLabel.trim())}
         onOpenChange={onOpenChange}
       >
-      <DialogContent className={conciergeDialogContentClassName} style={{ maxWidth: "64rem" }}>
+      <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
           tone="dot"
-          title={detail?.item.title ?? labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>{canDelete ? <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}><Trash2 />{labels.delete}</Button> : null}</> : undefined}
+          title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
@@ -799,7 +801,7 @@ export function ConciergeTaskDetailDialog({
                   <TaskDetailRow label={labels.assignee} value={detail.item.assigned_to_name} />
                   <TaskDetailRow label={labels.due} value={dateTime(detail.item.kind === "event" ? detail.item.starts_at : detail.item.due_at, lang)} />
                   <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at, lang)} />
-                  <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{detail.item.note || "—"}</p>} />
+                  <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{localizeTaskNote(detail.item.note, lang) || "—"}</p>} />
                   <TaskDetailRow label={labels.location} value={detail.item.location || "—"} />
                   <TaskDetailRow
                     label={labels.status}
@@ -829,7 +831,6 @@ export function ConciergeTaskDetailDialog({
                   <div className="divide-y divide-border/60">
                     {detail.item.patient_id && detail.item.patient_name ? (
                       <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><UserRound className="size-4" /></span>
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
@@ -954,7 +955,7 @@ export function ConciergeTaskDetailDialog({
                               }
                             }}
                           />
-                          <Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistDraft.trim()} aria-label={labels.save} onClick={() => void updateChecklistItem(item)}><Save /></Button>
+                          <Button type="button" size="icon-sm" className="size-8" disabled={busy || !checklistDirty || !checklistDraft.trim()} aria-label={labels.save} onClick={() => void updateChecklistItem(item)}><Save /></Button>
                           <Button type="button" size="icon-sm" variant="ghost" className="size-8" aria-label={labels.cancelEdit} onClick={() => { setEditingChecklistId(null); setChecklistDraft(""); }}><X /></Button>
                         </div>
                       ) : (
@@ -998,7 +999,7 @@ export function ConciergeTaskDetailDialog({
                           <textarea autoFocus className="min-h-24 w-full rounded-md border border-input bg-field px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" value={commentDraft} maxLength={4000} onChange={(event) => setCommentDraft(event.target.value)} />
                           <div className="flex justify-end gap-2">
                             <Button type="button" size="sm" variant="outline" onClick={() => { setEditingCommentId(null); setCommentDraft(""); }}><X />{labels.cancelEdit}</Button>
-                            <Button type="button" size="sm" disabled={busy || !commentDraft.trim()} onClick={() => void updateCommentItem(item)}>{busy ? <LoaderCircle className="animate-spin" /> : <Save />}{labels.save}</Button>
+                            <Button type="button" size="sm" disabled={busy || !commentDirty || !commentDraft.trim()} onClick={() => void updateCommentItem(item)}>{busy ? <LoaderCircle className="animate-spin" /> : <Save />}{labels.save}</Button>
                           </div>
                         </div>
                       ) : <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-snug">{item.body}</p>}
@@ -1025,21 +1026,30 @@ export function ConciergeTaskDetailDialog({
             </div>
           ) : null}
         </ConciergeDialogBody>
-        {statusDirty ? (
+        {canDelete || statusDirty ? (
           <ConciergeDialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={busy}
-              onClick={() => setPendingStatus(detail?.item.status ?? "")}
-            >
-              <X />
-              {labels.cancelStatus}
-            </Button>
-            <Button type="button" disabled={busy} onClick={() => void changeStatus()}>
-              {busy ? <LoaderCircle className="animate-spin" /> : <Check />}
-              {labels.confirmStatus}
-            </Button>
+            {canDelete ? (
+              <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive sm:mr-auto" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
+                <Trash2 />{labels.delete}
+              </Button>
+            ) : null}
+            {statusDirty ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setPendingStatus(detail?.item.status ?? "")}
+                >
+                  <X />
+                  {labels.cancelStatus}
+                </Button>
+                <Button type="button" disabled={busy} onClick={() => void changeStatus()}>
+                  {busy ? <LoaderCircle className="animate-spin" /> : <Check />}
+                  {labels.confirmStatus}
+                </Button>
+              </>
+            ) : null}
           </ConciergeDialogFooter>
         ) : null}
       </DialogContent>

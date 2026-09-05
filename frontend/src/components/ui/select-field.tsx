@@ -4,7 +4,7 @@ import { Select } from "@base-ui/react/select"
 import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import type React from "react"
 
-import { useOverlayDirtyMarker } from "@/components/ui/dismissal-guard"
+import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { cn } from "@/lib/utils"
 
 export type SelectFieldOption = {
@@ -30,7 +30,7 @@ export function SelectField({
   title?: string
   "aria-label"?: string
 }) {
-  const markOverlayDirty = useOverlayDirtyMarker()
+  const updateOverlayField = useOverlayDirtyField(value)
 
   return (
     <Select.Root
@@ -40,7 +40,7 @@ export function SelectField({
       modal={false}
       onValueChange={(nextValue) => {
         if (nextValue == null || nextValue === value) return
-        markOverlayDirty()
+        updateOverlayField(nextValue)
         onValueChange(nextValue)
       }}
     >

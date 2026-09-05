@@ -23,6 +23,7 @@ from .extraction import (
 from .models import ClinicalCandidate, DraftExtractionMetadata, ParseDraft
 from .naming import DocumentNameSuggestion, suggest_document_name
 from .parser import parse_clinical_text
+from .translation import with_german_translation
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -874,6 +875,7 @@ def run() -> None:
                     parsed, extraction.metadata, extraction.text
                 )
                 log_candidate_metrics(enriched)
+                enriched = with_german_translation(enriched)
                 draft = enriched.model_dump()
                 finish_job(connection, str(job["id"]), draft)
                 LOGGER.info("parsed clinical document import")

@@ -1,9 +1,11 @@
 import { apiFetch, apiFetchFile } from "@/lib/api";
+import { hasInvoiceBillingRelease } from "../model/billing-release";
 
 import type {
   AccountingLedgerPayload,
   DunningEvent,
   InvoiceItem,
+  InvoiceBillingRelease,
   InvoiceCreditNoteHistoryResponse,
   InvoiceListResponse,
   InvoicePaymentHistoryResponse,
@@ -78,8 +80,31 @@ export function fetchAccountingLedger(year: string) {
   );
 }
 
-export function createInvoice(quoteId: string, payload: JsonPayload) {
+export async function createInvoice(quoteId: string, payload: JsonPayload, orderId: string) {
+  // Use fresh order state so a revoked release cannot be submitted from a stale form.
+  const release = await fetchInvoiceBillingRelease(orderId);
+  if (!hasInvoiceBillingRelease(release)) {
+    throw new Error("Order requires billing release before invoice creation");
+  }
   return postJson<InvoiceItem>(`/quotes/${quoteId}/invoices`, payload);
+}
+
+export async function fetchInvoiceBillingRelease(orderId: string) {
+  const order = await apiFetch<{ process_gates?: InvoiceBillingRelease }>(
+    `/orders/${encodeURIComponent(orderId)}`, { forceFresh: true },
+  );
+  const release = order.process_gates;
+  if (!release || !["pending", "granted", "denied"].includes(release.billing_release_status)) {
+    throw new Error("invoice_billing_release_unavailable");
+  }
+  return release;
+}
+
+export function grantInvoiceBillingRelease(orderId: string, existingNote: string | null) {
+  return postJson<void>(`/orders/${encodeURIComponent(orderId)}/process-gates`, {
+    billing_release_status: "granted",
+    billing_release_note: existingNote,
+  });
 }
 
 export function updateInvoiceStatus(invoiceId: string, payload: JsonPayload) {

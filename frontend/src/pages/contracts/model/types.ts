@@ -143,6 +143,7 @@ export type QuoteStatusFormState = {
 };
 
 export type AgencyServiceItem = {
+  description_items?: import("@/lib/service-description").ServiceDescriptionItem[] | null;
   id: string;
   service_key: string;
   service_name: string;
@@ -177,6 +178,7 @@ export type AgencyServiceFilters = {
 };
 
 export type AgencyServiceFormState = {
+  descriptionItems?: import("@/lib/service-description").ServiceDescriptionItem[];
   id: string;
   serviceKey: string;
   serviceName: string;

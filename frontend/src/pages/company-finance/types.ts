@@ -50,10 +50,10 @@ export type CompanyProviderLiability = {
   settlement_status: CompanyProviderSettlementStatus;
   latest_payment_on: string | null;
   payment_count: number;
-  order_id: string;
-  order_number: string;
-  patient_id: string;
-  patient_pid: string;
+  order_id: string | null;
+  order_number: string | null;
+  patient_id: string | null;
+  patient_pid: string | null;
   patient_name: string;
   provider_id: string | null;
   provider_name: string | null;

@@ -1355,7 +1355,10 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         cost_estimate_document_generated: row
             .try_get("cost_estimate_document_generated")
             .unwrap_or(false),
-        prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false) && quote_matches_order,
+        // Receiving the required prepayment and accepting the current quote are
+        // separate readiness checks. A later catalog-price change invalidates
+        // the quote, but it must not make money already received disappear.
+        prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
     })
 }
 
@@ -1535,9 +1538,7 @@ async fn load_lead_conversion_readiness(
                       SELECT CASE
                           WHEN NOT o.prepayment_required THEN true
                           ELSE COALESCE((
-                              SELECT q.status = 'accepted'
-                                     AND q.total_gross = o.total_estimated
-                                     AND q.paid_amount >= COALESCE(
+                              SELECT q.paid_amount >= COALESCE(
                                          NULLIF(o.prepayment_amount, 0),
                                          q.total_gross
                                      )

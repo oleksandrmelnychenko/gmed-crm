@@ -171,6 +171,10 @@ export function localizeTimelineTitle(
     .replace(/^(?:Order|Patient) checklist:\s*/i, "")
     .trim();
   const exactKey = {
+    "Verify contact, insurance and emergency data": "workflow_item_profile_verification",
+    "Review DSGVO, contract readiness and legal status": "workflow_item_compliance_readiness",
+    "Audit required patient documents and current upload gaps": "workflow_item_document_pack_review",
+    "Confirm language, travel and concierge support needs": "workflow_item_language_support_needs",
     "Prepare provider and doctor shortlist for execution":
       "workflow_item_provider_shortlist",
     "Review order scope and convert needs into service blocks":

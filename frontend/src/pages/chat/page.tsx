@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, type FormEvent, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import {
   MessageSquarePlus,
@@ -6,8 +6,6 @@ import {
   Send,
   Paperclip,
   X,
-  FileText,
-  Download,
   MessageSquare,
   Shield,
   ShieldCheck,
@@ -15,6 +13,10 @@ import {
   Clock3,
   RotateCcw,
   Trash2,
+  ArrowDown,
+  Check,
+  CheckCheck,
+  LoaderCircle,
 } from "lucide-react";
 import {
   CHAT_E2E_PREVIEW,
@@ -30,6 +32,7 @@ import {
   type MessageKeyEnvelope,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
+import { ApiRequestError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,30 +62,23 @@ import {
 import {
   canAccessChat,
   chatMessageDateKey,
-  formatSize,
   initials,
   isSameChatMessageGroup,
+  mergeChatMessages,
+  reconcileChatMessages,
+  sortChatMessages,
   roleDisplay,
   timeAgo,
   truncate,
 } from "./model/chat-model";
 import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
+import { CHAT_ATTACHMENT_ACCEPT, CHAT_ATTACHMENT_MAX_COUNT, chatAttachmentMime, chatAttachmentProblem, type PendingChatAttachment } from "./model/attachments";
+import { ChatAttachment, PendingAttachment } from "./ui/chat-attachment";
 
 type KeyDialogMode = "manage" | null;
 type ChatConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
 
-const CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
-const CHAT_ATTACHMENT_ACCEPT =
-  ".pdf,.png,.jpg,.jpeg,.gif,.webp,.heic,.heif,.txt,.csv,.doc,.docx,.xls,.xlsx,.dcm";
-const CHAT_ATTACHMENT_EXTENSIONS = new Set(
-  CHAT_ATTACHMENT_ACCEPT.split(",").map((value) => value.slice(1)),
-);
 const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
-
-function isAllowedChatAttachment(file: File) {
-  const extension = file.name.split(".").pop()?.toLocaleLowerCase();
-  return Boolean(extension && CHAT_ATTACHMENT_EXTENSIONS.has(extension));
-}
 
 function formatChatDay(iso: string, lang: "de" | "ru") {
   const value = new Date(iso);
@@ -126,17 +122,19 @@ type ChatPageState = {
   showNewChat: boolean;
   allUsers: UserItem[];
   userSearch: string;
-  pendingFile: File | null;
+  pendingFiles: PendingChatAttachment[];
   activePeerMessageKey: MessageKeyEnvelope | null;
   pendingPeerMessageKey: MessageKeyEnvelope | null;
   deviceKeyFingerprint: string | null;
   secureStatus: string | null;
-  attachmentBusyId: string | null;
   keyDialogMode: KeyDialogMode;
   messageTimerSeconds: number;
   deleteTarget: Message | null;
   deletingMessageId: string | null;
   expiryClock: number;
+  usersLoading: boolean;
+  securityLoading: boolean;
+  showScrollToLatest: boolean;
 };
 
 type ChatPagePatch =
@@ -198,17 +196,19 @@ function useChatPageContent() {
       showNewChat: false,
       allUsers: [],
       userSearch: "",
-      pendingFile: null,
+      pendingFiles: [],
       activePeerMessageKey: null,
       pendingPeerMessageKey: null,
       deviceKeyFingerprint: null,
       secureStatus: null,
-      attachmentBusyId: null,
       keyDialogMode: null,
       messageTimerSeconds: 0,
       deleteTarget: null,
       deletingMessageId: null,
       expiryClock: Date.now(),
+      usersLoading: false,
+      securityLoading: false,
+      showScrollToLatest: false,
     }),
   );
   const {
@@ -232,17 +232,19 @@ function useChatPageContent() {
     showNewChat,
     allUsers,
     userSearch,
-    pendingFile,
+    pendingFiles,
     activePeerMessageKey,
     pendingPeerMessageKey,
     deviceKeyFingerprint,
     secureStatus,
-    attachmentBusyId,
     keyDialogMode,
     messageTimerSeconds,
     deleteTarget,
     deletingMessageId,
     expiryClock,
+    usersLoading,
+    securityLoading,
+    showScrollToLatest,
   } = chatState;
   const setChatField = <K extends keyof ChatPageState>(
     field: K,
@@ -288,8 +290,8 @@ function useChatPageContent() {
     setChatField("allUsers", value);
   const setUserSearch = (value: SetStateAction<string>) =>
     setChatField("userSearch", value);
-  const setPendingFile = (value: SetStateAction<File | null>) =>
-    setChatField("pendingFile", value);
+  const setPendingFiles = (value: SetStateAction<PendingChatAttachment[]>) =>
+    setChatField("pendingFiles", value);
   const setActivePeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
     setChatField("activePeerMessageKey", value);
   const setPendingPeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
@@ -298,8 +300,6 @@ function useChatPageContent() {
     setChatField("deviceKeyFingerprint", value);
   const setSecureStatus = (value: SetStateAction<string | null>) =>
     setChatField("secureStatus", value);
-  const setAttachmentBusyId = (value: SetStateAction<string | null>) =>
-    setChatField("attachmentBusyId", value);
   const setKeyDialogMode = (value: SetStateAction<KeyDialogMode>) =>
     setChatField("keyDialogMode", value);
   const setMessageTimerSeconds = (value: SetStateAction<number>) =>
@@ -316,11 +316,40 @@ function useChatPageContent() {
   const ignoredRoutePeerRef = useRef<string | null>(null);
   const messageRequestIdRef = useRef(0);
   const peerMessageKeyCacheRef = useRef<Record<string, MessageKeyEnvelope>>({});
+  const peerMessageKeyRequestsRef = useRef(new Map<string, Promise<MessageKeyEnvelope | null>>());
+  const conversationRequestIdRef = useRef(0);
+  const userRequestIdRef = useRef(0);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const scrollToBottomRef = useRef(true);
+  const scrollContentRef = useRef<{ newestId?: string; fileCount: number } | null>(null);
+  const prependScrollRef = useRef<{ height: number; top: number } | null>(null);
+  const outboxRef = useRef(new Map<string, Message>());
+  const draftRef = useRef(new Map<string, { input: string; pendingFiles: PendingChatAttachment[]; messageTimerSeconds: number }>());
+  const uploadAttemptRef = useRef(new Map<string, {
+    caption: string; timer: number; id: string; formData?: FormData; envelope?: Partial<Message>;
+  }>());
+  const [attachmentUpload, setAttachmentUpload] = useState<{ peerId: string; fileId: string; index: number; total: number; name: string } | null>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const sendLockRef = useRef(false);
+  const deviceReadyRef = useRef(false);
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useLayoutEffect(() => {
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    const newest = sortChatMessages(messages)[0];
+    const newestId = newest?.client_message_id || newest?.id;
+    const previous = scrollContentRef.current;
+    const contentChanged = !previous || previous.newestId !== newestId || previous.fileCount !== pendingFiles.length;
+    scrollContentRef.current = { newestId, fileCount: pendingFiles.length };
+    const prepend = prependScrollRef.current;
+    if (prepend) {
+      container.scrollTop = prepend.top + container.scrollHeight - prepend.height;
+      prependScrollRef.current = null;
+    } else if (scrollToBottomRef.current && contentChanged) {
+      container.scrollTop = container.scrollHeight;
+    }
+    dispatchChatState({ showScrollToLatest: container.scrollHeight - container.scrollTop - container.clientHeight > 100 });
+  }, [messages, pendingFiles.length]);
 
   useEffect(() => {
     const composer = composerRef.current;
@@ -344,14 +373,16 @@ function useChatPageContent() {
       setLoading(false);
       return;
     }
-    setConversationError(false);
+    const requestId = ++conversationRequestIdRef.current;
     try {
       const data = await fetchConversations();
+      if (requestId !== conversationRequestIdRef.current) return;
       setConversations(data);
+      setConversationError(false);
     } catch {
-      setConversationError(true);
+      if (requestId === conversationRequestIdRef.current) setConversationError(true);
     } finally {
-      setLoading(false);
+      if (requestId === conversationRequestIdRef.current) setLoading(false);
     }
   }, [canViewChat]);
 
@@ -362,58 +393,73 @@ function useChatPageContent() {
         if (cached) return cached;
       }
 
-      const key = await fetchPeerMessageKey(myId, peerId, fingerprint);
-      if (key) {
-        // Fingerprint-addressed historical keys are immutable and safe to
-        // cache. The active key is deliberately fetched on every send so a
-        // rotation cannot be hidden by a stale in-memory entry.
-        peerMessageKeyCacheRef.current[`${peerId}:${key.fingerprint}`] = key;
+      const cacheId = `${peerId}:${fingerprint ?? "active"}`;
+      const pending = peerMessageKeyRequestsRef.current.get(cacheId);
+      if (pending) return pending;
+      const request = fetchPeerMessageKey(myId, peerId, fingerprint);
+      peerMessageKeyRequestsRef.current.set(cacheId, request);
+      try {
+        const key = await request;
+        if (key) {
+          // Historical keys are immutable. Always fetch the active key before
+          // sending so an in-memory cache cannot hide a peer's key rotation.
+          peerMessageKeyCacheRef.current[`${peerId}:${key.fingerprint}`] = key;
+        }
+        return key;
+      } finally {
+        peerMessageKeyRequestsRef.current.delete(cacheId);
       }
-      return key;
     },
     [myId],
   );
 
   const hydrateMessages = useCallback(
     async (peerId: string, rawMessages: Message[]) => {
+      // Finish IndexedDB migration/registration before trying to read history.
+      if (!deviceReadyRef.current && rawMessages.some((message) => message.is_e2e)) {
+        await ensureServerMessageKey(myId).then(() => { deviceReadyRef.current = true; }).catch(() => undefined);
+      }
       return Promise.all(
         rawMessages.map(async (message) => {
           if (!message.is_e2e) return message;
-
-          const myFingerprint =
-            message.from_user === myId
-              ? message.sender_key_fingerprint
-              : message.recipient_key_fingerprint;
-          const peerFingerprint =
-            message.from_user === myId
-              ? message.recipient_key_fingerprint
-              : message.sender_key_fingerprint;
-          const localKey = await getLocalMessageKey(myId, myFingerprint);
-          if (!localKey || !peerFingerprint) {
-            return {
-              ...message,
-              message: CHAT_E2E_UNAVAILABLE,
-            };
-          }
-
-          const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
-          if (!peerKey) {
-            return {
-              ...message,
-              message: CHAT_E2E_PREVIEW,
-            };
-          }
-
           try {
+            const myFingerprint =
+              message.from_user === myId
+                ? message.sender_key_fingerprint
+                : message.recipient_key_fingerprint;
+            const peerFingerprint =
+              message.from_user === myId
+                ? message.recipient_key_fingerprint
+                : message.sender_key_fingerprint;
+            const localKey = await getLocalMessageKey(myId, myFingerprint);
+            if (!localKey || !peerFingerprint) {
+              return {
+                ...message,
+                message: CHAT_E2E_UNAVAILABLE,
+                decryption_failed: true,
+              };
+            }
+
+            const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
+            if (!peerKey) {
+              return {
+                ...message,
+                message: CHAT_E2E_PREVIEW,
+                decryption_failed: true,
+              };
+            }
+
             const decrypted = await decryptMessageFromPeer(message, localKey, peerKey);
             return {
               ...message,
               message: decrypted,
+              decryption_failed: false,
             };
           } catch {
             return {
               ...message,
               message: CHAT_E2E_UNAVAILABLE,
+              decryption_failed: true,
             };
           }
         }),
@@ -423,14 +469,15 @@ function useChatPageContent() {
   );
 
   const loadMessagesForPeer = useCallback(
-    async (peerId: string, markRead = false, preserveHistory = false) => {
+    async (peerId: string, markRead = false, preserveHistory = true) => {
       if (!canViewChat) {
         setMessages([]);
         return;
       }
       const requestId = ++messageRequestIdRef.current;
-      setMessageLoading(true);
-      setMessageError(false);
+      // Background reconciliation keeps the loaded view, including empty
+      // search results and any error notice, until a response arrives.
+      if (!preserveHistory) setMessageLoading(true);
       try {
         const msgs = await fetchPeerMessages(peerId);
         const hydrated = await hydrateMessages(peerId, msgs);
@@ -440,14 +487,20 @@ function useChatPageContent() {
         ) {
           return;
         }
+        setMessageError(false);
+        for (const message of hydrated) {
+          if (message.client_message_id) outboxRef.current.delete(message.client_message_id);
+        }
         setMessages((current) => {
-          if (!preserveHistory) return hydrated;
-          const incomingIds = new Set(hydrated.map((message) => message.id));
-          return [...hydrated, ...current.filter((message) => !incomingIds.has(message.id))];
+          const pending = [...outboxRef.current.values()].filter((message) => message.to_user === peerId);
+          return reconcileChatMessages(mergeChatMessages(preserveHistory ? current : [], pending), hydrated);
         });
-        setHasOlderMessages((current) => (preserveHistory ? current : msgs.length === 100));
-        if (markRead) {
-          await markPeerMessagesRead(peerId);
+        setHasOlderMessages((current) => preserveHistory ? current || msgs.length === 100 : msgs.length === 100);
+        if (markRead && document.visibilityState === "visible" &&
+            hydrated.every((message) => message.to_user !== myId || !message.decryption_failed) &&
+            msgs.some((message) => message.to_user === myId && !message.is_read)) {
+          // A failed read receipt must not hide successfully loaded messages.
+          await markPeerMessagesRead(peerId).then(() => loadConversations()).catch(() => undefined);
         }
       } catch (error) {
         if (
@@ -466,12 +519,12 @@ function useChatPageContent() {
         }
       }
     },
-    [canViewChat, hydrateMessages],
+    [canViewChat, hydrateMessages, loadConversations, myId],
   );
 
   const loadOlderMessages = useCallback(async () => {
     if (!activePeer || olderMessagesLoading || !hasOlderMessages) return;
-    const oldest = messages[messages.length - 1];
+    const oldest = sortChatMessages(messages.filter((message) => !message.id.startsWith("local-"))).at(-1);
     if (!oldest || oldest.id.startsWith("local-")) return;
 
     setOlderMessagesLoading(true);
@@ -479,10 +532,9 @@ function useChatPageContent() {
       const raw = await fetchPeerMessages(activePeer, oldest);
       const hydrated = await hydrateMessages(activePeer, raw);
       if (activePeerRef.current !== activePeer) return;
-      setMessages((current) => {
-        const currentIds = new Set(current.map((message) => message.id));
-        return [...current, ...hydrated.filter((message) => !currentIds.has(message.id))];
-      });
+      const container = messagesScrollRef.current;
+      if (container) prependScrollRef.current = { height: container.scrollHeight, top: container.scrollTop };
+      setMessages((current) => mergeChatMessages(current, hydrated));
       setHasOlderMessages(raw.length === 100);
     } catch {
       setMessageError(true);
@@ -511,7 +563,10 @@ function useChatPageContent() {
     void (async () => {
       try {
         const key = await ensureServerMessageKey(myId);
-        if (!cancelled) setDeviceKeyFingerprint(key.fingerprint);
+        if (!cancelled) {
+          deviceReadyRef.current = true;
+          setDeviceKeyFingerprint(key.fingerprint);
+        }
       } catch {
         if (!cancelled) {
           setSecureStatus(t.chat_secure_setup_failed_device);
@@ -538,29 +593,71 @@ function useChatPageContent() {
     setSecureStatus(null);
   }, []);
 
+  const refreshSecurity = useCallback(async () => {
+    const peerId = activePeerRef.current;
+    if (!peerId) return;
+    dispatchChatState({ securityLoading: true });
+    try {
+      const ownKey = deviceReadyRef.current
+        ? await getLocalMessageKey(myId)
+        : await ensureServerMessageKey(myId);
+      if (activePeerRef.current !== peerId) return;
+      if (!ownKey) throw new Error("Device key unavailable");
+      deviceReadyRef.current = true;
+      setDeviceKeyFingerprint(ownKey.fingerprint);
+      const peerKey = await loadPeerMessageKey(peerId);
+      if (activePeerRef.current !== peerId) return;
+      setActivePeerMessageKey(peerKey);
+      setPendingPeerMessageKey(null);
+      if (peerKey) setSecureStatus((current) =>
+        current === t.chat_secure_key_failed || current === t.chat_secure_setup_failed_device ||
+        current === t.chat_secure_setup_pending ? null : current,
+      );
+    } catch (error) {
+      if (activePeerRef.current !== peerId) return;
+      if (error instanceof PeerMessageKeyChangedError) {
+        setActivePeerMessageKey(null);
+        setPendingPeerMessageKey(error.candidate);
+        setSecureStatus(t.chat_secure_identity_changed);
+      } else if (error instanceof ApiRequestError && (!error.status || error.status >= 500 || error.status === 429)) {
+        // A temporary lookup failure does not revoke the already verified key.
+        // Sending still fetches the active identity and fails if it cannot verify it.
+        dispatchChatState((current) => current.activePeerMessageKey ? {} : { secureStatus: t.chat_secure_key_failed });
+      } else {
+        setActivePeerMessageKey(null);
+        setSecureStatus(t.chat_secure_key_failed);
+      }
+    } finally {
+      if (activePeerRef.current === peerId) dispatchChatState({ securityLoading: false });
+    }
+  }, [myId, loadPeerMessageKey, t.chat_secure_identity_changed, t.chat_secure_key_failed]);
+
   const applyActivePeerMessageKey = useCallback((key: MessageKeyEnvelope | null) => {
     setActivePeerMessageKey(key);
     setPendingPeerMessageKey(null);
     setSecureStatus(null);
   }, []);
 
-  const failActivePeerMessageKey = useCallback(() => {
-    setActivePeerMessageKey(null);
-    setSecureStatus(t.chat_secure_key_failed);
-  }, [t.chat_secure_key_failed]);
-
   const openPeerFromRoute = useCallback((peer: string, name: string, role: string) => {
+    scrollToBottomRef.current = true;
+    scrollContentRef.current = null;
+    prependScrollRef.current = null;
     messageRequestIdRef.current += 1;
     activePeerRef.current = peer;
     setActivePeer(peer);
     setActiveName(name);
     setActiveRole(role);
-    setMessages([]);
+    setMessages([...outboxRef.current.values()].filter((message) => message.to_user === peer));
     setHasOlderMessages(false);
     setMessageLoading(true);
     setMessageError(false);
     setShowNewChat(false);
-    setPendingFile(null);
+    dispatchChatState({
+      ...(draftRef.current.get(peer) ?? { input: "", pendingFiles: [], messageTimerSeconds: 0 }),
+      olderMessagesLoading: false,
+      deleteTarget: null,
+      showScrollToLatest: false,
+    });
     setMessageSearch("");
   }, []);
 
@@ -574,37 +671,18 @@ function useChatPageContent() {
       return;
     }
 
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const key = await loadPeerMessageKey(activePeer);
-        if (cancelled) return;
-        applyActivePeerMessageKey(key);
-      } catch (error) {
-        if (cancelled) return;
-        if (error instanceof PeerMessageKeyChangedError) {
-          setActivePeerMessageKey(null);
-          setPendingPeerMessageKey(error.candidate);
-          setSecureStatus(t.chat_secure_identity_changed);
-        } else {
-          failActivePeerMessageKey();
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    resetActivePeerSecurity();
+    void refreshSecurity();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && navigator.onLine) void refreshSecurity();
+    }, 10_000);
+    return () => window.clearInterval(timer);
   }, [
     activePeer,
-    applyActivePeerMessageKey,
     canViewChat,
     clearActivePeerMessageKey,
-    failActivePeerMessageKey,
-    loadPeerMessageKey,
+    refreshSecurity,
     resetActivePeerSecurity,
-    t.chat_secure_identity_changed,
   ]);
 
   useEffect(() => {
@@ -629,6 +707,7 @@ function useChatPageContent() {
       activeRole;
 
     if (activePeer !== peer && name) {
+      if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
       openPeerFromRoute(peer, name, role);
     }
 
@@ -682,76 +761,128 @@ function useChatPageContent() {
     );
   }, [searchParams, setSearchParams]);
 
-  // Keep chat live via WebSocket push.
+  // Push is an optimization; HTTP reconciliation also recovers missed events.
   useEffect(() => {
     if (!canViewChat) return;
-
     let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
-    let connectTimer: number | null = null;
+    let reconnectTimer: number | undefined;
+    let handshakeTimer: number | undefined;
     let disposed = false;
+    let connecting = false;
     let reconnectAttempt = 0;
+    let connected = false;
+    let refreshing = false;
+    let refreshQueued = false;
+    let lastRefresh = 0;
 
-    const scheduleReconnect = () => {
-      if (disposed) return;
-      setConnectionStatus("reconnecting");
-      const baseDelay = Math.min(30_000, 1_000 * 2 ** reconnectAttempt);
-      const jitter = Math.floor(baseDelay * 0.25 * Math.random());
-      reconnectAttempt += 1;
-      reconnectTimer = window.setTimeout(connect, baseDelay + jitter);
-    };
-
-    const connect = () => {
-      setConnectionStatus(reconnectAttempt === 0 ? "connecting" : "reconnecting");
-      const nextSocket = openMessagesSocket();
-      if (!nextSocket) {
-        setConnectionStatus("offline");
-        scheduleReconnect();
-        return;
+    const refresh = async () => {
+      if (disposed || !navigator.onLine || document.visibilityState !== "visible") return;
+      if (refreshing) { refreshQueued = true; return; }
+      refreshing = true;
+      lastRefresh = Date.now();
+      try {
+        const peer = activePeerRef.current;
+        await Promise.allSettled([
+          loadConversations(),
+          ...(peer ? [loadMessagesForPeer(peer, true)] : []),
+        ]);
+      } finally {
+        refreshing = false;
+        if (refreshQueued && !disposed) {
+          refreshQueued = false;
+          void refresh();
+        }
       }
-      socket = nextSocket;
-      socket.onopen = () => {
-        reconnectAttempt = 0;
-        setConnectionStatus("connected");
-      };
-      socket.onmessage = (event) => {
-        const payload = (() => {
-          try {
-            return JSON.parse(event.data) as ChatStreamEvent;
-          } catch {
-            return null;
-          }
-        })();
-        if (!payload) return;
-
-        void loadConversations();
-        const currentPeer = activePeerRef.current;
-        if (!currentPeer || payload.peer_id !== currentPeer) return;
-
-        void loadMessagesForPeer(
-          currentPeer,
-          payload.type === "message_created" && payload.user_id === myId,
-          true,
-        ).catch(() => undefined);
-      };
-      socket.onerror = () => {
-        socket?.close();
-      };
-      socket.onclose = () => {
-        scheduleReconnect();
-      };
     };
-
-    connectTimer = window.setTimeout(connect, 0);
-
-    return () => {
-      disposed = true;
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer !== undefined) return;
+      connected = false;
+      if (!navigator.onLine) { setConnectionStatus("offline"); return; }
+      setConnectionStatus("reconnecting");
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt++, 5));
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect();
+      }, delay + Math.floor(delay * 0.2 * Math.random()));
+    };
+    const connect = async () => {
+      if (disposed || connecting || connected) return;
+      if (!navigator.onLine) { setConnectionStatus("offline"); return; }
+      connecting = true;
+      setConnectionStatus(reconnectAttempt ? "reconnecting" : "connecting");
+      try {
+        const next = await openMessagesSocket();
+        if (disposed) { next?.close(); return; }
+        if (!next) { scheduleReconnect(); return; }
+        socket = next;
+        handshakeTimer = window.setTimeout(() => next.close(), 10_000);
+        next.onopen = () => {
+          if (disposed || socket !== next) return;
+          window.clearTimeout(handshakeTimer);
+          connected = true;
+          reconnectAttempt = 0;
+          setConnectionStatus("connected");
+          void refresh();
+        };
+        next.onmessage = (event) => {
+          if (disposed || socket !== next) return;
+          let payload: ChatStreamEvent;
+          try { payload = JSON.parse(event.data) as ChatStreamEvent; } catch { return; }
+          if (!payload || payload.user_id !== myId ||
+              !["message_created", "message_deleted", "conversation_read"].includes(payload.type)) return;
+          if (payload.type === "message_deleted" && payload.peer_id === activePeerRef.current) {
+            setMessages((current) => current.filter((message) => message.id !== payload.message_id));
+          }
+          void refresh();
+        };
+        next.onerror = () => next.close();
+        next.onclose = () => {
+          if (socket !== next) return;
+          window.clearTimeout(handshakeTimer);
+          socket = null;
+          scheduleReconnect();
+        };
+      } catch {
+        scheduleReconnect();
+      } finally {
+        connecting = false;
+      }
+    };
+    const resume = () => {
+      if (document.visibilityState !== "visible") return;
+      void refresh();
+      void refreshSecurity();
+      if (!connected) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
+        void connect();
+      }
+    };
+    const offline = () => {
       setConnectionStatus("offline");
-      if (connectTimer !== null) window.clearTimeout(connectTimer);
-      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      connected = false;
       socket?.close();
     };
-  }, [canViewChat, loadConversations, loadMessagesForPeer, myId]);
+    reconnectTimer = window.setTimeout(() => { reconnectTimer = undefined; void connect(); }, 0);
+    const poll = window.setInterval(() => {
+      if (!connected || Date.now() - lastRefresh >= 30_000) void refresh();
+    }, 5_000);
+    window.addEventListener("online", resume);
+    window.addEventListener("offline", offline);
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      disposed = true;
+      window.clearTimeout(reconnectTimer);
+      window.clearTimeout(handshakeTimer);
+      window.clearInterval(poll);
+      window.removeEventListener("online", resume);
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+      socket?.close();
+    };
+  }, [canViewChat, loadConversations, loadMessagesForPeer, myId, refreshSecurity]);
 
   // Load messages when peer changes
   useEffect(() => {
@@ -762,7 +893,7 @@ function useChatPageContent() {
     }
     void (async () => {
       try {
-        await loadMessagesForPeer(activePeer, true);
+        await loadMessagesForPeer(activePeer, true, false);
         void loadConversations();
       } catch {
         /* ignore */
@@ -771,19 +902,10 @@ function useChatPageContent() {
   }, [activePeer, loadConversations, loadMessagesForPeer]);
 
   const openConversation = (userId: string, name: string, role: string) => {
+    if (userId === activePeerRef.current) return;
+    if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
     ignoredRoutePeerRef.current = null;
-    messageRequestIdRef.current += 1;
-    activePeerRef.current = userId;
-    setActivePeer(userId);
-    setActiveName(name);
-    setActiveRole(role);
-    setMessages([]);
-    setHasOlderMessages(false);
-    setMessageLoading(true);
-    setMessageError(false);
-    setShowNewChat(false);
-    setPendingFile(null);
-    setMessageSearch("");
+    openPeerFromRoute(userId, name, role);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -798,6 +920,9 @@ function useChatPageContent() {
   };
 
   const closeConversation = () => {
+    if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
+    setInput("");
+    setMessageTimerSeconds(0);
     ignoredRoutePeerRef.current = activePeerRef.current;
     messageRequestIdRef.current += 1;
     activePeerRef.current = null;
@@ -808,7 +933,7 @@ function useChatPageContent() {
     setHasOlderMessages(false);
     setMessageLoading(false);
     setMessageError(false);
-    setPendingFile(null);
+    setPendingFiles([]);
     setMessageSearch("");
     resetActivePeerSecurity();
     setSearchParams(
@@ -830,13 +955,19 @@ function useChatPageContent() {
       return;
     }
     setUserError(false);
+    const requestId = ++userRequestIdRef.current;
+    dispatchChatState({ usersLoading: true });
     try {
-      const data = await fetchAllowedPeers(userSearch);
+      // The server search covers names/email only. Search localized roles here.
+      const data = await fetchAllowedPeers("");
+      if (requestId !== userRequestIdRef.current) return;
       setAllUsers(data);
     } catch {
-      setUserError(true);
+      if (requestId === userRequestIdRef.current) setUserError(true);
+    } finally {
+      if (requestId === userRequestIdRef.current) dispatchChatState({ usersLoading: false });
     }
-  }, [canViewChat, userSearch]);
+  }, [canViewChat]);
 
   useEffect(() => {
     if (!showNewChat) return;
@@ -857,12 +988,14 @@ function useChatPageContent() {
         null,
         pendingPeerMessageKey.fingerprint,
       );
+      if (activePeerRef.current !== activePeer) return;
       if (!trusted) throw new Error("Peer key is unavailable");
       peerMessageKeyCacheRef.current[`${activePeer}:${trusted.fingerprint}`] = trusted;
       setActivePeerMessageKey(trusted);
       setPendingPeerMessageKey(null);
       setSecureStatus(null);
     } catch (error) {
+      if (activePeerRef.current !== activePeer) return;
       if (error instanceof PeerMessageKeyChangedError) {
         setPendingPeerMessageKey(error.candidate);
         setSecureStatus(t.chat_secure_identity_changed);
@@ -878,108 +1011,73 @@ function useChatPageContent() {
     t.chat_secure_key_failed,
   ]);
 
-  const downloadBlob = useCallback((blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.rel = "noopener noreferrer";
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  }, []);
+  const loadAttachmentBlob = useCallback(async (message: Message) => {
+    if (!message.attachment_key) throw new Error(t.chat_attachment_load_failed);
+    let bytes: ArrayBuffer | Uint8Array<ArrayBuffer>;
+    if (message.attachment_is_e2e) {
+      const mine = message.from_user === myId;
+      const localKey = await getLocalMessageKey(myId, mine ? message.sender_key_fingerprint : message.recipient_key_fingerprint);
+      const peerFingerprint = mine ? message.recipient_key_fingerprint : message.sender_key_fingerprint;
+      if (!localKey || !peerFingerprint) throw new Error(t.chat_secure_attachment_unavailable);
+      const peerKey = await loadPeerMessageKey(mine ? message.to_user : message.from_user, peerFingerprint);
+      if (!peerKey) throw new Error(t.chat_secure_attachment_peer_key_failed);
+      let ciphertext: ArrayBuffer;
+      try { ciphertext = await downloadMessageAttachmentBytes(message.attachment_key); }
+      catch { throw new Error(t.chat_attachment_load_failed); }
+      try { bytes = await decryptAttachmentFromPeer(message, new Uint8Array(ciphertext), localKey, peerKey); }
+      catch { throw new Error(t.chat_secure_attachment_decrypt_failed); }
+    } else {
+      try { bytes = await downloadMessageAttachmentBytes(message.attachment_key); }
+      catch { throw new Error(t.chat_attachment_load_failed); }
+    }
+    return new Blob([bytes], { type: chatAttachmentMime(message.attachment_filename ?? "") });
+  }, [loadPeerMessageKey, myId, t.chat_attachment_load_failed, t.chat_secure_attachment_unavailable, t.chat_secure_attachment_peer_key_failed, t.chat_secure_attachment_decrypt_failed]);
 
-  const handleSecureAttachmentDownload = useCallback(
-    async (message: Message) => {
-      if (!message.attachment_key) return;
-
-      const myFingerprint =
-        message.from_user === myId
-          ? message.sender_key_fingerprint
-          : message.recipient_key_fingerprint;
-      const peerFingerprint =
-        message.from_user === myId
-          ? message.recipient_key_fingerprint
-          : message.sender_key_fingerprint;
-      const localKey = await getLocalMessageKey(myId, myFingerprint);
-      if (!localKey || !peerFingerprint) {
-        setSecureStatus(t.chat_secure_attachment_unavailable);
-        return;
+  function addPendingFiles(files: File[]) {
+    if (!activePeer || sendLockRef.current || !files.length) return;
+    if (!activePeerMessageKey) { setSecureStatus(secureChannelPendingStatus); return; }
+    const additions: PendingChatAttachment[] = [];
+    const errors: string[] = [];
+    for (const file of files) {
+      const problem = chatAttachmentProblem(file);
+      if (problem) {
+        errors.push(file.name + ": " + (problem === "size" ? t.chat_attachment_too_large : problem === "name" ? t.chat_attachment_name_invalid : t.chat_attachment_type_blocked));
+        continue;
       }
+      if ([...pendingFiles, ...additions].some((entry) => entry.file.name === file.name && entry.file.size === file.size && entry.file.lastModified === file.lastModified)) continue;
+      if (pendingFiles.length + additions.length >= CHAT_ATTACHMENT_MAX_COUNT) { errors.push(t.chat_attachments_limit); break; }
+      additions.push({ id: crypto.randomUUID(), file });
+    }
+    setPendingFiles((current) => [...current, ...additions]);
+    setSecureStatus(errors.length ? errors.join(" ") : null);
+  }
 
-      const peerId = message.from_user === myId ? message.to_user : message.from_user;
-      const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
-      if (!peerKey) {
-        setSecureStatus(t.chat_secure_attachment_peer_key_failed);
-        return;
-      }
-
-      setAttachmentBusyId(message.id);
-      try {
-        const ciphertext = new Uint8Array(
-          await downloadMessageAttachmentBytes(message.attachment_key),
-        );
-        const decrypted = await decryptAttachmentFromPeer(
-          message,
-          ciphertext,
-          localKey,
-          peerKey,
-        );
-        downloadBlob(
-          new Blob([decrypted], {
-            type: message.attachment_mime ?? "application/octet-stream",
-          }),
-          message.attachment_filename ?? "secure-attachment",
-        );
-        setSecureStatus(null);
-      } catch {
-        setSecureStatus(t.chat_secure_attachment_decrypt_failed);
-      } finally {
-        setAttachmentBusyId(null);
-      }
-    },
-    [
-      downloadBlob,
-      loadPeerMessageKey,
-      myId,
-      t.chat_secure_attachment_decrypt_failed,
-      t.chat_secure_attachment_peer_key_failed,
-      t.chat_secure_attachment_unavailable,
-    ],
-  );
-
-  const handleAttachmentDownload = useCallback(
-    async (message: Message) => {
-      if (!message.attachment_key) return;
-
-      setAttachmentBusyId(message.id);
-      try {
-        const bytes = await downloadMessageAttachmentBytes(message.attachment_key);
-        downloadBlob(
-          new Blob([bytes], {
-            type: message.attachment_mime ?? "application/octet-stream",
-          }),
-          message.attachment_filename ?? "attachment",
-        );
-        setSecureStatus(null);
-      } catch (error) {
-        setSecureStatus(
-          error instanceof Error ? error.message : t.chat_secure_operation_failed,
-        );
-      } finally {
-        setAttachmentBusyId(null);
-      }
-    },
-    [downloadBlob, t.chat_secure_operation_failed],
-  );
+  function finishAttachmentDraft(peerId: string, fileId: string, caption: string) {
+    const update = (draft: { pendingFiles: PendingChatAttachment[]; input: string; messageTimerSeconds: number }) => {
+      const remaining = draft.pendingFiles.filter((entry) => entry.id !== fileId);
+      return {
+        pendingFiles: remaining,
+        input: caption && draft.input.trim() === caption ? "" : draft.input,
+        messageTimerSeconds: remaining.length ? draft.messageTimerSeconds : 0,
+      };
+    };
+    const savedDraft = draftRef.current.get(peerId);
+    if (savedDraft) draftRef.current.set(peerId, update(savedDraft));
+    if (activePeerRef.current === peerId) dispatchChatState((current) => update(current));
+  }
 
   const applyDeliveryReceipt = (
     peerId: string,
     clientMessageId: string,
     receipt: SentMessageReceipt,
   ) => {
+    const pending = outboxRef.current.get(clientMessageId);
+    if (pending) outboxRef.current.set(clientMessageId, {
+      ...pending, id: receipt.id, created_at: receipt.created_at,
+      expires_at: receipt.expires_at ?? null, delivery_state: undefined,
+    });
     if (activePeerRef.current !== peerId) return;
+    messageRequestIdRef.current += 1;
     setMessages((current) =>
       current.map((message) =>
         message.client_message_id === clientMessageId
@@ -1010,26 +1108,23 @@ function useChatPageContent() {
       };
       const currentPeerKey = await loadPeerMessageKey(peerId);
       if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
-      applyActivePeerMessageKey(currentPeerKey);
-      const receipt = await (async () => {
-            const senderKey = await ensureServerMessageKey(myId);
-            const payload = await encryptMessageForPeer(
-              text,
-              senderKey,
-              currentPeerKey,
-            );
-            return sendPeerMessage(peerId, { ...payload, ...lifecycle });
-          })();
+      if (activePeerRef.current === peerId) applyActivePeerMessageKey(currentPeerKey);
+      const senderKey = await ensureServerMessageKey(myId);
+      const payload = await encryptMessageForPeer(text, senderKey, currentPeerKey);
+      const receipt = await sendPeerMessage(peerId, { ...payload, ...lifecycle });
 
       applyDeliveryReceipt(peerId, clientMessageId, receipt);
-      setSecureStatus(null);
-      void loadMessagesForPeer(peerId).catch(() => undefined);
+      if (activePeerRef.current === peerId) {
+        setSecureStatus(null);
+        void loadMessagesForPeer(peerId).catch(() => undefined);
+      }
       void loadConversations();
     } catch (error) {
       if (error instanceof PeerMessageKeyChangedError) {
-        setActivePeerMessageKey(null);
-        setPendingPeerMessageKey(error.candidate);
+        outboxRef.current.set(clientMessageId, { ...message, delivery_state: "failed" });
         if (activePeerRef.current === peerId) {
+          setActivePeerMessageKey(null);
+          setPendingPeerMessageKey(error.candidate);
           setMessages((current) =>
             current.map((item) =>
               item.client_message_id === clientMessageId
@@ -1045,14 +1140,18 @@ function useChatPageContent() {
         const serverMessages = await fetchPeerMessages(peerId);
         if (serverMessages.some((item) => item.client_message_id === clientMessageId)) {
           const hydrated = await hydrateMessages(peerId, serverMessages);
-          if (activePeerRef.current === peerId) setMessages(hydrated);
-          setSecureStatus(null);
+          outboxRef.current.delete(clientMessageId);
+          if (activePeerRef.current === peerId) {
+            setMessages((current) => reconcileChatMessages(current, hydrated));
+            setSecureStatus(null);
+          }
           void loadConversations();
           return;
         }
       } catch {
         // The retry control below keeps the idempotency key and can safely resend.
       }
+      outboxRef.current.set(clientMessageId, { ...message, delivery_state: "failed" });
       if (activePeerRef.current === peerId) {
         setMessages((current) =>
           current.map((item) =>
@@ -1064,13 +1163,16 @@ function useChatPageContent() {
         setSecureStatus(t.chat_secure_message_send_failed);
       }
     } finally {
-      if (activePeerRef.current === peerId) setSending(false);
+      sendLockRef.current = false;
+      setSending(false);
     }
   };
 
   const retryTextMessage = async (message: Message) => {
-    if (sending || message.delivery_state !== "failed") return;
+    if (sendLockRef.current || message.delivery_state !== "failed") return;
+    sendLockRef.current = true;
     setSending(true);
+    if (message.client_message_id) outboxRef.current.set(message.client_message_id, { ...message, delivery_state: "sending" });
     setMessages((current) =>
       current.map((item) =>
         item.client_message_id === message.client_message_id
@@ -1084,6 +1186,7 @@ function useChatPageContent() {
   const confirmDeleteMessage = async () => {
     if (!deleteTarget || !activePeer || deletingMessageId) return;
     if (deleteTarget.id.startsWith("local-")) {
+      if (deleteTarget.client_message_id) outboxRef.current.delete(deleteTarget.client_message_id);
       setMessages((current) => current.filter((message) => message.id !== deleteTarget.id));
       setDeleteTarget(null);
       return;
@@ -1106,103 +1209,102 @@ function useChatPageContent() {
   // Send message
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
-    if (!activePeer || sending) return;
+    if (!activePeer || sendLockRef.current || (!input.trim() && !pendingFiles.length)) return;
+    if (!activePeerMessageKey || !deviceKeyFingerprint) {
+      setSecureStatus(t.chat_secure_setup_pending);
+      void refreshSecurity();
+      return;
+    }
 
-    // File upload
-    if (pendingFile) {
-      if (!activePeerMessageKey) {
-        setSecureStatus(secureChannelPendingStatus);
-        return;
-      }
-      setSending(true);
-      const formData = new FormData();
+    // Upload sequentially: each accepted file leaves the draft immediately.
+    if (pendingFiles.length) {
+      const peerId = activePeer;
+      const queued = pendingFiles;
       const caption = input.trim();
-      const clientMessageId = crypto.randomUUID();
-      formData.append("client_message_id", clientMessageId);
-      if (messageTimerSeconds) {
-        formData.append("expires_in_seconds", String(messageTimerSeconds));
-      }
+      setSending(true);
+      sendLockRef.current = true;
       try {
-        const currentPeerKey = await loadPeerMessageKey(activePeer);
-        if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
-        applyActivePeerMessageKey(currentPeerKey);
-        const senderKey = await ensureServerMessageKey(myId);
-        const encryptedAttachment = await encryptAttachmentForPeer(
-          new Uint8Array(await pendingFile.arrayBuffer()),
-          senderKey,
-          currentPeerKey,
-        );
-        formData.append(
-          "file",
-          new Blob([encryptedAttachment.ciphertext], {
-            type: "application/octet-stream",
-          }),
-          pendingFile.name,
-        );
-        formData.append("attachment_plaintext_size", String(pendingFile.size));
-        formData.append(
-          "attachment_e2e_algorithm",
-          encryptedAttachment.attachment_e2e_algorithm,
-        );
-        formData.append(
-          "attachment_e2e_nonce",
-          encryptedAttachment.attachment_e2e_nonce,
-        );
-        formData.append(
-          "attachment_e2e_salt",
-          encryptedAttachment.attachment_e2e_salt,
-        );
-        formData.append(
-          "sender_key_fingerprint",
-          encryptedAttachment.sender_key_fingerprint,
-        );
-        formData.append(
-          "recipient_key_fingerprint",
-          encryptedAttachment.recipient_key_fingerprint,
-        );
-        if (caption) {
-          const payload = await encryptMessageForPeer(
-            caption,
-            senderKey,
-            currentPeerKey,
-          );
-          formData.append("e2e_algorithm", payload.e2e_algorithm);
-          formData.append("e2e_ciphertext", payload.e2e_ciphertext);
-          formData.append("e2e_nonce", payload.e2e_nonce);
-          formData.append("e2e_salt", payload.e2e_salt);
+        for (let index = 0; index < queued.length; index += 1) {
+          const entry = queued[index];
+          const entryCaption = index === 0 ? caption : "";
+          setAttachmentUpload({ peerId, fileId: entry.id, index: index + 1, total: queued.length, name: entry.file.name });
+          let attempt = uploadAttemptRef.current.get(entry.id);
+          if (!attempt || attempt.caption !== entryCaption || attempt.timer !== messageTimerSeconds) {
+            attempt = { id: crypto.randomUUID(), caption: entryCaption, timer: messageTimerSeconds };
+            uploadAttemptRef.current.set(entry.id, attempt);
+          }
+          const currentPeerKey = await loadPeerMessageKey(peerId);
+          if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
+          if (activePeerRef.current === peerId) applyActivePeerMessageKey(currentPeerKey);
+          if (!attempt.formData) {
+            const senderKey = await ensureServerMessageKey(myId);
+            const { ciphertext, ...metadata } = await encryptAttachmentForPeer(new Uint8Array(await entry.file.arrayBuffer()), senderKey, currentPeerKey);
+            const captionEnvelope = entryCaption ? await encryptMessageForPeer(entryCaption, senderKey, currentPeerKey) : {};
+            const formData = new FormData();
+            formData.append("client_message_id", attempt.id);
+            if (messageTimerSeconds) formData.append("expires_in_seconds", String(messageTimerSeconds));
+            formData.append("file", new Blob([ciphertext], { type: "application/octet-stream" }), entry.file.name);
+            formData.append("attachment_plaintext_size", String(entry.file.size));
+            for (const [key, value] of Object.entries({ ...metadata, ...captionEnvelope })) formData.append(key, String(value));
+            attempt.formData = formData;
+            attempt.envelope = { ...metadata, ...captionEnvelope };
+          }
+          let receipt;
+          try { receipt = await uploadPeerAttachment(peerId, attempt.formData); }
+          catch (error) {
+            // The server checks idempotency before validating active keys. Only
+            // a definite key rejection permits re-encryption on the next retry.
+            if (error instanceof ApiRequestError && error.status === 422 && error.message.includes("message key is not active")) {
+              attempt.formData = undefined;
+              attempt.envelope = undefined;
+            }
+            throw error;
+          }
+          const delivered: Message = {
+            ...attempt.envelope,
+            id: receipt.id, client_message_id: attempt.id, created_at: receipt.created_at,
+            expires_at: receipt.expires_at ?? null, from_user: myId, to_user: peerId,
+            message: entryCaption || null, is_e2e: Boolean(entryCaption), is_read: false, read_at: null,
+            attachment_key: receipt.attachment_key, attachment_filename: entry.file.name,
+            attachment_mime: chatAttachmentMime(entry.file.name), attachment_size: entry.file.size,
+            attachment_is_e2e: true,
+          };
+          outboxRef.current.set(attempt.id, delivered);
+          if (activePeerRef.current === peerId) {
+            messageRequestIdRef.current += 1;
+            scrollToBottomRef.current = true;
+            setMessages((current) => mergeChatMessages(current, [delivered]));
+            setSecureStatus(null);
+          }
+          uploadAttemptRef.current.delete(entry.id);
+          finishAttachmentDraft(peerId, entry.id, entryCaption);
         }
-
-        await uploadPeerAttachment(activePeer, formData);
-        await loadMessagesForPeer(activePeer);
-        void loadConversations();
-        setSecureStatus(null);
-        setInput("");
-        setPendingFile(null);
-        setMessageTimerSeconds(0);
       } catch (error) {
-        if (error instanceof PeerMessageKeyChangedError) {
-          setActivePeerMessageKey(null);
-          setPendingPeerMessageKey(error.candidate);
-          setSecureStatus(t.chat_secure_identity_changed);
-        } else {
-          setSecureStatus(t.chat_secure_attachment_send_failed);
+        if (activePeerRef.current === peerId) {
+          if (error instanceof PeerMessageKeyChangedError) {
+            setActivePeerMessageKey(null);
+            setPendingPeerMessageKey(error.candidate);
+            setSecureStatus(t.chat_secure_identity_changed);
+          } else setSecureStatus(t.chat_secure_attachment_send_failed);
         }
       } finally {
+        sendLockRef.current = false;
         setSending(false);
+        setAttachmentUpload(null);
+        void loadConversations();
+        if (activePeerRef.current === peerId) void loadMessagesForPeer(peerId).catch(() => undefined);
       }
       return;
     }
 
     // Text message
     if (!input.trim()) return;
+    sendLockRef.current = true;
     setSending(true);
     const msg = input.trim();
     const clientMessageId = crypto.randomUUID();
     const peerId = activePeer;
     const createdAt = new Date().toISOString();
-    const expiresAt = messageTimerSeconds
-      ? new Date(Date.now() + messageTimerSeconds * 1_000).toISOString()
-      : null;
     const optimisticMessage: Message = {
       id: `local-${clientMessageId}`,
       from_user: myId,
@@ -1212,7 +1314,8 @@ function useChatPageContent() {
       is_read: false,
       read_at: null,
       created_at: createdAt,
-      expires_at: expiresAt,
+      // Expiry begins when the server accepts the message, never while offline.
+      expires_at: null,
       client_message_id: clientMessageId,
       delivery_state: "sending",
       retry_expires_in_seconds: messageTimerSeconds || undefined,
@@ -1223,6 +1326,10 @@ function useChatPageContent() {
     };
     setInput("");
     setMessageTimerSeconds(0);
+    draftRef.current.delete(peerId);
+    outboxRef.current.set(clientMessageId, optimisticMessage);
+    scrollToBottomRef.current = true;
+    dispatchChatState({ showScrollToLatest: false });
     setMessages((current) => [optimisticMessage, ...current]);
     await deliverTextMessage(optimisticMessage);
   };
@@ -1230,7 +1337,7 @@ function useChatPageContent() {
   // Filtered conversations (German-aware fold)
   const normalizedConvoSearch = deNormalize(search);
   const filteredConvos = normalizedConvoSearch
-    ? conversations.filter((c) => deNormalize(c.name).includes(normalizedConvoSearch))
+    ? conversations.filter((c) => deNormalize(`${c.name} ${c.email} ${roleDisplay(c.role, t)}`).includes(normalizedConvoSearch))
     : conversations;
 
   // Filtered users for new chat. Matches name, email, the role enum AND its localized
@@ -1259,7 +1366,26 @@ function useChatPageContent() {
             : t.chat_message_timer_off;
 
   const normalizedMessageSearch = deNormalize(messageSearch);
-  const displayMsgs = [...messages]
+  const securityWarning = !activePeerMessageKey || !deviceKeyFingerprint
+    ? pendingPeerMessageKey ? t.chat_secure_identity_changed
+      : securityLoading && !deviceKeyFingerprint ? t.common_loading
+      : !deviceKeyFingerprint ? t.chat_secure_setup_failed_device
+      : secureStatus === t.chat_secure_key_failed ? t.chat_secure_key_failed : t.chat_secure_waiting
+    : null;
+  const visibleSecureStatus = securityWarning && (
+    secureStatus === securityWarning || secureStatus === t.chat_secure_setup_pending ||
+    secureStatus === t.chat_attachment_pending || secureStatus === t.chat_secure_key_failed
+  ) ? null : secureStatus;
+  const messageLoadError = messageError ? (
+    <div role="alert" className="mx-auto flex max-w-sm items-center gap-3 rounded-xl border border-destructive/30 bg-card px-4 py-3 shadow-sm">
+      <p className="flex-1 text-sm text-destructive">{t.common_error}</p>
+      <Button type="button" variant="outline" size="sm"
+        onClick={() => activePeer && void loadMessagesForPeer(activePeer, true).catch(() => undefined)}>
+        {t.common_refresh}
+      </Button>
+    </div>
+  ) : null;
+  const displayMsgs = sortChatMessages(messages)
     .filter(
       (message) =>
         !message.expires_at || new Date(message.expires_at).getTime() > expiryClock,
@@ -1281,7 +1407,7 @@ function useChatPageContent() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-5.5rem)] min-h-[420px] overflow-hidden rounded-xl border bg-card shadow-sm sm:h-[calc(100vh-8rem)] sm:rounded-2xl">
+    <div className="flex h-[calc(100dvh-5.5rem)] min-h-[320px] overflow-hidden rounded-xl border bg-card shadow-sm sm:h-[calc(100dvh-8rem)] sm:rounded-2xl" data-testid="chat-workspace">
       {/* ── Left: Conversations ── */}
       <div
         className={cn(
@@ -1312,6 +1438,7 @@ function useChatPageContent() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input
               placeholder={t.common_search}
+              aria-label={t.common_search}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 h-9 rounded-lg"
@@ -1328,6 +1455,7 @@ function useChatPageContent() {
           >
             <Input
               placeholder={t.chat_search_users}
+              aria-label={t.chat_search_users}
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
               className="h-8 rounded-lg text-sm"
@@ -1337,7 +1465,9 @@ function useChatPageContent() {
               role="listbox"
               aria-label={t.chat_search_users}
             >
-              {userError ? (
+              {usersLoading ? (
+                <p role="status" className="py-4 text-center text-xs text-muted-foreground">{t.common_loading}</p>
+              ) : userError ? (
                 <div className="flex flex-col items-center gap-2 py-4 text-center">
                   <p className="text-xs text-destructive">{t.common_error}</p>
                   <Button type="button" variant="outline" size="sm" onClick={() => void loadUsers()}>
@@ -1415,12 +1545,12 @@ function useChatPageContent() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium truncate">{c.name}</span>
-                    <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(c.last_at)}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{timeAgo(c.last_at, lang)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-0.5">
                     <span className={cn("text-xs truncate", c.unread > 0 ? "text-foreground font-medium" : "text-muted-foreground")}>
                       {c.is_mine ? `${t.chat_you}: ` : ""}
-                      {truncate(c.last_message, 40)}
+                      {truncate(c.is_e2e ? CHAT_E2E_PREVIEW : c.last_message, 40)}
                     </span>
                     {c.unread > 0 && (
                       <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-primary text-[10px] font-semibold text-primary-foreground px-1 shrink-0">
@@ -1437,11 +1567,27 @@ function useChatPageContent() {
 
       {/* ── Right: Messages ── */}
       <div
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = activePeer && !sendLockRef.current ? "copy" : "none";
+          if (activePeer && !sendLockRef.current) setDraggingFiles(true);
+        }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFiles(false); }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setDraggingFiles(false);
+          addPendingFiles(Array.from(event.dataTransfer.files));
+        }}
+        data-testid="chat-message-panel"
         className={cn(
-          "min-w-0 flex-1 flex-col",
+          "relative min-w-0 flex-1 flex-col",
           activePeer ? "flex" : "hidden md:flex",
         )}
       >
+        {draggingFiles && activePeer ? <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-background/95 p-6 text-center font-medium"><Paperclip className="mr-2 size-5" />{t.chat_attachments_drop}</div> : null}
         {!activePeer ? (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
             <MessageSquare className="size-12 opacity-30" />
@@ -1472,12 +1618,13 @@ function useChatPageContent() {
                   <p className="text-[10px] text-muted-foreground">
                     {roleDisplay(activeRole, t)}
                     {` - ${
-                      activePeerMessageKey
+                      activePeerMessageKey && deviceKeyFingerprint
                         ? t.chat_secure_encrypted_label
-                        : t.chat_secure_server_channel_label
+                        : t.chat_secure_identity_unverified
                     }`}
                   </p>
-                  <p className="text-[10px] text-muted-foreground" aria-live="polite">
+                  <p className="truncate text-[10px] text-muted-foreground" aria-live="polite"
+                    title={connectionStatus !== "connected" ? t.chat_connection_polling : undefined}>
                     {connectionStatus === "connected"
                       ? t.chat_connection_connected
                       : connectionStatus === "reconnecting"
@@ -1504,6 +1651,20 @@ function useChatPageContent() {
               </button>
             </div>
 
+            {securityWarning ? (
+              <div className="flex items-start gap-3 border-b bg-amber-50/60 px-3 py-3 text-xs sm:px-5 dark:bg-amber-950/20" role="status">
+                <Shield className="mt-0.5 size-4 shrink-0 text-amber-700" />
+                <p className="min-w-0 flex-1 leading-relaxed">
+                  {securityWarning}
+                </p>
+                <Button type="button" variant="outline" size="sm" disabled={securityLoading}
+                  onClick={() => pendingPeerMessageKey ? setKeyDialogMode("manage") : void refreshSecurity()}>
+                  {securityLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+                  {pendingPeerMessageKey ? t.chat_security_settings : t.chat_security_retry}
+                </Button>
+              </div>
+            ) : null}
+
             <div className="border-b px-3 py-2 sm:px-5">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1521,8 +1682,16 @@ function useChatPageContent() {
             </div>
 
             {/* Messages */}
+            <div className="relative min-h-0 flex-1">
             <div
-              className="flex-1 overflow-y-auto px-3 py-4 sm:px-5"
+              ref={messagesScrollRef}
+              onScroll={(event) => {
+                const container = event.currentTarget;
+                const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+                scrollToBottomRef.current = distance <= 2;
+                dispatchChatState({ showScrollToLatest: distance > 100 });
+              }}
+              className="h-full overflow-y-auto overscroll-contain px-3 py-4 sm:px-5"
               role="log"
               aria-live="polite"
               aria-relevant="additions text"
@@ -1533,17 +1702,11 @@ function useChatPageContent() {
                   {t.common_loading}
                 </div>
               ) : null}
-              {messageError ? (
-                <div className="mx-auto my-4 flex max-w-sm flex-col items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-center">
-                  <p className="text-sm text-destructive">{t.common_error}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => activePeer && void loadMessagesForPeer(activePeer, true)}
-                  >
-                    {t.common_refresh}
-                  </Button>
+              {messages.length === 0 ? messageLoadError : null}
+              {!messageLoading && !messageError && !messageSearch && displayMsgs.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+                  <MessageSquare className="size-8 opacity-40" />
+                  <p>{t.chat_empty_conversation}</p>
                 </div>
               ) : null}
               {!messageLoading && !messageError && messageSearch && displayMsgs.length === 0 ? (
@@ -1576,11 +1739,8 @@ function useChatPageContent() {
                     chatMessageDateKey(m.created_at);
                 const hasText = !!m.message?.trim();
                 const hasAttachment = !!m.attachment_key;
-                const isSecureAttachment = m.attachment_is_e2e ?? false;
-                const isImage =
-                  !isSecureAttachment && (m.attachment_mime?.startsWith("image/") ?? false);
                 const readReceipt =
-                  mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at)}` : null;
+                  mine && m.read_at ? `${t.chat_seen} ${timeAgo(m.read_at, lang)}` : null;
                 const expiryLabel = m.expires_at
                   ? t.chat_message_expires.replace(
                       "{time}",
@@ -1609,58 +1769,13 @@ function useChatPageContent() {
                         mine ? "items-end" : "items-start",
                       )}
                     >
-                    {/* Attachment */}
-                    {hasAttachment &&
-                      (isSecureAttachment ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleSecureAttachmentDownload(m)}
-                          disabled={attachmentBusyId === m.id}
-                          className={cn(
-                            "flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 max-w-[320px] transition-colors text-left disabled:opacity-60",
-                            mine ? "bg-foreground/90 text-background" : "bg-muted",
-                          )}
-                        >
-                          <Shield className="size-4 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium break-words">
-                              {m.attachment_filename}
-                            </p>
-                            <p className="text-[10px] opacity-70">
-                              {t.chat_secure_attachment_label} - {formatSize(m.attachment_size ?? 0)}
-                            </p>
-                            <p className="text-[10px] opacity-80">
-                              {t.chat_secure_attachment_unscanned}
-                            </p>
-                          </div>
-                          <Download className="size-3.5 shrink-0 opacity-60" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void handleAttachmentDownload(m)}
-                          disabled={attachmentBusyId === m.id}
-                          className={cn(
-                            "flex items-center gap-2.5 px-3 py-2 rounded-xl mb-1 max-w-[280px] transition-colors text-left disabled:opacity-60",
-                            mine ? "bg-foreground/90 text-background" : "bg-muted"
-                          )}
-                        >
-                          <FileText className="size-4 shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-medium break-words">{m.attachment_filename}</p>
-                            <p className="text-[10px] opacity-70">
-                              {isImage ? t.uiText.chat_attachment_image : t.uiText.chat_attachment_file} - {formatSize(m.attachment_size ?? 0)}
-                            </p>
-                          </div>
-                          <Download className="size-3.5 shrink-0 opacity-60" />
-                        </button>
-                      ))}
+                    {hasAttachment ? <ChatAttachment message={m} mine={mine} loadBlob={loadAttachmentBlob} /> : null}
                     {/* Text bubble */}
                     {hasText && (
                       <div
                         data-testid={`chat-message-text-${m.id}`}
                         className={cn(
-                          "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-sm leading-5 sm:max-w-[70%]",
+                          "max-w-[85%] whitespace-pre-wrap wrap-anywhere rounded-2xl px-3.5 py-2 text-sm leading-5 sm:max-w-[70%]",
                           mine
                             ? cn(
                                 "bg-foreground text-background",
@@ -1679,7 +1794,13 @@ function useChatPageContent() {
                     )}
                     <div className="mt-0.5 flex min-h-5 items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
                       {m.delivery_state === "sending" ? (
-                        <span>{t.chat_message_sending}</span>
+                        <span className="inline-flex items-center gap-1"><LoaderCircle className="size-3 animate-spin" />{t.chat_message_sending}</span>
+                      ) : null}
+                      {mine && !m.delivery_state ? (
+                        <span className={cn("inline-flex items-center gap-1", m.is_read && "text-primary")} title={readReceipt ?? t.chat_message_sent}>
+                          {m.is_read ? <CheckCheck className="size-3.5" /> : <Check className="size-3.5" />}
+                          {m.is_read ? t.chat_seen : t.chat_message_sent}
+                        </span>
                       ) : null}
                       {m.delivery_state === "failed" ? (
                         <>
@@ -1703,8 +1824,7 @@ function useChatPageContent() {
                       ) : null}
                       {!groupedWithNext && m.delivery_state !== "sending" ? (
                         <span>
-                          {timeAgo(m.created_at)}
-                          {readReceipt ? ` - ${readReceipt}` : ""}
+                          {timeAgo(m.created_at, lang)}
                         </span>
                       ) : null}
                       {mine && m.delivery_state !== "sending" ? (
@@ -1726,11 +1846,25 @@ function useChatPageContent() {
               })}
               <div ref={messagesEndRef} />
             </div>
+            {messageError && messages.length > 0 ? (
+              <div className="absolute inset-x-3 top-3 z-10">{messageLoadError}</div>
+            ) : null}
+            {showScrollToLatest ? (
+              <div className="absolute bottom-3 right-3 z-10">
+                <Button type="button" variant="outline" size="sm" className="bg-card shadow-sm" onClick={() => {
+                  const container = messagesScrollRef.current;
+                  if (container) container.scrollTop = container.scrollHeight;
+                  scrollToBottomRef.current = true;
+                  dispatchChatState({ showScrollToLatest: false });
+                }}><ArrowDown className="size-4" />{t.chat_scroll_latest}</Button>
+              </div>
+            ) : null}
+            </div>
 
-            {secureStatus && (
+            {visibleSecureStatus && (
               <div className="flex items-center gap-2 border-t bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground sm:px-5">
                 <Shield className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1">{secureStatus}</span>
+                <span className="min-w-0 flex-1">{visibleSecureStatus}</span>
                 <button
                   type="button"
                   className="flex size-11 shrink-0 items-center justify-center rounded-md hover:bg-muted"
@@ -1743,49 +1877,33 @@ function useChatPageContent() {
               </div>
             )}
 
-            {/* Pending file preview */}
-            {pendingFile && (
-              <div className="flex items-center gap-3 px-5 py-2 border-t bg-muted/30 animate-in fade-in duration-150">
-                <FileText className="size-4 text-muted-foreground shrink-0" />
-                <span className="text-sm flex-1 min-w-0 break-words">{pendingFile.name}</span>
-                <span className="text-xs text-muted-foreground">{formatSize(pendingFile.size)}</span>
-                <button
-                  type="button"
-                  onClick={() => setPendingFile(null)}
-                  className="text-muted-foreground hover:text-foreground"
-                  aria-label={t.common_remove}
-                  title={t.common_remove}
-                >
-                  <X className="size-4" />
-                </button>
+            {pendingFiles.length > 0 ? (
+              <div data-testid="chat-attachment-queue" className="border-t bg-muted/30 px-3 py-2 sm:px-5">
+                {attachmentUpload?.peerId === activePeer ? <p role="status" className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 shrink-0 animate-spin" />{t.chat_attachments_uploading.replace("{index}", String(attachmentUpload.index)).replace("{total}", String(attachmentUpload.total)).replace("{name}", attachmentUpload.name)}</p> : null}
+                <div role="list" aria-label={t.chat_secure_attachment_label} className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {pendingFiles.map((entry) => <div role="listitem" key={entry.id}><PendingAttachment file={entry.file} busy={sending} onRemove={() => {
+                    uploadAttemptRef.current.delete(entry.id);
+                    setPendingFiles((current) => current.filter((item) => item.id !== entry.id));
+                  }} /></div>)}
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">{t.chat_attachments_limit}</p>
               </div>
-            )}
+            ) : null}
 
             {/* Input */}
-            <form onSubmit={handleSend} className="flex flex-wrap items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
+            <form onSubmit={handleSend} onPaste={(event) => {
+              const files = Array.from(event.clipboardData.files);
+              if (files.length) { event.preventDefault(); addPendingFiles(files); }
+            }} className="flex flex-wrap items-center gap-1.5 border-t px-2 py-2.5 sm:gap-2 sm:px-4 sm:py-3">
               <input
                 ref={fileInputRef}
                 type="file"
                 accept={CHAT_ATTACHMENT_ACCEPT}
                 className="hidden"
-                onChange={(e) => {
-                  if (!activePeerMessageKey) {
-                    setSecureStatus(secureChannelPendingStatus);
-                    e.target.value = "";
-                    return;
-                  }
-                  const file = e.target.files?.[0];
-                  if (file && !isAllowedChatAttachment(file)) {
-                    setSecureStatus(t.chat_attachment_type_blocked);
-                    setPendingFile(null);
-                  } else if (file && file.size > CHAT_ATTACHMENT_MAX_BYTES) {
-                    setSecureStatus(t.chat_attachment_too_large);
-                    setPendingFile(null);
-                  } else if (file) {
-                    setSecureStatus(null);
-                    setPendingFile(file);
-                  }
-                  e.target.value = "";
+                multiple
+                onChange={(event) => {
+                  addPendingFiles(Array.from(event.target.files ?? []));
+                  event.target.value = "";
                 }}
               />
               <button
@@ -1843,6 +1961,7 @@ function useChatPageContent() {
               </label>
               <textarea
                 ref={composerRef}
+                disabled={sending && pendingFiles.length > 0}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(event) => {
@@ -1868,13 +1987,14 @@ function useChatPageContent() {
                 disabled={
                   sending ||
                   !activePeerMessageKey ||
-                  (!input.trim() && !pendingFile)
+                  !deviceKeyFingerprint ||
+                  (!input.trim() && !pendingFiles.length)
                 }
                 aria-label={t.chat_send}
                 title={t.chat_send}
                 className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-40"
               >
-                <Send className="size-4" />
+                {sending ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>
               <p
                 id="chat-composer-keyboard-hint"

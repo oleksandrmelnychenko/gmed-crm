@@ -1,3 +1,5 @@
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
+
 export const CONCIERGE_SERVICE_STATUSES = [
   "planned",
   "booked",
@@ -629,8 +631,7 @@ export function nextConciergeTaskStatus(status: string): "in_progress" | "review
 }
 
 export function conciergeTaskDisplayTitle(task: ConciergeTask, lang: "de" | "ru"): string {
-  void lang;
-  return task.title;
+  return localizeTaskTitle(task.title, lang);
 }
 
 export function conciergeTaskCode(task: Pick<ConciergeTask, "id">): string {
@@ -789,6 +790,10 @@ export function filterConciergeTasks(
       conciergeTaskCode(task),
       task.title,
       task.note,
+      localizeTaskTitle(task.title, "de"),
+      localizeTaskTitle(task.title, "ru"),
+      localizeTaskNote(task.note, "de"),
+      localizeTaskNote(task.note, "ru"),
       task.location,
       task.assigned_to_name,
       task.assigned_by_name,

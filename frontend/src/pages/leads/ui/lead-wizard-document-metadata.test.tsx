@@ -25,6 +25,26 @@ describe("LeadWizardDocumentMetadata", () => {
     })).toBe("VKS-20260727-A1B2C3D4E5F6");
   });
 
+  it("distinguishes document versions while retaining the business number", () => {
+    const html = renderToStaticMarkup(
+      <LeadWizardDocumentMetadata
+        lang="ru"
+        document={{
+          id: "framework-v2",
+          document_number: "FC-20260714-0010-V02",
+          version_number: 2,
+          version_count: 3,
+          is_latest_version: false,
+          file_size: 2048,
+          generated_template_id: "framework_contract",
+          created_at: createdAt,
+        }}
+      />,
+    );
+    expect(html).toContain("FC-20260714-0010");
+    expect(html).toContain("Версия 2 · предыдущая");
+  });
+
   it("renders a generated document date-time pill immediately after the size", () => {
     const expectedDateTime = formatDateTime(createdAt, "de-DE", "");
     const html = renderToStaticMarkup(

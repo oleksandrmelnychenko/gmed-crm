@@ -1,3 +1,4 @@
+import { serviceDescriptionItems, serviceDescriptionText, type ServiceDescriptionItem } from "@/lib/service-description";
 import {
   Suspense,
   lazy,
@@ -12,6 +13,8 @@ import {
 } from "react";
 import {
   Archive,
+  ArrowLeft,
+  ArrowRight,
   Check,
   ChevronDown,
   CircleAlert,
@@ -102,6 +105,7 @@ import {
   uploadDocument,
   type DocumentComplianceKind,
 } from "@/pages/documents/data/document-api";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import {
   createOrder,
@@ -284,6 +288,7 @@ export type ServiceLine = {
   managedByWizard?: boolean;
   description: string;
   catalogDescription: string;
+  catalogDescriptionItems?: ServiceDescriptionItem[];
   catalogUnitLabel: string;
   currency: string;
   quantity: string;
@@ -689,6 +694,10 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
           managedByWizard: line.managed_by_wizard !== false,
           description: inputString(line.description),
           catalogDescription: inputString(line.catalog_description),
+          catalogDescriptionItems: serviceDescriptionItems(
+            Array.isArray(line.catalog_description_items) ? line.catalog_description_items as ServiceDescriptionItem[] : undefined,
+            inputString(line.catalog_description),
+          ),
           catalogUnitLabel: inputString(line.catalog_unit_label),
           currency: inputString(line.currency, "EUR"),
           quantity: inputString(line.quantity, "1"),
@@ -803,6 +812,7 @@ function autosavePayload(
           managed_by_wizard: line.managedByWizard !== false,
           description: line.description,
           catalog_description: line.catalogDescription,
+          catalog_description_items: serviceDescriptionItems(line.catalogDescriptionItems, line.catalogDescription),
           catalog_unit_label: line.catalogUnitLabel,
           currency: line.currency,
           quantity: line.quantity,
@@ -1533,6 +1543,7 @@ function intakeFlowLabel(value: string | null | undefined, tx: Tx) {
     medical: ["Медицинский", "Medizinisch"],
     contact: ["Контактная форма", "Kontaktformular"],
     standard: ["Стандартный", "Standard"],
+    website_wizard: ["Опросник на сайте", "Website-Fragebogen"],
   };
   const label = normalized ? labels[normalized] : null;
   return label ? tx(label[0], label[1]) : value || tx("Не указано", "Nicht angegeben");
@@ -1653,6 +1664,13 @@ export function resolveServiceDescriptionTemplate(
     .join("\n")
     .replace(/\n{3,}/gu, "\n\n")
     .trim();
+}
+
+export function resolveServiceDescriptionItems(
+  items: ServiceDescriptionItem[],
+  context: Parameters<typeof resolveServiceDescriptionTemplate>[1],
+) {
+  return items.map((item) => ({ ...item, text: resolveServiceDescriptionTemplate(item.text, context) }));
 }
 
 type ServiceBillingUnitKind = "hour" | "day" | "unit" | "other";
@@ -2056,6 +2074,16 @@ export function quoteMatchesCurrentServices(
     && quoteMatchesServiceLines(quote, lines);
 }
 
+export function mergeCommercialQuoteReadiness(
+  clientReady: boolean,
+  serverQuoteAccepted: boolean | undefined,
+  serverPrepaymentReady: boolean | undefined,
+) {
+  return clientReady
+    && serverQuoteAccepted !== false
+    && serverPrepaymentReady !== false;
+}
+
 function validMoneyInput(value: string) {
   if (!value.trim()) return true;
   const parsed = Number(value.replace(",", ".").trim());
@@ -2070,6 +2098,10 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     clientReference: item.client_reference ?? null,
     managedByWizard: item.client_reference?.startsWith("lead-wizard:") ?? false,
     description: item.description,
+    catalogDescriptionItems: serviceDescriptionItems(
+      item.agency_service_description_items_snapshot,
+      item.agency_service_description_snapshot ?? item.agency_service_description,
+    ),
     catalogDescription:
       item.agency_service_description_snapshot
       ?? item.agency_service_description
@@ -2140,6 +2172,13 @@ function wizardDocumentFilename(document: DocumentItem) {
   if (mimeType !== "application/pdf" || /\.pdf$/i.test(filename)) return filename;
   const filenameWithoutExtension = filename.replace(/\.[a-z0-9]{1,10}$/i, "");
   return `${filenameWithoutExtension || "document"}.pdf`;
+}
+
+function wizardDocumentComplianceKind(document: DocumentItem): DocumentComplianceKind | null {
+  if (document.generated_template_id === "framework_contract") return "framework_contract";
+  const kind = wizardDocumentKind(document);
+  if (kind === "privacy_consents") return "dsgvo";
+  return kind === "privacy_information" ? null : kind;
 }
 
 function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | null {
@@ -2557,6 +2596,7 @@ function ToggleRow({
 function WizardDocumentRows({
   documents,
   complianceKind,
+  showSignatureStatus = true,
   emptyLabel,
   lang,
   busy,
@@ -2569,6 +2609,7 @@ function WizardDocumentRows({
 }: {
   documents: DocumentItem[];
   complianceKind?: DocumentComplianceKind;
+  showSignatureStatus?: boolean;
   emptyLabel: string;
   lang: Lang;
   busy: string | null;
@@ -2597,22 +2638,37 @@ function WizardDocumentRows({
             <div className="min-w-0 flex-1">
               <button
                 type="button"
-                className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={wizardDocumentFilename(document)}
+                disabled={disabled}
+                className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                 onClick={() => onOpen(document)}
               >
                 {wizardDocumentFilename(document)}
               </button>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <LeadWizardDocumentMetadata document={document} lang={lang} />
-                {complianceKind ? (
+                {complianceKind && !signed && onSign ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    aria-busy={busy === `sign-${document.id}`}
+                    disabled={disabled}
+                    onClick={() => onSign(document, complianceKind)}
+                  >
+                    {busy === `sign-${document.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileCheck2 aria-hidden="true" className="size-3.5" />}
+                    {busy === `sign-${document.id}` ? tx("Подтверждение…", "Wird bestätigt…") : complianceKind === "identity" ? tx("Подтвердить документ", "Dokument bestätigen") : tx("Подтвердить подпись", "Unterschrift bestätigen")}
+                  </Button>
+                ) : complianceKind && showSignatureStatus ? (
                   <StateMark
                     done={signed}
-                    label={signed ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+                    label={complianceKind === "identity" ? signed ? tx("Проверен", "Geprüft") : tx("Ожидает проверки", "Prüfung offen") : signed ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
                   />
                 ) : null}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              <DocumentSignatureAction documentId={document.id} title={wizardDocumentFilename(document)} iconOnly disabled={disabled} />
               {wizardDocumentPreviewKind(document) ? (
                 <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть", "Vorschau")} aria-label={tx("Просмотреть", "Vorschau")} disabled={disabled} onClick={() => onOpen(document)}>
                   {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
@@ -2621,11 +2677,6 @@ function WizardDocumentRows({
               <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать", "Herunterladen")} aria-label={tx("Скачать", "Herunterladen")} disabled={disabled} onClick={() => onDownload(document)}>
                 {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
               </Button>
-              {complianceKind && onSign ? (
-                <Button type="button" variant="ghost" size="icon-sm" title={tx("Подтвердить подпись", "Unterschrift bestätigen")} aria-label={tx("Подтвердить подпись", "Unterschrift bestätigen")} disabled={signed || disabled} onClick={() => onSign(document, complianceKind)}>
-                  <FileCheck2 className={cn("size-3.5", signed && "text-emerald-700")} />
-                </Button>
-              ) : null}
               <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить", "Löschen")} aria-label={tx("Удалить", "Löschen")} disabled={disabled} onClick={() => onDelete(document)}>
                 <Trash2 className="size-3.5" />
               </Button>
@@ -2713,6 +2764,7 @@ export function LeadWizard({
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
+  const [documentPreviewError, setDocumentPreviewError] = useState("");
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
     () => new Set(),
   );
@@ -2722,6 +2774,7 @@ export function LeadWizard({
   const [validationContext, setValidationContext] = useState<ValidationContext | null>(null);
   const hydrated = useRef<string | null>(null);
   const stepNavRef = useRef<HTMLElement | null>(null);
+  const stepPanelRef = useRef<HTMLElement | null>(null);
   const stepTabsRef = useRef<HTMLDivElement | null>(null);
   const stepPillRef = useRef<HTMLSpanElement | null>(null);
   const stepPillReadyRef = useRef(false);
@@ -2898,6 +2951,7 @@ export function LeadWizard({
     }
     documentPreviewUrlRef.current = nextPreview?.url ?? null;
     setDocumentPreview(nextPreview);
+    setDocumentPreviewError("");
   }, []);
 
   useEffect(() => () => {
@@ -3345,6 +3399,10 @@ export function LeadWizard({
     };
   }, [lang, open, step]);
 
+  useEffect(() => {
+    stepPanelRef.current?.scrollTo({ top: 0 });
+  }, [open, step]);
+
   const order = orders[0] ?? null;
   const contract = contracts.find((item) => item.status !== "terminated") ?? null;
   const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
@@ -3404,10 +3462,21 @@ export function LeadWizard({
     )),
     [documents],
   );
+  const previewedDocument = documents.find((item) => item.id === documentPreview?.id);
+  const previewComplianceKind = previewedDocument ? wizardDocumentComplianceKind(previewedDocument) : null;
+  const previewDocumentSigned = Boolean(
+    previewComplianceKind
+    && previewedDocument?.signed_at
+    && previewedDocument.compliance_kind === previewComplianceKind,
+  );
   const intakeType = lead ? leadIntakeTypeFromLead(lead) : null;
   const isQuestionnaireLead = intakeType === "questionnaire";
   const isExternalIntakeLead = intakeType === "questionnaire" || intakeType === "form";
   const readiness = useMemo(() => new Map((lead?.readiness.steps ?? []).map((item) => [item.key, item.ready])), [lead?.readiness.steps]);
+  const readinessChecks = useMemo(
+    () => new Map((lead?.readiness.checks ?? []).map((item) => [item.key, item.passed])),
+    [lead?.readiness.checks],
+  );
   const quoteIsCurrent = useMemo(() => Boolean(
     quote
     && quoteMatchesCurrentServices(quote, lines, estimate.gross)
@@ -3423,16 +3492,29 @@ export function LeadWizard({
     && requiredPrepayment <= quoteTotal + 0.005
   );
   const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
-  const quoteAndPrepaymentReady = Boolean(acceptedQuote)
+  const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote)
     && requiredPrepaymentValid
     && (!prepayment || persistedPrepayment + 0.005 >= requiredPrepayment);
+  const serverQuoteAccepted = readinessChecks.get("quote_accepted");
+  const serverPrepaymentReady = readinessChecks.get("prepayment_ready");
+  const quoteAndPrepaymentReady = mergeCommercialQuoteReadiness(
+    clientQuoteAndPrepaymentReady,
+    serverQuoteAccepted,
+    serverPrepaymentReady,
+  );
   const quoteStateLabel = !quote
     ? tx("Смета ещё не рассчитана", "Kostenvoranschlag noch nicht berechnet")
     : !quoteIsCurrent
       ? tx("Услуги изменены — пересчитайте смету", "Leistungen geändert — Kostenvoranschlag neu berechnen")
       : quote.status !== "accepted"
         ? tx("Смета ожидает подтверждения", "Kostenvoranschlag wartet auf Annahme")
-        : prepayment && (!requiredPrepaymentValid || persistedPrepayment + 0.005 < requiredPrepayment)
+        : serverQuoteAccepted === false
+          ? tx("Смета не соответствует текущему заказу — пересчитайте", "Kostenvoranschlag stimmt nicht mit dem aktuellen Auftrag überein — neu berechnen")
+        : prepayment && (
+            !requiredPrepaymentValid
+            || persistedPrepayment + 0.005 < requiredPrepayment
+            || serverPrepaymentReady === false
+          )
           ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
           : tx("Смета и предоплата актуальны", "Kostenvoranschlag und Vorauszahlung sind aktuell");
 
@@ -3468,7 +3550,7 @@ export function LeadWizard({
           <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
           <div className="min-w-0">
             <p className="font-semibold">
-              {tx("Не удалось создать", "Erstellung fehlgeschlagen")}: {commercialDocumentTitle(templateId)}
+              {tx("Не удалось выполнить действие", "Aktion fehlgeschlagen")}: {commercialDocumentTitle(templateId)}
             </p>
             <p className="mt-0.5">{message}</p>
           </div>
@@ -4299,6 +4381,7 @@ export function LeadWizard({
       return;
     }
     setBusy("upload-" + kind);
+    setError("");
     try {
       const form = new FormData();
       form.set("lead_id", leadId);
@@ -4315,16 +4398,18 @@ export function LeadWizard({
     }
   }
 
-  async function downloadDocument(document: DocumentItem) {
+  async function downloadDocument(document: DocumentItem, fromPreview = false) {
     setBusy(`download-${document.id}`);
     setError("");
+    if (fromPreview) setDocumentPreviewError("");
     try {
       await downloadDocumentFile(
         document.id,
         wizardDocumentFilename(document),
       );
     } catch (nextError) {
-      showWizardError(nextError);
+      if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
+      else showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -4388,13 +4473,16 @@ export function LeadWizard({
     }
   }
 
-  async function signDocument(id: string, kind: DocumentComplianceKind) {
-    setBusy("sign-" + kind);
+  async function signDocument(id: string, kind: DocumentComplianceKind, fromPreview = false) {
+    setBusy("sign-" + id);
+    setError("");
+    if (fromPreview) setDocumentPreviewError("");
     try {
       await markDocumentSigned(id, kind);
       await refreshDocumentsState();
     } catch (nextError) {
-      showWizardError(nextError);
+      if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
+      else showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -4692,18 +4780,21 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
-  async function signContract(documentId?: string) {
-    setBusy("contract");
+  async function signContract(documentId: string, fromPreview = false) {
+    setBusy("sign-" + documentId);
     setError("");
+    if (fromPreview) setDocumentPreviewError("");
     setCommercialDocumentErrors((current) => ({ ...current, framework_contract: "" }));
     try {
       const result = await ensureCommercial();
       await updateContractStatus(result.contractId, { status: "signed" });
-      if (documentId) await markDocumentSigned(documentId, "framework_contract");
-      await reload(false, true);
+      await markDocumentSigned(documentId, "framework_contract");
+      if (fromPreview) await refreshCommercialState();
+      else await reload(false, true);
     } catch (nextError) {
       setValidationContext(null);
-      setCommercialDocumentErrors((current) => ({
+      if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
+      else setCommercialDocumentErrors((current) => ({
         ...current,
         framework_contract: errorText(nextError, tx),
       }));
@@ -5000,6 +5091,7 @@ ${serviceCommentLines.join("\n")}`
                 line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
                 vat_rate: line.vat,
                 note: serviceDocumentNote(line),
+                description_items: resolvedServiceCatalogItems(line),
               })),
         },
       });
@@ -5114,7 +5206,7 @@ ${serviceCommentLines.join("\n")}`
   }
 
   function navigateToStep(target: StepId) {
-    if (target === step || busy !== null || stepNavigationInFlightRef.current) return;
+    if (target === step || loading || isBusy || stepNavigationInFlightRef.current) return;
     setError("");
     setValidationContext(null);
     setOrderValidationAttempted(false);
@@ -5224,6 +5316,7 @@ ${serviceCommentLines.join("\n")}`
           agencyServicePriceVersionId: selectedPrice.id || null,
           description: service.service_name,
           catalogDescription: service.description?.trim() ?? "",
+          catalogDescriptionItems: serviceDescriptionItems(service.description_items, service.description),
           catalogUnitLabel: service.unit_label?.trim() ?? "",
           currency: selectedPrice.currency || "EUR",
           price: inputString(selectedPrice.unit_price),
@@ -5278,16 +5371,17 @@ ${serviceCommentLines.join("\n")}`
     return line.description.trim() || catalogService?.service_name.trim() || "";
   }
 
-  function resolvedServiceCatalogDescription(line: ServiceLine) {
-    const catalogService = line.agencyServiceId
-      ? agencyServiceById.get(line.agencyServiceId)
-      : undefined;
-    const template = line.catalogDescription.trim() || catalogService?.description?.trim() || "";
-    return resolveServiceDescriptionTemplate(template, {
+  function resolvedServiceCatalogItems(line: ServiceLine) {
+    const items = serviceDescriptionItems(line.catalogDescriptionItems, line.catalogDescription);
+    return resolveServiceDescriptionItems(items, {
       dateFrom: draft?.programDateFrom ?? "",
       dateTo: draft?.programDateTo ?? "",
       specialties: (draft?.specialties ?? []).map((value) => specialtyDocumentLabel(value)),
     });
+  }
+
+  function resolvedServiceCatalogDescription(line: ServiceLine) {
+    return serviceDescriptionText(resolvedServiceCatalogItems(line));
   }
 
   function serviceDocumentNote(line: ServiceLine) {
@@ -5303,6 +5397,19 @@ ${serviceCommentLines.join("\n")}`
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
+  const stepIndex = STEPS.findIndex((item) => item.id === step);
+  const previousStep = STEPS[stepIndex - 1];
+  const nextStep = STEPS[stepIndex + 1];
+  const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
+  const conversionReady = Boolean(lead?.readiness.conversion_ready) && quoteAndPrepaymentReady;
+  const isStepReady = (id: string) => {
+    if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
+    if (id === "medical") return Boolean(draft?.concern.trim());
+    if (id === "order") return Boolean(draft && orderIssues.length === 0);
+    if (id === "commercial") return commercialReady;
+    if (id === "release") return conversionReady;
+    return readiness.get(id) ?? false;
+  };
   const serviceLineColumns: ColumnDef<ServiceLine>[] = [
     {
       id: "service",
@@ -5407,7 +5514,7 @@ ${serviceCommentLines.join("\n")}`
       accessor: (line) => money(line.price),
       sortable: false,
       align: "right",
-      width: 280,
+      width: 240,
       render: (line) => {
         const catalogService = line.agencyServiceId
           ? agencyServiceById.get(line.agencyServiceId)
@@ -5422,36 +5529,58 @@ ${serviceCommentLines.join("\n")}`
             draft?.programDateFrom || undefined,
           );
           const selectedPriceId = selectedAgencyServicePriceId(line, catalogService);
+          const selectedPrice = priceChoices.find((price) => price.id === selectedPriceId);
           return (
             <NativeComboboxSelect
               aria-label={`${tx("Цена каталога", "Katalogpreis")}: ${line.description}`}
               name={`service_price_${line.id}`}
               value={selectedPriceId}
+              selectedLabel={selectedPrice ? (
+                <span className="inline-flex max-w-full items-baseline gap-1.5">
+                  <span className="font-medium">{formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}</span>
+                  <span className="text-muted-foreground">/ {unit}</span>
+                </span>
+              ) : undefined}
               disabled={isBusy}
-              className="h-8 min-w-60 bg-field pr-8 text-right font-mono text-xs tabular-nums"
-              title={tx(
-                "Выберите конкретную версию цены каталога",
-                "Wählen Sie eine konkrete Katalogpreisversion",
-              )}
+              className="h-8 min-w-0 bg-field font-mono text-xs tabular-nums [&>span]:text-right"
+              title={selectedPrice ? servicePriceChoiceLabel(selectedPrice) : tx("Выбрать тариф", "Tarif auswählen")}
+              searchPlaceholder={tx("Найти тариф…", "Tarif suchen…")}
               onChange={(event) => applyAgencyServicePrice(
                 line.id,
                 catalogService,
                 event.target.value,
               )}
             >
-              {priceChoices.map((price) => (
-                <option
-                  key={price.id || "catalog-price"}
-                  value={price.id}
-                  disabled={
-                    (!price.id && !price.is_effective)
-                    || price.currency.toUpperCase()
-                      !== "EUR"
-                  }
-                >
-                  {servicePriceChoiceLabel(price)} / {unit}
-                </option>
-              ))}
+              {priceChoices.map((price) => {
+                const priceName = price.name?.trim();
+                const automaticName = `${price.valid_from} · ${money(inputString(price.unit_price))} ${price.currency}`;
+                return (
+                  <option
+                    key={price.id || "catalog-price"}
+                    value={price.id}
+                    data-search-text={`${servicePriceChoiceLabel(price)} ${unit}`}
+                    disabled={
+                      (!price.id && !price.is_effective)
+                      || price.currency.toUpperCase() !== "EUR"
+                    }
+                  >
+                    <span className="block whitespace-normal py-0.5">
+                      <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span className="font-mono text-xs font-medium tabular-nums">
+                          {formatMoneyValue(money(inputString(price.unit_price)), lang)} {price.currency}
+                          <span className="font-normal text-muted-foreground"> / {unit}</span>
+                        </span>
+                        {price.is_effective ? <span className="text-[10px] font-medium text-emerald-700">{tx("Рекомендуемая", "Empfohlen")}</span> : null}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {tx("С", "Ab")} {germanDateLabel(price.valid_from)}
+                        {price.valid_to ? ` ${tx("по", "bis")} ${germanDateLabel(price.valid_to)}` : ` · ${tx("бессрочно", "unbefristet")}`}
+                      </span>
+                      {priceName && priceName !== automaticName ? <span className="mt-1 block text-xs text-muted-foreground">{priceName}</span> : null}
+                    </span>
+                  </option>
+                );
+              })}
             </NativeComboboxSelect>
           );
         }
@@ -5519,7 +5648,7 @@ ${serviceCommentLines.join("\n")}`
         className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
-        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
+        <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold text-foreground">
               {lead
@@ -5528,17 +5657,6 @@ ${serviceCommentLines.join("\n")}`
                   ? tx("Новый лид", "Neuer Lead")
                   : tx("Оформление обращения", "Lead-Aufnahme")}
             </h2>
-            {autosaveStatus === "error" ? (
-              <div
-                role="alert"
-                aria-live="polite"
-                title={autosaveError || undefined}
-                className="mt-1 inline-flex items-center gap-1 text-[11px] text-destructive"
-              >
-                <CircleAlert aria-hidden="true" className="size-3" />
-                {tx("Не удалось сохранить изменения", "Änderungen konnten nicht gespeichert werden")}
-              </div>
-            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {leadId && lead && ["new", "in_progress", "qualified"].includes(lead.qualification_status) ? (
@@ -5612,7 +5730,7 @@ ${serviceCommentLines.join("\n")}`
 
         <nav
           ref={stepNavRef}
-          className="overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
           <div className="flex w-max min-w-full justify-center px-4 py-2.5">
@@ -5620,22 +5738,29 @@ ${serviceCommentLines.join("\n")}`
               <span ref={stepPillRef} className="t-tabs-pill lead-wizard-step-pill" aria-hidden="true" />
               {STEPS.map((item, itemIndex) => {
                 const selected = item.id === step;
-                const done = item.id === "master_data"
-                  ? Boolean(draft && Object.keys(masterErrors).length === 0)
-                  : item.id === "medical"
-                    ? Boolean(draft?.concern.trim())
-                    : item.id === "order"
-                      ? Boolean(draft && orderIssues.length === 0)
-                      : readiness.get(item.id) ?? false;
+                const done = isStepReady(item.id);
                 const StepIcon = STEP_ICONS[item.id];
                 return (
                   <button
                     key={item.id}
                     type="button"
                     role="tab"
+                    id={`lead-wizard-tab-${item.id}`}
+                    aria-controls="lead-wizard-step-panel"
+                    tabIndex={selected ? 0 : -1}
                     data-step={item.id}
                     disabled={loading || isBusy}
                     onClick={() => navigateToStep(item.id)}
+                    onKeyDown={(event) => {
+                      const targetIndex = event.key === "ArrowRight" ? (itemIndex + 1) % STEPS.length
+                        : event.key === "ArrowLeft" ? (itemIndex + STEPS.length - 1) % STEPS.length
+                          : event.key === "Home" ? 0
+                            : event.key === "End" ? STEPS.length - 1
+                              : null;
+                      if (targetIndex === null) return;
+                      event.preventDefault();
+                      stepTabsRef.current?.querySelector<HTMLElement>(`[data-step="${STEPS[targetIndex].id}"]`)?.focus();
+                    }}
                     aria-selected={selected}
                     aria-current={selected ? "step" : undefined}
                     className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
@@ -5643,6 +5768,7 @@ ${serviceCommentLines.join("\n")}`
                     <StepIcon aria-hidden="true" className="size-4 shrink-0" />
                     <span className="whitespace-nowrap">{lang === "de" ? item.de : item.ru}</span>
                     <span
+                      aria-hidden="true"
                       data-count
                       className={cn(
                         "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none",
@@ -5655,6 +5781,7 @@ ${serviceCommentLines.join("\n")}`
                     >
                       {done ? <Check aria-hidden="true" className="size-3" /> : itemIndex + 1}
                     </span>
+                    <span className="sr-only">{done ? tx(" — выполнено", " — erledigt") : tx(" — не завершено", " — noch offen")}</span>
                   </button>
                 );
               })}
@@ -5662,12 +5789,7 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <main aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-5">
-          {error ? (
-            <div role="alert" className="mb-5">
-              <Banner tone="error">{error}</Banner>
-            </div>
-          ) : null}
+        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 outline-none sm:px-5">
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
               <Banner tone="error">
@@ -6454,7 +6576,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
                   accessory={amlRequired ? (
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
+                    <Button type="button" variant={wizardDocuments.enhanced_due_diligence.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
                       <ShieldCheck className="size-3.5" />
                       {wizardDocuments.enhanced_due_diligence.length > 0
                         ? tx("Создать новую версию", "Neue Version erstellen")
@@ -6482,7 +6604,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={(
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                    <Button type="button" variant={wizardDocuments.confidentiality_release.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                       {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -6515,7 +6637,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                    <Button type="button" variant={wizardDocuments.privacy_consents.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                       {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -6535,7 +6657,7 @@ ${serviceCommentLines.join("\n")}`
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={openNewTrustedContact}>
+                    <Button type="button" size="sm" onClick={openNewTrustedContact}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
@@ -6610,7 +6732,7 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
-                  <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+                  <Button type="button" variant={wizardDocuments.privacy_information.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
                     {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                     {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
@@ -6651,17 +6773,20 @@ ${serviceCommentLines.join("\n")}`
                     <label
                       htmlFor="lead-file-identity"
                       className={cn(
-                        buttonVariants({ variant: "default", size: "sm" }),
+                        buttonVariants({ variant: wizardDocuments.identity.length > 0 ? "outline" : "default", size: "sm" }),
                         "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                         isBusy && "pointer-events-none opacity-50",
                       )}
                     >
-                      <Upload aria-hidden="true" className="size-3.5" />
-                      {wizardDocuments.identity.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
+                      {busy === "upload-identity" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Upload aria-hidden="true" className="size-3.5" />}
+                      {busy === "upload-identity" ? tx("Загрузка…", "Wird hochgeladen…") : wizardDocuments.identity.length > 0 ? tx("Добавить файл", "Datei hinzufügen") : tx("Загрузить файл", "Datei hochladen")}
                     </label>
                   </span>
                 )}
               >
+                <p className="text-xs text-muted-foreground">
+                  {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
+                </p>
                 <WizardDocumentRows
                   documents={wizardDocuments.identity}
                   complianceKind="identity"
@@ -6971,19 +7096,19 @@ ${serviceCommentLines.join("\n")}`
               <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={tx("Рамочный договор", "Rahmenvertrag")}
+                  title={(
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <span>{tx("Рамочный договор", "Rahmenvertrag")}</span>
+                      <StatusBadge tone={contract?.status === "signed" ? "success" : "neutral"}>
+                        {contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+                      </StatusBadge>
+                    </span>
+                  )}
                   accessory={(
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StateMark done={contract?.status === "signed"} label={contract?.status === "signed" ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")} />
-                      <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
-                        {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-                        {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg" disabled={isBusy || !contract || commercialDocuments.framework_contract.length === 0} onClick={() => void signContract(commercialDocuments.framework_contract[0]?.id)}>
-                        {busy === "contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileCheck2 className="size-3.5" />}
-                        {tx("Подтвердить подпись", "Unterschrift bestätigen")}
-                      </Button>
-                    </div>
+                    <Button type="button" variant={commercialDocuments.framework_contract.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                      {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                      {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
+                    </Button>
                   )}
                 >
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -7022,6 +7147,7 @@ ${serviceCommentLines.join("\n")}`
                 <WizardDocumentRows
                   documents={commercialDocuments.framework_contract}
                   complianceKind="framework_contract"
+                  showSignatureStatus={false}
                   emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
                   lang={lang}
                   busy={busy}
@@ -7231,7 +7357,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={(
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
+                    <Button type="button" variant={commercialDocuments.single_order.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -7283,9 +7409,19 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Смета и предоплата", "Kostenvoranschlag und Vorauszahlung")}
                 accessory={(
-                  <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void createOrAcceptQuote(false)}>
+                  <Button
+                    type="button"
+                    variant={quote ? "outline" : "default"}
+                    size="sm"
+                    className="h-8 rounded-lg"
+                    disabled={isBusy || !lines.some(validLine)}
+                    title={quote
+                      ? tx("Обновить смету по текущим услугам и ценам", "Kostenvoranschlag mit aktuellen Leistungen und Preisen aktualisieren")
+                      : tx("Сформировать смету по текущим услугам и ценам", "Kostenvoranschlag aus aktuellen Leistungen und Preisen erstellen")}
+                    onClick={() => void createOrAcceptQuote(false)}
+                  >
                     {busy === "quote" ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-                    {quote ? tx("Пересчитать", "Neu berechnen") : tx("Рассчитать", "Berechnen")}
+                    {quote ? tx("Пересчитать", "Neu berechnen") : tx("Сформировать смету", "Kostenvoranschlag erstellen")}
                   </Button>
                 )}
               >
@@ -7355,9 +7491,9 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                <div className="flex flex-wrap items-end gap-3">
                   {prepayment ? (
-                    <Field label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
+                    <Field className="w-full sm:w-64" label={tx("Необходимая предоплата", "Erforderliche Vorauszahlung")}>
                       <Input
                         id={PREPAYMENT_AMOUNT_ID}
                         className={cn(inputClass, "font-mono tabular-nums")}
@@ -7381,7 +7517,7 @@ ${serviceCommentLines.join("\n")}`
                       />
                     </Field>
                   ) : null}
-                  <Field label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
+                  <Field className="w-full sm:w-64" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
                     <Input
                       className={cn(inputClass, "font-mono tabular-nums")}
                       inputMode="decimal"
@@ -7397,7 +7533,7 @@ ${serviceCommentLines.join("\n")}`
                   {!acceptedQuote || prepayment ? (
                     <Button
                       type="button"
-                      variant="outline"
+                      className="w-fit"
                       disabled={isBusy || !quote || !quoteIsCurrent || !validMoneyInput(paidAmount)}
                       onClick={() => void createOrAcceptQuote(true)}
                     >
@@ -7460,7 +7596,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
                   accessory={(
-                    <Button type="button" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                    <Button type="button" variant={commercialDocuments.order_cost_estimate.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                       {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -7491,6 +7627,7 @@ ${serviceCommentLines.join("\n")}`
                       className="h-8 rounded-lg"
                       disabled={isBusy}
                       onClick={() => void generateCommercialDocument("cost_estimate")}
+                      variant={commercialDocuments.cost_estimate.length > 0 ? "outline" : "default"}
                     >
                       {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
@@ -7521,34 +7658,6 @@ ${serviceCommentLines.join("\n")}`
                   ) : null}
                 </Section>
               </div>
-              <div className={cn(WIZARD_DOCUMENT_SECTION_CLASS, "space-y-3")}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <StateMark
-                    done={Boolean(readiness.get("commercial"))}
-                    label={readiness.get("commercial") ? tx("Договор и заказ завершены", "Vertrag und Auftrag abgeschlossen") : tx("Договор и заказ ещё не завершены", "Vertrag und Auftrag noch nicht abgeschlossen")}
-                  />
-                  <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy} onClick={() => void prepareCommercial()}>
-                    {busy === "commercial" ? <LoaderCircle className="size-3.5 animate-spin" /> : <ShieldCheck className="size-3.5" />}
-                    {tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}
-                  </Button>
-                </div>
-                {commercialSaveFeedback ? (
-                  <div
-                    role={commercialSaveFeedback.tone === "error" ? "alert" : "status"}
-                    aria-live="polite"
-                    className={cn(
-                      "rounded-lg border px-3 py-2 text-xs",
-                      commercialSaveFeedback.tone === "error"
-                        ? "border-destructive/30 bg-destructive/10 text-destructive"
-                        : commercialSaveFeedback.tone === "warning"
-                          ? "border-amber-200 bg-amber-50 text-amber-700"
-                          : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                    )}
-                  >
-                    {commercialSaveFeedback.message}
-                  </div>
-                ) : null}
-              </div>
             </section>
           ) : null}
 
@@ -7559,15 +7668,28 @@ ${serviceCommentLines.join("\n")}`
                   {tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
                 </p>
                 <div>
-                  {lead.readiness.steps.map((item) => (
-                    <div key={item.key} className="flex items-center justify-between gap-4 border-b border-border/70 py-3 last:border-b-0">
-                      <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span>
-                      <StateMark done={item.ready} label={item.ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />
-                    </div>
-                  ))}
+                  {lead.readiness.steps.map((item) => {
+                    const ready = isStepReady(item.key);
+                    const target = STEPS.find((candidate) => candidate.id === item.key);
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className="flex w-full items-center justify-between gap-3 rounded-md border-b border-border/70 px-2 py-3 text-left last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        disabled={isBusy || !target || target.id === step}
+                        onClick={() => target && navigateToStep(target.id)}
+                      >
+                        <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span>
+                        <span className="inline-flex shrink-0 items-center gap-2">
+                          <StateMark done={ready} label={ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />
+                          <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </Section>
-              {lead.readiness.blocking_reasons.length > 0 || !conversionConfirmed ? (
+              {lead.readiness.blocking_reasons.length > 0 || !quoteAndPrepaymentReady ? (
                 <Banner tone="warning">
                   <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
@@ -7583,11 +7705,12 @@ ${serviceCommentLines.join("\n")}`
                         </button>
                       </li>
                     ))}
-                    {!conversionConfirmed ? (
-                      <li>{tx(
-                        "Подтвердите, что данные проверены и пациента можно создать",
-                        "Bestätigen Sie, dass die Daten geprüft wurden und der Patient angelegt werden kann",
-                      )}</li>
+                    {!quoteAndPrepaymentReady && !lead.readiness.blocking_reasons.some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? (
+                      <li>
+                        <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => navigateToStep("commercial")}>
+                          {quoteStateLabel}
+                        </button>
+                      </li>
                     ) : null}
                   </ul>
                 </Banner>
@@ -7607,16 +7730,83 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 </span>
               </label>
-              <div className="flex justify-end">
-                <Button type="button" className="h-9 rounded-lg gap-1.5 px-3.5" disabled={isBusy || !lead.readiness.conversion_ready || !quoteAndPrepaymentReady || !conversionConfirmed} onClick={() => void convert()}>
-                  {busy === "convert" ? <LoaderCircle className="size-4 animate-spin" /> : <UserRoundCheck className="size-4" />}
-                  {tx("Создать пациента", "Patient anlegen")}
-                </Button>
-              </div>
             </section>
           ) : null}
         </main>
-
+        {draft ? (
+          <footer className="shrink-0 border-t border-border bg-background px-4 py-3 sm:px-5">
+            {error || autosaveStatus === "error" ? (
+              <div role="alert" className="mb-3 flex max-h-28 items-start gap-2 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  {autosaveStatus === "error" ? (
+                    <>
+                      <p className="font-medium">{tx("Изменения не сохранены", "Änderungen nicht gespeichert")}</p>
+                      {autosaveError || error ? <p className="mt-0.5">{autosaveError || error}</p> : null}
+                    </>
+                  ) : error}
+                </div>
+                {autosaveStatus === "error" ? (
+                  <Button type="button" variant="outline" size="xs" disabled={isBusy || loading} onClick={() => void save()}>
+                    <RefreshCw aria-hidden="true" className="size-3" />
+                    {tx("Повторить", "Erneut versuchen")}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {step === "commercial" && commercialSaveFeedback ? (
+              <div role={commercialSaveFeedback.tone === "error" ? "alert" : "status"} className="mb-3 max-h-28 overflow-y-auto text-xs">
+                <div className={cn("rounded-lg border px-3 py-2", commercialSaveFeedback.tone === "error" ? "border-destructive/30 bg-destructive/10 text-destructive" : commercialSaveFeedback.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                  {commercialSaveFeedback.message}
+                </div>
+              </div>
+            ) : null}
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              <span>{tx("Этап", "Schritt")} {stepIndex + 1} {tx("из", "von")} {STEPS.length}</span>
+              <span role="status" className="inline-flex items-center gap-1.5">
+                {autosaveStatus === "error" ? null : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
+                  : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
+                    <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
+                  ) : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
+                    : autosaveStatus === "saved" ? (
+                      <><Check aria-hidden="true" className="size-3 text-emerald-700" />{tx("Данные сохранены", "Daten gespeichert")}</>
+                    ) : null}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Button type="button" variant="outline" className="h-9" disabled={!previousStep || loading || isBusy} onClick={() => previousStep && navigateToStep(previousStep.id)}>
+                <ArrowLeft aria-hidden="true" className="size-3.5" />
+                {tx("Назад", "Zurück")}
+              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {validationIssues.length > 0 ? (
+                  <Button type="button" variant="link" size="sm" className="text-destructive" disabled={isBusy} onClick={() => openValidationIssue(validationIssues[0])}>
+                    {tx("Требуют внимания", "Bitte prüfen")}: {validationIssues.length}
+                  </Button>
+                ) : null}
+                {step === "commercial" ? (
+                  <Button type="button" className="h-9" aria-label={tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")} disabled={loading || isBusy} onClick={() => void prepareCommercial()}>
+                    {busy === "commercial" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <ShieldCheck aria-hidden="true" className="size-3.5" />}
+                    <span className="sm:hidden">{tx("Сохранить", "Speichern")}</span>
+                    <span className="hidden sm:inline">{tx("Сохранить договор и заказ", "Vertrag und Auftrag speichern")}</span>
+                  </Button>
+                ) : null}
+                {nextStep ? (
+                  <Button type="button" variant={step === "commercial" ? "outline" : "default"} className="h-9" disabled={loading || isBusy} onClick={() => navigateToStep(nextStep.id)}>
+                    {busy === "save" || busy === "intake" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
+                    {step === "commercial" ? tx("Проверить готовность", "Bereitschaft prüfen") : tx("Далее", "Weiter")}
+                    <ArrowRight aria-hidden="true" className="size-3.5" />
+                  </Button>
+                ) : (
+                  <Button type="button" className="h-9" disabled={loading || isBusy || !conversionReady || !conversionConfirmed} onClick={() => void convert()}>
+                    {busy === "convert" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <UserRoundCheck aria-hidden="true" className="size-4" />}
+                    {tx("Создать пациента", "Patient anlegen")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </footer>
+        ) : error ? <div role="alert" className="shrink-0 border-t border-border p-4"><Banner tone="error">{error}</Banner></div> : null}
       </DialogContent>
       </Dialog>
       <Sheet open={amlSheetOpen} onOpenChange={setAmlSheetOpen}>
@@ -8065,7 +8255,7 @@ ${serviceCommentLines.join("\n")}`
                       : undefined;
                     const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
                     const unit = serviceBillingUnitLabel(rawUnit, tx);
-                    const description = resolvedServiceCatalogDescription(line);
+                    const descriptionItems = resolvedServiceCatalogItems(line);
                     const net = money(line.quantity) * money(line.price);
                     const vat = net * money(line.vat) / 100;
                     return (
@@ -8105,9 +8295,17 @@ ${serviceCommentLines.join("\n")}`
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                               {tx("Полное описание", "Vollständige Beschreibung")}
                             </p>
-                            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
-                              {description || tx("Описание не указано", "Keine Beschreibung hinterlegt")}
-                            </p>
+                            {descriptionItems.length > 0 ? (
+                              <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-5 text-foreground">
+                                {descriptionItems.map((item) => (
+                                  <li key={item.id} className="whitespace-pre-wrap break-words">{item.text}</li>
+                                ))}
+                              </ol>
+                            ) : (
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {tx("Описание не указано", "Keine Beschreibung hinterlegt")}
+                              </p>
+                            )}
                           </div>
                           <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                             {[
@@ -8232,15 +8430,20 @@ ${serviceCommentLines.join("\n")}`
         <DialogContent
           className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 duration-0 data-closed:animate-none data-open:animate-none sm:h-[min(88vh,52rem)] sm:w-[min(96vw,84rem)] sm:max-w-[84rem]"
         >
-          <DialogHeader className="border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-14 sm:px-5 sm:pr-14">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div className="min-w-0">
-                <DialogTitle className="truncate text-base">
+                <DialogTitle title={documentPreview?.title} className="line-clamp-2 break-words text-sm [overflow-wrap:anywhere] sm:text-base">
                   {documentPreview?.title ?? tx("Просмотр документа", "Dokumentvorschau")}
                 </DialogTitle>
-                <DialogDescription className="truncate">
-                  {documentPreview?.contentType ?? ""}
+                <DialogDescription className="sr-only">
+                  {tx("Просмотр документа и действия с ним", "Dokumentvorschau und Dokumentaktionen")}
                 </DialogDescription>
+                {previewedDocument ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <LeadWizardDocumentMetadata document={previewedDocument} lang={lang} />
+                  </div>
+                ) : null}
               </div>
               {documentPreview ? (
                 <div className="flex shrink-0 items-center gap-1">
@@ -8252,13 +8455,13 @@ ${serviceCommentLines.join("\n")}`
                       title={tx("Открыть PDF в новой вкладке", "PDF in neuem Tab öffnen")}
                       aria-label={tx("Открыть PDF в новой вкладке", "PDF in neuem Tab öffnen")}
                       onClick={() => {
+                        setDocumentPreviewError("");
                         const previewWindow = window.open(documentPreview.url, "_blank");
                         if (previewWindow) {
                           previewWindow.opener = null;
                           return;
                         }
-                        setValidationContext(null);
-                        setError(tx(
+                        setDocumentPreviewError(tx(
                           "Браузер заблокировал новую вкладку. Разрешите всплывающие окна или скачайте PDF.",
                           "Der Browser hat den neuen Tab blockiert. Erlauben Sie Pop-ups oder laden Sie die PDF-Datei herunter.",
                         ));
@@ -8273,15 +8476,22 @@ ${serviceCommentLines.join("\n")}`
                     size="icon-sm"
                     title={tx("Скачать файл", "Datei herunterladen")}
                     aria-label={tx("Скачать файл", "Datei herunterladen")}
-                    onClick={() => void downloadDocumentFile(documentPreview.id, documentPreview.title)}
+                    aria-busy={busy === `download-${documentPreview.id}`}
+                    disabled={isBusy || !previewedDocument}
+                    onClick={() => { if (previewedDocument) void downloadDocument(previewedDocument, true); }}
                   >
-                    <Download aria-hidden="true" className="size-3.5" />
+                    {busy === `download-${documentPreview.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Download aria-hidden="true" className="size-3.5" />}
                   </Button>
                 </div>
               ) : null}
             </div>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3">
+            {previewedDocument && documentPreview?.kind !== "image" ? (
+              <div className="mb-3">
+                <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} onDone={() => { void refreshDocumentsState(); }} />
+              </div>
+            ) : null}
             {documentPreview?.kind === "image" ? (
               <img
                 src={documentPreview.url}
@@ -8292,9 +8502,48 @@ ${serviceCommentLines.join("\n")}`
               <iframe
                 title={documentPreview.title}
                 src={documentPreview.url}
-                className="h-full min-h-[32rem] w-full border border-border bg-white"
+                className="h-full w-full border border-border bg-white"
               />
             ) : null}
+          </div>
+          {documentPreviewError ? (
+            <p role="alert" className="shrink-0 border-t border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive sm:px-5">
+              {documentPreviewError}
+            </p>
+          ) : null}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 sm:px-5">
+            {previewComplianceKind ? (
+              <span role="status">
+                <StateMark
+                  done={previewDocumentSigned}
+                  label={previewComplianceKind === "identity"
+                    ? previewDocumentSigned ? tx("Проверен", "Geprüft") : tx("Ожидает проверки", "Prüfung offen")
+                    : previewDocumentSigned ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+                />
+              </span>
+            ) : null}
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => replaceDocumentPreview(null)}>
+                {tx("К документам", "Zur Dokumentenliste")}
+              </Button>
+              {previewedDocument && previewComplianceKind && !previewDocumentSigned ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isBusy}
+                  aria-busy={busy === `sign-${previewedDocument.id}`}
+                  onClick={() => {
+                    if (previewComplianceKind === "framework_contract") void signContract(previewedDocument.id, true);
+                    else void signDocument(previewedDocument.id, previewComplianceKind, true);
+                  }}
+                >
+                  {busy === `sign-${previewedDocument.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileCheck2 aria-hidden="true" className="size-3.5" />}
+                  {busy === `sign-${previewedDocument.id}`
+                    ? tx("Подтверждение…", "Wird bestätigt…")
+                    : previewComplianceKind === "identity" ? tx("Подтвердить документ", "Dokument bestätigen") : tx("Подтвердить подпись", "Unterschrift bestätigen")}
+                </Button>
+              ) : null}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

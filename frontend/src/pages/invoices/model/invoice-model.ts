@@ -144,6 +144,33 @@ export function invoiceLineQuantityAvailable(
   return Number.isFinite(quantity) ? Math.max(0, quantity) : 0;
 }
 
+export function createInvoiceLineSelection(lines: InvoiceLineItem[], invoiceType: InvoiceType) {
+  return {
+    selectedLineIndexes: lines.flatMap((line, index) =>
+      invoiceLineQuantityAvailable(line, invoiceType) > 0 ? [index] : [],
+    ),
+    lineQuantities: Object.fromEntries(lines.map((line, index) => [
+      String(index), String(invoiceLineQuantityAvailable(line, invoiceType)),
+    ])),
+  };
+}
+
+export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateForm) {
+  const selected = new Set(form.selectedLineIndexes);
+  if (!selected.size || selected.size !== form.selectedLineIndexes.length) return false;
+  for (const index of selected) {
+    const line = lines[index];
+    const quantity = Number(form.lineQuantities[String(index)]);
+    if (!line || !Number.isFinite(quantity) || quantity <= 0 ||
+      quantity > invoiceLineQuantityAvailable(line, form.invoiceType)) return false;
+    if (form.invoiceType === "final" &&
+      quantity !== invoiceLineQuantityAvailable(line, form.invoiceType)) return false;
+  }
+  return form.invoiceType !== "final" || lines.every((line, index) =>
+    invoiceLineQuantityAvailable(line, "final") === 0 || selected.has(index),
+  );
+}
+
 export function calculateInvoiceSelectionTotals(
   lines: InvoiceLineItem[],
   selectedLineIndexes: number[],

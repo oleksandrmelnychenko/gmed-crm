@@ -253,6 +253,18 @@ const AdminSettingsPage = lazy(() =>
   })),
 );
 
+const AdminSignaturesPage = lazy(() =>
+  import("@/pages/admin-signatures").then((module) => ({
+    default: module.AdminSignaturesPage,
+  })),
+);
+
+const AdminDatevPage = lazy(() =>
+  import("@/pages/admin-datev").then((module) => ({
+    default: module.AdminDatevPage,
+  })),
+);
+
 const AdminActivityPage = lazy(() =>
   import("@/pages/admin-activity").then((module) => ({
     default: module.AdminActivityPage,
@@ -424,6 +436,8 @@ function AppRoutes() {
             <Route path="admin/users" element={<AdminUsersPage />} />
             <Route path="admin/access" element={<AdminAccessPage />} />
             <Route path="admin/settings" element={<AdminSettingsPage />} />
+            <Route path="admin/datev" element={<AdminDatevPage />} />
+            <Route path="admin/signatures" element={<AdminSignaturesPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/security" element={<AdminSecurityPage />} />
             <Route path="admin/health" element={<AdminHealthPage />} />

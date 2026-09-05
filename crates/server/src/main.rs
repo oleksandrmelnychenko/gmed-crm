@@ -11,6 +11,11 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let cfg = config::Config::from_env();
+    let signature_provider = gmed_server::document_signatures::provider::Provider::from_env()
+        .unwrap_or_else(|error| {
+            tracing::error!(error, "Invalid document signing configuration");
+            std::process::exit(1);
+        });
 
     if let Err(error) = gmed_server::file_scan::ensure_upload_scanner_ready() {
         tracing::error!(%error, "Required upload malware scanner is unavailable");
@@ -57,7 +62,9 @@ async fn main() {
         cfg.message_key_registry,
     )
     .with_audit_sender(audit_sender)
-    .with_medication_ai(cfg.medication_ai);
+    .with_medication_ai(cfg.medication_ai)
+    .with_document_signatures(signature_provider);
+    gmed_server::document_signatures::spawn_worker(app_state.clone());
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
     gmed_server::routes::cases::spawn_medication_expiry_scheduler(app_state.clone());
     gmed_server::routes::orders::spawn_external_invoice_deadline_scheduler(app_state.clone());

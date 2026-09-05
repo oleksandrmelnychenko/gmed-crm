@@ -32,6 +32,7 @@ export const de = {
   nav_company_finance: "Unternehmenssaldo",
   nav_finance_catalog: "Finanzkatalog",
   nav_admin: "Administration",
+  nav_signatures: "Elektronische Signatur",
   nav_users_roles: "Benutzer & Rollen",
   nav_access_matrix: "Zugriffsmatrix",
   nav_logout: "Abmelden",

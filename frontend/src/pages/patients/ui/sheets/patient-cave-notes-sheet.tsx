@@ -63,6 +63,7 @@ function PatientCaveNotesSheetContent({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || value.trim() === initial.trim()) return;
     setBusy(true);
     try {
       await apiFetch(`/patients/${patientId}/update`, {
@@ -82,7 +83,7 @@ function PatientCaveNotesSheetContent({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges dirty={value.trim() !== initial.trim()}
       open={open}
       onOpenChange={onOpenChange}
       title={l("patients_update_cave_notes")}

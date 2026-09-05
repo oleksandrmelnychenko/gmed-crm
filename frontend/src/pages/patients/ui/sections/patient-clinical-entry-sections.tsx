@@ -671,8 +671,8 @@ export function PatientMedicationTable({
             <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
             <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
             {canManage ? (
-              <th scope="col" className="px-2.5 py-2 text-right text-xs font-medium text-muted-foreground">
-                {tx("Действия", "Aktionen")}
+              <th scope="col" className="w-[72px] px-1 py-2 text-right text-xs font-medium text-muted-foreground">
+                <span className="sr-only">{tx("Действия", "Aktionen")}</span>
               </th>
             ) : null}
           </tr>

@@ -2018,6 +2018,7 @@ function useReportsPageContent() {
                         </StaffLink>
                       </div>
                     )}
+                    rowActionsWidth={320}
                     emptyState={tableEmpty(text.clinicReport.empty)}
                   />
                 </div>
@@ -2079,6 +2080,7 @@ function useReportsPageContent() {
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
+                    rowActionsWidth={140}
                     emptyState={tableEmpty(text.medicalProviders.empty)}
                   />
                 </div>
@@ -2123,6 +2125,7 @@ function useReportsPageContent() {
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
+                    rowActionsWidth={140}
                     emptyState={tableEmpty(text.providerCosts.empty)}
                   />
                 </div>
@@ -2156,6 +2159,7 @@ function useReportsPageContent() {
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
+                    rowActionsWidth={140}
                     emptyState={tableEmpty(text.nonMedicalProviders.empty)}
                   />
                 </div>
@@ -2224,6 +2228,7 @@ function useReportsPageContent() {
                         <Button variant="outline" size="sm">{text.openProvider}</Button>
                       </StaffLink>
                     )}
+                    rowActionsWidth={140}
                     emptyState={tableEmpty(text.doctors.empty)}
                   />
                 </div>

@@ -194,6 +194,7 @@ import type {
   UploadFormState,
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
+import { DocumentSignatureAction } from "./ui/document-signature-action";
 import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
 import { DocumentWorkspaceNav } from "./ui/document-workspace-nav";
 
@@ -3625,6 +3626,7 @@ function StaffDocumentsPage({
           <EmptyCell>{t.documents_no_documents_match}</EmptyCell>
         ) : (
           <DocumentsGrid
+            onSigned={refresh}
             documents={documents}
             paginated
             showSelection={false}
@@ -5904,6 +5906,8 @@ function StaffDocumentsPage({
                     </p>
                   </div>
                   {detail?.has_stored_file ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                    <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} />
                     <Button
                       type="button"
                       variant="outline"
@@ -5919,6 +5923,7 @@ function StaffDocumentsPage({
                       <Download className="size-3.5" />
                       {t.documents_download}
                     </Button>
+                    </div>
                   ) : null}
                 </div>
                 <div className="flex min-h-0 flex-1 items-center justify-center p-3">
@@ -6029,7 +6034,7 @@ function StaffDocumentsPage({
           className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[70vw] sm:max-w-[1500px]"
         >
           <DialogHeader className="border-b border-border/70 px-5 py-4">
-            <div className="flex min-w-0 items-start justify-between gap-4 pr-14">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-14">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
                   {documentPreview?.title ?? t.documents_preview}
@@ -6039,6 +6044,8 @@ function StaffDocumentsPage({
                 </DialogDescription>
               </div>
               {documentPreview ? (
+                <div className="flex flex-wrap items-center gap-2">
+                <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={() => refresh()} />
                 <Button
                   type="button"
                   variant="default"
@@ -6051,6 +6058,7 @@ function StaffDocumentsPage({
                   <Download className="size-3.5" />
                   {t.documents_download}
                 </Button>
+                </div>
               ) : null}
             </div>
           </DialogHeader>
@@ -6120,6 +6128,7 @@ function StaffDocumentsPage({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[44%] sm:justify-end">
+                      <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
                       {canManage && currentDetailTemplate ? (
                         <Button
                           type="button"

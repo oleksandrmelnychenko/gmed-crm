@@ -1826,7 +1826,7 @@ function useStaffServicesPageContent() {
         )}
       </div>
 
-      <Sheet open={Boolean(selectedService)} onOpenChange={(open) => (!open ? closeServiceDetail() : undefined)}>
+      <Sheet requireChanges open={Boolean(selectedService)} onOpenChange={(open) => (!open ? closeServiceDetail() : undefined)}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           {selectedService ? (
             <AdminSheetScaffold

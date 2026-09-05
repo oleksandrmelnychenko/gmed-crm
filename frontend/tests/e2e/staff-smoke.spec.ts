@@ -2003,6 +2003,233 @@ test.describe("patient-profile RBAC shell", () => {
   });
 });
 
+test.describe("lead wizard UX", () => {
+  test.setTimeout(30_000);
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("gmed_lang", "de");
+    });
+    await installStaffApiMocks(page);
+    await loginAsStaff(page, "admin@gmed.de");
+  });
+
+  test("document preview retries failed actions and confirms the displayed signature", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const documentId = "00000000-0000-0000-0000-000000000978";
+    let signed = false;
+    let signAttempts = 0;
+    let downloads = 0;
+    await page.route(`**/api/v1/documents?lead_id=${leadId}`, (route) => json(route, [{
+      id: documentId,
+      lead_id: leadId,
+      auto_name: "Consent",
+      original_filename: "consent-v2.pdf",
+      document_number: "DOC-1001-V02",
+      generated_template_id: "privacy_consents",
+      mime_type: "application/pdf",
+      file_size: 2048,
+      created_at: "2026-09-05T10:00:00Z",
+      has_stored_file: true,
+      signed_at: signed ? "2026-09-05T11:00:00Z" : null,
+      compliance_kind: signed ? "dsgvo" : null,
+    }]));
+    await page.route(`**/api/v1/documents/${documentId}/download`, (route) => {
+      downloads += 1;
+      if (downloads === 2) return json(route, { error: "Download temporarily unavailable" }, 503);
+      return route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.4\n%%EOF" });
+    });
+    await page.route(`**/api/v1/documents/${documentId}/mark-signed`, (route) => {
+      expect(route.request().postDataJSON()).toEqual({ compliance_kind: "dsgvo" });
+      signAttempts += 1;
+      if (signAttempts === 1) return json(route, { error: "Confirmation temporarily unavailable" }, 503);
+      signed = true;
+      return json(route, { ok: true });
+    });
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="documents"]').click();
+    await wizard.getByRole("button", { name: "consent-v2.pdf", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "consent-v2.pdf", exact: true });
+    await expect(preview).toBeVisible();
+    await expect(preview.getByText("Version 2", { exact: true })).toBeVisible();
+    await expect(preview.locator("iframe")).toHaveAttribute("src", /^blob:/);
+
+    await preview.getByRole("button", { name: "Datei herunterladen", exact: true }).click();
+    await expect(preview.getByRole("alert")).toContainText("Serverfehler. Bitte erneut versuchen");
+    const downloadPromise = page.waitForEvent("download");
+    await preview.getByRole("button", { name: "Datei herunterladen", exact: true }).click();
+    expect((await downloadPromise).suggestedFilename()).toBe("consent-v2.pdf");
+    await expect(preview.getByRole("alert")).toHaveCount(0);
+
+    await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+    await expect(preview.getByRole("alert")).toContainText("Serverfehler. Bitte erneut versuchen");
+    await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+    await expect(preview.getByRole("status")).toHaveText("Unterzeichnet");
+    await expect(preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true })).toHaveCount(0);
+    await expect(preview.getByRole("alert")).toHaveCount(0);
+    expect(signAttempts).toBe(2);
+    await preview.getByRole("button", { name: "Zur Dokumentenliste", exact: true }).click();
+    await expect(preview).toBeHidden();
+    await expect(wizard.getByText("Unterzeichnet", { exact: true })).toBeVisible();
+  });
+
+  test("framework signature updates the preview without closing it or requesting a second signature", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const documentId = "00000000-0000-0000-0000-000000000977";
+    const contractId = "00000000-0000-0000-0000-000000000976";
+    const orderId = "00000000-0000-0000-0000-000000000975";
+    let signed = false;
+    const order = {
+      id: orderId,
+      source_lead_id: leadId,
+      contract_id: contractId,
+      order_number: "A-20260905-0001",
+      prepayment_required: false,
+      leistungen: [{ id: "service-1", description: "Transfer", quantity: "1", unit_price: "100", vat_rate: "19" }],
+    };
+    await page.route(`**/api/v1/documents?lead_id=${leadId}`, (route) => json(route, [{
+      id: documentId, lead_id: leadId, auto_name: "Framework contract",
+      original_filename: "framework.pdf", generated_template_id: "framework_contract",
+      mime_type: "application/pdf", file_size: 2048, has_stored_file: true,
+      created_at: "2026-09-05T10:00:00Z",
+      signed_at: signed ? "2026-09-05T11:00:00Z" : null,
+      compliance_kind: signed ? "framework_contract" : null,
+    }]));
+    await page.route(`**/api/v1/framework-contracts?lead_id=${leadId}`, (route) => json(route, [{
+      id: contractId, status: signed ? "signed" : "sent",
+    }]));
+    await page.route(`**/api/v1/framework-contracts/${contractId}/status`, (route) => json(route, { id: contractId }));
+    await page.route(`**/api/v1/orders?lead_id=${leadId}`, (route) => json(route, [order]));
+    await page.route(`**/api/v1/orders/${orderId}`, (route) => json(route, order));
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) => json(route, { ok: true }));
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => json(route, { id: "service-1" }));
+    await page.route(`**/api/v1/orders/${orderId}/leistungen/sync-lead-wizard`, (route) => json(route, { ok: true }));
+    await page.route(`**/api/v1/documents/${documentId}/download`, (route) => route.fulfill({
+      status: 200, contentType: "application/pdf", body: "%PDF-1.4\n%%EOF",
+    }));
+    await page.route(`**/api/v1/documents/${documentId}/mark-signed`, (route) => {
+      expect(route.request().postDataJSON()).toEqual({ compliance_kind: "framework_contract" });
+      signed = true;
+      return json(route, { ok: true });
+    });
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="commercial"]').click();
+    await wizard.getByRole("button", { name: "framework.pdf", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "framework.pdf", exact: true });
+    const previewUrl = await preview.locator("iframe").getAttribute("src");
+    await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+    await expect(preview.getByRole("status")).toHaveText("Unterzeichnet");
+    await expect(preview.locator("iframe")).toHaveAttribute("src", previewUrl!);
+    await expect(preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true })).toHaveCount(0);
+    await preview.getByRole("button", { name: "Zur Dokumentenliste", exact: true }).click();
+    await expect(wizard.getByRole("heading", { name: "Rahmenvertrag Unterzeichnet", exact: true })).toBeVisible();
+  });
+
+  test("document preview keeps mobile actions visible and omits signing for information sheets", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const documentId = "00000000-0000-0000-0000-000000000979";
+    const filename = "Informationsblatt_Datenschutz_Ready_Lead_2026-09-05.pdf";
+    await page.route(`**/api/v1/documents?lead_id=${leadId}`, (route) => json(route, [{
+      id: documentId,
+      lead_id: leadId,
+      auto_name: "Datenschutzinformation",
+      original_filename: filename,
+      generated_template_id: "privacy_information",
+      mime_type: "application/pdf",
+      file_size: 2048,
+      created_at: "2026-09-05T10:00:00Z",
+      has_stored_file: true,
+    }]));
+    await page.route(`**/api/v1/documents/${documentId}/download`, (route) => route.fulfill({
+      status: 200, contentType: "application/pdf", body: "%PDF-1.4\n%%EOF",
+    }));
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="documents"]').click();
+    await wizard.getByRole("button", { name: filename, exact: true }).click();
+    const preview = page.getByRole("dialog", { name: filename, exact: true });
+    await expect(preview.getByRole("button", { name: "Zur Dokumentenliste", exact: true })).toBeInViewport();
+    await expect(preview.getByRole("button", { name: "Datei herunterladen", exact: true })).toBeInViewport();
+    await expect(preview.getByRole("button", { name: /bestätigen/ })).toHaveCount(0);
+    const frameBox = await preview.locator("iframe").boundingBox();
+    expect(frameBox!.height).toBeGreaterThan(300);
+    expect(frameBox!.x + frameBox!.width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("wizard-document-mobile.png") });
+  });
+
+  test("wizard footer keeps navigation visible on mobile and supports keyboard tabs", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/leads");
+    await page.getByText("Ready Lead", { exact: true }).click();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const footer = wizard.locator("footer");
+    const masterTab = wizard.locator('[data-step="master_data"]');
+    await masterTab.click();
+    await expect(footer.getByText("Schritt 1 von 7")).toBeVisible();
+    await expect(footer.getByRole("button", { name: "Zurück", exact: true })).toBeDisabled();
+    await wizard.getByRole("tabpanel").evaluate((panel) => { panel.scrollTop = panel.scrollHeight; });
+    await expect(footer.getByRole("button", { name: "Weiter", exact: true })).toBeInViewport();
+    await footer.getByRole("button", { name: "Weiter", exact: true }).click();
+    await expect(wizard.locator('[data-step="medical"]')).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => wizard.getByRole("tabpanel").evaluate((panel) => panel.scrollTop)).toBe(0);
+    await footer.getByRole("button", { name: "Zurück", exact: true }).click();
+    await expect(masterTab).toHaveAttribute("aria-selected", "true");
+    await masterTab.focus();
+    await masterTab.press("ArrowRight");
+    const medicalTab = wizard.locator('[data-step="medical"]');
+    await expect(medicalTab).toBeFocused();
+    await expect(masterTab).toHaveAttribute("aria-selected", "true");
+    await medicalTab.press("Enter");
+    await expect(medicalTab).toHaveAttribute("aria-selected", "true");
+    await expect(wizard.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", await medicalTab.getAttribute("id") ?? "");
+    const footerBox = await footer.boundingBox();
+    expect(footerBox).not.toBeNull();
+    expect(footerBox!.x + footerBox!.width).toBeLessThanOrEqual(390);
+    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(844);
+    await page.screenshot({ path: test.info().outputPath("wizard-mobile.png") });
+    await wizard.locator('[data-step="commercial"]').click();
+    await expect(footer.getByRole("button", { name: "Vertrag und Auftrag speichern", exact: true })).toBeInViewport();
+    await expect(footer.getByRole("button", { name: "Bereitschaft prüfen", exact: true })).toBeInViewport();
+    expect(await wizard.getByRole("tabpanel").evaluate((panel) => panel.clientHeight)).toBeGreaterThan(180);
+    await page.screenshot({ path: test.info().outputPath("wizard-commercial-mobile.png") });
+  });
+
+  test("wizard footer retries failed autosave without losing entered data", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    await page.goto("/leads");
+    await page.getByRole("row").filter({ hasText: "Ready Lead" }).click();
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="master_data"]').click();
+    const footer = wizard.locator("footer");
+    await expect(footer.getByText("Daten gespeichert", { exact: true })).toBeVisible();
+    let failed = false;
+    await page.route(`**/api/v1/leads/${leadId}/update`, async (route) => {
+      if (!failed && route.request().postDataJSON().first_name === "Retry Ready") {
+        failed = true;
+        await json(route, { error: "Temporarily unavailable" }, 503);
+        return;
+      }
+      await route.fallback();
+    });
+    const firstName = wizard.locator('input[name="first_name"]');
+    await firstName.fill("Retry Ready");
+    await expect(footer.getByText("Änderungen nicht gespeichert", { exact: true })).toBeVisible();
+    await expect(firstName).toHaveValue("Retry Ready");
+    await page.screenshot({ path: test.info().outputPath("wizard-save-error.png") });
+    await footer.getByRole("button", { name: "Erneut versuchen" }).click();
+    await expect(footer.getByText("Daten gespeichert", { exact: true })).toBeVisible();
+    await expect(footer.getByRole("alert")).toHaveCount(0);
+    await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
+    await expect(wizard).toBeHidden();
+    await page.getByRole("table").getByText("Ready Lead", { exact: true }).click();
+    await wizard.locator('[data-step="master_data"]').click();
+    await expect(firstName).toHaveValue("Retry Ready");
+  });
+
+});
+
 test.describe("lead onboarding wizard", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {

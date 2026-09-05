@@ -416,6 +416,9 @@ async function ensureServerMessageKeyOnce(ownerUserId: string): Promise<MessageK
     await storeMessageKey(active, true);
   }
 
+  if (serverExisting?.fingerprint === active.fingerprint &&
+      serverExisting.public_key === active.publicKey) return active;
+
   const serverKey = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key", {
     method: "POST",
     body: JSON.stringify({
@@ -438,7 +441,11 @@ export async function ensureServerMessageKey(ownerUserId: string) {
   const pending = ensureServerMessageKeyPromises.get(ownerUserId);
   if (pending) return pending;
 
-  const promise = ensureServerMessageKeyOnce(ownerUserId);
+  // Coordinate first-time setup across tabs sharing the same IndexedDB store.
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  const promise = locks
+    ? locks.request(`gmed-chat-key:${ownerUserId}`, () => ensureServerMessageKeyOnce(ownerUserId))
+    : ensureServerMessageKeyOnce(ownerUserId);
   ensureServerMessageKeyPromises.set(ownerUserId, promise);
   try {
     return await promise;
@@ -505,6 +512,7 @@ export async function fetchPeerMessageKey(
   try {
     const raw = await apiFetch<MessageKeyEnvelope>(
       `/messages/e2e-key/${peerUserId}${query}`,
+      { cache: "no-store" },
     );
     const envelope = await validateMessageKeyEnvelope(raw, peerUserId, !fingerprint);
     if (!fingerprint) {

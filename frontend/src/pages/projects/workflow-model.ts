@@ -95,9 +95,11 @@ function sameOrBackwardsEdgePath(source: ProjectWorkflowNode, target: ProjectWor
 export function buildProjectWorkflowGraph(
   tasks: ConciergeTask[],
   dependencies: ProjectWorkflowDependency[],
+  visibleTaskIds?: ReadonlySet<string>,
 ): ProjectWorkflowGraph {
+  const visibleTasks = visibleTaskIds ? tasks.filter((task) => visibleTaskIds.has(task.id)) : tasks;
   const stages = WORKFLOW_STAGE_ORDER.filter(
-    (stage) => stage !== "cancelled" || tasks.some((task) => task.status === "cancelled"),
+    (stage) => stage !== "cancelled" || visibleTasks.some((task) => task.status === "cancelled"),
   );
   const tasksById = taskById(tasks);
   const validDependencies = dependencies.filter(
@@ -105,7 +107,7 @@ export function buildProjectWorkflowGraph(
   );
 
   const nodes = stages.flatMap((stage, stageIndex) =>
-    tasks
+    visibleTasks
       .filter((task) => task.status === stage)
       .sort((left, right) => {
         const leftDate = left.due_at ?? left.created_at;
@@ -124,7 +126,7 @@ export function buildProjectWorkflowGraph(
           y: WORKFLOW_TASK_START_Y + taskIndex * WORKFLOW_TASK_STEP_Y,
           incoming,
           outgoing,
-          unresolvedIncoming: incoming.filter(
+          unresolvedIncoming: task.status === "completed" || task.status === "cancelled" ? [] : incoming.filter(
             (dependency) => !dependencyIsResolved(dependency, tasksById),
           ),
         };
@@ -171,7 +173,7 @@ export function buildProjectWorkflowGraph(
     });
   const largestStage = Math.max(
     1,
-    ...stages.map((stage) => tasks.filter((task) => task.status === stage).length),
+    ...stages.map((stage) => visibleTasks.filter((task) => task.status === stage).length),
   );
 
   return {
@@ -183,17 +185,25 @@ export function buildProjectWorkflowGraph(
   };
 }
 
+export function projectWorkflowBlockedTaskIds(
+  tasks: ConciergeTask[],
+  dependencies: ProjectWorkflowDependency[],
+) {
+  const tasksById = taskById(tasks);
+  return new Set(dependencies.filter((dependency) => {
+    const target = tasksById.get(dependency.task_id);
+    return target && target.status !== "completed" && target.status !== "cancelled"
+      && tasksById.has(dependency.depends_on_task_id)
+      && !dependencyIsResolved(dependency, tasksById);
+  }).map((dependency) => dependency.task_id));
+}
+
 export function projectWorkflowStats(
   tasks: ConciergeTask[],
   dependencies: ProjectWorkflowDependency[],
   now = new Date(),
 ): ProjectWorkflowStats {
-  const tasksById = taskById(tasks);
-  const blockedTaskIds = new Set(
-    dependencies
-      .filter((dependency) => !dependencyIsResolved(dependency, tasksById))
-      .map((dependency) => dependency.task_id),
-  );
+  const blockedTaskIds = projectWorkflowBlockedTaskIds(tasks, dependencies);
   const completed = tasks.filter((task) => task.status === "completed").length;
   const overdue = tasks.filter((task) => {
     if (!task.due_at || task.status === "completed" || task.status === "cancelled") return false;

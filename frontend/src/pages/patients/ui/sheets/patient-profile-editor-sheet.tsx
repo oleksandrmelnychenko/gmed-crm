@@ -1,3 +1,4 @@
+import { hasFormChanges } from "@/lib/form-changes";
 import {
   memo,
   useCallback,
@@ -925,6 +926,9 @@ function PatientProfileEditorSheetContent({
   const [trustedContacts, setTrustedContacts] = useState<PatientTrustedContactFormState[]>(() =>
     open && detail ? trustedContactsFromDetail(detail) : [],
   );
+  const [initialForm] = useState(form);
+  const [initialTrustedContacts, setInitialTrustedContacts] = useState(trustedContacts);
+  const dirty = hasFormChanges(form, initialForm) || hasFormChanges(trustedContacts, initialTrustedContacts);
   const [initialTrustedContactIds, setInitialTrustedContactIds] = useState<string[]>([]);
   const [trustedContactsLoading, setTrustedContactsLoading] = useState(Boolean(open && patientId));
   const [busy, setBusy] = useState(false);
@@ -940,7 +944,10 @@ function PatientProfileEditorSheetContent({
       .then((relations) => {
         if (!active) return;
         const loadedContacts = patientTrustedContactsFromRelations(relations);
-        if (loadedContacts.length > 0) setTrustedContacts(loadedContacts);
+        if (loadedContacts.length > 0) {
+          setTrustedContacts(loadedContacts);
+          setInitialTrustedContacts(loadedContacts);
+        }
         setInitialTrustedContactIds(loadedContacts.flatMap((contact) => (
           contact.persistedId ? [contact.persistedId] : []
         )));
@@ -984,7 +991,7 @@ function PatientProfileEditorSheetContent({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!patientId || !form) return;
+      if (!patientId || !form || !dirty || busy || trustedContactsLoading) return;
       setBusy(true);
       onError("");
       try {
@@ -1100,6 +1107,9 @@ function PatientProfileEditorSheetContent({
       }
     },
     [
+      busy,
+      dirty,
+      trustedContactsLoading,
       dictionary.common_active,
       dictionary.common_failed_update,
       form,
@@ -1114,7 +1124,7 @@ function PatientProfileEditorSheetContent({
   );
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       width="detail-wide"
@@ -1134,7 +1144,7 @@ function PatientProfileEditorSheetContent({
             <Button
               type="submit"
               className="h-9 rounded-lg gap-1.5 px-3.5"
-              disabled={busy}
+              disabled={busy || trustedContactsLoading}
             >
               {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
               {dictionary.patient_profile_editor_save_patient}

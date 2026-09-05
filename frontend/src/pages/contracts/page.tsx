@@ -1,3 +1,6 @@
+import { hasFormChanges } from "@/lib/form-changes";
+import { ServiceDescriptionEditor } from "@/components/service-description-editor";
+import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
 import {
   startTransition,
   useCallback,
@@ -23,6 +26,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   AdminSheetScaffold,
   SheetFormFooter,
@@ -67,6 +71,7 @@ import {
   DEFAULT_QUOTE_FILTERS,
   QUOTE_STATUSES,
   agencyServiceToForm,
+  hasAgencyServiceFormChanges,
   blankAgencyServiceForm,
   blankContractForm,
   blankQuoteForm,
@@ -1774,7 +1779,8 @@ function useContractsPageContent() {
       const payload = {
         service_key: agencyServiceForm.serviceKey || null,
         service_name: agencyServiceForm.serviceName,
-        description: toOptional(agencyServiceForm.description),
+        description_items: serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)
+          .map((item) => ({ ...item, text: item.text.trim() })).filter((item) => item.text),
         unit_label: toOptional(agencyServiceForm.unitLabel),
         unit_price: Number(agencyServiceForm.unitPrice),
         currency: toOptional(agencyServiceForm.currency),
@@ -1820,8 +1826,13 @@ function useContractsPageContent() {
     setAgencyServiceSheetOpen(false);
   }
 
+  const contractStatusDirty = Boolean(contractDetail && hasFormChanges(contractStatusForm, contractToStatusForm(contractDetail)));
+  const quoteStatusDirty = Boolean(quoteDetail && hasFormChanges(quoteStatusForm, quoteToStatusForm(quoteDetail)));
+  const agencyServiceBaseline = agencyServices.find((service) => service.id === agencyServiceForm.id);
+  const agencyServiceDirty = Boolean(agencyServiceBaseline && hasAgencyServiceFormChanges(agencyServiceForm, agencyServiceToForm(agencyServiceBaseline)));
+
   async function handleSaveContractStatus() {
-    if (!selectedContractId) return;
+    if (!selectedContractId || !contractStatusDirty || contractStatusBusy) return;
     const validationError = validateContractStatusForm(
       contractStatusForm,
       createContractValidationMessages,
@@ -1862,7 +1873,7 @@ function useContractsPageContent() {
   }
 
   async function handleSaveQuoteStatus() {
-    if (!selectedQuoteId) return;
+    if (!selectedQuoteId || !quoteStatusDirty || quoteStatusBusy) return;
     setQuoteStatusBusy(true);
     setQuoteStatusError(null);
     try {
@@ -2341,7 +2352,7 @@ function useContractsPageContent() {
         </div>
       </div>
 
-      <Sheet open={agencyServiceSheetOpen} onOpenChange={(open) => (!open ? closeAgencyServiceSheet() : setAgencyServiceSheetOpen(true))}>
+      <Sheet dirty={agencyServiceForm.id ? agencyServiceDirty : undefined} requireChanges={Boolean(agencyServiceForm.id)} open={agencyServiceSheetOpen} onOpenChange={(open) => (!open ? closeAgencyServiceSheet() : setAgencyServiceSheetOpen(true))}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
           <form className="flex h-full flex-col" onSubmit={handleSaveAgencyService}>
             <AdminSheetScaffold
@@ -2454,15 +2465,14 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.descriptionStatus)}</h2>
                   <div className="mt-5 space-y-4">
-                    <Field label={text.description}>
-                      <textarea
-                        className={textareaClassName}
-                        value={agencyServiceForm.description}
-                        onChange={(event) =>
-                          setAgencyServiceForm((current) => ({ ...current, description: event.target.value }))
-                        }
-                      />
-                    </Field>
+                    <ServiceDescriptionEditor
+                      items={serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)}
+                      onChange={(descriptionItems) => setAgencyServiceForm((current) => ({
+                        ...current, descriptionItems, description: serviceDescriptionText(descriptionItems),
+                      }))}
+                      lang={lang}
+                      disabled={agencyServiceBusy}
+                    />
                     <label
                       className={cn(
                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
@@ -2710,6 +2720,7 @@ function useContractsPageContent() {
       </Sheet>
 
       <Sheet
+        dirty={contractStatusDirty}
         open={Boolean(selectedContractId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -2838,6 +2849,7 @@ function useContractsPageContent() {
                         </span>
                       </button>
                     </div>
+                    <div className="mt-3"><DocumentSignatureAction scope={{ patientId: contractDetail.patient_id, leadId: contractDetail.patient_id ? undefined : contractDetail.lead_id }} title={contractDetail.contract_number} /></div>
                   </section>
 
                   <section>
@@ -2915,7 +2927,7 @@ function useContractsPageContent() {
                           type="button"
                           className="h-9 rounded-lg px-3.5"
                           onClick={() => void handleSaveContractStatus()}
-                          disabled={contractStatusBusy || !permissions.canManageContract}
+                          disabled={contractStatusBusy || !permissions.canManageContract || !contractStatusDirty}
                         >
                           {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {text.saveContract}
@@ -2931,6 +2943,7 @@ function useContractsPageContent() {
       </Sheet>
 
       <Sheet
+        dirty={quoteStatusDirty}
         open={Boolean(selectedQuoteId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -3073,6 +3086,7 @@ function useContractsPageContent() {
                         </span>
                       </button>
                     </div>
+                    <div className="mt-3"><DocumentSignatureAction scope={{ orderId: quoteDetail.order_id }} title={quoteDetail.quote_number} /></div>
                   </section>
 
                   <section>
@@ -3129,7 +3143,7 @@ function useContractsPageContent() {
                           type="button"
                           className="h-9 rounded-lg px-3.5"
                           onClick={() => void handleSaveQuoteStatus()}
-                          disabled={quoteStatusBusy || !permissions.canManageQuote}
+                          disabled={quoteStatusBusy || !permissions.canManageQuote || !quoteStatusDirty}
                         >
                           {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {text.saveQuote}

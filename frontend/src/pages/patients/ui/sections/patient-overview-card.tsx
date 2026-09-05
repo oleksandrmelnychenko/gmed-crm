@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
@@ -454,8 +456,6 @@ export function PatientOverviewCard({
   const age = computeAge(birthDate);
   const showDemographics = Boolean(birthDate || gender || phone || email);
   const profileMedications = medications.filter((item) => !medicationHasEndedForProfile(item));
-  const regularMedications = profileMedications.filter((item) => item.category !== "besondere");
-  const specialTimeMedications = profileMedications.filter((item) => item.category === "besondere");
   // Completed ("erfolg") recommendations drop off the overview list.
   const activeRecommendations = recommendations.filter((rec) => rec.lifecycle_status !== "erfolg");
 
@@ -514,103 +514,147 @@ export function PatientOverviewCard({
     );
   };
 
-  const medicationHeadCell =
-    "px-2.5 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const medicationHeadDoseCell =
-    "px-1.5 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-  const medicationBodyCell = "break-words px-2.5 py-2 align-top text-foreground";
-  const medicationBodyDoseCell =
-    "px-1.5 py-2 text-center align-top font-mono tabular-nums text-foreground";
   const medicationDose = (value: string | null) => value?.trim() ?? "";
-
-  const renderMedicationRows = (items: ClinicalMedication[]) =>
-    items.map((item, index) => (
-      <tr
-        key={item.id ?? index}
-        className={cn(
-          "align-top transition-colors hover:bg-muted/30",
-          item.on_hold && "bg-amber-50/70",
-        )}
-      >
-        <td className={cn(medicationBodyCell, "whitespace-pre-line")}>{item.wirkstoff || "—"}</td>
-        <td className={cn(medicationBodyCell, "font-medium")}>
-          {item.handelsname || tx("Без названия", "Ohne Namen")}
-          {item.einnahme_bis ? (
-            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-              {tx("Приём до", "Einnahme bis")} {item.einnahme_bis.slice(0, 10)}
+  const medicationRows = profileMedications.map((item, index) => ({
+    id: item.id ?? `${item.category}-${index}`,
+    item,
+    specialTime: item.category === "besondere",
+  }));
+  type MedicationOverviewRow = (typeof medicationRows)[number];
+  const medicationColumns: ColumnDef<MedicationOverviewRow>[] = [
+    {
+      id: "substance",
+      label: tx("Действующее вещество", "Wirkstoff"),
+      accessor: (row) => row.item.wirkstoff,
+      width: 180,
+      cellClassName: "whitespace-normal",
+      render: (row) => (
+        <div className="min-w-0">
+          <span className="block truncate font-medium" title={row.item.wirkstoff ?? undefined}>
+            {row.item.wirkstoff || "—"}
+          </span>
+          {row.specialTime ? (
+            <span className="mt-1 inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+              {tx("В особое время", "Zu besonderen Zeiten")}
             </span>
           ) : null}
-        </td>
-        <td className={cn(medicationBodyCell, "whitespace-pre-line font-mono")}>
-          {item.staerke || ""}
-        </td>
-        <td className={cn(medicationBodyCell, "whitespace-pre-line")}>
-          {darreichungsformLabel(item.form)}
-        </td>
-        {item.on_hold ? (
-          <td colSpan={4} className="px-2.5 py-2 align-top text-left text-amber-800">
-            <span className="block text-[11px] font-semibold">
-              {tx("На холд", "Auf Hold")}
-              {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from.slice(0, 10)}` : ""}
-              {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until.slice(0, 10)}` : ""}
+        </div>
+      ),
+    },
+    {
+      id: "trade_name",
+      label: tx("Торговое название", "Handelsname"),
+      accessor: (row) => row.item.handelsname,
+      width: 170,
+      cellClassName: "whitespace-normal",
+      render: (row) => (
+        <div className="min-w-0">
+          <span className="block truncate font-medium" title={row.item.handelsname ?? undefined}>
+            {row.item.handelsname || tx("Без названия", "Ohne Namen")}
+          </span>
+          {row.item.einnahme_bis ? (
+            <span className="mt-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              {tx("Приём до", "Einnahme bis")} {row.item.einnahme_bis.slice(0, 10)}
             </span>
-            {item.hold_note ? (
-              <span className="mt-0.5 block break-words text-[10px] font-normal">
-                {item.hold_note}
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "strength",
+      label: tx("Дозировка", "Stärke"),
+      accessor: (row) => row.item.staerke,
+      width: 110,
+      render: (row) => <span className="font-mono tabular-nums">{row.item.staerke || "—"}</span>,
+    },
+    {
+      id: "form",
+      label: tx("Форма", "Form"),
+      accessor: (row) => darreichungsformLabel(row.item.form),
+      width: 210,
+      cellClassName: "whitespace-normal",
+      render: (row) => {
+        const label = darreichungsformLabel(row.item.form);
+        return <span className="line-clamp-2" title={label}>{label || "—"}</span>;
+      },
+    },
+    ...([
+      ["morning", tx("Утро", "Morgens"), "dose_morgens"],
+      ["noon", tx("День", "Mittags"), "dose_mittags"],
+      ["evening", tx("Вечер", "Abends"), "dose_abends"],
+      ["night", tx("Ночь", "Zur Nacht"), "dose_nachts"],
+    ] as const).map(([id, label, field]) => ({
+      id,
+      label,
+      accessor: (row: MedicationOverviewRow) => medicationDose(row.item[field]),
+      align: "right" as const,
+      width: 72,
+      render: (row: MedicationOverviewRow) => (
+        <span className="font-mono tabular-nums">{medicationDose(row.item[field]) || "—"}</span>
+      ),
+    })),
+    {
+      id: "unit",
+      label: tx("Ед.", "Einheit"),
+      accessor: (row) => row.item.einheit,
+      width: 90,
+      render: (row) => row.item.einheit || "—",
+    },
+    {
+      id: "instructions",
+      label: tx("Указания", "Hinweise"),
+      accessor: (row) => [row.item.hold_note, row.item.hinweis].filter(Boolean).join(" "),
+      width: 300,
+      cellClassName: "whitespace-normal",
+      render: (row) => {
+        const holdPeriod = [
+          row.item.hold_from ? `${tx("с", "seit")} ${row.item.hold_from.slice(0, 10)}` : "",
+          row.item.hold_until ? `${tx("до", "bis")} ${row.item.hold_until.slice(0, 10)}` : "",
+        ].filter(Boolean).join(" ");
+        const details = [row.item.hold_note, row.item.hinweis].filter(Boolean).join(" · ");
+        return (
+          <div className="min-w-0" title={[holdPeriod, details].filter(Boolean).join(" · ") || undefined}>
+            {row.item.on_hold ? (
+              <span className="mb-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                {tx("На холд", "Auf Hold")}{holdPeriod ? ` ${holdPeriod}` : ""}
               </span>
             ) : null}
-          </td>
-        ) : (
-          <>
-            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_morgens)}</td>
-            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_mittags)}</td>
-            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_abends)}</td>
-            <td className={medicationBodyDoseCell}>{medicationDose(item.dose_nachts)}</td>
-          </>
-        )}
-        <td className={cn(medicationBodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
-        <td className={medicationBodyCell}>{item.hinweis || ""}</td>
-        <td className={medicationBodyCell}>{item.grund || ""}</td>
-      </tr>
-    ));
+            <span className="block line-clamp-2 text-muted-foreground">{details || "—"}</span>
+          </div>
+        );
+      },
+    },
+    {
+      id: "indication",
+      label: tx("Показание", "Grund"),
+      accessor: (row) => row.item.grund,
+      width: 220,
+      cellClassName: "whitespace-normal",
+      render: (row) => (
+        <span className="line-clamp-2" title={row.item.grund ?? undefined}>{row.item.grund || "—"}</span>
+      ),
+    },
+  ];
 
   const renderMedicationTable = () => (
-    <div className="overflow-x-auto rounded-lg border border-border/70 bg-card">
-      <table
-        aria-label={tx("Медикаменты", "Medikation")}
-        className="w-full min-w-[1080px] border-collapse text-left text-xs"
-      >
-        <thead className="border-b border-border bg-muted/40">
-          <tr>
-            <th scope="col" className={medicationHeadCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Торговое название", "Handelsname")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Дозировка", "Stärke")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Форма", "Form")}</th>
-            <th scope="col" className={medicationHeadDoseCell}>{tx("Утро", "Morgens")}</th>
-            <th scope="col" className={medicationHeadDoseCell}>{tx("День", "Mittags")}</th>
-            <th scope="col" className={medicationHeadDoseCell}>{tx("Вечер", "Abends")}</th>
-            <th scope="col" className={medicationHeadDoseCell}>{tx("Ночь", "Zur Nacht")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Ед.", "Einheit")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Указания", "Hinweise")}</th>
-            <th scope="col" className={medicationHeadCell}>{tx("Показание", "Grund")}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/60">
-          {renderMedicationRows(regularMedications)}
-          {specialTimeMedications.length > 0 ? (
-            <tr>
-              <td
-                colSpan={11}
-                className="bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                {tx("В особое время", "Zu besonderen Zeiten")}
-              </td>
-            </tr>
-          ) : null}
-          {renderMedicationRows(specialTimeMedications)}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      rows={medicationRows}
+      columns={medicationColumns}
+      rowId={(row) => row.id}
+      density="compact"
+      rowHeightOverrides={{ compact: 64 }}
+      disableRowHover
+      rowBackground={(row) => row.item.on_hold
+        ? "color-mix(in oklch, var(--color-amber-500) 9%, var(--card))"
+        : null}
+      storageKey="patient-overview-medications"
+      footer={(
+        <span className="tabular-nums text-muted-foreground">
+          {profileMedications.length} {tx("препаратов", "Medikamente")}
+        </span>
+      )}
+      className="w-full min-w-0 shadow-none"
+    />
   );
 
   return (

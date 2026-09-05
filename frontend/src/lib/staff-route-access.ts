@@ -265,11 +265,25 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "admin", labelKey: "settings_title" },
   },
   {
+    id: "admin/signatures",
+    match: "prefix",
+    path: "/admin/signatures",
+    roles: ["ceo", "it_admin"],
+    nav: { section: "admin", labelKey: "nav_signatures" },
+  },
+  {
     id: "admin/users",
     match: "prefix",
     path: "/admin/users",
     roles: ROLES_ADMIN_USERS,
     nav: { section: "admin", labelKey: "nav_users_roles" },
+  },
+  {
+    id: "admin/datev",
+    match: "prefix",
+    path: "/admin/datev",
+    roles: ROLES_ADMIN,
+    nav: { section: "admin", labelKey: "nav_datev", after: "admin/settings" },
   },
   { id: "admin", match: "prefix", path: "/admin", roles: ROLES_ADMIN },
   {

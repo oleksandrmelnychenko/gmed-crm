@@ -1,3 +1,5 @@
+import { serviceDescriptionItems } from "@/lib/service-description";
+import { hasFormChanges } from "@/lib/form-changes";
 import type {
   AgencyServiceFilters,
   AgencyServiceFormState,
@@ -24,6 +26,14 @@ type EnumLabelTranslations = Pick<
   Translations,
   "common_not_set" | "common_unknown" | "common_unknown_value"
 >;
+
+export function hasAgencyServiceFormChanges(current: AgencyServiceFormState, initial: AgencyServiceFormState) {
+  const comparable = ({ description, ...form }: AgencyServiceFormState) => ({
+    ...form,
+    descriptionItems: serviceDescriptionItems(form.descriptionItems, description),
+  });
+  return hasFormChanges(comparable(current), comparable(initial));
+}
 
 export const CONTRACT_STATUSES: ContractStatus[] = [
   "draft",
@@ -324,6 +334,7 @@ export function blankAgencyServiceForm(unitLabel = ""): AgencyServiceFormState {
     serviceKey: "",
     serviceName: "",
     description: "",
+    descriptionItems: [],
     unitLabel,
     unitPrice: "",
     currency: "EUR",
@@ -358,6 +369,7 @@ export function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFo
     serviceKey: service.service_key,
     serviceName: service.service_name,
     description: service.description ?? "",
+    descriptionItems: serviceDescriptionItems(service.description_items, service.description),
     unitLabel: service.unit_label,
     unitPrice: valueToInput(service.unit_price),
     currency: service.currency,

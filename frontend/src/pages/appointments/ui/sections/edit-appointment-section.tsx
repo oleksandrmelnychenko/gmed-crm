@@ -581,6 +581,7 @@ function useEditAppointmentSectionContentContent({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || !hasUnsavedChanges) return;
     setBusy(true);
     setError("");
     try {
@@ -892,7 +893,7 @@ function useEditAppointmentSectionContentContent({
               type="submit"
               size="sm"
               className="h-8 rounded-lg gap-1.5"
-              disabled={busy}
+              disabled={busy || !hasUnsavedChanges}
             >
               {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
               {busy ? t.patients_saving : t.common_save}

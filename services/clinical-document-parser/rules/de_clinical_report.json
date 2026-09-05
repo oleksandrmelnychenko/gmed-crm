@@ -1,4 +1,13 @@
 {
+  "laboratory_analyte_ocr_aliases": {
+    "HbAlc": "HbA1c",
+    "HbAlc%": "HbA1c%",
+    "HbAIc": "HbA1c",
+    "HbAIc%": "HbA1c%",
+    "Betal-Globulin": "Beta1-Globulin",
+    "Betal-Globulin %": "Beta1-Globulin %",
+    "Kreatinin Jaffe": "Kreatinin Jaffé"
+  },
   "section_aliases": {
     "diagnosis": [
       "Diagnosen",

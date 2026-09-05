@@ -148,6 +148,19 @@ describe("secure chat server key setup", () => {
     expect(await getLocalMessageKey("owner-user", first.fingerprint)).toBeTruthy();
     expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBeNull();
   });
+
+  it("reuses a matching server registration without rotating or posting it again", async () => {
+    const local = await ensureServerMessageKey("owner-user");
+    apiFetchMock.mockClear();
+    apiFetchMock.mockResolvedValueOnce({
+      id: "existing", user_id: "owner-user", algorithm: local.algorithm,
+      public_key: local.publicKey, fingerprint: local.fingerprint,
+      is_active: true, created_at: local.createdAt,
+    });
+    const reused = await ensureServerMessageKey("owner-user");
+    expect(reused.fingerprint).toBe(local.fingerprint);
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+  });
 });
 
 describe("chat E2E attachments", () => {

@@ -1,4 +1,5 @@
 export interface AdminSystemTranslations {
+  nav_datev: string;
   admin_system_overview: string;
   admin_system_fields: string;
   admin_system_permissions: string;
@@ -167,6 +168,15 @@ export interface AdminSystemTranslations {
   chat_attachment_pending: string;
   chat_attachment_too_large: string;
   chat_attachment_type_blocked: string;
+  chat_attachment_name_invalid: string;
+  chat_attachments_limit: string;
+  chat_attachments_uploading: string;
+  chat_attachments_drop: string;
+  chat_attachment_preview: string;
+  chat_attachment_download: string;
+  chat_attachment_preview_unavailable: string;
+  chat_attachment_preview_truncated: string;
+  chat_attachment_load_failed: string;
   chat_security_settings: string;
   chat_security_settings_description: string;
   chat_security_device_bound_description: string;
@@ -175,6 +185,12 @@ export interface AdminSystemTranslations {
   chat_secure_identity_changed: string;
   chat_secure_identity_unverified: string;
   chat_secure_trust_new_identity: string;
+  chat_message_sent: string;
+  chat_scroll_latest: string;
+  chat_empty_conversation: string;
+  chat_secure_waiting: string;
+  chat_connection_polling: string;
+  chat_security_retry: string;
   chat_message_history: string;
   chat_search_messages: string;
   chat_search_loaded_history: string;
@@ -434,6 +450,7 @@ export interface AdminSystemTranslations {
 }
 
 export const adminSystemRu: AdminSystemTranslations = {
+  nav_datev: "Подключение DATEV",
   admin_system_overview: "Обзор",
   admin_system_fields: "Поля",
   admin_system_permissions: "Права доступа",
@@ -612,6 +629,15 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_attachment_pending:
     "Вложения станут доступны, когда собеседник активирует защищенный чат.",
   chat_attachment_too_large: "Файл превышает допустимый размер 20 МБ.",
+  chat_attachment_name_invalid: "Сократите имя файла до 255 байт и уберите недопустимые символы.",
+  chat_attachments_limit: "Можно прикрепить до 10 файлов за раз, не более 20 МБ каждый.",
+  chat_attachments_uploading: "Отправка файла {index} из {total}: {name}",
+  chat_attachments_drop: "Отпустите файлы, чтобы прикрепить к сообщению",
+  chat_attachment_preview: "Просмотреть",
+  chat_attachment_download: "Скачать",
+  chat_attachment_preview_unavailable: "Предпросмотр недоступен. Файл можно скачать.",
+  chat_attachment_preview_truncated: "Показано начало файла. Скачайте его для просмотра целиком.",
+  chat_attachment_load_failed: "Не удалось загрузить вложение. Попробуйте ещё раз.",
   chat_attachment_type_blocked:
     "Этот тип файла нельзя безопасно отправить в зашифрованном чате.",
   chat_security_settings: "Безопасность чата",
@@ -625,6 +651,12 @@ export const adminSystemRu: AdminSystemTranslations = {
     "Ключ собеседника изменился. Отправка приостановлена до проверки контрольного номера.",
   chat_secure_identity_unverified: "Личность собеседника не подтверждена",
   chat_secure_trust_new_identity: "Доверять новому ключу",
+  chat_message_sent: "Отправлено",
+  chat_scroll_latest: "К последним сообщениям",
+  chat_empty_conversation: "Здесь пока нет сообщений. Напишите первое сообщение.",
+  chat_secure_waiting: "Собеседник ещё не активировал защищённый чат. Он станет доступен после входа собеседника в систему. Проверяем автоматически.",
+  chat_connection_polling: "Обновляем сообщения каждые 5 секунд, пока восстанавливается соединение.",
+  chat_security_retry: "Проверить соединение",
   chat_message_history: "История сообщений",
   chat_search_messages: "Поиск в сообщениях",
   chat_search_loaded_history: "Поиск выполняется локально в загруженной истории.",
@@ -903,6 +935,7 @@ export const adminSystemRu: AdminSystemTranslations = {
 };
 
 export const adminSystemDe: AdminSystemTranslations = {
+  nav_datev: "DATEV-Verbindung",
   admin_system_overview: "Übersicht",
   admin_system_fields: "Felder",
   admin_system_permissions: "Berechtigungen",
@@ -1082,6 +1115,15 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_attachment_pending:
     "Anhänge werden verfügbar, sobald die Gegenseite den sicheren Chat aktiviert.",
   chat_attachment_too_large: "Die Datei überschreitet die zulässigen 20 MB.",
+  chat_attachment_name_invalid: "Kürzen Sie den Dateinamen auf 255 Bytes und entfernen Sie ungültige Zeichen.",
+  chat_attachments_limit: "Bis zu 10 Dateien gleichzeitig, jeweils maximal 20 MB.",
+  chat_attachments_uploading: "Datei {index} von {total} wird gesendet: {name}",
+  chat_attachments_drop: "Dateien loslassen, um sie anzuhängen",
+  chat_attachment_preview: "Vorschau",
+  chat_attachment_download: "Herunterladen",
+  chat_attachment_preview_unavailable: "Keine Vorschau verfügbar. Sie können die Datei herunterladen.",
+  chat_attachment_preview_truncated: "Anfang der Datei. Laden Sie sie herunter, um den gesamten Inhalt zu sehen.",
+  chat_attachment_load_failed: "Der Anhang konnte nicht geladen werden. Bitte versuchen Sie es erneut.",
   chat_attachment_type_blocked:
     "Dieser Dateityp kann im verschlüsselten Chat nicht sicher gesendet werden.",
   chat_security_settings: "Chat-Sicherheit",
@@ -1095,6 +1137,12 @@ export const adminSystemDe: AdminSystemTranslations = {
     "Der Schlüssel der Gegenseite hat sich geändert. Der Versand bleibt bis zur Prüfung der Prüfnummer gesperrt.",
   chat_secure_identity_unverified: "Identität der Gegenseite nicht bestätigt",
   chat_secure_trust_new_identity: "Neuem Schlüssel vertrauen",
+  chat_message_sent: "Gesendet",
+  chat_scroll_latest: "Zu den neuesten Nachrichten",
+  chat_empty_conversation: "Noch keine Nachrichten. Schreiben Sie die erste Nachricht.",
+  chat_secure_waiting: "Die Gegenseite hat den sicheren Chat noch nicht aktiviert. Sobald sie sich anmeldet, prüfen wir die Einrichtung automatisch.",
+  chat_connection_polling: "Nachrichten werden alle 5 Sekunden aktualisiert, während die Verbindung wiederhergestellt wird.",
+  chat_security_retry: "Verbindung prüfen",
   chat_message_history: "Nachrichtenverlauf",
   chat_search_messages: "Nachrichten durchsuchen",
   chat_search_loaded_history: "Die Suche bleibt lokal im geladenen Verlauf.",

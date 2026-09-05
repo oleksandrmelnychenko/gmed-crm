@@ -2077,7 +2077,7 @@ function usePatientInvoicesTabContent({
               id: "package_actions",
               label: t.table_actions,
               accessor: () => "",
-              width: 70,
+              width: 44,
               render: (item: PatientServicePackageItem) => (
                 <PackageActionsMenu
                   item={item}
@@ -3514,7 +3514,7 @@ function usePatientInvoicesTabContent({
               ]}
             />
           )}
-          rowActionsWidth={70}
+          rowActionsWidth={44}
           pagination={{ resetKey: filteredInvoices.map((invoice) => invoice.id).join(":") }}
         />
       )}

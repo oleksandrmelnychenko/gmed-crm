@@ -108,6 +108,7 @@ struct ListQuotesQuery {
 
 #[derive(Deserialize, Clone)]
 struct QuoteLineItemInput {
+    description_items: Option<Vec<crate::service_description::ServiceDescriptionItem>>,
     description: String,
     quantity: f64,
     unit_price: f64,
@@ -136,6 +137,7 @@ struct UpdateQuoteStatusRequest {
 
 #[derive(Deserialize)]
 struct UpsertAgencyServiceRequest {
+    description_items: Option<Vec<crate::service_description::ServiceDescriptionItem>>,
     service_key: Option<String>,
     service_name: String,
     description: Option<String>,
@@ -168,6 +170,7 @@ struct NormalizedAgencyServicePriceVersion {
 }
 
 struct NormalizedAgencyServicePayload {
+    description_items: Option<serde_json::Value>,
     service_key: Option<String>,
     service_name: String,
     description: Option<String>,
@@ -182,6 +185,8 @@ struct NormalizedAgencyServicePayload {
 
 #[derive(Serialize, Clone)]
 struct QuoteLineItem {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description_items: Option<Value>,
     description: String,
     quantity: String,
     unit_price: String,
@@ -432,9 +437,16 @@ fn normalize_agency_service_payload(
         .map(normalize_agency_service_key)
         .transpose()?;
 
-    let description = body
-        .description
-        .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string()));
+    let description_items = body
+        .description_items
+        .map(crate::service_description::normalize_items)
+        .transpose()?;
+    let description = match description_items.as_ref() {
+        Some(items) => crate::service_description::items_text(items),
+        None => body
+            .description
+            .and_then(|value| (!value.trim().is_empty()).then(|| value.trim().to_string())),
+    };
     let unit_label = body
         .unit_label
         .map(|value| value.trim().to_string())
@@ -475,6 +487,7 @@ fn normalize_agency_service_payload(
     }
 
     Ok(NormalizedAgencyServicePayload {
+        description_items: description_items.map(|items| json!(items)),
         service_key,
         service_name: service_name.to_string(),
         description,
@@ -668,7 +681,7 @@ async fn list_agency_services(
     }
 
     match sqlx::query(
-        r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description,
+        r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description, catalog.description_items,
                   catalog.unit_label,
                   COALESCE(current_price.unit_price, catalog.unit_price) AS unit_price,
                   COALESCE(current_price.currency, catalog.currency) AS currency,
@@ -741,6 +754,7 @@ async fn list_agency_services(
                         "service_key": row.try_get::<String, _>("service_key").unwrap_or_default(),
                         "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
                         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
+                        "description_items": row.try_get::<Value, _>("description_items").unwrap_or_else(|_| json!([])),
                         "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
                         "unit_price": row.try_get::<Decimal, _>("unit_price").unwrap_or(Decimal::ZERO),
                         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
@@ -788,10 +802,10 @@ async fn create_agency_service(
         r#"WITH inserted AS (
              INSERT INTO agency_service_catalog (
                 service_key, service_name, description, unit_label, unit_price,
-                currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by
+                currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by, description_items
              ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $11
+                $6, $7, $8, $9, $10, $11, $11, $12
              )
              RETURNING id, created_at, updated_at
            )
@@ -814,6 +828,7 @@ async fn create_agency_service(
     .bind(payload.valid_from)
     .bind(payload.valid_to)
     .bind(auth.user_id)
+    .bind(payload.description_items)
     .fetch_one(&state.db)
     .await
     {
@@ -886,6 +901,7 @@ async fn update_agency_service(
            SET service_key = COALESCE($2, service_key),
                service_name = $3,
                description = $4,
+               description_items = COALESCE($13, description_items),
                unit_label = $5,
                unit_price = $6,
                currency = $7,
@@ -925,6 +941,7 @@ async fn update_agency_service(
     .bind(payload.valid_from)
     .bind(payload.valid_to)
     .bind(auth.user_id)
+    .bind(payload.description_items)
     .fetch_optional(&mut *tx)
     .await
     {
@@ -2202,6 +2219,12 @@ fn normalize_custom_line_items(
         let line_gross = (line_net + line_vat).round_dp(2);
 
         normalized.push(QuoteLineItem {
+            description_items: item
+                .description_items
+                .clone()
+                .map(crate::service_description::normalize_items)
+                .transpose()?
+                .map(|items| json!(items)),
             description: item.description.trim().to_string(),
             quantity: quantity_to_string(quantity),
             unit_price: decimal_to_string(unit_price),
@@ -2263,6 +2286,9 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
         };
 
         items.push(QuoteLineItem {
+            description_items: row
+                .try_get::<Option<Value>, _>("agency_service_description_items_snapshot")
+                .unwrap_or_default(),
             description: row.try_get::<String, _>("description").unwrap_or_default(),
             quantity: quantity_to_string(quantity),
             unit_price: decimal_to_string(unit_price),
@@ -2293,7 +2319,7 @@ async fn load_quote_line_items_from_order_tx(
     order_id: Uuid,
 ) -> Result<Vec<QuoteLineItem>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT id, description, agency_service_description_snapshot,
+        r#"SELECT id, description, agency_service_description_snapshot, agency_service_description_items_snapshot,
                   quantity, unit_price_snapshot AS unit_price,
                   vat_rate_snapshot AS vat_rate, is_cost_passthrough,
                   external_document_id, provider_id, doctor_id, notes
@@ -2672,6 +2698,36 @@ async fn create_quote(
     let line_items = persisted_line_items;
 
     let totals = compute_quote_totals(&line_items);
+    // A quote revision changes the commercial calculation, not the fact that
+    // an advance payment was already received for this order. Carry the most
+    // recent payment forward so recalculating a quote never asks staff to
+    // record the same money a second time.
+    let (carried_paid_amount, carried_paid_at) =
+        match sqlx::query_as::<_, (Decimal, Option<DateTime<Utc>>)>(
+            r#"SELECT paid_amount, paid_at
+           FROM quotes
+           WHERE order_id = $1
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1
+           FOR SHARE"#,
+        )
+        .bind(order_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(payment)) => payment,
+            Ok(None) => (Decimal::ZERO, None),
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load prior quote payment");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+            }
+        };
+    if carried_paid_amount > totals.total_gross {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Received prepayment exceeds the recalculated quote total",
+        );
+    }
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('quote_number_seq')")
         .fetch_one(&mut *tx)
         .await
@@ -2695,9 +2751,9 @@ async fn create_quote(
     let row = match sqlx::query(
         r#"INSERT INTO quotes (
                 order_id, quote_number, total_net, total_vat, total_gross,
-                valid_until, line_items, notes, created_by
+                valid_until, paid_amount, paid_at, line_items, notes, created_by
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
            )
            RETURNING id, created_at, updated_at"#,
     )
@@ -2707,6 +2763,8 @@ async fn create_quote(
     .bind(totals.total_vat)
     .bind(totals.total_gross)
     .bind(valid_until)
+    .bind(carried_paid_amount)
+    .bind(carried_paid_at)
     .bind(line_items_value.clone())
     .bind(body.notes.clone())
     .bind(auth.user_id)
@@ -2730,8 +2788,8 @@ async fn create_quote(
         total_vat: totals.total_vat,
         total_gross: totals.total_gross,
         valid_until,
-        paid_amount: Decimal::ZERO,
-        paid_at: None,
+        paid_amount: carried_paid_amount,
+        paid_at: carried_paid_at,
         line_items: line_items_value,
         notes: body.notes.clone(),
         change_reason: Some("initial_snapshot".to_string()),
@@ -2810,6 +2868,7 @@ async fn create_quote(
             "lead_id": order_ctx.lead_id,
             "status": "draft",
             "total_gross": decimal_to_string(totals.total_gross),
+            "paid_amount": decimal_to_string(carried_paid_amount),
         }),
     )
     .await;
@@ -2828,6 +2887,8 @@ async fn create_quote(
             "total_vat": decimal_to_string(totals.total_vat),
             "total_gross": decimal_to_string(totals.total_gross),
             "valid_until": valid_until.map(|v| v.to_string()),
+            "paid_amount": decimal_to_string(carried_paid_amount),
+            "paid_at": carried_paid_at.map(|value| value.to_rfc3339()),
             "line_items": line_items,
             "notes": body.notes,
             "version_count": 1,

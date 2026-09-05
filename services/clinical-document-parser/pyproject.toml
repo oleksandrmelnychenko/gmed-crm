@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10"]
+translation = ["ctranslate2==4.8.2", "sentencepiece==0.2.2"]
 paddle = [
   "paddleocr==3.7.0",
   "paddlepaddle==3.3.1",

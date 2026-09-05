@@ -5,6 +5,7 @@ import type { Leistung } from "@/pages/orders/model/types";
 
 import {
   calculateServiceLineEstimate,
+  mergeCommercialQuoteReadiness,
   preferPersistedCommercialLines,
   quoteMatchesCurrentServices,
   type ServiceLine,
@@ -93,5 +94,12 @@ describe("lead wizard commercial source of truth", () => {
 
     expect(quoteMatchesCurrentServices(quote, persisted, estimate.gross)).toBe(true);
     expect(quoteMatchesCurrentServices(staleQuote, persisted, estimate.gross)).toBe(false);
+  });
+
+  it("does not show a green commercial status when server readiness rejects the quote", () => {
+    expect(mergeCommercialQuoteReadiness(true, false, true)).toBe(false);
+    expect(mergeCommercialQuoteReadiness(true, true, false)).toBe(false);
+    expect(mergeCommercialQuoteReadiness(true, true, true)).toBe(true);
+    expect(mergeCommercialQuoteReadiness(true, undefined, undefined)).toBe(true);
   });
 });

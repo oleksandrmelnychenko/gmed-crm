@@ -3,7 +3,9 @@ import {
   apiFetchFile,
   clearApiCache,
   getAccessToken,
+  getAccessTokenExpiresAtMs,
   openAuthenticatedApiWebSocket,
+  refreshAuthSession,
 } from "@/lib/api";
 
 import type { Conversation, Message, UserItem } from "../model/types";
@@ -46,7 +48,7 @@ function parseSentMessageReceipt(value: unknown): SentMessageReceipt {
 }
 
 export function fetchConversations() {
-  return apiFetch<Conversation[]>("/messages/conversations");
+  return apiFetch<Conversation[]>("/messages/conversations", { cache: "no-store" });
 }
 
 export function fetchPeerMessages(
@@ -58,7 +60,7 @@ export function fetchPeerMessages(
     params.set("before_created_at", before.created_at);
     params.set("before_id", before.id);
   }
-  return apiFetch<Message[]>(`/messages/${peerId}?${params.toString()}`);
+  return apiFetch<Message[]>(`/messages/${peerId}?${params.toString()}`, { cache: "no-store" });
 }
 
 export function markPeerMessagesRead(peerId: string) {
@@ -90,10 +92,14 @@ export async function uploadPeerAttachment(peerId: string, formData: FormData) {
   const rawReceipt = await apiFetch<unknown>(`/messages/${peerId}/upload`, {
     method: "POST",
     body: formData,
+    timeoutMs: 120_000,
   });
   const receipt = parseSentMessageReceipt(rawReceipt);
+  if (!isRecord(rawReceipt) || typeof rawReceipt.attachment_key !== "string" || !rawReceipt.attachment_key) {
+    throw new Error("Invalid attachment delivery receipt");
+  }
   clearApiCache();
-  return receipt;
+  return { ...receipt, attachment_key: rawReceipt.attachment_key };
 }
 
 export async function deletePeerMessage(peerId: string, messageId: string) {
@@ -102,11 +108,15 @@ export async function deletePeerMessage(peerId: string, messageId: string) {
 }
 
 export async function downloadMessageAttachmentBytes(fileKey: string) {
-  const { blob } = await apiFetchFile(`/messages/file/${fileKey}`);
+  const { blob } = await apiFetchFile(`/messages/file/${encodeURIComponent(fileKey)}`, { timeoutMs: 120_000 });
   return blob.arrayBuffer();
 }
 
-export function openMessagesSocket() {
+export async function openMessagesSocket() {
+  const expiresAt = getAccessTokenExpiresAtMs();
+  if (expiresAt !== null && expiresAt - Date.now() < 30_000) {
+    if (!await refreshAuthSession()) return null;
+  }
   const token = getAccessToken();
   if (!token) return null;
   return openAuthenticatedApiWebSocket("/messages/ws", token);

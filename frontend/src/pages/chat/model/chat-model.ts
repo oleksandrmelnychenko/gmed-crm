@@ -1,4 +1,5 @@
 import { formatUnknownValue, type Translations } from "@/lib/i18n";
+import type { Message } from "./types";
 
 export function initials(name: string) {
   return name
@@ -13,14 +14,49 @@ export function roleDisplay(role: string, translations: Translations) {
   return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
-export function timeAgo(iso: string) {
-  const idx = iso.indexOf("T");
-  if (idx < 0) return iso.slice(0, 16);
-  const hm = iso.slice(idx + 1, idx + 6);
-  const datePart = iso.slice(0, idx);
-  const today = new Date().toISOString().slice(0, 10);
-  if (datePart === today) return hm;
-  return `${datePart.slice(5).replace("-", ".")} ${hm}`;
+export function timeAgo(iso: string, lang: "de" | "ru" = "de") {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  const now = new Date();
+  const options: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+  if (chatMessageDateKey(iso) !== chatMessageDateKey(now.toISOString())) {
+    options.day = "2-digit";
+    options.month = "2-digit";
+    if (date.getFullYear() !== now.getFullYear()) options.year = "numeric";
+  }
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", options).format(date);
+}
+
+// The API uses descending (created_at, id) cursors. Match that order even when
+// socket events and delivery receipts arrive before their HTTP refresh.
+export function sortChatMessages(messages: Message[]) {
+  return [...messages].sort((a, b) =>
+    Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id),
+  );
+}
+
+export function mergeChatMessages(current: Message[], incoming: Message[]) {
+  const ids = new Set(incoming.map((message) => message.id));
+  const clients = new Set(incoming.map((message) => message.client_message_id).filter(Boolean));
+  return sortChatMessages([
+    ...incoming,
+    ...current.filter((message) => !ids.has(message.id) &&
+      !(message.client_message_id && clients.has(message.client_message_id))),
+  ]);
+}
+
+export function reconcileChatMessages(current: Message[], incoming: Message[], pageSize = 100) {
+  const ordered = sortChatMessages(incoming);
+  const oldest = ordered.at(-1);
+  // A complete latest page is authoritative: missing rows were deleted or
+  // expired. Preserve older loaded pages and local sends awaiting a receipt.
+  const retained = current.filter((message) => message.delivery_state || (
+    incoming.length >= pageSize && oldest && (
+      Date.parse(message.created_at) < Date.parse(oldest.created_at) ||
+      (Date.parse(message.created_at) === Date.parse(oldest.created_at) && message.id < oldest.id)
+    )
+  ));
+  return mergeChatMessages(retained, ordered);
 }
 
 export function truncate(s: string, max: number) {

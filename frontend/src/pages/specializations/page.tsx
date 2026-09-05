@@ -583,12 +583,12 @@ export function SpecializationsPage() {
               ) : null}
 
               <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
-                <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold uppercase text-muted-foreground md:grid">
+                <div className="hidden min-w-[720px] grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_72px] gap-3 border-b border-border/60 bg-muted/25 px-5 py-2 text-[11px] font-semibold uppercase text-muted-foreground md:grid">
                   <span>{tx("Вид работы", "Leistungsart")}</span>
                   <span>{tx("Диапазон, EUR", "Preisspanne, EUR")}</span>
                   <span className="text-right">{tx("Описания", "Beschreibungen")}</span>
                   <span>{tx("Статус", "Status")}</span>
-                  <span className="text-right">{tx("Действия", "Aktionen")}</span>
+                  <span className="text-right"><span className="sr-only">{tx("Действия", "Aktionen")}</span></span>
                 </div>
 
                 {workTypesLoading ? (
@@ -629,7 +629,7 @@ export function SpecializationsPage() {
                           setWorkTypeSheet({ item });
                         }}
                         className={cn(
-                          "grid grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_80px] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/25",
+                          "grid grid-cols-[minmax(220px,1.5fr)_190px_110px_96px_72px] items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/25",
                           canManage &&
                             "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-inset",
                         )}
@@ -775,6 +775,7 @@ function SpecializationSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || (item && !dirty)) return;
     setError("");
     const nameDe = draft.nameDe.trim();
     const nameRu = draft.nameRu.trim();
@@ -809,7 +810,7 @@ function SpecializationSheet({
     : tx("Новая специализация", "Neue Spezialisierung");
 
   return (
-    <Sheet open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open requireChanges={Boolean(item)} dirty={dirty} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
         className="w-full border-l border-border p-0 sm:max-w-[680px]"
@@ -1081,6 +1082,7 @@ function WorkTypeSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || (item && !dirty)) return;
     setError("");
     const minPrice = Number(draft.minPriceEur);
     const maxPrice = Number(draft.maxPriceEur);
@@ -1175,10 +1177,10 @@ function WorkTypeSheet({
     : tx("Новый вид работы", "Neue Leistungsart");
 
   return (
-    <Sheet open dirty={dirty} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open requireChanges={Boolean(item)} dirty={dirty} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
-        className="w-full border-l border-border p-0 sm:max-w-[900px]"
+        className="w-full border-l border-border p-0 data-[side=right]:sm:w-[60vw] data-[side=right]:sm:max-w-[60vw]"
       >
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <AdminSheetScaffold

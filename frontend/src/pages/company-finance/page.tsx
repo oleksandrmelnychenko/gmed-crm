@@ -4,7 +4,6 @@ import {
   Building2,
   Landmark,
   ReceiptText,
-  RefreshCw,
   Search,
   UsersRound,
 } from "lucide-react";
@@ -23,13 +22,13 @@ import {
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
 import { ConciergeExpenseReviewPanel } from "./concierge-expense-review-panel";
 import { ProviderSettlementDialog } from "./provider-settlement-dialog";
 import { ProviderStatementDialog } from "./provider-statement-dialog";
+import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 import {
   assignAccountingEntryFinancialAccount,
   fetchCompanyFinancialAccounts,
@@ -50,44 +49,6 @@ type PatientSideFilter = "all" | CompanyBalanceSide | "reconciliation";
 type ProviderSettlementFilter = "open" | "partial" | "settled" | "expected" | "all";
 type ProviderView = "providers" | "documents";
 
-const COMPANY_FINANCE_REALTIME_EVENTS = [
-  "realtime.connected",
-  "realtime.resync_required",
-  "patient.balance_adjustment_created",
-  "patient.balance_adjustment_reversed",
-  "invoice.created",
-  "invoice.status_changed",
-  "invoice.payment_recorded",
-  "invoice.payment_reversed",
-  "invoice.refund_recorded",
-  "invoice.refund_reversed",
-  "invoice.credit_note_created",
-  "invoice.credit_note_reversed",
-  "invoice.prepayment_applied",
-  "invoice.prepayment_released",
-  "order.external_invoice_created",
-  "order.external_invoice_updated",
-  "order.external_invoice_overdue",
-  "order.external_invoice_allocation_created",
-  "order.external_invoice_allocation_reversed",
-  "order.leistung_added",
-  "order.leistung_planned_cost_updated",
-  "order.leistung_approved",
-  "concierge_expense.submitted",
-  "concierge_expense.posted",
-  "concierge_expense.rejected",
-  "concierge_expense.reversed",
-  "company_financial_account.created",
-  "company_financial_account.updated",
-  "company_financial_account.adjustment_created",
-  "company_financial_account.adjustment_reversed",
-  "company_financial_account.transfer_created",
-  "company_financial_account.transfer_reversed",
-  "accounting_entry.financial_account_assigned",
-  "provider_payment.recorded",
-  "provider_payment.reversed",
-] as const;
-
 const today = new Date();
 const initialFilters: CompanyFinancialFilters = {
   from: `${today.getFullYear()}-01-01`,
@@ -101,7 +62,6 @@ const textByLanguage = {
   ru: {
     title: "Баланс компании",
     subtitle: "Финансовая позиция, обязательства и движение средств компании",
-    refresh: "Обновить",
     searchLabel: "Поиск",
     from: "Денежные операции с",
     to: "по",
@@ -182,7 +142,6 @@ const textByLanguage = {
   de: {
     title: "Unternehmenssaldo",
     subtitle: "Finanzposition, Verbindlichkeiten und Geldbewegungen des Unternehmens",
-    refresh: "Aktualisieren",
     searchLabel: "Suche",
     from: "Geldbewegungen von",
     to: "bis",
@@ -354,21 +313,21 @@ export function CompanyFinancePage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [conciergeExpensePendingCount, setConciergeExpensePendingCount] = useState(0);
 
-  useDebouncedRealtimeSubscription(COMPANY_FINANCE_REALTIME_EVENTS, () => {
+  useFinanceAutoRefresh(() => {
     setReloadToken((current) => current + 1);
-  }, 200);
+  }, loading);
 
   useEffect(() => {
     let active = true;
     const timer = window.setTimeout(() => {
       setLoading(true);
-      setError(null);
       void Promise.all([
-        fetchCompanyFinancialPosition(filters, reloadToken > 0),
-        fetchCompanyFinancialAccounts(filters.currency, reloadToken > 0),
+        fetchCompanyFinancialPosition(filters, true),
+        fetchCompanyFinancialAccounts(filters.currency, true),
       ])
         .then(([result, accountResult]) => {
           if (!active) return;
+          setError(null);
           setPosition(result);
           setAccounts(accountResult);
           if (!filters.currency && result.currency) {
@@ -608,8 +567,8 @@ export function CompanyFinancePage() {
       ),
     },
     { id: "provider", label: text.provider, accessor: (row) => row.provider_name ?? "", filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.provider_id ? <StaffLink className="hover:text-primary hover:underline" to={`/providers/${row.provider_id}`}>{row.provider_name || "—"}</StaffLink> : row.provider_name || "—" },
-    { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid}</StaffLink> },
-    { id: "order", label: text.order, accessor: (row) => row.order_number, filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> },
+    { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—" },
+    { id: "order", label: text.order, accessor: (row) => row.order_number ?? "", filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => row.order_id ? <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number || "—"}</StaffLink> : "—" },
     { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date, locale) },
     { id: "amount", label: text.originalAmount, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => money(row.amount_gross) },
     { id: "company_paid", label: text.companyPaid, accessor: (row) => parseAmount(row.company_paid_gross), filterType: "number", sortable: true, width: 170, render: (row) => <span className="text-emerald-700 dark:text-emerald-400">{money(row.company_paid_gross)}</span> },
@@ -669,18 +628,6 @@ export function CompanyFinancePage() {
       <PageHeader
         title={text.title}
         description={text.subtitle}
-        actions={(
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9 rounded-lg px-3.5"
-            disabled={loading}
-            onClick={() => setReloadToken((current) => current + 1)}
-          >
-            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-            {text.refresh}
-          </Button>
-        )}
       />
 
       <section className="relative z-30 grid grid-cols-2 items-end gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">

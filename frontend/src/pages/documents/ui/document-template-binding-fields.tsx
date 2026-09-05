@@ -1,12 +1,15 @@
 import { Check, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { ServiceDescriptionEditor } from "@/components/service-description-editor";
+import { serviceDescriptionText, type ServiceDescriptionItem } from "@/lib/service-description";
 import { cn } from "@/lib/utils";
 import {
   documentBindingFieldLabel,
+  parseBindingServiceLines,
   type BindingFieldDef,
   type DocumentBindingForm,
 } from "@/pages/documents/model/document-bindings";
@@ -39,6 +42,8 @@ type ServiceLineDraft = {
   quantity: string;
   lineTotal: string;
   note: string;
+  descriptionItems?: ServiceDescriptionItem[];
+  vatRate?: string;
 };
 
 const inputClassName =
@@ -71,36 +76,23 @@ function groupLabel(group: BindingGroup, lang: "de" | "ru") {
   return labels[group][lang === "de" ? 1 : 0];
 }
 
-function parseServiceLines(value: string): ServiceLineDraft[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [description = "", fee = "", quantity = "", lineTotal = "", note = ""] =
-        line.split("|").map((part) => part.trim());
-      return { formKey: nextServiceLineKey(), description, fee, quantity, lineTotal, note };
-    });
+function parseServiceLines(value: string, templateId: string): ServiceLineDraft[] {
+  return parseBindingServiceLines(value, templateId).map((line) => ({
+    formKey: nextServiceLineKey(), description: line.description,
+    fee: (templateId === "cost_estimate" ? line.line_total : line.fee) ?? "",
+    quantity: line.quantity ?? "", lineTotal: line.line_total ?? "", note: line.note ?? "",
+    descriptionItems: line.description_items, vatRate: line.vat_rate,
+  }));
 }
 
-function serializeServiceLines(lines: ServiceLineDraft[]) {
-  return lines
-    .filter((line) =>
-      Object.values(line).some((value) => value.trim()),
-    )
-    .map((line) =>
-      [
-        line.description,
-        line.fee,
-        line.quantity,
-        line.lineTotal,
-        line.note,
-      ]
-        .map((value) => value.trim())
-        .join(" | ")
-        .replace(/(?:\s*\|\s*)+$/, ""),
-    )
-    .join("\n");
+function serializeServiceLines(lines: ServiceLineDraft[], templateId: string) {
+  return JSON.stringify(lines.map((line) => ({
+    description: line.description,
+    fee: templateId === "cost_estimate" ? undefined : line.fee,
+    quantity: line.quantity,
+    line_total: templateId === "cost_estimate" ? line.fee : line.lineTotal,
+    note: line.note, description_items: line.descriptionItems, vat_rate: line.vatRate,
+  })));
 }
 
 function ServiceLinesEditor({
@@ -116,7 +108,7 @@ function ServiceLinesEditor({
 }) {
   const compact = templateId === "cost_estimate";
   const [lines, setLines] = useState<ServiceLineDraft[]>(() => {
-    const parsedLines = parseServiceLines(value);
+    const parsedLines = parseServiceLines(value, templateId);
     return parsedLines.length > 0
       ? parsedLines
       : [emptyServiceLine()];
@@ -127,8 +119,8 @@ function ServiceLinesEditor({
     queueMicrotask(() => {
       if (!active) return;
       setLines((current) => {
-        if (serializeServiceLines(current) === value.trim()) return current;
-        const parsedLines = parseServiceLines(value);
+        if (serializeServiceLines(current, templateId) === value.trim()) return current;
+        const parsedLines = parseServiceLines(value, templateId);
         return parsedLines.length > 0
           ? parsedLines
           : [emptyServiceLine()];
@@ -137,14 +129,14 @@ function ServiceLinesEditor({
     return () => {
       active = false;
     };
-  }, [value]);
+  }, [value, templateId]);
 
   function updateLine(index: number, patch: Partial<ServiceLineDraft>) {
     const nextLines = lines.map((line, lineIndex) =>
       lineIndex === index ? { ...line, ...patch } : line,
     );
     setLines(nextLines);
-    onChange(serializeServiceLines(nextLines));
+    onChange(serializeServiceLines(nextLines, templateId));
   }
 
   function addLine() {
@@ -155,7 +147,7 @@ function ServiceLinesEditor({
     const nextLines = lines.filter((_, lineIndex) => lineIndex !== index);
     const normalizedLines = nextLines.length > 0 ? nextLines : [emptyServiceLine()];
     setLines(normalizedLines);
-    onChange(serializeServiceLines(normalizedLines));
+    onChange(serializeServiceLines(normalizedLines, templateId));
   }
 
   return (
@@ -190,7 +182,8 @@ function ServiceLinesEditor({
           </thead>
           <tbody className="divide-y divide-border bg-background">
             {lines.map((line, index) => (
-              <tr key={line.formKey}>
+              <Fragment key={line.formKey}>
+              <tr>
                 <td className="p-2">
                   <Input
                     aria-label={lang === "de" ? "Leistung" : "Услуга"}
@@ -226,12 +219,16 @@ function ServiceLinesEditor({
                       />
                     </td>
                     <td className="p-2">
-                      <Input
+                      {line.descriptionItems ? (
+                        <span className="text-xs text-muted-foreground">
+                          {line.descriptionItems.length} {lang === "de" ? "Beschreibungspunkte" : "пунктов описания"}
+                        </span>
+                      ) : <Input
                         aria-label={lang === "de" ? "Anmerkung" : "Комментарий"}
                         value={line.note}
                         onChange={(event) => updateLine(index, { note: event.target.value })}
                         className={inputClassName}
-                      />
+                      />}
                     </td>
                   </>
                 ) : null}
@@ -249,6 +246,15 @@ function ServiceLinesEditor({
                   </Button>
                 </td>
               </tr>
+              {line.descriptionItems ? (
+                <tr><td colSpan={compact ? 3 : 6} className="p-3">
+                  <ServiceDescriptionEditor items={line.descriptionItems} lang={lang}
+                    onChange={(descriptionItems) => updateLine(index, {
+                      descriptionItems, note: serviceDescriptionText(descriptionItems),
+                    })} />
+                </td></tr>
+              ) : null}
+              </Fragment>
             ))}
           </tbody>
         </table>

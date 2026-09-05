@@ -1,4 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   startTransition,
   useCallback,
@@ -21,6 +22,7 @@ import {
   ChevronRight,
   Circle,
   ClipboardList,
+  FileText,
   LoaderCircle,
   Pause,
   Play,
@@ -60,6 +62,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { hasFormChanges } from "@/lib/form-changes";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -1074,6 +1077,31 @@ function useOrdersPageContent() {
     workflowCreateOpen,
     workflowForm,
   } = ordersPageState;
+  const initialProcessGateForm = orderProcessGatesToForm(orderDetail?.process_gates);
+  const debtDirty = Boolean(orderDetail) && hasFormChanges(
+    [processGateForm.debtStatus, processGateForm.debtNote, processGateForm.debtOwnerUserId,
+      processGateForm.debtNextReviewAt, processGateForm.debtLastContactAt, processGateForm.debtResolutionNote],
+    [initialProcessGateForm.debtStatus, initialProcessGateForm.debtNote, initialProcessGateForm.debtOwnerUserId,
+      initialProcessGateForm.debtNextReviewAt, initialProcessGateForm.debtLastContactAt, initialProcessGateForm.debtResolutionNote],
+  );
+  const billingReleaseDirty = Boolean(orderDetail) && hasFormChanges(
+    [processGateForm.billingReleaseStatus, processGateForm.billingReleaseNote],
+    [initialProcessGateForm.billingReleaseStatus, initialProcessGateForm.billingReleaseNote],
+  );
+  const packageCoverageDirty = Boolean(orderDetail) && hasFormChanges(
+    [processGateForm.packageCoverageStatus, processGateForm.packageCoverageNote],
+    [initialProcessGateForm.packageCoverageStatus, initialProcessGateForm.packageCoverageNote],
+  );
+  const planningDirty = Boolean(orderDetail) && hasFormChanges(
+    planningForm, orderPlanningToForm(orderDetail?.planning_preparation),
+  );
+  const executionDirty = Boolean(orderDetail) && hasFormChanges(
+    executionForm, orderExecutionToForm(orderDetail?.execution_flow),
+  );
+  const followupDirty = Boolean(orderDetail) && hasFormChanges(
+    followupForm, orderFollowupToForm(orderDetail?.followup_flow),
+  );
+  const phaseDirty = Boolean(orderDetail) && phaseDraft !== orderDetail?.phase;
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
@@ -2608,7 +2636,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSaveDebtManagement() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || processGateBusy || !debtDirty) return;
 
     setProcessGateBusy(true);
     setProcessGateError(null);
@@ -2647,7 +2675,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSaveBillingRelease() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || processGateBusy || !billingReleaseDirty) return;
 
     setProcessGateBusy(true);
     setProcessGateError(null);
@@ -2669,7 +2697,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSavePackageCoverage() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || processGateBusy || !packageCoverageDirty) return;
 
     setProcessGateBusy(true);
     setProcessGateError(null);
@@ -2691,7 +2719,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSavePlanningPreparation() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || planningBusy || !planningDirty) return;
 
     setPlanningBusy(true);
     setPlanningError(null);
@@ -2719,7 +2747,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSaveExecutionFlow() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || executionBusy || !executionDirty) return;
 
     setExecutionBusy(true);
     setExecutionError(null);
@@ -2746,7 +2774,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSaveFollowupFlow() {
-    if (!selectedOrderId) return;
+    if (!selectedOrderId || followupBusy || !followupDirty) return;
 
     setFollowupBusy(true);
     setFollowupError(null);
@@ -3666,6 +3694,7 @@ function useOrdersPageContent() {
       ) : null}
 
       <Sheet
+        dirty={phaseDirty || billingReleaseDirty || packageCoverageDirty || planningDirty || executionDirty || followupDirty}
         open={!isOrderRouteDetail && Boolean(selectedOrderId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -3789,6 +3818,7 @@ function useOrdersPageContent() {
                             <ArrowUpRight className="size-3.5" />
                             {l("orders_dokumente")}
                           </Button>
+                          <DocumentSignatureAction scope={{ orderId: orderDetail.id }} title={orderDetail.order_number} />
                           {permissions.canManagePhase
                             ? (orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
                                 (transition) => {
@@ -4493,7 +4523,7 @@ function useOrdersPageContent() {
                                   onClick={() =>
                                     void handleSaveBillingRelease()
                                   }
-                                  disabled={processGateBusy}
+                                  disabled={processGateBusy || !billingReleaseDirty}
                                 >
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -4546,7 +4576,7 @@ function useOrdersPageContent() {
                                   onClick={() =>
                                     void handleSavePackageCoverage()
                                   }
-                                  disabled={processGateBusy}
+                                  disabled={processGateBusy || !packageCoverageDirty}
                                 >
                                   {processGateBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -4832,7 +4862,7 @@ function useOrdersPageContent() {
                                   onClick={() =>
                                     void handleSavePlanningPreparation()
                                   }
-                                  disabled={planningBusy}
+                                  disabled={planningBusy || !planningDirty}
                                 >
                                   {planningBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -5191,7 +5221,7 @@ function useOrdersPageContent() {
                               <Button
                                 type="button"
                                 onClick={() => void handleSaveExecutionFlow()}
-                                disabled={executionBusy}
+                                disabled={executionBusy || !executionDirty}
                               >
                                   {executionBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -5572,7 +5602,7 @@ function useOrdersPageContent() {
                               <Button
                                 type="button"
                                 onClick={() => void handleSaveFollowupFlow()}
-                                disabled={followupBusy}
+                                disabled={followupBusy || !followupDirty}
                               >
                                   {followupBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -6395,6 +6425,7 @@ function useOrdersPageContent() {
                               );
                             const supportingDocumentValue =
                               leistung.external_document_id ? (
+                                <div className="flex flex-wrap items-center justify-end gap-1">
                                 <button
                                   type="button"
                                   className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
@@ -6406,6 +6437,8 @@ function useOrdersPageContent() {
                                     leistung.external_document_filename ||
                                     t.orders_open_linked_document}
                                 </button>
+                                <DocumentSignatureAction documentId={leistung.external_document_id} title={leistung.external_document_auto_name || leistung.external_document_filename || t.orders_open_linked_document} iconOnly />
+                                </div>
                               ) : leistung.is_cost_passthrough ? (
                                 t.orders_supporting_document_auto_link_hint
                               ) : (
@@ -6796,6 +6829,15 @@ function useOrdersPageContent() {
                                           <h3 className="min-w-0 break-words text-sm font-semibold leading-snug text-foreground">
                                             {invoice.external_invoice_number}
                                           </h3>
+                                          {invoice.source_document_id ? (
+                                            <>
+                                            <Button type="button" variant="outline" size="sm" onClick={() => staffGo(`/documents?document=${encodeURIComponent(invoice.source_document_id!)}`)}>
+                                              <FileText className="size-3.5" />
+                                              {lang === "de" ? "Original öffnen" : "Открыть оригинал"}
+                                            </Button>
+                                            <DocumentSignatureAction documentId={invoice.source_document_id} title={invoice.external_invoice_number || t.orders_open_linked_document} iconOnly />
+                                            </>
+                                          ) : null}
                                           <Badge
                                             variant="outline"
                                             className={cn(
@@ -7114,6 +7156,8 @@ function useOrdersPageContent() {
       />
 
       <Sheet
+        requireChanges
+        dirty={debtDirty}
         open={debtManagementSheetOpen}
         onOpenChange={(open) => {
           if (!open && !processGateBusy) {
@@ -7308,6 +7352,7 @@ function useOrdersPageContent() {
       </Sheet>
 
       <Sheet
+        requireChanges
         open={plannedCostEditor != null}
         onOpenChange={(open) => {
           if (!open && !plannedCostSaving) {

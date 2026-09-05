@@ -9,6 +9,7 @@ import {
   useSheetDismissalGuard,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { useOverlaySaveDisabled } from "@/components/ui/dismissal-guard";
 
 type MetricTone = "sky" | "emerald" | "amber" | "slate" | "rose";
 
@@ -273,6 +274,7 @@ export function SheetFormFooter({
   onSubmit?: () => void;
 }) {
   const handleCancel = useSheetDismissalGuard(onCancel);
+  const saveDisabled = useOverlaySaveDisabled();
 
   return (
     <div className="shrink-0 bg-popover">
@@ -290,7 +292,7 @@ export function SheetFormFooter({
         <Button
           type={onSubmit ? "button" : "submit"}
           className="h-9 rounded-lg"
-          disabled={submitting || submitDisabled}
+          disabled={submitting || submitDisabled || saveDisabled}
           onClick={onSubmit}
         >
           {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}

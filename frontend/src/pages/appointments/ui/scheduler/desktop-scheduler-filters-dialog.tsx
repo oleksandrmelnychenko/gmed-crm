@@ -49,7 +49,7 @@ export function DesktopSchedulerFiltersDialog({
   controlClassName,
 }: DesktopSchedulerFiltersDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog dirty={false} open={open} onOpenChange={onOpenChange}>
       {open ? (
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader className="space-y-0">

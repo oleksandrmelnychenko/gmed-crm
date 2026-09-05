@@ -266,7 +266,7 @@ function AppointmentHandoffSectionContent({
             <MessageSquare className="size-3.5" />
           </Button>
         )}
-        rowActionsWidth={70}
+        rowActionsWidth={44}
         surfaceClassName="rounded-none border-0 shadow-none"
       />
     </section>

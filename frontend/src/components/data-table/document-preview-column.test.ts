@@ -17,7 +17,7 @@ describe("createDocumentPreviewColumn", () => {
       pinned: "left",
       required: true,
       sortable: false,
-      width: 64,
+      width: 96,
     });
   });
 });

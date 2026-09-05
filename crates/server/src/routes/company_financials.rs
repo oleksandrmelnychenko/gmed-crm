@@ -396,10 +396,11 @@ async fn get_company_financial_position(
                   orders.order_number, external.patient_id,
                   patient.patient_id AS patient_pid,
                   patient.first_name, patient.last_name,
-                  provider.id AS provider_id, provider.name AS provider_name
+                  provider.id AS provider_id,
+                  COALESCE(provider.name, external.supplier_name) AS provider_name
            FROM external_invoices external
-           JOIN orders ON orders.id = external.order_id
-           JOIN patients patient ON patient.id = external.patient_id
+           LEFT JOIN orders ON orders.id = external.order_id
+           LEFT JOIN patients patient ON patient.id = external.patient_id
            JOIN external_invoice_provider_settlement_balances settlement
              ON settlement.external_invoice_id = external.id
            LEFT JOIN providers provider ON provider.id = external.provider_id
@@ -505,10 +506,10 @@ async fn get_company_financial_position(
             "settlement_status": settlement_status,
             "latest_payment_on": latest_payment_on.map(|value| value.to_string()),
             "payment_count": row.try_get::<i64, _>("payment_count").unwrap_or(0),
-            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
-            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-            "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+            "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+            "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
             "patient_name": patient_name,
             "provider_id": provider_id,
             "provider_name": provider_name,

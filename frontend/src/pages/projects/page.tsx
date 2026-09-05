@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { localizeTaskTitle } from "@/lib/task-labels";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, UsersRound, Workflow, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
@@ -200,8 +201,20 @@ export function ProjectsPage() {
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskDialogError, setTaskDialogError] = useState("");
+  const [taskDraftDefaults, setTaskDraftDefaults] = useState<{
+    assignees: ConciergeAssignee[];
+    projectId: string;
+    patientId: string | null;
+  } | null>(null);
   const createTaskRequestIdRef = useRef<string | null>(null);
   const selectedId = searchParams.get("project");
+  const activeProjectIdRef = useRef(selectedId);
+  const workflowRequestRef = useRef(0);
+  const [workflowProjectId, setWorkflowProjectId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    activeProjectIdRef.current = selectedId;
+    return () => { workflowRequestRef.current += 1; };
+  }, [selectedId]);
   const selected = projects.find((project) => project.id === selectedId) ?? null;
   const activeView = searchParams.get("view") === "workflow" ? "workflow" : "overview";
   const taskPatients = useMemo<ConciergeTaskPatientOption[]>(() => patients.map((patient) => ({
@@ -259,42 +272,42 @@ export function ProjectsPage() {
 
   useEffect(() => { void loadProjects(); }, []);
 
-  useEffect(() => {
-    if (!selectedId) { setTasks([]); setDependencies([]); setDependencyError(""); return; }
-    let cancelled = false;
-    setDetailLoading(true);
-    setDependencyError("");
-    void Promise.all([
-      apiFetch<Project>(`/projects/${selectedId}`, { forceFresh: true }),
-      apiFetch<ConciergeTask[]>(`/concierge-operational-items?project_id=${encodeURIComponent(selectedId)}&archive=all`, { forceFresh: true }),
-      apiFetch<ProjectWorkflowDependency[]>(`/projects/${selectedId}/workflow/dependencies`, { forceFresh: true })
-        .catch((dependencyLoadError: unknown) => {
-          if (!cancelled) setDependencyError(displayApiError(dependencyLoadError, labels.loadFailed, labels.apiUnavailable));
-          return [];
-        }),
-    ]).then(([detail, taskRows, dependencyRows]) => {
-      if (cancelled) return;
-      setProjects((current) => current.map((project) => project.id === detail.id ? detail : project));
-      setTasks(taskRows);
-      setDependencies(dependencyRows);
-    }).catch(() => { if (!cancelled) setError(labels.loadFailed); }).finally(() => { if (!cancelled) setDetailLoading(false); });
-    return () => { cancelled = true; };
-  }, [labels.loadFailed, selectedId]);
-
-  async function loadProjectWorkflow(projectId: string) {
+  const loadProjectWorkflow = useCallback(async (projectId: string, showLoading = false) => {
+    if (activeProjectIdRef.current !== projectId) return;
+    const requestId = ++workflowRequestRef.current;
+    if (showLoading) setDetailLoading(true);
     try {
-      const [taskRows, dependencyRows] = await Promise.all([
+      const [detail, taskRows, dependencyResult] = await Promise.all([
+        apiFetch<Project>(`/projects/${projectId}`, { forceFresh: true }),
         apiFetch<ConciergeTask[]>(`/concierge-operational-items?project_id=${encodeURIComponent(projectId)}&archive=all`, { forceFresh: true }),
-        apiFetch<ProjectWorkflowDependency[]>(`/projects/${projectId}/workflow/dependencies`, { forceFresh: true }),
+        apiFetch<ProjectWorkflowDependency[]>(`/projects/${projectId}/workflow/dependencies`, { forceFresh: true })
+          .then((value) => ({ value, error: "" }))
+          .catch((dependencyLoadError: unknown) => ({ value: null, error: displayApiError(dependencyLoadError, labels.loadFailed, labels.apiUnavailable) })),
       ]);
-      if (projectId !== selectedId) return;
+      if (projectId !== activeProjectIdRef.current || requestId !== workflowRequestRef.current) return;
+      setProjects((current) => current.some((project) => project.id === detail.id)
+        ? current.map((project) => project.id === detail.id ? detail : project)
+        : [...current, detail]);
       setTasks(taskRows);
-      setDependencies(dependencyRows);
-      setDependencyError("");
+      if (dependencyResult.value) setDependencies(dependencyResult.value);
+      setDependencyError(dependencyResult.error);
     } catch (workflowError) {
-      if (projectId === selectedId) setDependencyError(displayApiError(workflowError, labels.loadFailed, labels.apiUnavailable));
+      if (projectId === activeProjectIdRef.current && requestId === workflowRequestRef.current) {
+        setDependencyError(displayApiError(workflowError, labels.loadFailed, labels.apiUnavailable));
+      }
+    } finally {
+      if (projectId === activeProjectIdRef.current && requestId === workflowRequestRef.current) setDetailLoading(false);
     }
-  }
+  }, [labels.apiUnavailable, labels.loadFailed]);
+
+  useEffect(() => {
+    setTasks([]);
+    setDependencies([]);
+    setDependencyError("");
+    setWorkflowProjectId(selectedId);
+    if (selectedId) void loadProjectWorkflow(selectedId, true);
+    else setDetailLoading(false);
+  }, [loadProjectWorkflow, selectedId]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -335,6 +348,8 @@ export function ProjectsPage() {
   function openCreateTask() {
     if (!selected) return;
     setTaskDialogError("");
+    // Background project refreshes must not reinitialize an open task draft.
+    setTaskDraftDefaults({ assignees: taskAssignees, projectId: selected.id, patientId: selected.patient_id });
     createTaskRequestIdRef.current = crypto.randomUUID();
     setTaskDialogOpen(true);
   }
@@ -377,9 +392,12 @@ export function ProjectsPage() {
       });
       clearApiCache("/concierge-operational-items");
       clearApiCache("/projects");
-      setTasks((current) => current.some((task) => task.id === saved.id)
-        ? current.map((task) => task.id === saved.id ? saved : task)
-        : [...current, saved]);
+      if (saved.project_id && saved.project_id === activeProjectIdRef.current) {
+        workflowRequestRef.current += 1;
+        setTasks((current) => current.some((task) => task.id === saved.id)
+          ? current.map((task) => task.id === saved.id ? saved : task)
+          : [...current, saved]);
+      }
       void loadProjects(true);
       return saved;
     } catch (saveError) {
@@ -396,6 +414,8 @@ export function ProjectsPage() {
       method: "POST",
       body: JSON.stringify({ task_id: taskId, depends_on_task_id: dependsOnTaskId }),
     });
+    if (selected.id !== activeProjectIdRef.current) return;
+    workflowRequestRef.current += 1;
     setDependencies((current) => current.some((dependency) => dependency.id === created.id)
       ? current.map((dependency) => dependency.id === created.id ? created : dependency)
       : [...current, created]);
@@ -407,6 +427,8 @@ export function ProjectsPage() {
     await apiFetch<void>(`/projects/${selected.id}/workflow/dependencies/${dependencyId}/delete`, {
       method: "POST",
     });
+    if (selected.id !== activeProjectIdRef.current) return;
+    workflowRequestRef.current += 1;
     setDependencies((current) => current.filter((dependency) => dependency.id !== dependencyId));
     setDependencyError("");
   }
@@ -433,11 +455,12 @@ export function ProjectsPage() {
 
       {activeView === "workflow" ? (
         <ProjectWorkflowView
+          key={selectedId ?? "none"}
           projects={projects}
           selected={selected}
-          tasks={tasks}
-          dependencies={dependencies}
-          loading={detailLoading}
+          tasks={workflowProjectId === selectedId ? tasks : []}
+          dependencies={workflowProjectId === selectedId ? dependencies : []}
+          loading={detailLoading || workflowProjectId !== selectedId}
           projectError={error}
           dependencyError={dependencyError}
           canManage={canEditSelected}
@@ -447,6 +470,7 @@ export function ProjectsPage() {
           onOpenTask={(taskId) => staffGo(`/task-manager?task=${taskId}`)}
           onAddDependency={addWorkflowDependency}
           onRemoveDependency={removeWorkflowDependency}
+          onRetry={() => { if (selectedId) void loadProjectWorkflow(selectedId, true); }}
         />
       ) : (
         <>
@@ -487,7 +511,7 @@ export function ProjectsPage() {
             {selected.patient_name ? <button type="button" className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:border-orange-300 hover:bg-orange-50/40" onClick={() => staffGo(`/patients/${selected.patient_id}`)}><span className="text-muted-foreground">{labels.patient}: </span><span className="font-medium">{selected.patient_name}</span></button> : null}
             <div className="mt-4"><h3 className="text-sm font-semibold">{labels.team} <Badge variant="secondary">{selected.member_count}</Badge></h3><div className="mt-2 flex flex-wrap gap-1.5">{selected.members?.length ? selected.members.map((member) => <Badge key={member.id} variant="outline" className={member.id === selected.owner_id ? "border-orange-200 bg-orange-50 text-orange-700" : "bg-background"}><UsersRound className="mr-1 size-3" />{member.name}</Badge>) : <span className="text-sm text-muted-foreground">—</span>}</div></div>
             <div className="mt-5 flex items-center justify-between"><h3 className="font-semibold">{labels.tasks} <Badge variant="secondary">{selected.task_total}</Badge></h3><Button size="sm" onClick={openCreateTask}><Plus />{labels.newTask}</Button></div>
-            <div className="mt-3 space-y-2">{detailLoading ? <div className="py-8 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></div> : tasks.length ? tasks.map((task) => <button key={task.id} type="button" className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:border-orange-300" onClick={() => staffGo(`/task-manager?task=${task.id}`)}><CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${task.status === "completed" ? "text-emerald-600" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1"><span className="block font-medium text-foreground">{task.title}</span><span className="mt-1 block text-xs text-muted-foreground">{task.assigned_to_name}{task.due_at ? ` · ${new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(new Date(task.due_at))}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[10px] ${taskStatusClass(task.status)}`}>{labels[task.status as keyof typeof labels] ?? task.status}</Badge></button>) : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{labels.noTasks}</p>}</div>
+            <div className="mt-3 space-y-2">{detailLoading ? <div className="py-8 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></div> : tasks.length ? tasks.map((task) => <button key={task.id} type="button" className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:border-orange-300" onClick={() => staffGo(`/task-manager?task=${task.id}`)}><CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${task.status === "completed" ? "text-emerald-600" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1"><span className="block font-medium text-foreground">{localizeTaskTitle(task.title, lang)}</span><span className="mt-1 block text-xs text-muted-foreground">{task.assigned_to_name}{task.due_at ? ` · ${new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(new Date(task.due_at))}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[10px] ${taskStatusClass(task.status)}`}>{labels[task.status as keyof typeof labels] ?? task.status}</Badge></button>) : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{labels.noTasks}</p>}</div>
             <p className="mt-4 text-xs text-muted-foreground">{labels.createdBy}: {selected.created_by_name}</p>
           </> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center text-sm text-muted-foreground"><FolderKanban className="mb-3 size-9 text-orange-400" />{labels.selectHint}</div>}
         </aside>
@@ -499,7 +523,7 @@ export function ProjectsPage() {
       <ConciergeTaskEventDialog
         item={null}
         services={[]}
-        assignees={taskAssignees}
+        assignees={taskDraftDefaults?.assignees ?? taskAssignees}
         currentUserId={user?.id ?? null}
         canAssign={taskAssignees.length > 0}
         canModifyAttachments={false}
@@ -507,8 +531,8 @@ export function ProjectsPage() {
         patients={taskPatients}
         providers={[]}
         projects={projects}
-        initialPatientId={selected?.patient_id ?? null}
-        initialProjectId={selected?.id ?? null}
+        initialPatientId={taskDraftDefaults?.patientId ?? null}
+        initialProjectId={taskDraftDefaults?.projectId ?? null}
         lang={lang}
         open={taskDialogOpen}
         submitting={taskSubmitting}
@@ -537,7 +561,7 @@ function ProjectDialog({ open, editing, assignees, patients, lang, saving, error
   const [startsOn, setStartsOn] = useState(""); const [dueOn, setDueOn] = useState(""); const [memberIds, setMemberIds] = useState<string[]>([]);
   useEffect(() => { if (!open) return; setName(editing?.name ?? ""); setDescription(editing?.description ?? ""); setStatus(editing?.status ?? "planned"); setPriority(editing?.priority ?? "normal"); setOwnerId(editing?.owner_id ?? currentUserId); setPatientId(editing?.patient_id ?? ""); setStartsOn(editing?.starts_on ?? ""); setDueOn(editing?.due_on ?? ""); setMemberIds(editing?.members?.map((member) => member.id) ?? [editing?.owner_id ?? currentUserId].filter(Boolean)); }, [currentUserId, editing, open]);
   async function submit(event: FormEvent) { event.preventDefault(); await onSave({ name: name.trim(), description: description.trim() || null, status, priority, owner_id: ownerId, patient_id: patientId || null, starts_on: startsOn || null, due_on: dueOn || null, member_ids: Array.from(new Set([...memberIds, ownerId])) }); }
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-orange-500" />{editing ? labels.edit : labels.createTitle}</DialogTitle></DialogHeader><form onSubmit={(event) => void submit(event)} className="space-y-4">
+  return <Dialog requireChanges={Boolean(editing)} open={open} onOpenChange={onOpenChange}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><span className="size-2 rounded-full bg-orange-500" />{editing ? labels.edit : labels.createTitle}</DialogTitle></DialogHeader><form onSubmit={(event) => void submit(event)} className="space-y-4">
     {error ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
     <label className="grid gap-1.5 text-sm font-medium">{labels.name}<Input required maxLength={255} value={name} placeholder={labels.namePlaceholder} onChange={(event) => setName(event.target.value)} /></label>
     <label className="grid gap-1.5 text-sm font-medium">{labels.description}<textarea className="min-h-24 rounded-md border bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30" maxLength={8000} value={description} placeholder={labels.descriptionPlaceholder} onChange={(event) => setDescription(event.target.value)} /></label>

@@ -40,6 +40,7 @@ export interface RevenueTranslations {
   finance_catalog_price_name_placeholder: string;
   finance_catalog_price_period: string;
   finance_catalog_price_versions_count: string;
+  finance_catalog_prices_column: string;
   finance_catalog_open_ended: string;
   finance_catalog_price_current: string;
   finance_catalog_price_active: string;
@@ -844,6 +845,7 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_price_name_placeholder: "Напр. Стандартная цена 2026",
   finance_catalog_price_period: "Цена: {from} — {to}",
   finance_catalog_price_versions_count: "Цены: {count}",
+  finance_catalog_prices_column: "Цены",
   finance_catalog_open_ended: "бессрочно",
   finance_catalog_price_current: "Текущая",
   finance_catalog_price_active: "Активна",
@@ -1210,6 +1212,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_price_name_placeholder: "Z. B. Standardpreis 2026",
   finance_catalog_price_period: "Preis: {from} – {to}",
   finance_catalog_price_versions_count: "Preise: {count}",
+  finance_catalog_prices_column: "Preise",
   finance_catalog_open_ended: "unbefristet",
   finance_catalog_price_current: "Aktuell",
   finance_catalog_price_active: "Aktiv",

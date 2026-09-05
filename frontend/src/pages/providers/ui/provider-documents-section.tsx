@@ -9,6 +9,7 @@ import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ProviderDetail } from "../model/types";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
 type ProviderDocument = {
   id: string;
@@ -213,7 +214,7 @@ export function ProviderDocumentsSection({
       {error && !dialogOpen ? <p className="border-b border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2">{labels.name}</th><th className="px-3 py-2">{labels.patient}</th><th className="px-3 py-2">{labels.type}</th><th className="px-3 py-2">{labels.uploaded}</th><th className="px-3 py-2 text-right">{labels.actions}</th></tr></thead>
+          <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2">{labels.name}</th><th className="px-3 py-2">{labels.patient}</th><th className="px-3 py-2">{labels.type}</th><th className="px-3 py-2">{labels.uploaded}</th><th className="w-11 px-1 py-2 text-right"><span className="sr-only">{labels.actions}</span></th></tr></thead>
           <tbody className="divide-y">
             {documents.map((document) => (
               <tr key={document.id} className="hover:bg-muted/20">
@@ -221,7 +222,7 @@ export function ProviderDocumentsSection({
                 <td className="px-3 py-2.5"><p>{document.patient_name || labels.noPatient}</p>{document.patient_number ? <p className="text-xs text-muted-foreground">{document.patient_number}</p> : null}</td>
                 <td className="px-3 py-2.5"><Badge variant="outline" className={document.is_medical ? "border-sky-200 bg-sky-50 text-sky-700" : ""}>{document.is_medical ? labels.medical : labels.provider}</Badge></td>
                 <td className="px-3 py-2.5"><p>{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(document.created_at))}</p><p className="text-xs text-muted-foreground">{document.uploaded_by_name}</p></td>
-                <td className="px-3 py-2.5 text-right"><Button type="button" size="icon-sm" variant="ghost" title={document.original_filename || document.auto_name} onClick={() => void downloadApiFile(`/documents/${document.id}/download`, document.original_filename || document.auto_name)}><Download /></Button></td>
+                <td className="px-1 py-2.5"><div className="flex items-center justify-end gap-1"><DocumentSignatureAction documentId={document.id} title={document.original_filename || document.auto_name} iconOnly onDone={() => void loadDocuments()} /><Button type="button" size="icon-sm" variant="ghost" title={document.original_filename || document.auto_name} onClick={() => void downloadApiFile(`/documents/${document.id}/download`, document.original_filename || document.auto_name)}><Download /></Button></div></td>
               </tr>
             ))}
             {!loading && documents.length === 0 ? <tr><td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">{labels.empty}</td></tr> : null}

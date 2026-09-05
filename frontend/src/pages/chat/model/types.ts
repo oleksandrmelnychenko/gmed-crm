@@ -30,6 +30,7 @@ export interface Message {
   expires_at?: string | null;
   client_message_id?: string | null;
   delivery_state?: "sending" | "failed";
+  decryption_failed?: boolean;
   retry_expires_in_seconds?: number;
   attachment_filename: string | null;
   attachment_mime: string | null;

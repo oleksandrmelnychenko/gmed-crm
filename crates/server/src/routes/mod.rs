@@ -17,6 +17,7 @@ pub mod concierge_operational_items;
 pub mod concierge_services;
 pub mod contracts;
 pub mod custom_fields;
+pub mod datev;
 pub(crate) mod debt_management;
 pub mod documents;
 pub mod drug_products;
@@ -26,6 +27,7 @@ pub mod health;
 pub mod internal_notes;
 pub mod interpreter_patient_history;
 pub mod interpreters;
+pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
 pub mod leads;
@@ -64,6 +66,7 @@ use axum::Router;
 pub fn protected_router() -> Router<AppState> {
     Router::new()
         .merge(me::router())
+        .merge(invoice_imports::router())
         .merge(auth::protected_router())
         .merge(users::router())
         .merge(access_policies::router())
@@ -106,12 +109,14 @@ pub fn protected_router() -> Router<AppState> {
         .merge(staff_access::router())
         .merge(invoices::router())
         .merge(admin_settings::router())
+        .merge(datev::router())
         .merge(admin_security::router())
         .merge(key_rotation::router())
         .merge(admin_compliance::router())
         .merge(notifications::router())
         .merge(custom_fields::router())
         .merge(documents::router())
+        .merge(crate::document_signatures::router())
         .merge(feedback::router())
         .merge(announcements::router())
         .merge(user_notifications::router())

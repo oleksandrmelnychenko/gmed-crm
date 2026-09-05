@@ -6,6 +6,7 @@ import { TimePicker } from "@mui/x-date-pickers/TimePicker"
 import dayjs, { type Dayjs } from "dayjs"
 
 import { cn } from "@/lib/utils"
+import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 
 const DATE_FORMAT = "YYYY-MM-DD"
 const DATETIME_LOCAL_FORMAT = "YYYY-MM-DD HH:mm"
@@ -131,6 +132,7 @@ function Input({
   ...props
 }: React.ComponentProps<"input">) {
   const pickerCurrentValue = typeof value === "string" ? value : null
+  const updateOverlayField = useOverlayDirtyField(pickerCurrentValue ?? "")
   const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
   const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
 
@@ -145,8 +147,9 @@ function Input({
       return
     }
     lastEmittedPickerValueRef.current = nextValue
+    updateOverlayField(nextValue)
     emitDateChange(onChange, nextValue, id, name)
-  }, [id, name, onChange])
+  }, [id, name, onChange, updateOverlayField])
 
   if (type === "date" || type === "datetime-local" || type === "time") {
     const {
@@ -157,6 +160,7 @@ function Input({
     } = getPickerControlStyle(className)
     const htmlInputProps = {
       ...props,
+      "data-overlay-dirty-ignore": "",
       min,
       max,
       step,

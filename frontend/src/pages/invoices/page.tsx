@@ -1,3 +1,5 @@
+import { hasFormChanges } from "@/lib/form-changes";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   startTransition,
@@ -17,6 +19,7 @@ import {
   Download,
   Eye,
   FileText,
+  FileUp,
   Pencil,
   LoaderCircle,
   Plus,
@@ -25,10 +28,7 @@ import {
   X,
 } from "lucide-react";
 
-import {
-  AdminSheetScaffold,
-  SheetFormFooter,
-} from "@/components/admin-page-patterns";
+import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import {
   DataTablePager,
   useDataTablePagination,
@@ -59,6 +59,12 @@ import {
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { openDocumentPreview } from "@/pages/documents/data/document-api";
+import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
+import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
+import { DatevWorkspace } from "./datev/workspace";
+import { invoiceCreationErrorMessage } from "./model/billing-release";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -102,14 +108,14 @@ import {
   blankCreateForm,
   buildInvoicesPath,
   buildSearchParams,
-  calculateInvoiceSelectionTotals,
+  createInvoiceLineSelection,
+  isInvoiceSelectionValid,
   formatCurrency,
   formatDate,
   formatDateTime,
   invoiceToStatusForm,
   invoiceToPayerForm,
   invoiceToVisibilityForm,
-  invoiceLineQuantityAvailable,
   invoicesPermissions,
   nextDunningLevel,
 } from "./model/invoice-model";
@@ -127,7 +133,6 @@ import type {
   InvoicePaymentTransaction,
   InvoiceRefundTransaction,
   InvoiceStatus,
-  InvoiceType,
   OrderOption,
   PayerForm,
   PatientOption,
@@ -153,6 +158,7 @@ type InvoiceWorkspaceState = {
   listBusy: boolean;
   listError: string | null;
   optionsError: string | null;
+  optionsBusy: boolean;
   selectedInvoiceId: string;
   detail: InvoiceItem | null;
   dunningEvents: DunningEvent[];
@@ -386,6 +392,10 @@ function useStaffInvoicesPageContent() {
   const { t, lang } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const { staffGo, canStaffPath } = useStaffNavigate();
+  const [importOpen, setImportOpen] = useState(false);
+  const datevActive = searchParams.get("source") === "datev";
+  const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const formatMoney = (value: unknown) => formatCurrency(value, locale);
@@ -427,7 +437,6 @@ function useStaffInvoicesPageContent() {
     invoiceCount: t.invoices_workspace_invoice_count,
     previous: t.invoices_workspace_previous,
     next: t.invoices_workspace_next,
-    createInvoiceDescription: t.revenue_invoices_create_description,
     createQuoteSection: t.revenue_invoices_section_quote,
     invoiceSettingsSection: t.revenue_invoices_section_invoice_settings,
     selectedQuoteSnapshot: t.invoices_workspace_selected_quote_snapshot,
@@ -485,6 +494,7 @@ function useStaffInvoicesPageContent() {
     statsPaidWord: t.invoices_workspace_stats_paid_word,
     pageOf: t.invoices_workspace_page_of,
     linkedOrder: t.invoices_workspace_linked_order,
+    originalDocument: lang === "de" ? "Original" : "Оригинал",
     ledgerDate: t.revenue_invoices_ledger_date,
     ledgerDirection: t.revenue_invoices_ledger_direction,
     ledgerEntry: t.revenue_invoices_ledger_entry,
@@ -621,6 +631,7 @@ function useStaffInvoicesPageContent() {
       listBusy: false,
       listError: null,
       optionsError: null,
+      optionsBusy: true,
       selectedInvoiceId: initialInvoiceId,
       detail: null,
       dunningEvents: [],
@@ -647,6 +658,7 @@ function useStaffInvoicesPageContent() {
     listBusy,
     listError,
     optionsError,
+    optionsBusy,
     selectedInvoiceId,
     detail,
     dunningEvents,
@@ -865,19 +877,6 @@ function useStaffInvoicesPageContent() {
     });
   }, [filters.orderId, filters.patientId, quotes]);
   const selectedCreateQuote = useMemo(() => quotes.find((quote) => quote.id === createForm.quoteId) ?? null, [quotes, createForm.quoteId]);
-  const selectedCreateTotals = useMemo(
-    () =>
-      calculateInvoiceSelectionTotals(
-        selectedCreateQuote?.line_items ?? [],
-        createForm.selectedLineIndexes,
-        createForm.lineQuantities,
-      ),
-    [
-      createForm.lineQuantities,
-      createForm.selectedLineIndexes,
-      selectedCreateQuote?.line_items,
-    ],
-  );
   const anyQuickFilterActive =
     filters.search.trim() !== "" ||
     filters.patientId !== "" ||
@@ -888,18 +887,10 @@ function useStaffInvoicesPageContent() {
   const invoiceParam = searchParams.get("invoice") ?? "";
 
   useEffect(() => {
-    if (!selectedCreateQuote || Object.keys(createForm.lineQuantities).length > 0) return;
+    if (!selectedCreateQuote?.line_items.length || Object.keys(createForm.lineQuantities).length > 0) return;
     setCreateForm((current) => ({
       ...current,
-      selectedLineIndexes: selectedCreateQuote.line_items.flatMap((line, index) =>
-        invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0 ? [index] : [],
-      ),
-      lineQuantities: Object.fromEntries(
-        selectedCreateQuote.line_items.map((line, index) => [
-          String(index),
-          String(invoiceLineQuantityAvailable(line, createForm.invoiceType) || "1"),
-        ]),
-      ),
+      ...createInvoiceLineSelection(selectedCreateQuote.line_items, current.invoiceType),
     }));
   }, [createForm.invoiceType, createForm.lineQuantities, selectedCreateQuote]);
 
@@ -1180,12 +1171,61 @@ function useStaffInvoicesPageContent() {
       group: "context",
       sortable: true,
       searchable: true,
-      width: 170,
-      render: (row) => (
-        <span className="font-mono text-xs text-foreground">
-          {row.invoice_number ?? row.external_invoice_number ?? t.common_not_set}
-        </span>
-      ),
+      width: 260,
+      render: (row) => {
+        const invoiceNumber = row.invoice_number ?? row.external_invoice_number;
+        const canOpenInvoice = Boolean(row.invoice_id);
+        const canOpenOriginal = Boolean(row.source_document_id);
+        if (!invoiceNumber) return t.common_not_set;
+
+        return (
+          <div className="flex min-w-0 items-center gap-1.5">
+            {canOpenInvoice || canOpenOriginal ? (
+              <button
+                type="button"
+                className="min-w-0 truncate rounded px-1 py-0.5 text-left font-mono text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title={invoiceNumber}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (row.invoice_id) {
+                    openInvoice(row.invoice_id);
+                  } else if (row.source_document_id) {
+                    void openAccountingOriginal(row.source_document_id);
+                  }
+                }}
+              >
+                {invoiceNumber}
+              </button>
+            ) : (
+              <span className="min-w-0 truncate font-mono text-xs text-foreground" title={invoiceNumber}>
+                {invoiceNumber}
+              </span>
+            )}
+            {row.source_document_id ? (
+              <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 gap-1.5 px-2 text-xs"
+                title={row.source_document_name ?? text.originalDocument}
+                aria-label={`${text.originalDocument}: ${row.source_document_name ?? invoiceNumber}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (row.source_document_id) {
+                    void openAccountingOriginal(row.source_document_id);
+                  }
+                }}
+              >
+                <FileText className="size-3.5 text-primary" />
+                {text.originalDocument}
+              </Button>
+              <DocumentSignatureAction documentId={row.source_document_id} title={row.source_document_name ?? invoiceNumber} iconOnly />
+              </>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       id: "description",
@@ -1396,6 +1436,7 @@ function useStaffInvoicesPageContent() {
   useEffect(() => {
     let ignore = false;
     async function loadOptions() {
+      dispatchWorkspaceState({ optionsBusy: true });
       try {
         const {
           patients: patientsResult,
@@ -1408,11 +1449,13 @@ function useStaffInvoicesPageContent() {
           orders: ordersResult,
           quotes: quotesResult,
           optionsError: null,
+          optionsBusy: false,
         });
       } catch (error) {
         if (!ignore) {
           dispatchWorkspaceState({
             optionsError: error instanceof Error ? error.message : t.common_error,
+            optionsBusy: false,
           });
         }
       }
@@ -1421,7 +1464,7 @@ function useStaffInvoicesPageContent() {
     return () => {
       ignore = true;
     };
-  }, [canLoadOrderOptions, canLoadQuoteOptions, t.common_error]);
+  }, [canLoadOrderOptions, canLoadQuoteOptions, reloadToken, t.common_error]);
 
   useEffect(() => {
     let ignore = false;
@@ -1545,26 +1588,29 @@ function useStaffInvoicesPageContent() {
 
   async function handleCreateInvoice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!createForm.quoteId) {
+    if (createBusy || optionsBusy || optionsError) return;
+    if (!selectedCreateQuote) {
       setCreateError(text.chooseQuote);
       return;
     }
+    if (!isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
+      setCreateError(lang === "de" ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.");
+      return;
+    }
     setCreateBusy(true);
+    setCreateError(null);
     try {
       const selectedLines = createForm.selectedLineIndexes.map((lineIndex) => ({
         line_index: lineIndex,
         quantity: Number(createForm.lineQuantities[String(lineIndex)] || 0),
       }));
-      if (selectedLines.length === 0 || selectedLines.some((line) => line.quantity <= 0)) {
-        setCreateError(text.invoiceLinesDescription);
-        return;
-      }
       const created = await createInvoice(createForm.quoteId, {
         invoice_type: createForm.invoiceType,
         due_date: createForm.dueDate || null,
         notes: createForm.notes.trim() || null,
         line_items: selectedLines,
-      });
+      }, selectedCreateQuote.order_id);
+      clearApiCache();
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));
       setCreateError(null);
@@ -1572,7 +1618,7 @@ function useStaffInvoicesPageContent() {
       setSelectedInvoiceId(created.id);
       syncQuery({ invoice: created.id }, { replace: false });
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : t.common_error);
+      setCreateError(invoiceCreationErrorMessage(error, lang, t.common_error));
     } finally {
       setCreateBusy(false);
     }
@@ -1753,7 +1799,12 @@ function useStaffInvoicesPageContent() {
     }
   }
 
+  const statusDirty = Boolean(detail && hasFormChanges(statusForm, invoiceToStatusForm(detail)));
+  const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
+  const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
+
   async function handleSaveStatus() {
+    if (!statusDirty || statusBusy) return;
     if (!selectedInvoiceId) return;
     setStatusBusy(true);
     try {
@@ -1773,6 +1824,7 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleSaveVisibility() {
+    if (!visibilityDirty || visibilityBusy) return;
     if (!selectedInvoiceId) return;
     setVisibilityBusy(true);
     try {
@@ -1794,6 +1846,7 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleSavePayer() {
+    if (!payerDirty || payerBusy) return;
     if (!selectedInvoiceId) return;
     setPayerBusy(true);
     try {
@@ -1840,6 +1893,27 @@ function useStaffInvoicesPageContent() {
     syncQuery({ invoice: invoiceId }, { replace: false });
   }
 
+  function openAccountingEntry(entry: AccountingEntry) {
+    if (entry.invoice_id) {
+      openInvoice(entry.invoice_id);
+    } else if (entry.source_document_id) {
+      void openAccountingOriginal(entry.source_document_id);
+    }
+  }
+
+  async function openAccountingOriginal(documentId: string) {
+    const previewWindow = window.open("", "_blank");
+    if (previewWindow) previewWindow.opener = null;
+    try {
+      await openDocumentPreview(documentId, text.pdfOpenError, previewWindow);
+    } catch (error) {
+      previewWindow?.close();
+      dispatchWorkspaceState({
+        accountingError: error instanceof Error ? error.message : text.pdfOpenError,
+      });
+    }
+  }
+
   if (!access.canView) {
     return (
       <div className="rounded-xl">
@@ -1857,7 +1931,13 @@ function useStaffInvoicesPageContent() {
           title={t.invoices_title}
           actions={(
             <>
-              {access.canCreate ? (
+              {access.canCreate && !datevActive ? (
+                <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+                  <FileUp className="size-4" />
+                  {lang === "de" ? "Eingangsrechnung" : "Входящий счёт"}
+                </Button>
+              ) : null}
+              {access.canCreate && !datevActive ? (
                 <Button
                   type="button"
                   className="h-9 rounded-lg px-3.5"
@@ -1868,144 +1948,42 @@ function useStaffInvoicesPageContent() {
                   }}
                 >
                   <Plus className="mr-2 size-4" />
-                  {text.newInvoice}
+                  {lang === "de" ? "Ausgangsrechnung" : "Исходящий счёт"}
                 </Button>
               ) : null}
             </>
           )}
         />
 
-        {access.canAccounting ? (
-          <>
-            <div className="space-y-2">
-              {accountingError ? (
-                <ShellBanner tone="error">{accountingError}</ShellBanner>
-              ) : null}
-              {accountingLedger || accountingBusy ? (
-                <DataTableSurface
-                  loading={accountingBusy}
-                  rows={accountingEntriesPagination.pagedRows}
-                  columns={accountingTableColumns}
-                  rowId={(row) => row.id}
-                  defaultDensity="comfortable"
-                  defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
-                  dictionary={t as unknown as Record<string, string>}
-                  groupLabels={accountingColumnGroups}
-                  maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
-                  toolbarStart={
-                    <>
-                      <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                        {titleWithDot(text.accountingTitle)}
-                      </span>
-                      <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
-                      <ToolbarField label={t.dash_this_year}>
-                      <Input
-                        type="number"
-                        min="2020"
-                        max="2100"
-                        value={accountingYear}
-                        onChange={(event) => setAccountingYear(event.target.value || currentYear)}
-                        aria-label={text.accountingTitle}
-                        className={cn(shellInputClassName, "h-8 w-24 shrink-0 rounded-md bg-field text-xs")}
-                      />
-                      </ToolbarField>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon-sm"
-                        title={text.refreshLedger}
-                        aria-label={text.refreshLedger}
-                        onClick={() => setReloadToken((current) => current + 1)}
-                      >
-                        <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          void downloadAccountingLedgerExport(accountingYear).catch((error) =>
-                            setAccountingError(
-                              error instanceof Error ? error.message : t.common_error,
-                            ),
-                          )
-                        }
-                      >
-                        <Download className="size-3.5" />
-                        {text.exportCsv}
-                      </Button>
-                    </>
-                  }
-                  toolbarAfter={
-                    <DataTablePager
-                      pageIndex={accountingEntriesPagination.pageIndex}
-                      pageSize={accountingEntriesPagination.pageSize}
-                      totalPages={accountingEntriesPagination.totalPages}
-                      totalRows={accountingEntriesPagination.totalRows}
-                      previousLabel={t.pagination_previous}
-                      nextLabel={t.pagination_next}
-                      onPageChange={accountingEntriesPagination.onPageChange}
-                    />
-                  }
-                  rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
-                  emptyState={
-                    <EmptyState
-                      title={text.noAccountingEntries}
-                      description={text.noAccountingEntriesDescription}
-                    />
-                  }
-                />
-              ) : null}
-            </div>
-            {!accountingBusy && !accountingError && accountingLedger ? (
-              <section>
-                  <DataTableSurface
-                    toolbarStart={
-                      <>
-                        <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-                          {titleWithDot(text.monthlyEuer)}
-                        </span>
-                        <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
-                      </>
-                    }
-                    rows={accountingMonthlyPagination.pagedRows}
-                    columns={accountingMonthlyTableColumns}
-                    rowId={(row) => row.period}
-                    defaultDensity="comfortable"
-                    defaultFrozenColumns={["period"]}
-                    dictionary={t as unknown as Record<string, string>}
-                    groupLabels={accountingColumnGroups}
-                    maxFrozenColumns={2}
-                    toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
-                    toolbarAfter={
-                      <DataTablePager
-                        pageIndex={accountingMonthlyPagination.pageIndex}
-                        pageSize={accountingMonthlyPagination.pageSize}
-                        totalPages={accountingMonthlyPagination.totalPages}
-                        totalRows={accountingMonthlyPagination.totalRows}
-                        previousLabel={t.pagination_previous}
-                        nextLabel={t.pagination_next}
-                        onPageChange={accountingMonthlyPagination.onPageChange}
-                      />
-                    }
-                    rowAccent={(row) => {
-                      const value = Number(row.net_surplus ?? 0);
-                      if (value > 0) return "bg-emerald-500";
-                      if (value < 0) return "bg-rose-500";
-                      return "bg-slate-300";
-                    }}
-                    emptyState={
-                      <EmptyState
-                        title={text.monthlyEuer}
-                        description={text.noCashMovement.replace("{year}", accountingYear)}
-                      />
-                    }
-                  />
-              </section>
-            ) : null}
-          </>
+        <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
+          <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "ghost" : "default"} aria-current={!datevActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}>{lang === "de" ? "GMed-Rechnungen" : "Счета GMed"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "default" : "ghost"} aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}>{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
+          </nav>
+        </div>
+        <DatevWorkspace active={datevActive} demo={datevDemo} onConnection={canStaffPath("/admin/datev") ? () => staffGo("/admin/datev") : undefined} onModeChange={(demo) => syncQuery({ datev_mode: demo ? "demo" : null })} />
+
+        {importOpen ? (
+          <InvoiceImportSheet
+            patients={patients}
+            orders={orders}
+            initialPatientId={filters.patientId}
+            initialOrderId={filters.orderId}
+            optionsError={optionsError}
+            onClose={() => setImportOpen(false)}
+            onCreated={(result) => {
+              setImportOpen(false);
+              clearApiCache();
+              if (result.scope === "company") {
+                staffGo(`/company-finance?provider_invoice=${encodeURIComponent(result.id)}`);
+              } else if (result.orderId) {
+                staffGo(`/orders?order=${encodeURIComponent(result.orderId)}&section=invoices`);
+              }
+            }}
+          />
         ) : null}
 
+        <div hidden={datevActive} className="space-y-5">
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <div className="space-y-3">
@@ -2250,291 +2228,160 @@ function useStaffInvoicesPageContent() {
             }}
           />
         </div>
-      </div>
 
-      <Sheet open={createOpen} onOpenChange={setCreateOpen}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-2xl">
-          <form className="flex h-full flex-col" onSubmit={handleCreateInvoice}>
-            <AdminSheetScaffold
-              title={t.invoices_new}
-              description={text.createInvoiceDescription}
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={t.common_cancel}
-                  submitLabel={t.invoices_new}
-                  submitting={createBusy}
-                  submitDisabled={!createForm.quoteId || selectedCreateTotals.gross <= 0}
-                  onCancel={() => setCreateOpen(false)}
-                />
-              )}
-            >
-              <div className="space-y-4 rounded-xl">
-                {createError ? <ShellBanner tone="error">{createError}</ShellBanner> : null}
-                <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.createQuoteSection)}</h2>
-                  <div className="mt-5 space-y-4">
-                    <Field label={text.createQuoteSection}>
-                      <NativeComboboxSelect
-                        value={createForm.quoteId || "__empty__"}
-                        onChange={(event) => {
-                          const quoteId =
-                            event.target.value && event.target.value !== "__empty__"
-                              ? event.target.value
-                              : "";
-                          const quote = quotes.find((item) => item.id === quoteId);
-                          setCreateForm((current) => ({
-                            ...current,
-                            quoteId,
-                            selectedLineIndexes:
-                              quote?.line_items.flatMap((line, index) =>
-                                invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0
-                                  ? [index]
-                                  : [],
-                              ) ?? [],
-                            lineQuantities: Object.fromEntries(
-                              quote?.line_items.map((line, index) => [
-                                String(index),
-                                String(
-                                  invoiceLineQuantityAvailable(line, createForm.invoiceType) || "1",
-                                ),
-                              ]) ?? [],
-                            ),
-                          }));
-                        }}
-                        className={selectClassName}
+        {access.canAccounting ? (
+          <>
+            <div className="space-y-2">
+              {accountingError ? (
+                <ShellBanner tone="error">{accountingError}</ShellBanner>
+              ) : null}
+              {accountingLedger || accountingBusy ? (
+                <DataTableSurface
+                  loading={accountingBusy}
+                  rows={accountingEntriesPagination.pagedRows}
+                  columns={accountingTableColumns}
+                  rowId={(row) => row.id}
+                  onRowClick={openAccountingEntry}
+                  defaultDensity="comfortable"
+                  defaultFrozenColumns={ACCOUNTING_DEFAULT_FROZEN_COLUMNS}
+                  dictionary={t as unknown as Record<string, string>}
+                  groupLabels={accountingColumnGroups}
+                  maxFrozenColumns={ACCOUNTING_MAX_FROZEN_COLUMNS}
+                  toolbarStart={
+                    <>
+                      <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                        {titleWithDot(text.accountingTitle)}
+                      </span>
+                      <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+                      <ToolbarField label={t.dash_this_year}>
+                      <Input
+                        type="number"
+                        min="2020"
+                        max="2100"
+                        value={accountingYear}
+                        onChange={(event) => setAccountingYear(event.target.value || currentYear)}
+                        aria-label={text.accountingTitle}
+                        className={cn(shellInputClassName, "h-8 w-24 shrink-0 rounded-md bg-field text-xs")}
+                      />
+                      </ToolbarField>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-sm"
+                        title={text.refreshLedger}
+                        aria-label={text.refreshLedger}
+                        onClick={() => setReloadToken((current) => current + 1)}
                       >
-                        <option value="__empty__">{text.chooseQuote}</option>
-                        {filteredQuotes.map((quote) => (
-                          <option key={quote.id} value={quote.id}>
-                            {quoteOptionLabel(quote)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
-                    <Field label={text.selectedQuoteSnapshot}>
-                      <div className={cn("rounded-xl px-3 py-2 text-sm text-foreground", tokens.surface.mutedCard)}>
-                        {selectedCreateQuote
-                          ? `${quoteOptionLabel(selectedCreateQuote)} | ${formatMoney(selectedCreateQuote.total_gross)}`
-                          : text.chooseQuote}
-                      </div>
-                    </Field>
-                  </div>
-                </section>
-
-                {selectedCreateQuote ? (
-                  <section className="rounded-lg border border-border/70 bg-card p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className={tokens.text.sectionTitle}>
-                          {titleWithDot(text.invoiceLines)}
-                        </h2>
-                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          {text.invoiceLinesDescription}
-                        </p>
-                      </div>
+                        <RefreshCw className={cn("size-3.5", accountingBusy && "animate-spin")} />
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            selectedLineIndexes: selectedCreateQuote.line_items.flatMap(
-                              (line, index) =>
-                                invoiceLineQuantityAvailable(line, createForm.invoiceType) > 0
-                                  ? [index]
-                                  : [],
+                          void downloadAccountingLedgerExport(accountingYear).catch((error) =>
+                            setAccountingError(
+                              error instanceof Error ? error.message : t.common_error,
                             ),
-                          }))
+                          )
                         }
                       >
-                        {text.selectAllLines}
+                        <Download className="size-3.5" />
+                        {text.exportCsv}
                       </Button>
-                    </div>
-                    <div className="mt-4 space-y-2">
-                      {selectedCreateQuote.line_items.map((line, lineIndex) => {
-                        const selected = createForm.selectedLineIndexes.includes(lineIndex);
-                        const availableQuantity = invoiceLineQuantityAvailable(
-                          line,
-                          createForm.invoiceType,
-                        );
-                        const fullyInvoiced = availableQuantity <= 0;
-                        return (
-                          <div
-                            key={`${selectedCreateQuote.id}-${lineIndex}`}
-                            className={cn(
-                              "grid gap-3 rounded-lg border p-3 sm:grid-cols-[auto_1fr_7rem_7rem] sm:items-center",
-                              selected
-                                ? "border-sky-300/70 bg-sky-50/40"
-                                : "border-border/70 bg-muted/20 opacity-70",
-                            )}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              disabled={fullyInvoiced || createForm.invoiceType === "final"}
-                              aria-label={`${text.invoiceLines}: ${line.description}`}
-                              onChange={(event) =>
-                                setCreateForm((current) => ({
-                                  ...current,
-                                  selectedLineIndexes: event.target.checked
-                                    ? [...current.selectedLineIndexes, lineIndex].sort((a, b) => a - b)
-                                    : current.selectedLineIndexes.filter(
-                                        (index) => index !== lineIndex,
-                                      ),
-                                }))
-                              }
-                              className="size-4 rounded border-border"
-                            />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">
-                                {agencyServiceNameLabel(undefined, line.description, t)}
-                              </p>
-                              {line.notes ? (
-                                <p className="mt-1 whitespace-pre-line text-xs leading-5 text-muted-foreground">
-                                  {line.notes}
-                                </p>
-                              ) : null}
-                            </div>
-                            <Input
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              max={String(availableQuantity)}
-                              disabled={
-                                !selected ||
-                                fullyInvoiced ||
-                                createForm.invoiceType === "final"
-                              }
-                              value={createForm.lineQuantities[String(lineIndex)] ?? ""}
-                              onChange={(event) =>
-                                setCreateForm((current) => ({
-                                  ...current,
-                                  lineQuantities: {
-                                    ...current.lineQuantities,
-                                    [String(lineIndex)]: event.target.value,
-                                  },
-                                }))
-                              }
-                              aria-label={`${text.quantity}: ${line.description}`}
-                              className={shellInputClassName}
-                            />
-                            <div className="text-right text-sm tabular-nums text-foreground">
-                              {formatMoney(
-                                selectedCreateTotals.lineGrossByIndex[lineIndex] ?? 0,
-                              )}
-                              <div className="text-[11px] text-muted-foreground">
-                                {line.vat_rate}% {lang === "de" ? "USt." : "НДС"}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ) : null}
+                    </>
+                  }
+                  toolbarAfter={
+                    <DataTablePager
+                      pageIndex={accountingEntriesPagination.pageIndex}
+                      pageSize={accountingEntriesPagination.pageSize}
+                      totalPages={accountingEntriesPagination.totalPages}
+                      totalRows={accountingEntriesPagination.totalRows}
+                      previousLabel={t.pagination_previous}
+                      nextLabel={t.pagination_next}
+                      onPageChange={accountingEntriesPagination.onPageChange}
+                    />
+                  }
+                  rowAccent={(row) => (row.direction === "income" ? "bg-emerald-500" : "bg-rose-500")}
+                  emptyState={
+                    <EmptyState
+                      title={text.noAccountingEntries}
+                      description={text.noAccountingEntriesDescription}
+                    />
+                  }
+                />
+              ) : null}
+            </div>
+            {!accountingBusy && !accountingError && accountingLedger ? (
+              <section>
+                  <DataTableSurface
+                    toolbarStart={
+                      <>
+                        <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
+                          {titleWithDot(text.monthlyEuer)}
+                        </span>
+                        <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+                      </>
+                    }
+                    rows={accountingMonthlyPagination.pagedRows}
+                    columns={accountingMonthlyTableColumns}
+                    rowId={(row) => row.period}
+                    defaultDensity="comfortable"
+                    defaultFrozenColumns={["period"]}
+                    dictionary={t as unknown as Record<string, string>}
+                    groupLabels={accountingColumnGroups}
+                    maxFrozenColumns={2}
+                    toolbarClassName="border-b border-border/70 bg-card px-3 py-2"
+                    toolbarAfter={
+                      <DataTablePager
+                        pageIndex={accountingMonthlyPagination.pageIndex}
+                        pageSize={accountingMonthlyPagination.pageSize}
+                        totalPages={accountingMonthlyPagination.totalPages}
+                        totalRows={accountingMonthlyPagination.totalRows}
+                        previousLabel={t.pagination_previous}
+                        nextLabel={t.pagination_next}
+                        onPageChange={accountingMonthlyPagination.onPageChange}
+                      />
+                    }
+                    rowAccent={(row) => {
+                      const value = Number(row.net_surplus ?? 0);
+                      if (value > 0) return "bg-emerald-500";
+                      if (value < 0) return "bg-rose-500";
+                      return "bg-slate-300";
+                    }}
+                    emptyState={
+                      <EmptyState
+                        title={text.monthlyEuer}
+                        description={text.noCashMovement.replace("{year}", accountingYear)}
+                      />
+                    }
+                  />
+              </section>
+            ) : null}
+          </>
+        ) : null}
 
-                {selectedCreateQuote ? (
-                  <section
-                    className={cn(
-                      "rounded-lg border p-5",
-                      createForm.invoiceType === "advance"
-                        ? "border-amber-300/80 bg-amber-50/70"
-                        : "border-border/70 bg-card",
-                    )}
-                  >
-                    {createForm.invoiceType === "advance" ? (
-                      <div className="mb-4">
-                        <h2 className={tokens.text.sectionTitle}>{text.advanceVatTitle}</h2>
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          {text.advanceVatDescription}
-                        </p>
-                      </div>
-                    ) : null}
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <MiniMetric
-                        label={text.selectionNet}
-                        value={formatMoney(selectedCreateTotals.net)}
-                      />
-                      <MiniMetric
-                        label={text.selectionVat}
-                        value={formatMoney(selectedCreateTotals.vat)}
-                      />
-                      <MiniMetric
-                        label={text.selectionGross}
-                        value={formatMoney(selectedCreateTotals.gross)}
-                      />
-                    </div>
-                  </section>
-                ) : null}
+        </div>
+      </div>
 
-                <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.invoiceSettingsSection)}</h2>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.invoices_type}>
-                      <NativeComboboxSelect
-                        value={createForm.invoiceType}
-                        onChange={(event) =>
-                          setCreateForm((current) => {
-                            const invoiceType = event.target.value as InvoiceType;
-                            return {
-                              ...current,
-                              invoiceType,
-                              selectedLineIndexes:
-                                selectedCreateQuote?.line_items.flatMap((line, index) =>
-                                  invoiceLineQuantityAvailable(line, invoiceType) > 0
-                                    ? [index]
-                                    : [],
-                                ) ?? [],
-                              lineQuantities: Object.fromEntries(
-                                selectedCreateQuote?.line_items.map((line, index) => [
-                                  String(index),
-                                  String(invoiceLineQuantityAvailable(line, invoiceType)),
-                                ]) ?? [],
-                              ),
-                            };
-                          })
-                        }
-                        className={selectClassName}
-                      >
-                        {INVOICE_TYPES.map((invoiceType) => (
-                          <option key={invoiceType} value={invoiceType}>
-                            {invoiceTypeLabel(invoiceType)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
-                    </Field>
-                    <Field label={t.invoices_due_at}>
-                      <Input
-                        type="date"
-                        className={shellInputClassName}
-                        value={createForm.dueDate}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({ ...current, dueDate: event.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
-                </section>
-
-                <section className="rounded-lg border border-border/70 bg-card p-5">
-                  <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
-                  <div className="mt-5">
-                    <Field label={text.notes}>
-                      <textarea
-                        className={textareaClassName}
-                        value={createForm.notes}
-                        onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
-                        placeholder={text.billingNotePlaceholder}
-                      />
-                    </Field>
-                  </div>
-                </section>
-              </div>
-            </AdminSheetScaffold>
-          </form>
-        </SheetContent>
-      </Sheet>
+      <CreateInvoiceDialog
+        open={createOpen}
+        busy={createBusy}
+        dirty={hasFormChanges(createForm, {
+          ...blankCreateForm(filters.quoteId),
+          ...createInvoiceLineSelection(quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [], "final"),
+        })}
+        optionsBusy={optionsBusy}
+        error={createError}
+        optionsError={optionsError}
+        form={createForm}
+        quotes={filteredQuotes}
+        selectedQuote={selectedCreateQuote}
+        onOpenChange={setCreateOpen}
+        onFormChange={(value) => { setCreateForm(value); setCreateError(null); }}
+        onSubmit={handleCreateInvoice}
+        onRetry={() => { clearApiCache(); setReloadToken((current) => current + 1); }}
+      />
 
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => {
         if (!open) {
@@ -3983,7 +3830,7 @@ function useStaffInvoicesPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+      <Dialog dirty={statusDirty} open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
@@ -4040,7 +3887,7 @@ function useStaffInvoicesPageContent() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={statusBusy || !access.canManage}
+                  disabled={statusBusy || !access.canManage || !statusDirty}
                   onClick={() => void handleSaveStatus()}
                 >
                   {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
@@ -4052,7 +3899,7 @@ function useStaffInvoicesPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={visibilityDialogOpen} onOpenChange={setVisibilityDialogOpen}>
+      <Dialog dirty={visibilityDirty} open={visibilityDialogOpen} onOpenChange={setVisibilityDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
@@ -4150,7 +3997,7 @@ function useStaffInvoicesPageContent() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={visibilityBusy || !access.canManage}
+                  disabled={visibilityBusy || !access.canManage || !visibilityDirty}
                   onClick={() => void handleSaveVisibility()}
                 >
                   {visibilityBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
@@ -4162,7 +4009,7 @@ function useStaffInvoicesPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={payerDialogOpen} onOpenChange={setPayerDialogOpen}>
+      <Dialog dirty={payerDirty} open={payerDialogOpen} onOpenChange={setPayerDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <div className="space-y-5">
             <DialogHeader>
@@ -4254,7 +4101,7 @@ function useStaffInvoicesPageContent() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={payerBusy || !access.canManage}
+                  disabled={payerBusy || !access.canManage || !payerDirty}
                   onClick={() => void handleSavePayer()}
                 >
                   {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

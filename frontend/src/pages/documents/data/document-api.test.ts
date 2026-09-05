@@ -84,6 +84,14 @@ describe("document preview API", () => {
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:inline-preview");
   });
 
+  it("reopens a stored binary XML invoice as plain text without changing its bytes", async () => {
+    const original = '<Invoice><Note>&lt;img src=x onerror=alert(1)&gt;</Note></Invoice>';
+    apiFetchFileMock.mockResolvedValue({ blob: new Blob([original], { type: "application/octet-stream" }), contentType: "application/octet-stream", filename: "invoice.XML" });
+    const preview = await createDocumentPreviewObjectUrl("xml-invoice");
+    expect(preview.contentType).toBe("text/plain;charset=utf-8");
+    expect(await previewBlob?.text()).toBe(original);
+  });
+
   it("downloads generated PDFs with a PDF extension and delays URL revocation", async () => {
     vi.useFakeTimers();
     apiFetchFileMock.mockResolvedValue({

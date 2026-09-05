@@ -1322,6 +1322,29 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
         full_readiness["readiness"]["conversion_ready"], true,
         "{full_readiness}"
     );
+
+    sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE id = $1")
+        .bind(artifacts.service_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET total_estimated = 130.90 WHERE id = $1")
+        .bind(artifacts.order_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+
+    let (status, drifted_readiness) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{drifted_readiness}");
+    assert!(!readiness_check_passed(
+        &drifted_readiness,
+        "quote_accepted"
+    ));
+    assert!(
+        readiness_check_passed(&drifted_readiness, "prepayment_ready"),
+        "a changed quote must not erase an already received prepayment: {drifted_readiness}"
+    );
 }
 
 #[tokio::test]

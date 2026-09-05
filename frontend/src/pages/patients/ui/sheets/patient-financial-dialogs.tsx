@@ -279,6 +279,7 @@ function ContractStatusDialog({
 }: ContractStatusDialogProps) {
   return (
     <PatientSheetScaffold
+      requireChanges
       open={Boolean(contractStatusId)}
       onOpenChange={(open) => {
         if (!open) onCloseContractStatus();
@@ -412,6 +413,7 @@ function InvoiceManagerDialog({
 }: InvoiceManagerDialogProps) {
   return (
     <PatientSheetScaffold
+      requireChanges
       open={Boolean(invoiceManageId)}
       onOpenChange={onInvoiceManageOpenChange}
       width="form-heavy"

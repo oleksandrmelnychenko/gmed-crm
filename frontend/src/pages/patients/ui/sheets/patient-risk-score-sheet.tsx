@@ -182,7 +182,7 @@ export function PatientRiskScoreSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges={Boolean(initialScore?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   createDocumentPreviewObjectUrl,
   documentPreviewSandbox,
@@ -157,7 +158,7 @@ export function ClinicalRecordSource({
           onClick={(event) => event.stopPropagation()}
         >
           <DialogHeader className="border-b border-border/70 px-5 py-4">
-            <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
                   {preview?.title ?? tx("Предпросмотр документа", "Dokumentvorschau")}
@@ -169,6 +170,8 @@ export function ClinicalRecordSource({
                 </DialogDescription>
               </div>
               {item.source_document_id ? (
+                <div className="flex flex-wrap items-center gap-2">
+                <DocumentSignatureAction documentId={item.source_document_id} title={item.source_document_name || tx("Документ", "Dokument")} />
                 <Button
                   type="button"
                   size="sm"
@@ -181,6 +184,7 @@ export function ClinicalRecordSource({
                   <Download className="size-3.5" />
                   {tx("Скачать", "Herunterladen")}
                 </Button>
+                </div>
               ) : null}
             </div>
           </DialogHeader>

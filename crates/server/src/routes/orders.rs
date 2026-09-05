@@ -58,6 +58,10 @@ pub fn router() -> Router<AppState> {
             get(list_external_invoices).post(create_external_invoice),
         )
         .route(
+            "/external-invoices/company",
+            post(create_company_external_invoice),
+        )
+        .route(
             "/orders/{order_id}/external-invoices/{external_invoice_id}/update",
             post(update_external_invoice),
         )
@@ -229,6 +233,9 @@ struct SyncLeadWizardLeistungenRequest {
 
 #[derive(Deserialize)]
 struct CreateExternalInvoiceRequest {
+    patient_id: Option<Uuid>,
+    source_document_id: Option<Uuid>,
+    supplier_name: Option<String>,
     provider_id: Option<Uuid>,
     order_leistung_id: Option<Uuid>,
     external_invoice_number: String,
@@ -2984,7 +2991,7 @@ async fn get_order(
                   COALESCE(ol.agency_service_description_snapshot, catalog.description) AS agency_service_description,
                   COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label,
                   ol.agency_service_key_snapshot, ol.agency_service_name_snapshot,
-                  ol.agency_service_description_snapshot, ol.agency_service_unit_label_snapshot,
+                  ol.agency_service_description_snapshot, ol.agency_service_description_items_snapshot, ol.agency_service_unit_label_snapshot,
                   ol.unit_price_snapshot, ol.currency_snapshot, ol.vat_rate_snapshot,
                   ol.planned_partner_cost_net, ol.planned_partner_cost_vat,
                   ol.planned_partner_cost_gross,
@@ -3129,6 +3136,7 @@ async fn get_order(
             "agency_service_key_snapshot": l.try_get::<Option<String>, _>("agency_service_key_snapshot").unwrap_or_default(),
             "agency_service_name_snapshot": l.try_get::<Option<String>, _>("agency_service_name_snapshot").unwrap_or_default(),
             "agency_service_description_snapshot": l.try_get::<Option<String>, _>("agency_service_description_snapshot").unwrap_or_default(),
+            "agency_service_description_items_snapshot": l.try_get::<Option<serde_json::Value>, _>("agency_service_description_items_snapshot").unwrap_or_default(),
             "agency_service_unit_label_snapshot": l.try_get::<Option<String>, _>("agency_service_unit_label_snapshot").unwrap_or_default(),
             "unit_price_snapshot": l.try_get::<Option<rust_decimal::Decimal>, _>("unit_price_snapshot").unwrap_or_default(),
             "currency_snapshot": l.try_get::<Option<String>, _>("currency_snapshot").unwrap_or_default(),
@@ -3150,7 +3158,7 @@ async fn get_order(
     }
 
     let external_invoice_rows = match sqlx::query(
-        r#"SELECT ei.id, ei.provider_id, ei.order_leistung_id, ei.external_invoice_number, ei.invoice_date,
+        r#"SELECT ei.id, ei.source_document_id, ei.provider_id, ei.order_leistung_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.paid_by, ei.service_delivered,
                   receivable.patient_receivable_gross,
@@ -3208,6 +3216,7 @@ async fn get_order(
             "provider_taxonomy_node_name_de": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
             "provider_taxonomy_node_name_ru": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
             "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+            "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").ok().flatten(),
             "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
             "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
             "amount_net": row.try_get::<rust_decimal::Decimal, _>("amount_net").unwrap_or(rust_decimal::Decimal::ZERO),
@@ -5980,7 +5989,7 @@ async fn list_external_invoices(
     }
 
     match sqlx::query(
-        r#"SELECT ei.id, ei.provider_id, ei.order_leistung_id, ei.external_invoice_number, ei.invoice_date,
+        r#"SELECT ei.id, ei.source_document_id, ei.provider_id, ei.order_leistung_id, ei.external_invoice_number, ei.invoice_date,
                   ei.due_date, ei.amount_net, ei.amount_vat, ei.amount_gross, ei.currency,
                   ei.status, ei.paid_by, ei.service_delivered,
                   receivable.patient_receivable_gross,
@@ -6029,6 +6038,7 @@ async fn list_external_invoices(
                     "provider_taxonomy_node_name_de": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_de").unwrap_or_default(),
                     "provider_taxonomy_node_name_ru": row.try_get::<Option<String>, _>("provider_taxonomy_node_name_ru").unwrap_or_default(),
                     "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+                    "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").ok().flatten(),
                     "invoice_date": row.try_get::<Option<chrono::NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
                     "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
                     "amount_net": row.try_get::<rust_decimal::Decimal, _>("amount_net").unwrap_or(rust_decimal::Decimal::ZERO),
@@ -6058,6 +6068,218 @@ async fn list_external_invoices(
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load external invoices",
+            )
+        }
+    }
+}
+
+async fn create_company_external_invoice(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<CreateExternalInvoiceRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo])
+    {
+        return response;
+    }
+
+    let Some(source_document_id) = body.source_document_id else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Company invoice source document is required",
+        );
+    };
+    let external_invoice_number = body.external_invoice_number.trim();
+    if external_invoice_number.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "External invoice number is required",
+        );
+    }
+    let supplier_name = body
+        .supplier_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(supplier_name) = supplier_name else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Company invoice supplier is required",
+        );
+    };
+    if supplier_name.chars().count() > 500 || external_invoice_number.chars().count() > 250 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Company invoice supplier or number is too long",
+        );
+    }
+
+    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let due_date = match parse_optional_order_date(body.due_date.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let amount_net = match money_decimal_from_f64(
+        body.amount_net.unwrap_or(0.0),
+        "Company invoice net amount",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let amount_vat = match money_decimal_from_f64(
+        body.amount_vat.unwrap_or(0.0),
+        "Company invoice VAT amount",
+    ) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let amount_gross =
+        match money_decimal_from_f64(body.amount_gross, "Company invoice gross amount") {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let (amount_net, amount_vat, amount_gross) =
+        match validate_money_components(amount_net, amount_vat, amount_gross, "Company invoice") {
+            Ok(values) => values,
+            Err(response) => return response,
+        };
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("EUR")
+        .to_uppercase();
+    if currency.len() != 3
+        || !currency
+            .chars()
+            .all(|character| character.is_ascii_uppercase())
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Company invoice currency must be a three-letter code",
+        );
+    }
+    let notes = body
+        .notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if notes.is_some_and(|value| value.chars().count() > 10_000) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoice notes are too long",
+        );
+    }
+
+    let document_is_valid = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM documents
+               WHERE id = $1
+                 AND patient_id IS NULL
+                 AND order_id IS NULL
+                 AND lead_id IS NULL
+                 AND appointment_id IS NULL
+                 AND is_medical = false
+                 AND file_deleted_at IS NULL
+           )"#,
+    )
+    .bind(source_document_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, source_document_id = %source_document_id, "validate company invoice source document");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate company invoice document",
+            );
+        }
+    };
+    if !document_is_valid {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Company invoice document must not belong to a patient or order",
+        );
+    }
+
+    match sqlx::query(
+        r#"INSERT INTO external_invoices (
+               invoice_scope, source_document_id, supplier_name,
+               external_invoice_number, invoice_date, due_date,
+               amount_net, amount_vat, amount_gross, currency,
+               status, paid_by, service_delivered, notes,
+               received_at, created_by
+           ) VALUES (
+               'company', $1, $2, $3, $4, $5,
+               $6, $7, $8, $9,
+               'approved', 'unpaid', false, $10,
+               now(), $11
+           )
+           RETURNING id"#,
+    )
+    .bind(source_document_id)
+    .bind(supplier_name)
+    .bind(external_invoice_number)
+    .bind(invoice_date)
+    .bind(due_date)
+    .bind(amount_net)
+    .bind(amount_vat)
+    .bind(amount_gross)
+    .bind(&currency)
+    .bind(notes)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => {
+            let id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            state.audit_sender.try_send(audit::domain_event(
+                "create_company_external_invoice",
+                Some(auth.user_id),
+                "external_invoice",
+                Some(id),
+                serde_json::json!({
+                    "source_document_id": source_document_id,
+                    "supplier_name": supplier_name,
+                    "external_invoice_number": external_invoice_number,
+                    "amount_gross": amount_gross.to_string(),
+                    "currency": currency,
+                }),
+            ));
+            crate::realtime::publish_company_finance_event(
+                &state,
+                Some(auth.user_id),
+                "provider_invoice.created",
+                "external_invoice",
+                id,
+                serde_json::json!({
+                    "invoice_scope": "company",
+                    "supplier_name": supplier_name,
+                    "external_invoice_number": external_invoice_number,
+                }),
+            )
+            .await;
+            (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
+        }
+        Err(error) => {
+            if error
+                .as_database_error()
+                .is_some_and(|database_error| database_error.is_unique_violation())
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "This company invoice has already been imported",
+                );
+            }
+            tracing::error!(error = %error, "create company external invoice");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create company invoice",
             )
         }
     }
@@ -6232,19 +6454,48 @@ async fn create_external_invoice(
         );
     }
 
+    if body
+        .patient_id
+        .is_some_and(|expected| expected != patient_id)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoice patient must match the selected order",
+        );
+    }
+    if let Some(document_id) = body.source_document_id {
+        let valid = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM documents WHERE id = $1 AND patient_id = $2 AND order_id = $3 AND is_medical = false AND file_deleted_at IS NULL)",
+        ).bind(document_id).bind(patient_id).bind(order_id).fetch_one(&state.db).await;
+        match valid {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Invoice source document must belong to the same patient and order",
+                );
+            }
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate invoice document",
+                );
+            }
+        }
+    }
     match sqlx::query(
         r#"INSERT INTO external_invoices (
                 order_id, patient_id, provider_id, order_leistung_id,
                 external_invoice_number, invoice_date,
                 due_date, amount_net, amount_vat, amount_gross, currency, status,
                 paid_by, service_delivered, notes,
-                received_at, paid_at, created_by
+                received_at, paid_at, created_by, source_document_id
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11, $12, $13, $14, $15,
                 CASE WHEN $12 IN ('received', 'approved', 'paid', 'overdue') THEN now() ELSE NULL END,
                 CASE WHEN $12 = 'paid' THEN now() ELSE NULL END,
-                $16
+                $16, $17
            )
            RETURNING id"#,
     )
@@ -6264,6 +6515,7 @@ async fn create_external_invoice(
     .bind(service_delivered)
     .bind(notes)
     .bind(auth.user_id)
+    .bind(body.source_document_id)
     .fetch_one(&state.db)
     .await
     {
@@ -6292,6 +6544,7 @@ async fn create_external_invoice(
                     "external_invoice_id": id,
                     "external_invoice_number": external_invoice_number,
                     "order_leistung_id": body.order_leistung_id,
+                    "source_document_id": body.source_document_id,
                     "status": status,
                     "paid_by": paid_by,
                     "service_delivered": service_delivered,
@@ -6316,11 +6569,15 @@ async fn create_external_invoice(
             (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
         }
         Err(error) => {
+            if error.as_database_error().is_some_and(|error| error.is_unique_violation()) {
+                return err(StatusCode::CONFLICT, "This invoice number or source document has already been imported");
+            }
             let database_message = error.to_string();
             if database_message.contains("must match order currency")
                 || database_message.contains("must belong to the same order")
                 || database_message.contains("must match order service provider")
                 || database_message.contains("external_invoices_amount")
+                || database_message.contains("Invoice source document must belong")
             {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -6754,7 +7011,7 @@ async fn list_leistungen(
                   COALESCE(ol.agency_service_description_snapshot, catalog.description) AS agency_service_description,
                   COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label,
                   ol.agency_service_key_snapshot, ol.agency_service_name_snapshot,
-                  ol.agency_service_description_snapshot, ol.agency_service_unit_label_snapshot,
+                  ol.agency_service_description_snapshot, ol.agency_service_description_items_snapshot, ol.agency_service_unit_label_snapshot,
                   ol.unit_price_snapshot, ol.currency_snapshot, ol.vat_rate_snapshot,
                   ol.planned_partner_cost_net, ol.planned_partner_cost_vat,
                   ol.planned_partner_cost_gross,
@@ -6814,6 +7071,7 @@ async fn list_leistungen(
                     "agency_service_key_snapshot": r.try_get::<Option<String>, _>("agency_service_key_snapshot").unwrap_or_default(),
                     "agency_service_name_snapshot": r.try_get::<Option<String>, _>("agency_service_name_snapshot").unwrap_or_default(),
                     "agency_service_description_snapshot": r.try_get::<Option<String>, _>("agency_service_description_snapshot").unwrap_or_default(),
+            "agency_service_description_items_snapshot": r.try_get::<Option<serde_json::Value>, _>("agency_service_description_items_snapshot").unwrap_or_default(),
                     "agency_service_unit_label_snapshot": r.try_get::<Option<String>, _>("agency_service_unit_label_snapshot").unwrap_or_default(),
                     "unit_price_snapshot": r.try_get::<Option<rust_decimal::Decimal>, _>("unit_price_snapshot").unwrap_or_default(),
                     "currency_snapshot": r.try_get::<Option<String>, _>("currency_snapshot").unwrap_or_default(),

@@ -175,7 +175,7 @@ export function PatientVitalsSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges={Boolean(initialMeasurement?.id)}
       open={open}
       onOpenChange={onOpenChange}
       maxWidthClassName="sm:max-w-[540px]"

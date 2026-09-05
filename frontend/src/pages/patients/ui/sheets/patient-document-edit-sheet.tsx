@@ -1,3 +1,4 @@
+import { hasFormChanges } from "@/lib/form-changes";
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -31,6 +32,7 @@ import type {
 } from "@/pages/documents/model/types";
 
 import { FormSection } from "../shared/patient-form-primitives";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 type Copy = {
@@ -395,6 +397,8 @@ export function PatientDocumentEditSheet({
   const { lang } = useLang();
   const copy = COPY[lang];
   const [form, setForm] = useState<EditForm | null>(null);
+  const [initialForm, setInitialForm] = useState<EditForm | null>(null);
+  const dirty = form !== null && initialForm !== null && hasFormChanges(form, initialForm);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [arts, setArts] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -415,7 +419,9 @@ export function PatientDocumentEditSheet({
     void Promise.all([fetchDocument(documentId), fetchDocumentCategories()])
       .then(([document, lookups]) => {
         if (cancelled) return;
-        setForm(formFromDocument(document));
+        const loadedForm = formFromDocument(document);
+        setForm(loadedForm);
+        setInitialForm(loadedForm);
         setCategories(lookups.categories);
         setArts(lookups.arts);
       })
@@ -447,7 +453,7 @@ export function PatientDocumentEditSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!documentId || !form) return;
+    if (!documentId || !form || !dirty || busy) return;
     if (!form.autoName.trim() || !form.art.trim()) {
       setError(copy.saveFailed);
       return;
@@ -515,7 +521,7 @@ export function PatientDocumentEditSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       width="detail-wide"
@@ -546,6 +552,7 @@ export function PatientDocumentEditSheet({
         </div>
       ) : form ? (
         <>
+          {documentId ? <DocumentSignatureAction documentId={documentId} title={initialForm?.autoName || documentId} onDone={onSaved} /> : null}
           <FormSection title={copy.identity}>
             <div className="grid gap-3 md:grid-cols-2">
               <Field

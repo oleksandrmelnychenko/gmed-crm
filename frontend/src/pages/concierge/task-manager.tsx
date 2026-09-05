@@ -28,6 +28,7 @@ import { SelectField } from "@/components/ui/select-field";
 import { Section } from "@/components/ui-shell";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { localizeTaskTitle } from "@/lib/task-labels";
 
 import {
   conciergeTaskCode,
@@ -326,7 +327,7 @@ function TaskCard({
           {overdue ? <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">{labels.overdue}</Badge> : null}
           {archived ? <Badge variant="outline" className="rounded-full border-slate-300 bg-slate-100 text-[10px] text-slate-700">{labels.archived}</Badge> : null}
         </div>
-        <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{task.title}</h3>
+        <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{localizeTaskTitle(task.title, lang)}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
           <div className="flex min-w-0 items-center gap-1.5">
@@ -619,7 +620,7 @@ export function ConciergeTaskManager({
                       </button>
                       <div className="space-y-1">
                         {visibleRows.map((task) => (
-                          <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
+                          <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={localizeTaskTitle(task.title, lang)} onClick={() => onOpen(task)}>{localizeTaskTitle(task.title, lang)}</button>
                         ))}
                         {hiddenCount > 0 ? (
                           <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>
@@ -657,7 +658,7 @@ export function ConciergeTaskManager({
                           </button>
                           <div className="space-y-1">
                             {visibleRows.map((task) => (
-                              <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={task.title} onClick={() => onOpen(task)}>{task.title}</button>
+                              <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={localizeTaskTitle(task.title, lang)} onClick={() => onOpen(task)}>{localizeTaskTitle(task.title, lang)}</button>
                             ))}
                             {hiddenCount > 0 ? (
                               <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>

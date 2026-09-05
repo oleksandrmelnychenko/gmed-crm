@@ -113,4 +113,25 @@ describe("project workflow model", () => {
       "b",
     ).map((item) => item.id)).toEqual([]);
   });
+
+  it("keeps hidden prerequisites when filtering the canvas", () => {
+    const graph = buildProjectWorkflowGraph(
+      [task("a", "open"), task("b", "open")],
+      [dependency("a-before-b", "b", "a")],
+      new Set(["b"]),
+    );
+    expect(graph.nodes.map((node) => node.task.id)).toEqual(["b"]);
+    expect(graph.nodes[0].incoming).toHaveLength(1);
+    expect(graph.nodes[0].unresolvedIncoming).toHaveLength(1);
+    expect(graph.edges).toEqual([]);
+  });
+
+  it("does not count completed, cancelled or missing tasks as blocked", () => {
+    const tasks = [task("a", "open"), task("b", "completed"), task("c", "cancelled"), task("d", "open")];
+    const dependencies = [dependency("ab", "b", "a"), dependency("ac", "c", "a"), dependency("ad", "d", "a"), dependency("ax", "missing", "a")];
+    expect(projectWorkflowStats(tasks, dependencies).blocked).toBe(1);
+    const graph = buildProjectWorkflowGraph(tasks, dependencies);
+    expect(graph.nodes.find((node) => node.task.id === "b")?.unresolvedIncoming).toEqual([]);
+    expect(graph.nodes.find((node) => node.task.id === "c")?.unresolvedIncoming).toEqual([]);
+  });
 });

@@ -1,0 +1,13 @@
+**
+!services
+!services/invoice-parser
+!services/invoice-parser/pyproject.toml
+!services/invoice-parser/invoice_parser
+!services/invoice-parser/invoice_parser/*.py
+!services/invoice-parser/templates
+!services/invoice-parser/templates/**
+!services/clinical-document-parser
+!services/clinical-document-parser/app
+!services/clinical-document-parser/app/__init__.py
+!services/clinical-document-parser/app/extraction.py
+!services/clinical-document-parser/app/paddle_runtime.py

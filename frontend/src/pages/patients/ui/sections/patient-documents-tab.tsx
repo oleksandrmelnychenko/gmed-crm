@@ -51,6 +51,7 @@ import type {
 } from "../../model/detail-tab-types";
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
 import { PatientDocumentEditSheet } from "../sheets/patient-document-edit-sheet";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -352,6 +353,7 @@ export function PatientDocumentsTab({
         getTitle: (doc) => doc.filename || "document",
         label: t.documents_preview,
         onPreview: (doc) => void openPatientDocumentPreview(doc),
+        onSigned: onDocumentGenerated,
       }),
       {
         id: "filename",
@@ -494,6 +496,7 @@ export function PatientDocumentsTab({
       l,
       lang,
       openPatientDocumentPreview,
+      onDocumentGenerated,
       patientsAssignedByLabel,
       statusColors,
       statusLabel,
@@ -734,7 +737,7 @@ export function PatientDocumentsTab({
       >
         <DialogContent className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[78vw] sm:max-w-[1500px]">
           <DialogHeader className="border-b border-border/70 px-5 py-4">
-            <div className="flex min-w-0 items-start justify-between gap-4 pr-10">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-base">
                   {documentPreview?.title ?? t.documents_preview}
@@ -746,6 +749,8 @@ export function PatientDocumentsTab({
                 </DialogDescription>
               </div>
               {documentPreview ? (
+                <div className="flex flex-wrap items-center gap-2">
+                <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={onDocumentGenerated} />
                 <Button
                   type="button"
                   size="sm"
@@ -760,6 +765,7 @@ export function PatientDocumentsTab({
                   <Download className="size-3.5" />
                   {t.documents_download}
                 </Button>
+                </div>
               ) : null}
             </div>
           </DialogHeader>

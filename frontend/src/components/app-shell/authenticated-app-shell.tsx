@@ -7,6 +7,7 @@ import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-ro
 
 import { AppShellFrame } from "./app-shell-frame";
 import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
+import { ChatDeviceSetup } from "@/components/chat-device-setup";
 
 export function AuthenticatedAppShell() {
   const { user, loading } = useAuth();
@@ -37,6 +38,7 @@ export function AuthenticatedAppShell() {
 
   return (
     <NavStateProvider>
+      <ChatDeviceSetup />
       <AuthenticatedAppShellContent />
     </NavStateProvider>
   );

@@ -43,6 +43,7 @@ describe("first-release staff RBAC", () => {
       "/admin/users",
       "/admin/access",
       "/admin/settings",
+      "/admin/signatures",
     ];
     for (const path of paths) {
       expect(canAccessStaffRoute("ceo", path), path).toBe(true);
@@ -161,6 +162,7 @@ describe("first-release staff RBAC", () => {
         "interpreter",
       ],
       "/company-finance": ["ceo", "billing"],
+      "/admin/signatures": ["ceo", "it_admin"],
     } as const;
 
     for (const [path, allowedRoles] of Object.entries(matrix)) {
@@ -207,6 +209,7 @@ describe("first-release staff RBAC", () => {
     expect(ceo).toContain("/projects");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
+      "/admin/signatures",
       "/chat",
       "/notes",
       "/patients",

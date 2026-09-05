@@ -1,4 +1,9 @@
 export type InvoiceType = "advance" | "interim" | "final";
+export type InvoiceBillingRelease = {
+  billing_release_status: "pending" | "granted" | "denied";
+  billing_release_note: string | null;
+  package_coverage_status: string;
+};
 export type InvoiceStatus =
   | "draft"
   | "sent"
@@ -223,6 +228,12 @@ export type AccountingEntry = {
   amount_vat: string;
   amount_gross: string;
   currency: string;
+  invoice_id?: string | null;
+  external_invoice_id?: string | null;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
+  order_id?: string | null;
+  patient_id?: string | null;
   invoice_number?: string | null;
   external_invoice_number?: string | null;
   order_number?: string | null;

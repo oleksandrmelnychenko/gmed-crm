@@ -101,6 +101,17 @@ class DraftExtractionMetadata(BaseModel):
     )
 
 
+class DraftTranslation(BaseModel):
+    status: Literal["review_required", "unavailable", "failed", "too_large"]
+    source_language: Literal["en"] = "en"
+    target_language: Literal["de"] = "de"
+    provider: Literal["local_argos"] = "local_argos"
+    model: str
+    text: str | None = Field(default=None, max_length=180_000)
+    candidate_values: dict[str, str] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ParseDraft(BaseModel):
     document_type: str
     source_language: str | None = None
@@ -110,3 +121,4 @@ class ParseDraft(BaseModel):
     candidates: list[ClinicalCandidate] = Field(default_factory=list, max_length=MAX_DRAFT_CANDIDATES)
     warnings: list[str] = Field(default_factory=list)
     extraction: DraftExtractionMetadata | None = None
+    translation: DraftTranslation | None = None

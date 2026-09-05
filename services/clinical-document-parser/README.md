@@ -31,6 +31,80 @@ models for Latin text and falls back to local Tesseract for failures and
 Cyrillic pages. Set `PARSER_OCR_ENGINE=tesseract` to disable PaddleOCR. No
 document content leaves the host.
 
+English clinical headings, diagnosis assertions (including suspected, negated,
+rule-out and historical statements), labelled subject identity and medication
+tables are supported. English candidates remain unselected for explicit review.
+Ambiguous US/UK slash dates are never guessed.
+
+English imports also receive a separate German machine-translation draft. The
+original text, page boundaries, candidate evidence and clinical assertions remain
+unchanged. Reviewers can adopt and edit narrative wording in the import sheet;
+doing so clears selection and still requires confirmation. Structured medication,
+laboratory and vital-sign fields are never overwritten by translation. Changed
+numbers and missing supported clinical qualifiers are flagged, and the affected
+candidate translation cannot be adopted. These checks do not validate medical
+meaning. Paragraphs are translated sentence by sentence to avoid silently
+dropping later sentences.
+
+Wrapped English report lines are joined before sentence translation, while
+diagnosis rows, headings, table cells and page boundaries stay distinct.
+`Report Summary`, `Medical Summary`, and `Thyroid Sonography` are recognized.
+Long diagnosis lists retain individual assertions, including exclusions and
+historical conditions. Native PDF layout extraction falls back to the complete
+plain text stream if layout spacing changes numeric tokens. Unambiguous decimal
+dot-to-comma localization and English comma-grouped thousands localized to
+German dot groups are restored to the source spelling. Source dot groups with
+three fractional digits remain ambiguous; changed digits, signs and ordering
+are never repaired. Numeric ranges such as `40–80` and `40-80` are equivalent,
+while standalone signed measurements retain their sign.
+Missing or added supported negations, and missing laterality or historical
+qualifiers, block adoption of the affected candidate translation.
+An omitted qualifier permits one bounded retry with shorter comma/semicolon
+clauses. The retry is accepted only when the original sentence's numbers and
+supported qualifiers are preserved. `Euthyreose` is recognized alongside
+adjectival German renderings of `euthyroid`.
+
+Wrapped vital measurements keep an immediately following unit on the same
+page and within the same paragraph. English `pulse` / `pulse rate` is extracted
+as heart rate. A report without a measurement date still requires the reviewer
+to supply that date; dates of earlier diagnoses are not reused for current vitals.
+
+A small reviewed glossary repairs supported phrases that the model leaves in
+English and specific documented terminology errors. Each repair requires both
+the matching source phrase and its exact untranslated/incorrect target phrase;
+it cannot invent an absent procedure. Colon segments and solitary findings are
+also checked. This glossary is not a replacement for clinical review.
+
+English prose keeps paragraph context and joins wrapped diagnosis sentences.
+`Summary`, `Laboratory`, `Conclusion`, and `Therapy recommendations` terminate
+the preceding section. Normal/improved findings remain findings. Prose therapy
+recommendations retain alternatives and titration instructions as recommendations;
+they do not synthesize an active medication schedule. Historical and target
+laboratory values in this prose remain in context rather than becoming current
+measurements. Letter signatures, repeated page headings and pharmacy legends
+are excluded from the clinical candidates while the source text is retained.
+This general-purpose model is not clinically validated: terminology, negations,
+names, dosages and dates must be checked against the original.
+
+Translation runs offline with the [Argos English–German 1.3 model](https://github.com/argosopentech/argospm-index)
+using CTranslate2 and SentencePiece. The Docker image downloads and verifies the
+pinned model archive during its build and tests inference. Runtime translation
+does not download models or call an external provider. For local development:
+
+```bash
+uv sync --extra dev --extra translation
+uv run python -m app.install_translation_model
+```
+
+Set `PARSER_TRANSLATION_MODEL_DIR` to use the installed model directory elsewhere.
+The default is `models/translate-en_de-1_3` beside this README. Source text plus
+candidate text is limited to 60,000 characters per translation, output to 180,000,
+and native inference to a killable 120-second child process. Missing models,
+timeouts, invalid output and oversized inputs leave recognition available and
+show the translation state in the import sheet. Retry by rescanning the document
+after restoring translation. Existing imports retain their original snapshots;
+rescan to create an English/German review with the new parser.
+
 Administrative cost estimates are identified before clinical section parsing
 and deliberately produce no clinical candidates. Narrative candidate text also
 repairs only a narrow allowlist of deterministic native-PDF kerning splits;
@@ -72,6 +146,26 @@ Vertical German OCR tables may use either
 `Bezeichnung/Wert/Einheit/Normbereich`. Repeated letterheads and unrelated
 sidebar cells are excluded from clinical values while the unmodified OCR text
 remains available to the reviewer.
+
+Ruled laboratory histories with `Testbezeichnung / Toleranz / Einheit` and
+several date columns use a dedicated local Tesseract layout route. Repeated
+vertical rules define the cells, including leading, internal and trailing
+empty results. Continuation pages may omit the date header. Table cleanup
+preserves dense explanatory legends instead of treating their text as a rule.
+`ab` and `bis` reference limits are recognized. Prefix high/low markers are
+interpreted only when the document explicitly explains them in its legend.
+The API-compatible `result_text` contains the measurement; `source_result_text`,
+`source_abnormal_marker`, `source_unit`, and exact row evidence retain the
+original OCR. Unknown units, ambiguous dates/column counts, unreadable results
+and marker/reference conflicts require review. Identical measurements on
+different dates remain separate observations.
+Ambiguous unit glyphs may receive a bounded cell-image re-read at two scales.
+It changes only narrowly matched glyph families and retains conservative OCR
+confidence; valid units, result/date cells and missing prefixes are not inferred.
+Recognized ASCII micro-prefixes are normalized to `µ`. A small explicit analyte
+alias list normalizes known glyph confusions such as `HbAlc`; the original label
+remains in `source_analyte_name`. Values such as a printed `kA` and contradictions
+already present in the source retain their review gates.
 Document-subject evidence is extracted only from anchored identity labels or a
 supported letter salutation. Generic `Patienten-ID`/`Patienten-Nr.` values are
 marked with the `source_document` namespace: they belong to the issuing clinic

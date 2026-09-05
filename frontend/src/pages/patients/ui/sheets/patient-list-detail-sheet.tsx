@@ -1,3 +1,4 @@
+import { hasFormChanges } from "@/lib/form-changes";
 import {
   memo,
   useEffect,
@@ -370,6 +371,7 @@ function PatientDetailSheet({
   } = detailControls;
   type PatientDetailSheetState = {
     form: PatientFormState;
+    initialForm: PatientFormState | null;
     initialTrustedContactIds: string[];
     busy: boolean;
     error: string;
@@ -388,12 +390,14 @@ function PatientDetailSheet({
     undefined,
     () => ({
       form: blankPatientForm(),
+      initialForm: null,
       initialTrustedContactIds: [],
       busy: false,
       error: "",
     }),
   );
-  const { form, initialTrustedContactIds, busy, error } = detailSheetState;
+  const { form, initialForm, initialTrustedContactIds, busy, error } = detailSheetState;
+  const dirty = initialForm !== null && hasFormChanges(form, initialForm);
   const setForm = (nextValue: SetStateAction<PatientFormState>) => {
     dispatchDetailSheetState((current) => ({
       form:
@@ -416,8 +420,10 @@ function PatientDetailSheet({
 
     if (detail) {
       let active = true;
+      const loadedForm = patientToForm(detail);
       dispatchDetailSheetState({
-        form: patientToForm(detail),
+        form: loadedForm,
+        initialForm: loadedForm,
         initialTrustedContactIds: [],
         error: "",
       });
@@ -433,6 +439,10 @@ function PatientDetailSheet({
                   ? trustedContacts
                   : current.form.trustedContacts,
             },
+            initialForm: current.initialForm ? {
+              ...current.initialForm,
+              trustedContacts: trustedContacts.length > 0 ? trustedContacts : current.initialForm.trustedContacts,
+            } : null,
             initialTrustedContactIds: trustedContacts.flatMap((contact) => (
               contact.persistedId ? [contact.persistedId] : []
             )),
@@ -449,7 +459,7 @@ function PatientDetailSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail) return;
+    if (!detail || !dirty || busy) return;
 
     dispatchDetailSheetState({
       busy: true,
@@ -551,7 +561,7 @@ function PatientDetailSheet({
   }
 
   return (
-    <PatientSheetScaffold
+    <PatientSheetScaffold requireChanges dirty={dirty}
       open={open}
       onOpenChange={onOpenChange}
       title={

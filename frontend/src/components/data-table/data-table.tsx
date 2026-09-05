@@ -57,6 +57,7 @@ export type DataTableProps<T> = {
   onSelectedIdsChange?: (next: string[]) => void;
   selectionEnabled?: boolean;
   rowAccent?: (row: T) => string | null;
+  rowBackground?: (row: T) => string | null;
   rowActions?: (row: T) => ReactNode;
   rowActionsAlwaysVisible?: boolean;
   rowActionsLabel?: ReactNode;
@@ -128,10 +129,11 @@ function useDataTableContent<T>({
   onSelectedIdsChange,
   selectionEnabled = false,
   rowAccent,
+  rowBackground,
   rowActions,
-  rowActionsAlwaysVisible = false,
+  rowActionsAlwaysVisible = true,
   rowActionsLabel,
-  rowActionsWidth = 144,
+  rowActionsWidth = 44,
   rowHeightOverrides,
   disableRowHover = false,
   loading = false,
@@ -422,6 +424,7 @@ function useDataTableContent<T>({
             const sortState = sortLookup.get(col.id);
             const pinStyle = pinnedStyle(col, index, visibleCols, selectionEnabled);
             const isPinned = Boolean(col.pinned);
+            const isActionsColumn = col.id === "actions" || col.id.endsWith("_actions");
             return (
               <button
                 key={col.id}
@@ -452,9 +455,10 @@ function useDataTableContent<T>({
                 style={pinStyle.style}
                 aria-disabled={!col.sortable}
                 aria-haspopup={onColumnFreezeChange ? "menu" : undefined}
+                aria-label={isActionsColumn ? col.label : undefined}
                 disabled={!col.sortable && !onColumnFreezeChange}
               >
-                <span className="truncate">{col.label}</span>
+                <span className={cn("truncate", isActionsColumn && "sr-only")}>{col.label}</span>
                 {isPinned ? (
                   <span
                     title={columnHeaderContextMenuLabels?.frozen ?? t.table_columns_frozen}
@@ -501,7 +505,7 @@ function useDataTableContent<T>({
               className="sticky right-0 z-30 flex h-full items-center justify-end border-l border-b border-border/50 bg-card px-2 text-right shadow-[-1px_0_0_color-mix(in_oklch,var(--border)_70%,transparent)]"
               style={{ gridColumn: `${visibleCols.length + (selectionEnabled ? 2 : 1)}` }}
             >
-              <span className="truncate">{resolvedRowActionsLabel}</span>
+              <span className="sr-only">{resolvedRowActionsLabel}</span>
             </div>
           ) : null}
         </div>
@@ -522,10 +526,20 @@ function useDataTableContent<T>({
               const isSelected = selectedSet.has(id);
               const isOdd = vRow.index % 2 === 1;
               const accent = rowAccent?.(row);
+              const customRowBackground = rowBackground?.(row);
               const rowTone = rowToneStyle({ isActive, isOdd, isSelected });
-              const effectiveRowTone: DataTableRowStyle = disableRowHover
-                ? { ...rowTone, "--dt-row-hover-bg": rowTone["--dt-row-bg"] }
-                : rowTone;
+              const effectiveRowTone: DataTableRowStyle = {
+                ...rowTone,
+                ...(disableRowHover
+                  ? { "--dt-row-hover-bg": rowTone["--dt-row-bg"] }
+                  : {}),
+                ...(customRowBackground
+                  ? {
+                      "--dt-row-bg": customRowBackground,
+                      "--dt-row-hover-bg": customRowBackground,
+                    }
+                  : {}),
+              };
 
               return (
                 <div
@@ -641,6 +655,7 @@ function useDataTableContent<T>({
               const isActive = activeRowId === id;
               const isSelected = selectedSet.has(id);
               const accent = rowAccent?.(row);
+              const customRowBackground = rowBackground?.(row);
               return (
                 <article
                   key={id}
@@ -661,6 +676,7 @@ function useDataTableContent<T>({
                     isActive && "border-primary/50 bg-primary/[0.025] ring-1 ring-primary/15",
                     isSelected && "bg-primary/[0.045]",
                   )}
+                  style={customRowBackground ? { backgroundColor: customRowBackground } : undefined}
                 >
                   {accent ? <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-0.5", accent)} /> : null}
                   <div className="flex min-w-0 items-start gap-2.5">

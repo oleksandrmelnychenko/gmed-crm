@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
 import {
   availableConciergeTaskStatuses,
@@ -513,8 +514,10 @@ export function ConciergeTaskEventDialog({
           : null;
         saved = await onSave({
           kind,
-          title: title.trim(),
-          note: note.trim() || null,
+          title: item && localizeTaskTitle(title.trim(), lang) === localizeTaskTitle(item.title, lang)
+            ? item.title : title.trim(),
+          note: item && localizeTaskNote(note.trim(), lang) === localizeTaskNote(item.note, lang)
+            ? item.note : note.trim() || null,
           concierge_service_id: showServiceLink
             ? selectedServiceId
             : item?.concierge_service_id ?? null,
@@ -560,7 +563,7 @@ export function ConciergeTaskEventDialog({
   const dialogBusy = submitting || uploadingPending;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog requireChanges={Boolean(item)} open={open} onOpenChange={onOpenChange}>
       <DialogContent className={conciergeDialogContentClassName}>
         <ConciergeDialogHeader tone="dot" title={item ? labels.editTitle : labels.createTitle} />
 
@@ -580,10 +583,10 @@ export function ConciergeTaskEventDialog({
                         ))}
                       </div>
                       <ConciergeField label={labels.title}>
-                        <Input className="bg-field" value={title} maxLength={255} required placeholder={labels.titlePlaceholder} onChange={(event) => setTitle(event.target.value)} />
+                        <Input className="bg-field" value={localizeTaskTitle(title, lang)} maxLength={255} required placeholder={labels.titlePlaceholder} onChange={(event) => setTitle(event.target.value)} />
                       </ConciergeField>
                       <ConciergeField label={labels.note}>
-                        <textarea className={textAreaClass} value={note} maxLength={4000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} />
+                        <textarea className={textAreaClass} value={localizeTaskNote(note, lang)} maxLength={4000} placeholder={labels.notePlaceholder} onChange={(event) => setNote(event.target.value)} />
                       </ConciergeField>
                     </div>
                   </ConciergeDialogSection>

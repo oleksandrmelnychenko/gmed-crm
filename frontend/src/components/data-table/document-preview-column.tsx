@@ -1,6 +1,7 @@
 import { Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 
 import type { ColumnDef } from "./types";
 
@@ -9,6 +10,7 @@ type DocumentPreviewColumnOptions<T> = {
   getTitle: (row: T) => string;
   label: string;
   onPreview: (row: T) => void;
+  onSigned?: () => void;
 };
 
 export function createDocumentPreviewColumn<T>({
@@ -16,6 +18,7 @@ export function createDocumentPreviewColumn<T>({
   getTitle,
   label,
   onPreview,
+  onSigned,
 }: DocumentPreviewColumnOptions<T>): ColumnDef<T> {
   return {
     id: "preview",
@@ -24,12 +27,13 @@ export function createDocumentPreviewColumn<T>({
     sortable: false,
     required: true,
     pinned: "left",
-    width: 64,
-    cellClassName: "flex justify-center",
+    width: 96,
+    cellClassName: "flex items-center justify-center gap-1",
     render: (row) => {
       const title = getTitle(row) || label;
 
       return (
+        <>
         <Button
           type="button"
           variant="ghost"
@@ -44,6 +48,8 @@ export function createDocumentPreviewColumn<T>({
         >
           <Eye className="size-4" />
         </Button>
+        <DocumentSignatureAction documentId={getId(row)} title={title} iconOnly onDone={onSigned} />
+        </>
       );
     },
   };

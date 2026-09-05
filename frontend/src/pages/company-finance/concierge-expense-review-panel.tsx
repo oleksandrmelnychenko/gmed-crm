@@ -11,7 +11,6 @@ import {
   Eye,
   Loader2,
   ReceiptText,
-  RefreshCw,
   Undo2,
   XCircle,
 } from "lucide-react";
@@ -31,8 +30,8 @@ import { Input } from "@/components/ui/input";
 import { StaffLink } from "@/components/staff-link";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
 import {
   buildExpensePostPayload,
@@ -71,6 +70,8 @@ type Props = {
 };
 
 const EXPENSE_REALTIME_EVENTS = [
+  "realtime.connected",
+  "realtime.resync_required",
   "concierge_expense.submitted",
   "concierge_expense.posted",
   "concierge_expense.rejected",
@@ -96,7 +97,6 @@ const textByLanguage = {
   ru: {
     title: "Расходы по задачам",
     subtitle: "Проверка чеков и отражение подтвержденных расходов в финансовом учете.",
-    refresh: "Обновить",
     search: "Пациент, задача, партнёр или заказ",
     all: "Все",
     pending: "Ожидают проверки",
@@ -212,7 +212,6 @@ const textByLanguage = {
   de: {
     title: "Aufgabenausgaben",
     subtitle: "Belege prüfen und bestätigte Auslagen in die Finanzbuchhaltung übernehmen.",
-    refresh: "Aktualisieren",
     search: "Patient, Aufgabe, Partner oder Auftrag",
     all: "Alle",
     pending: "Zur Prüfung",
@@ -405,17 +404,16 @@ export function ConciergeExpenseReviewPanel({
   const loadQueue = useCallback(async (forceFresh: boolean) => {
     const request = ++queueRequestRef.current;
     setLoading(true);
-    setLoadError(null);
     try {
       const result = await fetchCompanyConciergeExpenseQueue(forceFresh);
       if (queueRequestRef.current !== request) return;
+      setLoadError(null);
       setQueue(result);
       setSelected((current) => (
         current ? result.rows.find((row) => row.id === current.id) ?? current : null
       ));
     } catch (error) {
       if (queueRequestRef.current !== request) return;
-      setQueue(null);
       setLoadError(error instanceof Error ? error.message : text.loadFailed);
     } finally {
       if (queueRequestRef.current === request) setLoading(false);
@@ -424,15 +422,12 @@ export function ConciergeExpenseReviewPanel({
 
   useEffect(() => {
     void loadQueue(true);
-    const timer = window.setInterval(() => {
-      void loadQueue(true);
-    }, 20_000);
-    return () => window.clearInterval(timer);
+    return () => { queueRequestRef.current += 1; };
   }, [loadQueue]);
 
-  useDebouncedRealtimeSubscription(EXPENSE_REALTIME_EVENTS, () => {
+  useFinanceAutoRefresh(() => {
     void loadQueue(true);
-  }, 250);
+  }, loading || mutationBusy !== null, true, EXPENSE_REALTIME_EVENTS);
 
   const pendingCount = queue?.rows.filter((row) => row.status === "pending_review").length ?? 0;
   useEffect(() => {
@@ -677,7 +672,7 @@ export function ConciergeExpenseReviewPanel({
   }
 
   async function postExpense() {
-    if (!selected || !context || !queue?.complete || loading || selected.status !== "pending_review") return;
+    if (!selected || !context || !queue?.complete || loading || loadError || selected.status !== "pending_review") return;
     const validation = validateExpensePostForm(
       selected,
       context,
@@ -717,7 +712,7 @@ export function ConciergeExpenseReviewPanel({
   }
 
   async function rejectExpense() {
-    if (!selected || !context || !queue?.complete || loading || selected.status !== "pending_review") return;
+    if (!selected || !context || !queue?.complete || loading || loadError || selected.status !== "pending_review") return;
     const reason = rejectReason.trim();
     if (!validateExpenseRejection(reason)) {
       setMutationError(text.rejectReasonRequired);
@@ -750,7 +745,7 @@ export function ConciergeExpenseReviewPanel({
   }
 
   async function reverseExpense() {
-    if (!selected || !queue?.complete || loading || selected.status !== "posted") return;
+    if (!selected || !queue?.complete || loading || loadError || selected.status !== "posted") return;
     const reason = reverseReason.trim();
     if (!validateExpenseRejection(reason)) {
       setMutationError(text.reverseReasonRequired);
@@ -811,6 +806,7 @@ export function ConciergeExpenseReviewPanel({
     && context
     && queue?.complete
     && !loading
+    && !loadError
     && !contextLoading
     && !contextError,
   );
@@ -819,6 +815,7 @@ export function ConciergeExpenseReviewPanel({
     && selected.status === "posted"
     && queue?.complete
     && !loading
+    && !loadError
     && validateExpenseRejection(reverseReason)
     && reversedOn >= selected.expense_date
     && reversedOn <= today,
@@ -834,17 +831,6 @@ export function ConciergeExpenseReviewPanel({
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{text.subtitle}</p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-full shrink-0 sm:w-auto"
-          disabled={loading}
-          onClick={() => void loadQueue(true)}
-        >
-          <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-          {text.refresh}
-        </Button>
       </div>
 
       {loadError ? <ShellBanner tone="error">{loadError || text.loadFailed}</ShellBanner> : null}

@@ -1,3 +1,3 @@
 """GMED draft-only clinical document intelligence service."""
 
-PARSER_VERSION = "rules-0.9.11"
+PARSER_VERSION = "rules-0.10.5"

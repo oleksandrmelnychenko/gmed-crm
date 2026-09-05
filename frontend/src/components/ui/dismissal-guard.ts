@@ -79,6 +79,10 @@ export function isOverlayDirty(
   return controlledDirty ?? markedDirty
 }
 
+export function isOwnOverlayEvent(event: { target: EventTarget | null; currentTarget: EventTarget | null }) {
+  return event.target instanceof Element && event.target.closest(OVERLAY_CONTENT_SELECTOR) === event.currentTarget
+}
+
 function normalizeDismissalLabel(value: string | null | undefined) {
   return value?.replace(/\s+/g, " ").trim().toLocaleLowerCase() ?? ""
 }
@@ -134,20 +138,37 @@ export function confirmDirtyDismiss(
 }
 
 export type OverlayDirtyContextValue = {
+  isDirty: boolean
+  requireChanges: boolean
   confirmDismiss: (onConfirm?: () => void) => boolean
-  markDirty: () => void
+  updateField: (key: unknown, previous: string, current: string) => void
   resetDirty: () => void
+  resetVersion: number
 }
 
 export const OverlayDirtyContext =
   React.createContext<OverlayDirtyContextValue | null>(null)
 
-export function useOverlayDirtyMarker() {
-  const dirtyContext = React.useContext(OverlayDirtyContext)
+export function useOverlaySaveDisabled(requireChanges?: boolean) {
+  const context = React.useContext(OverlayDirtyContext)
+  return Boolean(context && (requireChanges ?? context.requireChanges) && !context.isDirty)
+}
 
-  return React.useCallback(() => {
-    dirtyContext?.markDirty()
-  }, [dirtyContext])
+export function useOverlayDirtyField(value: string) {
+  const dirtyContext = React.useContext(OverlayDirtyContext)
+  const updateField = dirtyContext?.updateField
+  const key = React.useId()
+  const editedRef = React.useRef(false)
+
+  // Keep the comparison in sync with controlled values, including undo/reset.
+  React.useLayoutEffect(() => {
+    if (editedRef.current) updateField?.(key, value, value)
+  }, [updateField, key, value])
+
+  return React.useCallback((nextValue: string) => {
+    editedRef.current = true
+    updateField?.(key, value, nextValue)
+  }, [updateField, key, value])
 }
 
 export function useOverlayDirtyReset() {
@@ -160,33 +181,96 @@ export function useOverlayDirtyReset() {
 
 export function useOverlayDirtyNativeListeners<T extends HTMLElement>() {
   const dirtyContext = React.useContext(OverlayDirtyContext)
-  const contentRef = React.useRef<T | null>(null)
+  const updateField = dirtyContext?.updateField
+  const resetVersion = dirtyContext?.resetVersion
+  return React.useCallback((content: T | null) => {
+    if (!content || !updateField) return
+    // A saved/discarded draft establishes a new baseline even if the popup is
+    // still mounted for its closing animation.
 
-  React.useEffect(() => {
-    const content = contentRef.current
-
-    if (!content || !dirtyContext) {
-      return
+    const baseline = new WeakMap<Element, string>()
+    const edited = new WeakSet<Element>()
+    const selector = "input, textarea, select"
+    const fieldValue = (field: Element) => {
+      if (field instanceof HTMLInputElement) {
+        if (["hidden", "submit", "button", "reset", "search"].includes(field.type)) return null
+        if (field.type === "checkbox" || field.type === "radio") return String(field.checked)
+        if (field.type === "file") {
+          return JSON.stringify(Array.from(field.files ?? []).map((file) => [file.name, file.size, file.lastModified]))
+        }
+        return field.value
+      }
+      if (field instanceof HTMLTextAreaElement) return field.value
+      if (field instanceof HTMLSelectElement) return JSON.stringify(Array.from(field.selectedOptions, (option) => option.value))
+      return null
+    }
+    const ownsField = (field: Element) =>
+      field.closest(OVERLAY_CONTENT_SELECTOR) === content &&
+      !field.closest("[data-overlay-dirty-ignore], [aria-hidden='true']")
+    const remember = (field: Element) => {
+      if (!ownsField(field) || edited.has(field)) return
+      const value = fieldValue(field)
+      if (value !== null) baseline.set(field, value)
+    }
+    const rememberFields = () => content.querySelectorAll(selector).forEach((field) => {
+      if (!ownsField(field)) return
+      if (!edited.has(field)) {
+        remember(field)
+        return
+      }
+      const current = fieldValue(field)
+      const initial = baseline.get(field)
+      if (current !== null && initial !== undefined) updateField(field, initial, current)
+    })
+    rememberFields()
+    // React also updates default values when a controlled field is reset, e.g.
+    // after posting an inline comment. Reconcile those changes without requiring
+    // another keystroke. Async/conditional fields establish their own baseline.
+    const observer = new MutationObserver(rememberFields)
+    observer.observe(content, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["value", "checked"],
+    })
+    const beforeEdit = (event: Event) => {
+      if (event.target instanceof Element) remember(event.target)
+    }
+    const update = (event: Event) => {
+      const field = event.target
+      if (!(field instanceof Element) || !ownsField(field)) return
+      const current = fieldValue(field)
+      if (current === null) return
+      const initial = baseline.get(field)
+      if (initial === undefined) return
+      edited.add(field)
+      updateField(field, initial, current)
+      // Radio groups and dependent controls can change without their own event.
+      content.querySelectorAll(selector).forEach((other) => {
+        if (other === field || !ownsField(other)) return
+        const value = fieldValue(other)
+        const previous = baseline.get(other)
+        if (value !== null && previous !== undefined && (edited.has(other) || value !== previous)) {
+          edited.add(other)
+          updateField(other, previous, value)
+        }
+      })
     }
 
-    const markDirty = () => {
-      dirtyContext.markDirty()
-    }
-
-    content.addEventListener("beforeinput", markDirty, true)
-    content.addEventListener("input", markDirty, true)
-    content.addEventListener("change", markDirty, true)
-    content.addEventListener("paste", markDirty, true)
+    content.addEventListener("focusin", beforeEdit, true)
+    content.addEventListener("beforeinput", beforeEdit, true)
+    content.addEventListener("input", update, true)
+    content.addEventListener("change", update, true)
 
     return () => {
-      content.removeEventListener("beforeinput", markDirty, true)
-      content.removeEventListener("input", markDirty, true)
-      content.removeEventListener("change", markDirty, true)
-      content.removeEventListener("paste", markDirty, true)
+      observer.disconnect()
+      content.removeEventListener("focusin", beforeEdit, true)
+      content.removeEventListener("beforeinput", beforeEdit, true)
+      content.removeEventListener("input", update, true)
+      content.removeEventListener("change", update, true)
     }
-  }, [dirtyContext])
-
-  return contentRef
+  }, [updateField, resetVersion])
 }
 
 export function createConfirmedDismissEventDetails() {

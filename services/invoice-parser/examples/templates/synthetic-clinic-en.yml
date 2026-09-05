@@ -1,0 +1,36 @@
+issuer: GMED Synthetic Clinic
+keywords:
+  - GMED Synthetic Clinic
+  - Invoice
+exclude_keywords:
+  - Credit note
+fields:
+  invoice_number:
+    parser: regex
+    regex: 'Invoice number:\s*([A-Z0-9-]+)'
+  date:
+    parser: regex
+    regex: 'Invoice date:\s*([0-9-]+)'
+  due_date:
+    parser: regex
+    regex: 'Due date:\s*([0-9-]+)'
+  amount_untaxed:
+    parser: regex
+    regex: 'Net total:\s*([0-9,.]+)'
+  amount_tax:
+    parser: regex
+    regex: 'VAT total:\s*([0-9,.]+)'
+  amount:
+    parser: regex
+    regex: 'Gross total:\s*([0-9,.]+)'
+  currency:
+    parser: regex
+    regex: 'Currency:\s*([A-Z]{3})'
+  lines:
+    parser: lines
+    start: '(?m)^Description Quantity Subtotal$'
+    end: '(?m)^Net total:'
+    line: '^(?P<name>.+?)\s+(?P<qty>\d+)\s+(?P<price_subtotal>\d+\.\d{2})$'
+options:
+  decimal_separator: '.'
+  date_formats: ['%Y-%m-%d']

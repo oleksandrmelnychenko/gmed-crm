@@ -2121,7 +2121,7 @@ function useStaffFeedbackWorkspaceContent() {
         </SheetContent>
       </Sheet>
 
-      <Sheet open={Boolean(activeReview)} onOpenChange={(open) => !open && setActiveReview(null)}>
+      <Sheet requireChanges open={Boolean(activeReview)} onOpenChange={(open) => !open && setActiveReview(null)}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           {activeReview ? (
             <form className="flex h-full flex-col" onSubmit={(event) => void handleReview(event)}>

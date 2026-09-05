@@ -32,6 +32,7 @@ export const ru = {
   nav_company_finance: "Баланс компании",
   nav_finance_catalog: "Финансовый каталог",
   nav_admin: "Администрирование",
+  nav_signatures: "Электронная подпись",
   nav_users_roles: "Пользователи и роли",
   nav_access_matrix: "Матрица доступа",
   nav_logout: "Выход",

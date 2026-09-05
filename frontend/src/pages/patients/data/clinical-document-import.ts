@@ -55,6 +55,18 @@ export type ClinicalDocumentImportDraft = {
   warnings: string[];
   subject?: ClinicalDocumentSubjectEvidence | null;
   extraction?: ClinicalDocumentExtraction | null;
+  translation?: ClinicalDocumentTranslation | null;
+};
+
+export type ClinicalDocumentTranslation = {
+  status: "review_required" | "unavailable" | "failed" | "too_large";
+  source_language: "en";
+  target_language: "de";
+  provider: "local_argos";
+  model: string;
+  text: string | null;
+  candidate_values: Record<string, string>;
+  warnings: string[];
 };
 
 export type ClinicalDocumentTextPage = {
