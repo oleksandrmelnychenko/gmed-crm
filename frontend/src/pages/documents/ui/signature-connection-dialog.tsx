@@ -124,12 +124,9 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
           action={<Badge variant="outline" className="gap-1 rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Check aria-hidden="true" className="size-3" />{tx("Подключено", "Verbunden")}</Badge>}
         >
           <div className="space-y-4 p-3.5">
-            <div className="flex items-start gap-3">
+            <div className="flex items-center gap-3">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"><ShieldCheck aria-hidden="true" className="size-5" /></span>
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm font-medium">{tx("Электронная подпись подключена", "Elektronische Signatur eingerichtet")}</p>
-                <p className="text-xs leading-5 text-muted-foreground">{tx("Отправляйте документы на подпись из реестра и карточек GMED.", "Senden Sie Dokumente direkt aus der Dokumentenübersicht und den GMED-Karten zur Unterschrift.")}</p>
-              </div>
+              <p className="min-w-0 text-sm font-medium">{tx("Электронная подпись подключена", "Elektronische Signatur eingerichtet")}</p>
             </div>
             <dl className="grid min-w-0 gap-x-5 gap-y-3 rounded-md border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
               <div className="space-y-1">
