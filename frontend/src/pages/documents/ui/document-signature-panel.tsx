@@ -49,6 +49,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   const [signers, setSigners] = useState<Signer[]>(initialSigners);
   const [baseline, setBaseline] = useState<Signer[]>(initialSigners);
   const [editingSigners, setEditingSigners] = useState<number[]>([]);
+  const [excludedSigners, setExcludedSigners] = useState<number[]>([]);
   const [composeNew, setComposeNew] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +63,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   const previousPending = useRef(false);
   const initialized = useRef(false);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
-  const dirty = confirmed || JSON.stringify(signers) !== JSON.stringify(baseline);
+  const selectedSigners = signers.filter((_, index) => !excludedSigners.includes(index));
+  const dirty = confirmed || excludedSigners.length > 0 || JSON.stringify(signers) !== JSON.stringify(baseline);
   useLayoutEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   useEffect(() => {
@@ -77,7 +79,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
         setState(next); setError(false); setAwaitingState(false);
         if (!initialized.current || pending) {
           const defaults = next.suggested_signers?.length ? next.suggested_signers : initialSigners();
-          setSigners(defaults); setBaseline(defaults); setConfirmed(false); setEditingSigners([]);
+          setSigners(defaults); setBaseline(defaults); setConfirmed(false); setEditingSigners([]); setExcludedSigners([]);
           initialized.current = true;
         }
         if (previousPending.current && !pending) onDoneRef.current?.();
@@ -121,7 +123,16 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
     setEditingSigners(current => current.includes(index) ? current : [...current, index]);
     setSigners(current => current.map((signer, n) => n === index ? { ...signer, ...patch } : signer));
   };
-  const removeSigner = (index: number) => { setConfirmed(false); setEditingSigners([]); setSigners(current => current.filter((_, n) => n !== index)); };
+  const selectSigner = (index: number, selected: boolean) => {
+    setConfirmed(false); setActionError(null);
+    setEditingSigners(current => current.filter(n => n !== index));
+    setExcludedSigners(current => selected ? current.filter(n => n !== index) : [...current, index]);
+  };
+  const removeSigner = (index: number) => {
+    setConfirmed(false); setActionError(null); setEditingSigners([]);
+    setSigners(current => current.filter((_, n) => n !== index));
+    setExcludedSigners(current => current.filter(n => n !== index).map(n => n > index ? n - 1 : n));
+  };
   return (
     <details
       open={open}
@@ -183,29 +194,40 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && (!completed || composeNew) ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <AdminSectionTitle>{tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
-              <Badge variant="outline" className="rounded-full text-[10px]">{signers.length}</Badge>
+              <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
-              {signers.map((signer, index) => !validSigners([signer]) || editingSigners.includes(index) ? <div key={index} className="space-y-2">
-                <SignatureSignerFields signer={signer} index={index} disabled={busy} onChange={patch => updateSigner(index, patch)} onRemove={signers.length > 1 ? () => removeSigner(index) : undefined} />
-                {validSigners([signer]) ? <div className="flex justify-end"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEditingSigners(current => current.filter(n => n !== index))}>{tx("Готово", "Fertig")}</Button></div> : null}
-              </div> : <div key={index} className="flex min-w-0 items-start gap-2 rounded-lg border border-border/70 bg-muted/10 p-3">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-[11px] text-muted-foreground">{signer.role === "agency" ? tx("Представитель GMED", "GMED-Vertretung") : signer.role === "client" ? tx("Клиент / представитель клиента", "Kunde / Kundenvertretung") : tx("Другая сторона", "Weitere Partei")}</p>
-                  <p className="break-words text-sm font-medium">{signer.first_name} {signer.last_name}</p>
-                  <p className="break-all text-xs text-muted-foreground">{signer.email}</p>
-                </div>
-                <div className="flex shrink-0 flex-col gap-1">
-                  <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={`${tx("Изменить подписанта", "Person bearbeiten")} ${index + 1}`} onClick={() => setEditingSigners(current => [...current, index])}><Pencil className="size-3.5" /></Button>
-                  {signers.length > 1 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={busy} aria-label={`${tx("Удалить подписанта", "Person entfernen")} ${index + 1}`} onClick={() => removeSigner(index)}><Trash2 className="size-3.5" /></Button> : null}
-                </div>
-              </div>)}
+              {signers.map((signer, index) => {
+                const selected = !excludedSigners.includes(index);
+                const editing = selected && (!validSigners([signer]) || editingSigners.includes(index));
+                const name = `${signer.first_name} ${signer.last_name}`.trim() || `${tx("Подписант", "Unterzeichnende Person")} ${index + 1}`;
+                return <div key={index} className={`min-w-0 rounded-lg border p-3 ${selected ? "border-[var(--brand)]/35 bg-[var(--brand)]/[0.025]" : "border-border/70 bg-muted/20"}`}>
+                  <div className="flex min-w-0 items-start gap-2">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                      <input type="checkbox" aria-label={`${tx("Выбрать подписанта", "Person auswählen")} ${index + 1}: ${name}`} checked={selected} disabled={busy || awaitingState} onChange={event => selectSigner(index, event.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" />
+                      <span className="min-w-0 space-y-1">
+                        <span className="block text-[11px] text-muted-foreground">{signer.role === "agency" ? tx("Представитель GMED", "GMED-Vertretung") : signer.role === "client" ? tx("Клиент / представитель клиента", "Kunde / Kundenvertretung") : tx("Другая сторона", "Weitere Partei")}</span>
+                        <span className="block break-words text-sm font-medium">{name}</span>
+                        {signer.email ? <span className="block break-all text-xs text-muted-foreground">{signer.email}</span> : null}
+                      </span>
+                    </label>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      {!editing ? <Button type="button" variant="ghost" size="icon-sm" disabled={busy || awaitingState || !selected} aria-label={`${tx("Изменить подписанта", "Person bearbeiten")} ${index + 1}`} onClick={() => setEditingSigners(current => [...current, index])}><Pencil className="size-3.5" /></Button> : null}
+                      {signers.length > 1 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={busy || awaitingState} aria-label={`${tx("Удалить подписанта", "Person entfernen")} ${index + 1}`} onClick={() => removeSigner(index)}><Trash2 className="size-3.5" /></Button> : null}
+                    </div>
+                  </div>
+                  {editing ? <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+                    <SignatureSignerFields signer={signer} index={index} disabled={busy || awaitingState} embedded onChange={patch => updateSigner(index, patch)} />
+                    {validSigners([signer]) ? <div className="flex justify-end"><Button type="button" variant="outline" size="sm" disabled={busy || awaitingState} onClick={() => setEditingSigners(current => current.filter(n => n !== index))}>{tx("Готово", "Fertig")}</Button></div> : null}
+                  </div> : null}
+                </div>;
+              })}
               {signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
             </div>
             <div className="border-t border-border/60 bg-muted/10 p-4">
-              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{tx("Я проверил сохранённый PDF и адреса. Отправить этот документ указанным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die genannten Personen senden.")}</span></label>
+              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
               <div className="mt-3 flex justify-end">
-                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !confirmed || !validSigners(signers)} onClick={() => void run(async () => { await createSignatureRequest(documentId, signers); previousPending.current = true; setSigners(baseline); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
+                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !confirmed || !validSigners(selectedSigners)} onClick={() => void run(async () => { await createSignatureRequest(documentId, selectedSigners); previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
               </div>
             </div>
           </section> : null}

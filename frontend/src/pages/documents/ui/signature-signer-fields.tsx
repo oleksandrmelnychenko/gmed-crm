@@ -5,14 +5,14 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useLang } from "@/lib/i18n";
 import type { Signer } from "../data/document-signature-api";
 
-export function SignatureSignerFields({ signer, index, disabled, agencyOnly, onChange, onRemove }: {
-  signer: Signer; index: number; disabled?: boolean; agencyOnly?: boolean;
+export function SignatureSignerFields({ signer, index, disabled, agencyOnly, embedded, onChange, onRemove }: {
+  signer: Signer; index: number; disabled?: boolean; agencyOnly?: boolean; embedded?: boolean;
   onChange: (patch: Partial<Signer>) => void; onRemove?: () => void;
 }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
-  return <fieldset disabled={disabled} className="grid min-w-0 gap-3 rounded-lg border border-border/70 bg-muted/10 p-3">
-    <legend className="px-2 text-xs font-semibold">{agencyOnly ? tx("Представитель GMED", "GMED-Vertretung") : tx("Подписант", "Unterzeichnende Person")} {index + 1}</legend>
+  return <fieldset disabled={disabled} className={embedded ? "grid min-w-0 gap-3" : "grid min-w-0 gap-3 rounded-lg border border-border/70 bg-muted/10 p-3"}>
+    <legend className={embedded ? "sr-only" : "px-2 text-xs font-semibold"}>{agencyOnly ? tx("Представитель GMED", "GMED-Vertretung") : tx("Подписант", "Unterzeichnende Person")} {index + 1}</legend>
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">{tx("Имя", "Vorname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.first_name} onChange={e => onChange({ first_name: e.target.value })} /></label>
       <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">{tx("Фамилия", "Nachname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.last_name} onChange={e => onChange({ last_name: e.target.value })} /></label>
