@@ -29,6 +29,13 @@ server {
     return 200 'ok';
   }
 
+  # Module workers require a JavaScript MIME type; nginx's default mime.types
+  # does not include .mjs. Never fall back to the SPA for a missing worker.
+  location ~ \.mjs$ {
+    types { application/javascript mjs; }
+    try_files $uri =404;
+  }
+
   location / {
     try_files $uri $uri/ /index.html;
   }

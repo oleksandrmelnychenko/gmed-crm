@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, FileText, LoaderCircle, Minus, Plus } from "lucide-react";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { Button } from "@/components/ui/button";
 import { apiFetchFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
@@ -34,7 +34,7 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
     void (async () => {
       const [file, pdfjs] = await Promise.all([
         apiFetchFile(`/documents/${documentId}/download`, { cache: "no-store", signal: controller.signal }),
-        import("pdfjs-dist"),
+        import("pdfjs-dist/legacy/build/pdf.mjs"),
       ]);
       if (controller.signal.aborted) return;
       if (file.contentType.split(";", 1)[0].trim().toLowerCase() !== "application/pdf") throw new Error("Expected PDF");

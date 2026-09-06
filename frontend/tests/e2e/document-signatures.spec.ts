@@ -588,8 +588,13 @@ for (const lang of ["de", "ru"] as const) {
   });
 }
 
-test("PDF pages and zoom render without a browser PDF plugin", async ({ page }) => {
+test("PDF pages and zoom render without a browser PDF plugin or native iterator and binary helpers", async ({ page }) => {
   await prepare(page);
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(globalThis, "Iterator");
+    Reflect.deleteProperty(Map.prototype, "getOrInsertComputed");
+    Reflect.deleteProperty(Uint8Array.prototype, "toBase64");
+  });
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   const multipagePdf = readFileSync(new URL("./fixtures/signature-preview-multipage.pdf", import.meta.url));
