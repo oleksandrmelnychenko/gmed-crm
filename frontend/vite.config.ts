@@ -1,4 +1,5 @@
 import path from "path"
+import { readFileSync, readdirSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
@@ -20,6 +21,24 @@ export default defineConfig(({ mode }) => {
       react(),
       babel({ presets: [reactCompilerPreset()] }),
       tailwindcss(),
+      {
+        name: 'pdf-preview-resources',
+        generateBundle() {
+          const root = path.resolve(__dirname, 'node_modules/pdfjs-dist')
+          const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
+          // Keep fonts, character maps and image decoders local, alongside the
+          // matching PDF.js worker. No document data goes to a public viewer.
+          for (const directory of ['cmaps', 'standard_fonts', 'wasm', 'iccs']) {
+            for (const file of readdirSync(path.join(root, directory))) {
+              this.emitFile({
+                type: 'asset',
+                fileName: `pdfjs/${version}/${directory}/${file}`,
+                source: readFileSync(path.join(root, directory, file)),
+              })
+            }
+          }
+        },
+      },
     ],
     define: {
       'import.meta.env.VITE_BUILD_TIMESTAMP': JSON.stringify(buildTimestamp),

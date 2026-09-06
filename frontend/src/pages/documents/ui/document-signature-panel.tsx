@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +63,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   const initialized = useRef(false);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
   const dirty = confirmed || JSON.stringify(signers) !== JSON.stringify(baseline);
-  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useLayoutEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   useEffect(() => {
     if (!open) return;

@@ -171,9 +171,8 @@ test("contract picker uses its patient context and resets recipients when the PD
   await picker.click();
   await expect(page.getByRole("option", { name: /Bild/ })).toHaveCount(0);
   await page.getByRole("option", { name: /Rahmenvertrag – Testperson/ }).click();
-  const pdf = dialog.locator('iframe[title="PDF zur Unterschrift"]');
-  await expect(pdf).toHaveAttribute("src", /^blob:/);
-  const firstPreview = await pdf.getAttribute("src");
+  const pdf = dialog.getByRole("img", { name: "PDF, Seite 1", exact: true });
+  await expect(pdf).toHaveAttribute("data-document-id", documentId);
   await dialog.getByLabel("Vorname", { exact: true }).first().fill("Erika");
   await dialog.getByRole("checkbox").check();
   await picker.click();
@@ -184,8 +183,7 @@ test("contract picker uses its patient context and resets recipients when the PD
   await picker.click();
   await page.getByRole("option", { name: /Zweites PDF/ }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Ohne Speichern schließen", exact: true }).click();
-  await expect(pdf).toHaveAttribute("src", /^blob:/);
-  await expect(pdf).not.toHaveAttribute("src", firstPreview!);
+  await expect(pdf).toHaveAttribute("data-document-id", secondId);
   await expect(dialog.getByLabel("Vorname", { exact: true }).first()).toHaveValue("");
   await expect(dialog.getByRole("checkbox")).not.toBeChecked();
   await expect(dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true })).toBeDisabled();
@@ -541,8 +539,9 @@ for (const lang of ["de", "ru"] as const) {
     const action = page.getByRole("button", { name: `${tx("Электронная подпись", "Elektronische Unterschrift")}: vertrag.pdf`, exact: true });
     await action.click();
     const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
-    const pdf = dialog.locator("iframe");
-    await expect(pdf).toHaveAttribute("src", /^blob:/);
+    const pdf = dialog.getByRole("img", { name: tx("PDF, страница 1", "PDF, Seite 1"), exact: true });
+    await expect(pdf).toHaveAttribute("data-document-id", documentId);
+    await expect(pdf).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
     await expect(dialog.getByRole("button", { name: tx("Скачать исходный документ", "Ausgangsdokument herunterladen"), exact: true })).toHaveCount(0);
     await expect(dialog.getByText("Erika Mustermann", { exact: true })).toBeVisible();
     await expect(dialog.getByText("Max Muster", { exact: true })).toBeVisible();
@@ -553,19 +552,22 @@ for (const lang of ["de", "ru"] as const) {
     await action.click();
     await expect(pdf).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 1000 });
-    const left = await pdf.boundingBox();
-    const right = await dialog.getByRole("region", { name: tx("Подписание документа", "Dokument unterzeichnen"), exact: true }).boundingBox();
-    expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x);
-    // Full Chromium includes the native PDF viewer; headless shell only tests the iframe contract.
-    if (test.info().project.use.channel === "chromium") {
-      await expect.poll(async () => {
-        const viewer = page.frames().find(frame => frame.url().startsWith("chrome-extension:"));
-        return viewer ? viewer.locator("viewer-toolbar").evaluate(element => element.shadowRoot?.textContent ?? "").catch(() => "") : "";
-      }).toContain("GMED - Skribble DEMO integration test");
-    }
+    await expect.poll(async () => {
+      const left = await pdf.boundingBox();
+      const right = await dialog.getByRole("region", { name: tx("Подписание документа", "Dokument unterzeichnen"), exact: true }).boundingBox();
+      return !!left && !!right && left.x + left.width <= right.x;
+    }).toBe(true);
+    await expect(pdf).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
+    expect(await pdf.evaluate(canvas => {
+      const context = (canvas as HTMLCanvasElement).getContext("2d")!;
+      const pixels = context.getImageData(0, 0, (canvas as HTMLCanvasElement).width, (canvas as HTMLCanvasElement).height).data;
+      return pixels.some((value, index) => index % 4 !== 3 && value < 180);
+    })).toBe(true);
     await dialog.screenshot({ path: `../artifacts/design-qa/signature-workspace-${lang}-desktop.png` });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+    await expect(pdf).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
+    await dialog.screenshot({ path: `../artifacts/design-qa/signature-workspace-${lang}-mobile-preview.png` });
     await dialog.getByText("Max Muster", { exact: true }).scrollIntoViewIfNeeded();
     await dialog.screenshot({ path: `../artifacts/design-qa/signature-workspace-${lang}-mobile.png` });
     await dialog.getByRole("checkbox").check();
@@ -586,6 +588,37 @@ for (const lang of ["de", "ru"] as const) {
   });
 }
 
+test("PDF pages and zoom render without a browser PDF plugin", async ({ page }) => {
+  await prepare(page);
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const multipagePdf = readFileSync(new URL("./fixtures/signature-preview-multipage.pdf", import.meta.url));
+  await page.route(`**/api/v1/documents/${documentId}/download`, route => route.fulfill({ contentType: "application/pdf", body: multipagePdf }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  const previous = dialog.getByRole("button", { name: "Vorherige Seite", exact: true });
+  const next = dialog.getByRole("button", { name: "Nächste Seite", exact: true });
+  const first = dialog.getByRole("img", { name: "PDF, Seite 1", exact: true });
+  await expect(first).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
+  await expect(previous).toBeDisabled();
+  await expect(dialog.getByText("1 / 2", { exact: true })).toBeVisible();
+  const fittedWidth = (await first.boundingBox())!.width;
+  await dialog.getByRole("button", { name: "Vergrößern", exact: true }).click();
+  await expect.poll(async () => (await first.boundingBox())?.width ?? 0).toBeGreaterThan(fittedWidth * 1.2);
+  await next.click();
+  await expect(dialog.getByRole("img", { name: "PDF, Seite 2", exact: true })).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
+  await expect(next).toBeDisabled();
+  await expect(dialog.getByText("2 / 2", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "125%", exact: true }).click();
+  await previous.click();
+  await expect(first).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
+  await expect.poll(async () => Math.round((await first.boundingBox())?.width ?? 0)).toBe(Math.round(fittedWidth));
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("preview failures block sending until a successful retry and completed DEMO hides the new composer", async ({ page }) => {
   const fixture = await prepare(page);
   const signers = [
@@ -597,8 +630,10 @@ test("preview failures block sending until a successful retry and completed DEMO
     enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, suggested_signers: signers,
     requests: completed ? [{ id: "completed-demo", status: "completed", test_mode: true, signers, evidence: {}, has_report: true, result_document_id: documentId, last_error: null, created_at: document.created_at }] : [],
   } }));
-  let denied = true;
-  await page.route(`**/api/v1/documents/${documentId}/download`, route => denied ? route.fulfill({ status: 503, json: { error: "unavailable" } }) : route.fallback());
+  let previewFailure: "http" | "invalid-pdf" | null = "http";
+  await page.route(`**/api/v1/documents/${documentId}/download`, route => previewFailure === "http"
+    ? route.fulfill({ status: 503, json: { error: "unavailable" } })
+    : previewFailure === "invalid-pdf" ? route.fulfill({ contentType: "application/pdf", body: "not a PDF" }) : route.fallback());
   await page.goto(`/documents/${documentId}`);
   const action = page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true });
   await action.click();
@@ -607,9 +642,13 @@ test("preview failures block sending until a successful retry and completed DEMO
   await dialog.getByRole("checkbox").check();
   const send = dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true });
   await expect(send).toBeDisabled();
-  denied = false;
+  previewFailure = "invalid-pdf";
   await dialog.getByRole("button", { name: "Erneut laden", exact: true }).click();
-  await expect(dialog.locator("iframe")).toBeVisible();
+  await expect(dialog.getByText(/PDF konnte nicht geöffnet werden/)).toBeVisible();
+  await expect(send).toBeDisabled();
+  previewFailure = null;
+  await dialog.getByRole("button", { name: "Erneut laden", exact: true }).click();
+  await expect(dialog.getByRole("img", { name: "PDF, Seite 1", exact: true })).toBeVisible();
   await expect(send).toBeEnabled();
   await dialog.getByRole("checkbox").uncheck();
   await page.keyboard.press("Escape");
