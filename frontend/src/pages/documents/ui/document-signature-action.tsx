@@ -1,5 +1,5 @@
-import { useContext, useEffect, useRef, useState } from "react";
-import { FileSignature, LoaderCircle } from "lucide-react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -11,6 +11,9 @@ import { useLang } from "@/lib/i18n";
 import type { DocumentItem } from "../model/types";
 import { DocumentSignaturePanel } from "./document-signature-panel";
 import { SignatureDocumentPreview } from "./signature-document-preview";
+import { refreshSignatureSummaries, useSignatureSummary } from "../data/use-signature-summary";
+import type { SignatureRequest, SignatureState } from "../data/document-signature-api";
+import { signaturePresentation } from "./signature-status";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
 type Props = {
@@ -28,6 +31,8 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const changed = useRef(false);
+  const summary = useSignatureSummary(user && ["ceo", "patient_manager", "it_admin"].includes(user.role) ? user.id : undefined, documentId);
+  const presentation = signaturePresentation(summary, lang);
   if (!user || !["ceo", "patient_manager", "it_admin"].includes(user.role)) return null;
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
@@ -35,12 +40,14 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   return <>
     <Button
       type="button" variant={iconOnly ? "ghost" : "outline"} size={iconOnly ? "icon-sm" : "sm"}
-      title={label} aria-label={`${label}: ${title}`} disabled={disabled}
+      title={presentation.label} aria-label={`${label}: ${title}`} disabled={disabled}
+      aria-description={summary ? presentation.label : undefined}
+      className={presentation.className} data-signature-status={summary?.status ?? "none"}
       data-document-signature-id={documentId}
       onClick={event => { event.stopPropagation(); setOpen(true); }}
       onKeyDown={event => event.stopPropagation()}
     >
-      <FileSignature aria-hidden="true" className="size-4" />{!iconOnly ? label : null}
+      <presentation.Icon aria-hidden="true" className="size-4" />{!iconOnly ? presentation.label : null}
     </Button>
     <Dialog open={open} onOpenChange={nextOpen => {
       setOpen(nextOpen);
@@ -71,6 +78,20 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [loading, setLoading] = useState(!documentId);
   const [error, setError] = useState(false);
   const [previewedId, setPreviewedId] = useState("");
+  const [signatureState, setSignatureState] = useState<SignatureState | null>(null);
+  const [resultPreview, setResultPreview] = useState<SignatureRequest | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const lastResult = useRef<string | null>(null);
+  const receiveState = useCallback((next: SignatureState) => {
+    const resultId = next.requests[0]?.result_document_id ?? null;
+    if (resultId && resultId !== lastResult.current) { setResultPreview(null); setShowOriginal(false); }
+    lastResult.current = resultId;
+    setSignatureState(next);
+  }, []);
+  const latestResult = signatureState?.requests[0]?.result_document_id ? signatureState.requests[0] : null;
+  const availableResult = resultPreview ?? latestResult;
+  const displayedResult = showOriginal ? null : availableResult;
+  const previewId = displayedResult?.result_document_id ?? selectedId;
   const patientId = scope?.patientId;
   const orderId = scope?.orderId;
   const leadId = scope?.leadId;
@@ -95,8 +116,12 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
-        <AdminSectionTitle>{tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
+        <AdminSectionTitle>{displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
         {selectedId ? <span className="min-w-0 break-words text-xs text-muted-foreground">{selectedTitle}</span> : null}
+        {availableResult ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
+          <Button type="button" size="sm" variant={displayedResult ? "outline" : "default"} aria-pressed={!displayedResult} onClick={() => setShowOriginal(true)}>{tx("Исходный PDF", "Original-PDF")}</Button>
+          <Button type="button" size="sm" variant={displayedResult ? "default" : "outline"} aria-pressed={!!displayedResult} onClick={() => setShowOriginal(false)}>{availableResult.test_mode ? "TEST · " : ""}{tx("Подписанный PDF", "Signiertes PDF")}</Button>
+        </div> : null}
       </div>
       {!documentId || error ? <div className="space-y-3 p-4">
         {!documentId ? <>
@@ -107,7 +132,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
@@ -117,11 +142,12 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
         </> : null}
         {error ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">{tx("Не удалось загрузить документ. Повторите открытие окна.", "Dokument konnte nicht geladen werden. Öffnen Sie das Fenster erneut.")}</p> : null}
       </div> : null}
-      {selectedId ? <SignatureDocumentPreview key={selectedId} documentId={selectedId} onReady={setPreviewedId} /> : null}
+      {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} onReady={setPreviewedId} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId} expanded onDirtyChange={onDirtyChange} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId && !displayedResult} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
+      refreshSignatureSummaries();
       onDone?.();
     }} /> : null}
     </section>

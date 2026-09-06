@@ -89,7 +89,7 @@ test("German workflow requires checked recipients and reconciles uncertain sendi
   await expect(page.getByRole("button", { name: "Signiertes PDF", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Signaturprotokoll", exact: true })).toBeVisible();
   for (const [label, path, filename] of [
-    ["Signiertes PDF", `/documents/${documentId}/download`, "signed.pdf"],
+    ["PDF herunterladen", `/documents/${documentId}/download`, "signed.pdf"],
     ["Signaturprotokoll", "/document-signature-requests/signature-fixture/report", "signature-report.pdf"],
   ]) {
     await page.route(`**/api/v1${path}`, route => route.fulfill({ contentType: "application/pdf", body: "%PDF-1.7\nfixture result\n%%EOF" }));
@@ -740,6 +740,101 @@ for (const lang of ["de", "ru"] as const) {
     await expect(send).toHaveCount(0);
   });
 }
+
+for (const lang of ["ru", "de"] as const) {
+  test(`signature result is previewed automatically and registry status follows the latest request in ${lang}`, async ({ page }) => {
+    await prepare(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.addInitScript(language => localStorage.setItem("gmed_lang", language), lang);
+    const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+    const resultId = "ea3a0c15-792b-4a3a-9a7e-006300000099";
+    const otherId = "ea3a0c15-792b-4a3a-9a7e-006300000088";
+    let completed = false;
+    const summaries: string[][] = [];
+    const downloads: string[] = [];
+    const person = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+    await page.route("**/api/v1/documents?*", route => route.fulfill({ json: [document, { ...document, id: otherId, original_filename: "second.pdf" }] }));
+    await page.route("**/api/v1/documents", route => route.fulfill({ json: [document, { ...document, id: otherId, original_filename: "second.pdf" }] }));
+    await page.route("**/api/v1/document-signatures/statuses?*", route => {
+      const ids = new URL(route.request().url()).searchParams.get("ids")!.split(",");
+      summaries.push(ids);
+      return route.fulfill({ json: [{ document_id: documentId, status: completed ? "completed" : "pending", test_mode: true, result_document_id: completed ? resultId : null }] });
+    });
+    await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+      enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null,
+      requests: [{ id: "current", status: completed ? "completed" : "pending", test_mode: true, signers: [person],
+        evidence: { signatures: [{ email: person.email, status: completed ? "SIGNED" : "OPEN", signed_at: completed ? document.created_at : null }] },
+        has_report: completed, result_document_id: completed ? resultId : null, last_error: null, created_at: "2026-09-06T11:15:29Z" }],
+    } }));
+    await page.route("**/api/v1/documents/*/download", route => {
+      downloads.push(new URL(route.request().url()).pathname);
+      return route.fulfill({ contentType: "application/pdf", body: previewPdf });
+    });
+    await page.goto("/documents");
+    const action = page.locator(`[data-document-signature-id="${documentId}"]:visible`);
+    await expect(action).toHaveAttribute("data-signature-status", "pending");
+    await expect(action).toHaveAttribute("title", `TEST · ${tx("Ожидание подписей", "Unterschriften ausstehend")}`);
+    expect(summaries.some(ids => ids.includes(documentId) && ids.includes(otherId))).toBe(true);
+    await action.click();
+    const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
+    await expect(dialog.getByText(tx("Ожидает подписи", "Unterschrift ausstehend"), { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: tx("Открыть PDF", "PDF öffnen"), exact: true })).toHaveCount(0);
+    completed = true;
+    await expect(dialog.getByRole("button", { name: tx("Открыть PDF", "PDF öffnen"), exact: true })).toBeVisible({ timeout: 12_000 });
+    const versions = dialog.getByLabel(tx("Версия PDF", "PDF-Version"), { exact: true });
+    const result = versions.getByRole("button", { name: `TEST · ${tx("Подписанный PDF", "Signiertes PDF")}`, exact: true });
+    await expect(result).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => downloads.includes(`/api/v1/documents/${resultId}/download`)).toBe(true);
+    await expect(dialog.getByRole("img", { name: tx("PDF, страница 1", "PDF, Seite 1"), exact: true })).toBeVisible();
+    await versions.getByRole("button", { name: tx("Исходный PDF", "Original-PDF"), exact: true }).click();
+    await expect(result).toHaveAttribute("aria-pressed", "false");
+    await expect.poll(() => downloads.at(-1)).toBe(`/api/v1/documents/${documentId}/download`);
+    await dialog.getByRole("button", { name: tx("Открыть PDF", "PDF öffnen"), exact: true }).click();
+    await expect(result).toHaveAttribute("aria-pressed", "true");
+    const download = page.waitForEvent("download");
+    await dialog.getByRole("button", { name: tx("Скачать PDF", "PDF herunterladen"), exact: true }).click();
+    expect((await download).suggestedFilename()).toBe("TEST-signed.pdf");
+    await expect(dialog.getByRole("img", { name: tx("PDF, страница 1", "PDF, Seite 1"), exact: true })).toBeVisible();
+    await dialog.screenshot({ path: `../artifacts/design-qa/signature-result-${lang}-desktop.png` });
+    await page.keyboard.press("Escape");
+    await expect(action).toHaveAttribute("data-signature-status", "completed");
+    await expect(action).toHaveAttribute("title", `TEST · ${tx("Подписано", "Unterzeichnet")}`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await action.click();
+    await expect(dialog.getByRole("img", { name: tx("PDF, страница 1", "PDF, Seite 1"), exact: true })).toBeVisible();
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+    await dialog.screenshot({ path: `../artifacts/design-qa/signature-result-${lang}-mobile.png` });
+    await page.keyboard.press("Escape");
+    await expect(action).toHaveAttribute("data-signature-status", "completed");
+    await expect(action).toHaveAttribute("title", `TEST · ${tx("Подписано", "Unterzeichnet")}`);
+  });
+}
+
+test("an old signed PDF does not hide a newer pending request", async ({ page }) => {
+  const fixture = await prepare(page);
+  const oldResult = "ea3a0c15-792b-4a3a-9a7e-006300000099";
+  const signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+  const reads: string[] = [];
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null,
+    requests: [
+      { id: "newer", status: "pending", test_mode: true, signers: [signer], evidence: {}, has_report: false, result_document_id: null, last_error: null, created_at: "2026-09-06T11:15:29Z" },
+      { id: "older", status: "completed", test_mode: true, signers: [signer], evidence: {}, has_report: true, result_document_id: oldResult, last_error: null, created_at: document.created_at },
+    ],
+  } }));
+  page.on("request", request => { if (request.url().endsWith("/download")) reads.push(request.url()); });
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await expect(dialog.getByRole("region", { name: "Aktuelle Signaturanfrage", exact: true }).getByText("TEST · Unterschriften ausstehend", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("region", { name: "Frühere Signaturanfrage", exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("PDF-Version", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("img", { name: "PDF, Seite 1", exact: true })).toBeVisible();
+  expect(reads.some(url => url.includes(oldResult))).toBe(false);
+  await dialog.getByRole("region", { name: "Frühere Signaturanfrage", exact: true }).getByRole("button", { name: "PDF öffnen", exact: true }).click();
+  await expect.poll(() => reads.some(url => url.includes(oldResult))).toBe(true);
+  expect(fixture.submissions).toHaveLength(0);
+});
 
 test("unchecked incomplete recipients retain their selection when another row is removed or added", async ({ page }) => {
   const fixture = await prepare(page);

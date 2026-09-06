@@ -331,7 +331,11 @@ impl Provider {
         for recipient in recipients {
             let email = recipient["account_email"]
                 .as_str()
-                .filter(|s| !s.is_empty())
+                // No-account signers can have an opaque account ID here. Their
+                // invitation address is returned in signer_identity_data instead.
+                // An actual account email still takes precedence, so conflicting
+                // identities cannot be accepted via a matching fallback address.
+                .filter(|s| s.contains('@'))
                 .or_else(|| recipient["signer_identity_data"]["email_address"].as_str())
                 .ok_or("provider_invalid_signer")?
                 .to_ascii_lowercase();

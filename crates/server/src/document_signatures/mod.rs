@@ -1,6 +1,7 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod connection;
 mod defaults;
+mod summary;
 pub mod provider;
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(connection::router())
         .merge(defaults::router())
+        .route("/document-signatures/statuses", get(summary::list))
         .route("/documents/{id}/signature-requests", get(list).post(create))
         .route("/document-signature-requests/{id}/refresh", post(refresh))
         .route("/document-signature-requests/{id}/withdraw", post(withdraw))

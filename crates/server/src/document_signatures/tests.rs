@@ -108,6 +108,32 @@ fn mode_credentials_and_recipients_are_strict() {
     );
 }
 
+#[test]
+fn no_account_signer_uses_invitation_email_without_accepting_conflicting_accounts() {
+    for demo in [true, false] {
+        let p = provider(demo);
+        let id = Uuid::new_v4();
+        let hash = sha256(b"original");
+        let mut value = response(id, &hash, demo);
+        value["signatures"][0]["account_email"] = json!("885ff7c86b644ce4bb436203368eb4b6");
+        value["signatures"][0]["signer_identity_data"] =
+            json!({"email_address":"erika@example.org"});
+        let verified = p.validate(&value, id, &hash, None, &signers()).unwrap();
+        assert_eq!(
+            verified.evidence["signatures"][0]["email"],
+            "erika@example.org"
+        );
+        value["signatures"][0]["account_email"] = json!("intruder@example.org");
+        assert!(p.validate(&value, id, &hash, None, &signers()).is_err());
+        value["signatures"][0]["account_email"] = json!("opaque-id");
+        value["signatures"][0]["signer_identity_data"]["email_address"] =
+            json!("intruder@example.org");
+        assert!(p.validate(&value, id, &hash, None, &signers()).is_err());
+        value["signatures"][0]["signer_identity_data"] = Value::Null;
+        assert!(p.validate(&value, id, &hash, None, &signers()).is_err());
+    }
+}
+
 #[derive(Clone, Default)]
 struct MockProvider {
     value: Arc<Mutex<Value>>,
@@ -440,6 +466,105 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             result.get::<Option<String>, _>("last_error")
         );
         let document_id: Uuid = result.get("result_document_id");
+        let summaries = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/document-signatures/statuses?ids={source_id},{document_id}"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(summaries.status(), StatusCode::OK);
+        let summaries: Value =
+            serde_json::from_slice(&to_bytes(summaries.into_body(), 10000).await.unwrap()).unwrap();
+        assert_eq!(summaries.as_array().unwrap().len(), 2);
+        for summary in summaries.as_array().unwrap() {
+            assert_eq!(summary["status"], result.get::<String, _>("status"));
+            assert_eq!(summary["test_mode"], demo);
+            assert!(summary.get("signers").is_none());
+            assert!(summary.get("evidence").is_none());
+        }
+        if demo {
+            // A new request on a DEMO result must take precedence over its old
+            // completed request, which is also part of this document's history.
+            let newer = Uuid::new_v4();
+            sqlx::query("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,created_at) SELECT $2,$3,requested_by,source_sha256,source_context,signers,provider_account,test_mode,'pending',created_at + interval '1 second' FROM document_signature_requests WHERE id=$1")
+                .bind(request_id).bind(newer).bind(document_id).execute(&pool).await.unwrap();
+            let summary = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/document-signatures/statuses?ids={document_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let summary: Value =
+                serde_json::from_slice(&to_bytes(summary.into_body(), 10000).await.unwrap())
+                    .unwrap();
+            assert_eq!(summary[0]["status"], "pending");
+            assert!(summary[0]["result_document_id"].is_null());
+            sqlx::query("DELETE FROM document_signature_requests WHERE id=$1")
+                .bind(newer)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        if scenario == "live" {
+            let manager: Uuid =
+                sqlx::query_scalar("SELECT id FROM users WHERE role='patient_manager' LIMIT 1")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            for capability in ["view", "download"] {
+                sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by) VALUES($1,'patient_manager','document','record',$2,$3,'allow','signature summary ACL test',$4)")
+                    .bind(manager).bind(source_id).bind(capability).bind(actor).execute(&pool).await.unwrap();
+            }
+            let restricted_app = router()
+                .with_state(state.clone())
+                .layer(Extension(AuthUser {
+                    user_id: manager,
+                    role: Role::PatientManager,
+                    ..auth.clone()
+                }));
+            let allowed = restricted_app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/document-signatures/statuses?ids={source_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(allowed.status(), StatusCode::OK);
+            let allowed: Value =
+                serde_json::from_slice(&to_bytes(allowed.into_body(), 10000).await.unwrap())
+                    .unwrap();
+            assert_eq!(allowed.as_array().unwrap().len(), 1);
+            sqlx::query("UPDATE staff_user_access_rules SET effect='deny' WHERE resource_id=$1 AND capability='download' AND reason='signature summary ACL test'")
+                .bind(source_id).execute(&pool).await.unwrap();
+            let denied = restricted_app
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/document-signatures/statuses?ids={source_id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let denied: Value =
+                serde_json::from_slice(&to_bytes(denied.into_body(), 10000).await.unwrap())
+                    .unwrap();
+            assert_eq!(denied, json!([]));
+            sqlx::query("DELETE FROM staff_user_access_rules WHERE resource_id=$1 AND reason='signature summary ACL test'")
+                .bind(source_id).execute(&pool).await.unwrap();
+        }
         let document = sqlx::query("SELECT * FROM documents WHERE id=$1")
             .bind(document_id)
             .fetch_one(&pool)

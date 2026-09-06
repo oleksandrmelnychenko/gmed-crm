@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, Eye, FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
-import { createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, signatureAction, validSigners, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
+import { createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, signatureAction, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
 
 const emptySigner = (role: Signer["role"]): Signer => ({ first_name: "", last_name: "", email: "", role });
 const initialSigners = () => [emptySigner("client"), emptySigner("agency")];
@@ -41,7 +41,7 @@ function requestStatusClassName(status: SignatureStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; expanded?: boolean; previewReady?: boolean }) {
+export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; expanded?: boolean; previewReady?: boolean }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -60,9 +60,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   const [awaitingState, setAwaitingState] = useState(false);
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
+  const onStateChangeRef = useRef(onStateChange);
+  const previousRequests = useRef<string | null>(null);
   const previousPending = useRef(false);
   const initialized = useRef(false);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
+  useEffect(() => { onStateChangeRef.current = onStateChange; }, [onStateChange]);
   const selectedSigners = signers.filter((_, index) => !excludedSigners.includes(index));
   const dirty = confirmed || excludedSigners.length > 0 || JSON.stringify(signers) !== JSON.stringify(baseline);
   useLayoutEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
@@ -77,12 +80,15 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
         if (cancelled) return;
         const pending = next.requests.some(r => isSignaturePending(r.status));
         setState(next); setError(false); setAwaitingState(false);
+        onStateChangeRef.current?.(next);
         if (!initialized.current || pending) {
           const defaults = next.suggested_signers?.length ? next.suggested_signers : initialSigners();
           setSigners(defaults); setBaseline(defaults); setConfirmed(false); setEditingSigners([]); setExcludedSigners([]);
           initialized.current = true;
         }
-        if (previousPending.current && !pending) onDoneRef.current?.();
+        const requestSnapshot = JSON.stringify(next.requests.map(r => [r.id, r.status, r.result_document_id]));
+        if ((previousRequests.current !== null && previousRequests.current !== requestSnapshot) || (previousPending.current && !pending)) onDoneRef.current?.();
+        previousRequests.current = requestSnapshot;
         previousPending.current = pending;
         if (pending) timer = setTimeout(() => { void load(); }, 5000);
       } catch (reason) {
@@ -166,9 +172,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
             {!state.can_send ? <p className="border-t border-border/60 px-4 py-3 text-xs leading-5 text-muted-foreground">{tx("Доступен просмотр статуса. Для отправки документа на подпись нужны права редактирования и скачивания.", "Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.")}</p> : null}
           </section>
 
-          {state.requests.map(request => <section key={request.id} className="rounded-xl border border-border/70 bg-card shadow-xs">
+          {state.requests.map((request, index) => <section key={request.id} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-              <AdminSectionTitle>{tx("Запрос подписи", "Signaturanfrage")}</AdminSectionTitle>
+              <div className="space-y-1">
+                <AdminSectionTitle>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
+                <time dateTime={request.created_at} className="block text-[11px] text-muted-foreground">{new Date(request.created_at).toLocaleString(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
+              </div>
               <Badge role="status" variant="outline" className={`rounded-full text-[10px] ${requestStatusClassName(request.status)}`}>
                 {request.test_mode ? "TEST · " : ""}{tx(...statuses[request.status])}
               </Badge>
@@ -176,11 +185,14 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
             <div className="space-y-2 p-4">
               {request.signers.map(signer => {
                 const signed = request.evidence.signatures?.some(s => s.email.toLowerCase() === signer.email.toLowerCase() && s.status === "SIGNED");
-                return <div key={signer.email} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="break-words font-medium text-foreground">{signer.first_name} {signer.last_name} · {signer.email}</span><span className={signed ? "text-emerald-700" : "text-muted-foreground"}>{signed ? tx("Подписано", "Unterzeichnet") : tx("Подпись не завершена", "Unterschrift nicht abgeschlossen")}</span></div>;
+                return <div key={signer.email} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="break-words font-medium text-foreground">{signer.first_name} {signer.last_name} · {signer.email}</span><span className={signed ? "shrink-0 text-emerald-700" : "shrink-0 text-muted-foreground"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</span></div>;
               })}
+              {request.status === "pending" && !request.last_error ? <p className="text-xs leading-5 text-muted-foreground">{tx("Приглашение отправлено на E-Mail. После подписания PDF появится здесь автоматически.", "Die Einladung wurde per E-Mail versendet. Nach der Unterschrift erscheint die PDF hier automatisch.")}</p> : null}
+              {request.status === "submission_unknown" && request.last_error === "provider_signers_mismatch" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Не удалось сопоставить подписантов в ответе Skribble. Требуется проверка подключения; повторное приглашение не отправляйте.", "Die Personen in der Skribble-Antwort konnten nicht zugeordnet werden. Die Verbindung muss geprüft werden; senden Sie keine zweite Einladung.")}</p> : null}
               {request.last_error && request.status === "pending" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Синхронизация повторится автоматически. Подписывать заново не нужно.", "Die Synchronisierung wird automatisch wiederholt. Erneutes Signieren ist nicht nötig.")}</p> : null}
               <div className="flex flex-wrap justify-end gap-2 pt-1">
-                {request.result_document_id ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadDocumentFile(request.result_document_id!, request.test_mode ? "TEST-signed.pdf" : "signed.pdf"), false)}>{tx("Подписанный PDF", "Signiertes PDF")}</Button> : null}
+                {request.result_document_id && onPreviewResult ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onPreviewResult(request)}><Eye className="size-4" />{tx("Открыть PDF", "PDF öffnen")}</Button> : null}
+                {request.result_document_id ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadDocumentFile(request.result_document_id!, request.test_mode ? "TEST-signed.pdf" : "signed.pdf"), false)}><Download className="size-4" />{tx("Скачать PDF", "PDF herunterladen")}</Button> : null}
                 {request.has_report ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadSignatureReport(request.id), false)}>{tx("Отчёт о подписях", "Signaturprotokoll")}</Button> : null}
                 {isSignaturePending(request.status) && state.enabled && state.can_send ? <Button type="button" variant="outline" size="sm" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "refresh"))}>{tx("Проверить статус", "Status prüfen")}</Button> : null}
                 {request.status === "pending" && state.enabled && state.can_send ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "withdraw"))}>{tx("Отозвать запрос", "Anfrage zurückziehen")}</Button> : null}
@@ -190,7 +202,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
 
           {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <p className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs">{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}</p> : null}
 
-          {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => setComposeNew(true)}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
+          {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && (!completed || composeNew) ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <AdminSectionTitle>{tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
