@@ -186,7 +186,6 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
               <Badge variant="outline" className="rounded-full text-[10px]">{signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
-              <p className="text-xs leading-5 text-muted-foreground">{tx("Клиент — из связанной карточки, представители GMED — из общих настроек. Проверьте получателей; для договора нужны обе стороны.", "Kundendaten stammen aus der verknüpften Karte, GMED-Vertretungen aus den Einstellungen. Empfänger prüfen; Verträge benötigen beide Parteien.")}</p>
               {signers.map((signer, index) => !validSigners([signer]) || editingSigners.includes(index) ? <div key={index} className="space-y-2">
                 <SignatureSignerFields signer={signer} index={index} disabled={busy} onChange={patch => updateSigner(index, patch)} onRemove={signers.length > 1 ? () => removeSigner(index) : undefined} />
                 {validSigners([signer]) ? <div className="flex justify-end"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEditingSigners(current => current.filter(n => n !== index))}>{tx("Готово", "Fertig")}</Button></div> : null}
