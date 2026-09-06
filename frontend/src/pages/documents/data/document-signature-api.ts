@@ -4,6 +4,7 @@ export type Signer = { first_name: string; last_name: string; email: string; rol
 export type SignatureStatus = "submitting" | "submission_unknown" | "pending" | "completed" | "needs_review" | "declined" | "withdrawn" | "expired" | "error";
 export type SignatureRequest = {
   id: string; status: SignatureStatus; test_mode: boolean; signers: Signer[];
+  source_document_id?: string;
   result_document_id: string | null; has_report: boolean; last_error: string | null; created_at: string;
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };

@@ -81,17 +81,19 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [signatureState, setSignatureState] = useState<SignatureState | null>(null);
   const [resultPreview, setResultPreview] = useState<SignatureRequest | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [composingNew, setComposingNew] = useState(false);
   const lastResult = useRef<string | null>(null);
   const receiveState = useCallback((next: SignatureState) => {
     const resultId = next.requests[0]?.result_document_id ?? null;
-    if (resultId && resultId !== lastResult.current) { setResultPreview(null); setShowOriginal(false); }
+    if (resultId && resultId !== lastResult.current) { setResultPreview(null); setShowOriginal(false); setComposingNew(false); }
     lastResult.current = resultId;
     setSignatureState(next);
   }, []);
   const latestResult = signatureState?.requests[0]?.result_document_id ? signatureState.requests[0] : null;
   const availableResult = resultPreview ?? latestResult;
   const displayedResult = showOriginal ? null : availableResult;
-  const previewId = displayedResult?.result_document_id ?? selectedId;
+  const originalId = composingNew ? selectedId : availableResult?.source_document_id ?? selectedId;
+  const previewId = displayedResult?.result_document_id ?? (showOriginal ? originalId : selectedId);
   const patientId = scope?.patientId;
   const orderId = scope?.orderId;
   const leadId = scope?.leadId;
@@ -132,7 +134,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
@@ -145,7 +147,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
       {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} onReady={setPreviewedId} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId && !displayedResult} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setShowOriginal(true); setResultPreview(null); }} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId && !displayedResult} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
       refreshSignatureSummaries();
       onDone?.();

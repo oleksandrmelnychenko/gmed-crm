@@ -836,6 +836,28 @@ test("an old signed PDF does not hide a newer pending request", async ({ page })
   expect(fixture.submissions).toHaveLength(0);
 });
 
+test("a signed copy opens its actual source, while a new request previews the selected copy", async ({ page }) => {
+  const fixture = await prepare(page);
+  const originalId = "ea3a0c15-792b-4a3a-9a7e-006300000077";
+  const signer = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, suggested_signers: [signer],
+    requests: [{ id: "completed", source_document_id: originalId, status: "completed", test_mode: true, signers: [signer], evidence: {}, has_report: true, result_document_id: documentId, last_error: null, created_at: document.created_at }],
+  } }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  const canvas = dialog.getByRole("img", { name: "PDF, Seite 1", exact: true });
+  await expect(canvas).toHaveAttribute("data-document-id", documentId);
+  await dialog.getByRole("button", { name: "Original-PDF", exact: true }).click();
+  await expect(canvas).toHaveAttribute("data-document-id", originalId);
+  await dialog.getByRole("button", { name: "Neue Signaturanfrage", exact: true }).click();
+  await expect(canvas).toHaveAttribute("data-document-id", documentId);
+  await dialog.getByRole("checkbox", { name: /Ich habe die gespeicherte PDF/ }).check();
+  await expect(dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true })).toBeEnabled();
+  expect(fixture.submissions).toHaveLength(0);
+});
+
 test("unchecked incomplete recipients retain their selection when another row is removed or added", async ({ page }) => {
   const fixture = await prepare(page);
   const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };

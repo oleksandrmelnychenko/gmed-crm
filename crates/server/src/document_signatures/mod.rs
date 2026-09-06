@@ -84,6 +84,7 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
 
 fn public_request(row: &PgRow) -> Value {
     json!({"id":row.get::<Uuid,_>("id"),"status":row.get::<String,_>("status"),
+        "source_document_id":row.get::<Uuid,_>("source_document_id"),
         "test_mode":row.get::<bool,_>("test_mode"),"signers":row.get::<Value,_>("signers"),
         "evidence":row.get::<Value,_>("evidence"),"result_document_id":row.get::<Option<Uuid>,_>("result_document_id"),
         "has_report":row.get::<Option<String>,_>("report_storage_key").is_some(),
