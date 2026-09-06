@@ -147,7 +147,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
             <div className="flex flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">Skribble · Deutschland</p>
-                <p className="text-xs leading-5 text-muted-foreground">{state.test_mode ? tx("Тестовый режим без юридически действительной подписи", "Testbetrieb ohne rechtsverbindliche Signatur") : tx("Квалифицированная подпись по стандарту eIDAS", "Qualifizierte Signatur nach eIDAS")}</p>
+                {!state.test_mode ? <p className="text-xs leading-5 text-muted-foreground">{tx("Квалифицированная подпись по стандарту eIDAS", "Qualifizierte Signatur nach eIDAS")}</p> : null}
               </div>
               <SignatureConnectionDialog canConfigure={state.can_configure} onChanged={() => { setAwaitingState(true); setRevision(value => value + 1); }} />
             </div>
