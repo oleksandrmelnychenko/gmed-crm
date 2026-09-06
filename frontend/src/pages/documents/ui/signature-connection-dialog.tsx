@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ExternalLink, KeyRound, LoaderCircle } from "lucide-react";
+import { Check, ExternalLink, KeyRound, LoaderCircle, Pencil, ShieldCheck } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -50,6 +50,7 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
   const [username, setUsername] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [mode, setMode] = useState<"demo" | "live">("demo");
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(canConfigure);
   const [notice, setNotice] = useState("");
@@ -88,32 +89,83 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
     event.preventDefault();
     void run(async () => {
       const next = await saveSignatureConnection(username, apiKey, mode);
-      setConnection(next); setUsername(next.username ?? ""); setMode(next.mode); setApiKey("");
+      setConnection(next); setUsername(next.username ?? ""); setMode(next.mode); setApiKey(""); setEditing(false);
       setNotice(tx("Подключение проверено и сохранено.", "Verbindung geprüft und gespeichert.")); onChanged?.();
     });
   }
+  function resetDraft() {
+    setUsername(connection?.username ?? ""); setMode(connection?.mode ?? "demo"); setApiKey("");
+    setNotice(""); setError("");
+  }
+  const feedback = <>
+    {notice ? <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">{notice}</p> : null}
+    {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">{error}</p> : null}
+  </>;
+  const portalLink = <a href="https://my.skribble.de/" target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 shrink-0 rounded-md")}>
+    {tx("Кабинет Skribble", "Skribble-Konto öffnen")}<ExternalLink className="size-3.5" aria-hidden="true" />
+  </a>;
   return (
     <div className="grid min-w-0 gap-3">
+      {!loading && !connection?.configured ? (
       <ConnectionSection title={tx("Вход в кабинет Skribble", "Bei Skribble anmelden")}>
         <div className="flex flex-col items-start gap-3 p-3.5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-muted-foreground">{tx("Откройте немецкий кабинет сервиса в отдельном окне.", "Öffnen Sie das deutsche Skribble-Konto in einem separaten Fenster.")}</p>
-          <a href="https://my.skribble.de/" target="_blank" rel="noopener noreferrer" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 shrink-0 rounded-md")}>
-            {tx("Войти в Skribble", "Skribble-Login öffnen")}<ExternalLink className="size-3.5" aria-hidden="true" />
-          </a>
+          {portalLink}
         </div>
       </ConnectionSection>
-      {canConfigure ? (
+      ) : null}
+      {canConfigure && loading ? (
+        <ConnectionSection title={tx("Подключение Skribble", "Skribble-Verbindung")}>
+          <p role="status" className="flex items-center gap-2 p-3.5 text-xs text-muted-foreground"><LoaderCircle aria-hidden="true" className="size-4 animate-spin" />{tx("Загрузка подключения…", "Verbindung wird geladen…")}</p>
+        </ConnectionSection>
+      ) : canConfigure && connection?.configured && !editing ? (
+        <ConnectionSection
+          title={tx("Подключение Skribble", "Skribble-Verbindung")}
+          action={<Badge variant="outline" className="gap-1 rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Check aria-hidden="true" className="size-3" />{tx("Подключено", "Verbunden")}</Badge>}
+        >
+          <div className="space-y-4 p-3.5">
+            <div className="flex items-start gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"><ShieldCheck aria-hidden="true" className="size-5" /></span>
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-medium">{tx("Электронная подпись подключена", "Elektronische Signatur eingerichtet")}</p>
+                <p className="text-xs leading-5 text-muted-foreground">{tx("Отправляйте документы на подпись из реестра и карточек GMED.", "Senden Sie Dokumente direkt aus der Dokumentenübersicht und den GMED-Karten zur Unterschrift.")}</p>
+              </div>
+            </div>
+            <dl className="grid min-w-0 gap-x-5 gap-y-3 rounded-md border border-border/60 bg-muted/20 p-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <dt className="text-xs text-muted-foreground">{tx("Режим", "Betriebsart")}</dt>
+                <dd className="text-sm font-medium">{connection.mode === "demo" ? tx("Тестовый · DEMO", "Testbetrieb · DEMO") : tx("Рабочий · QES / eIDAS", "Echtbetrieb · QES / eIDAS")}</dd>
+              </div>
+              <div className="space-y-1">
+                <dt className="text-xs text-muted-foreground">{tx("Регион", "Region")}</dt>
+                <dd className="text-sm font-medium">{tx("Германия", "Deutschland")}</dd>
+              </div>
+              <div className="min-w-0 space-y-1 sm:col-span-2">
+                <dt className="text-xs text-muted-foreground">{tx("Имя API-пользователя", "API-Benutzername")}</dt>
+                <dd className="break-all font-mono text-xs leading-5">{connection.username ?? tx("Настроен на сервере", "Auf dem Server eingerichtet")}</dd>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <dt className="text-xs text-muted-foreground">{tx("API-ключ", "API-Schlüssel")}</dt>
+                <dd className="flex items-center gap-1.5 text-xs"><KeyRound aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />{tx("Сохранён · повторный ввод не нужен", "Gespeichert · keine erneute Eingabe nötig")}</dd>
+              </div>
+            </dl>
+            {feedback}
+          </div>
+          <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center">
+            {portalLink}
+            <Button type="button" variant="outline" size="sm" className="h-8 rounded-md sm:ml-auto" disabled={busy} onClick={() => { resetDraft(); setEditing(true); }}><Pencil aria-hidden="true" className="size-3.5" />{tx("Изменить подключение", "Verbindung ändern")}</Button>
+            <Button type="button" size="sm" className="h-8 rounded-md" disabled={busy} onClick={() => void run(async () => { await checkSignatureConnection(); setNotice(tx("Соединение работает.", "Verbindung erfolgreich geprüft.")); })}>{busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}{tx("Проверить соединение", "Verbindung prüfen")}</Button>
+          </div>
+        </ConnectionSection>
+      ) : canConfigure ? (
         <form onSubmit={save}>
           <ConnectionSection
-            title={tx("Подключение GMED", "GMED anbinden")}
-            action={loading ? (
-              <span role="status" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</span>
-            ) : connection?.configured ? (
-              <Badge variant="outline" className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">{tx("Подключение настроено", "Verbindung eingerichtet")} · {connection.mode === "demo" ? "DEMO" : "QES / eIDAS"}</Badge>
-            ) : undefined}
+            title={connection?.configured ? tx("Изменить подключение", "Verbindung ändern") : tx("Подключение GMED", "GMED anbinden")}
           >
             <div className="space-y-3 p-3.5">
-              <p className="text-xs leading-5 text-muted-foreground">{tx("Создайте API-доступ в административном разделе Skribble и введите данные здесь.", "Erstellen Sie im Skribble-Adminbereich einen API-Zugang und tragen Sie die Zugangsdaten hier ein.")}{" "}<a href="https://docs.skribble.com/business-admin/api/apicreate.html" target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">{tx("Инструкция", "Anleitung")}</a></p>
+              <p className="text-xs leading-5 text-muted-foreground">{connection?.configured
+                ? tx("Введите новый API-ключ для замены подключения. Текущее подключение действует до проверки и сохранения новых данных.", "Geben Sie einen neuen API-Schlüssel ein. Die aktuelle Verbindung bleibt aktiv, bis die neuen Zugangsdaten geprüft und gespeichert sind.")
+                : tx("Создайте API-доступ в административном разделе Skribble и введите данные здесь.", "Erstellen Sie im Skribble-Adminbereich einen API-Zugang und tragen Sie die Zugangsdaten hier ein.")}{" "}<a href="https://docs.skribble.com/business-admin/api/apicreate.html" target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">{tx("Инструкция", "Anleitung")}</a></p>
               <fieldset disabled={busy || loading} className="grid min-w-0 gap-3 sm:grid-cols-2">
                 <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground">
                   <span>{tx("Режим", "Betriebsart")}</span>
@@ -132,17 +184,16 @@ export function SignatureConnectionForm({ canConfigure, onChanged, onDirtyChange
                 </label>
                 <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{tx("Ключ будет зашифрован на сервере. После сохранения поле очистится.", "Der Schlüssel wird verschlüsselt auf dem Server gespeichert. Nach dem Speichern wird das Feld geleert.")}</p>
               </fieldset>
-              {notice ? <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">{notice}</p> : null}
-              {error ? <p role="alert" className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">{error}</p> : null}
+              {feedback}
             </div>
             <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
               {connection?.configured ? (
-                <div className="flex flex-wrap items-center gap-2 sm:mr-auto">
-                  <Button type="button" variant="ghost" size="sm" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={busy || loading} onClick={() => void run(async () => { await disconnectSignatureConnection(); setConnection(null); setUsername(""); setApiKey(""); setMode("demo"); setNotice(tx("Подключение отключено.", "Verbindung getrennt.")); onChanged?.(); })}>{tx("Отключить", "Verbindung trennen")}</Button>
-                  <Button type="button" variant="outline" size="sm" className="h-8 rounded-md" disabled={busy || loading} onClick={() => void run(async () => { await checkSignatureConnection(); setNotice(tx("Соединение работает.", "Verbindung erfolgreich geprüft.")); })}>{tx("Проверить соединение", "Verbindung prüfen")}</Button>
-                </div>
+                <>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 rounded-md text-destructive hover:text-destructive sm:mr-auto" disabled={busy} onClick={() => void run(async () => { await disconnectSignatureConnection(); setConnection(null); setUsername(""); setApiKey(""); setMode("demo"); setEditing(false); setNotice(tx("Подключение отключено.", "Verbindung getrennt.")); onChanged?.(); })}>{tx("Отключить", "Verbindung trennen")}</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-8 rounded-md" disabled={busy} onClick={() => { resetDraft(); setEditing(false); }}>{tx("Отменить изменения", "Änderungen verwerfen")}</Button>
+                </>
               ) : null}
-              <Button type="submit" size="sm" className="h-9 rounded-md sm:h-8" disabled={!username.trim() || !apiKey || busy || loading}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Проверить и подключить", "Prüfen und verbinden")}</Button>
+              <Button type="submit" size="sm" className="h-9 rounded-md sm:h-8" disabled={!username.trim() || !apiKey || busy || loading}>{busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : null}{connection?.configured ? tx("Проверить и сохранить", "Prüfen und speichern") : tx("Проверить и подключить", "Prüfen und verbinden")}</Button>
             </div>
           </ConnectionSection>
         </form>
