@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { FileSignature, LoaderCircle, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
+import { FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldCheck, Trash2 } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ApiRequestError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
+import { SignatureSignerFields } from "./signature-signer-fields";
 import { createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, signatureAction, validSigners, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
 
 const emptySigner = (role: Signer["role"]): Signer => ({ first_name: "", last_name: "", email: "", role });
@@ -42,12 +41,15 @@ function requestStatusClassName(status: SignatureStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expanded = false }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; expanded?: boolean }) {
+export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; expanded?: boolean; previewReady?: boolean }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
   const [state, setState] = useState<SignatureState | null>(null);
   const [signers, setSigners] = useState<Signer[]>(initialSigners);
+  const [baseline, setBaseline] = useState<Signer[]>(initialSigners);
+  const [editingSigners, setEditingSigners] = useState<number[]>([]);
+  const [composeNew, setComposeNew] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -58,8 +60,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
   const previousPending = useRef(false);
+  const initialized = useRef(false);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
-  const dirty = confirmed || JSON.stringify(signers) !== JSON.stringify(initialSigners());
+  const dirty = confirmed || JSON.stringify(signers) !== JSON.stringify(baseline);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   useEffect(() => {
@@ -72,7 +75,11 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
         if (cancelled) return;
         const pending = next.requests.some(r => isSignaturePending(r.status));
         setState(next); setError(false); setAwaitingState(false);
-        if (pending) { setSigners(initialSigners()); setConfirmed(false); }
+        if (!initialized.current || pending) {
+          const defaults = next.suggested_signers?.length ? next.suggested_signers : initialSigners();
+          setSigners(defaults); setBaseline(defaults); setConfirmed(false); setEditingSigners([]);
+          initialized.current = true;
+        }
         if (previousPending.current && !pending) onDoneRef.current?.();
         previousPending.current = pending;
         if (pending) timer = setTimeout(() => { void load(); }, 5000);
@@ -108,10 +115,13 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
   }
   const pending = state?.requests.some(r => isSignaturePending(r.status));
   const mutationDisabled = busy || awaitingState || error;
+  const completed = state?.requests.some(r => r.status === "completed");
   const updateSigner = (index: number, patch: Partial<Signer>) => {
     setConfirmed(false);
+    setEditingSigners(current => current.includes(index) ? current : [...current, index]);
     setSigners(current => current.map((signer, n) => n === index ? { ...signer, ...patch } : signer));
   };
+  const removeSigner = (index: number) => { setConfirmed(false); setEditingSigners([]); setSigners(current => current.filter((_, n) => n !== index)); };
   return (
     <details
       open={open}
@@ -169,33 +179,34 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, expa
 
           {state.can_send && !pending && state.ineligible_reason && !state.requests.some(r => r.result_document_id) ? <p className="rounded-xl border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs">{tx(...(ineligibleMessages[state.ineligible_reason] ?? ["Документ сейчас недоступен для подписания.", "Das Dokument kann derzeit nicht unterzeichnet werden."]))}</p> : null}
 
-          {state.enabled && state.can_send && !pending && !state.ineligible_reason ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
+          {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => setComposeNew(true)}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
+          {state.enabled && state.can_send && !pending && !state.ineligible_reason && (!completed || composeNew) ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <AdminSectionTitle>{tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
               <Badge variant="outline" className="rounded-full text-[10px]">{signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
-              <p className="text-xs leading-5 text-muted-foreground">{tx("Добавьте всех подписантов. Для договора нужны клиент и представитель агентства.", "Tragen Sie alle Unterzeichnenden ein. Verträge benötigen Kunde und Agenturvertretung.")}</p>
-              {signers.map((signer, index) => <fieldset key={index} disabled={busy} className="grid gap-3 rounded-xl border border-border/70 bg-muted/10 p-4">
-                <legend className="px-2 text-xs font-semibold text-foreground">{tx("Подписант", "Unterzeichnende Person")} {index + 1}</legend>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Имя", "Vorname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.first_name} onChange={e => updateSigner(index, { first_name: e.target.value })} /></label>
-                  <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Фамилия", "Nachname")}<Input className="h-9 bg-field font-normal text-foreground" maxLength={120} autoComplete="off" value={signer.last_name} onChange={e => updateSigner(index, { last_name: e.target.value })} /></label>
+              <p className="text-xs leading-5 text-muted-foreground">{tx("Клиент — из связанной карточки, представители GMED — из общих настроек. Проверьте получателей; для договора нужны обе стороны.", "Kundendaten stammen aus der verknüpften Karte, GMED-Vertretungen aus den Einstellungen. Empfänger prüfen; Verträge benötigen beide Parteien.")}</p>
+              {signers.map((signer, index) => !validSigners([signer]) || editingSigners.includes(index) ? <div key={index} className="space-y-2">
+                <SignatureSignerFields signer={signer} index={index} disabled={busy} onChange={patch => updateSigner(index, patch)} onRemove={signers.length > 1 ? () => removeSigner(index) : undefined} />
+                {validSigners([signer]) ? <div className="flex justify-end"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEditingSigners(current => current.filter(n => n !== index))}>{tx("Готово", "Fertig")}</Button></div> : null}
+              </div> : <div key={index} className="flex min-w-0 items-start gap-2 rounded-lg border border-border/70 bg-muted/10 p-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-[11px] text-muted-foreground">{signer.role === "agency" ? tx("Представитель GMED", "GMED-Vertretung") : signer.role === "client" ? tx("Клиент / представитель клиента", "Kunde / Kundenvertretung") : tx("Другая сторона", "Weitere Partei")}</p>
+                  <p className="break-words text-sm font-medium">{signer.first_name} {signer.last_name}</p>
+                  <p className="break-all text-xs text-muted-foreground">{signer.email}</p>
                 </div>
-                <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">E-Mail<Input className="h-9 bg-field font-normal text-foreground" type="email" maxLength={254} autoComplete="off" value={signer.email} onChange={e => updateSigner(index, { email: e.target.value })} /></label>
-                <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Роль", "Rolle")}<NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value={signer.role} onChange={e => updateSigner(index, { role: e.target.value as Signer["role"] })}>
-                  <option value="client">{tx("Клиент / представитель клиента", "Kunde / Kundenvertretung")}</option>
-                  <option value="agency">{tx("Представитель агентства", "Agenturvertretung")}</option>
-                  <option value="other">{tx("Другая сторона", "Weitere Partei")}</option>
-                </NativeComboboxSelect></label>
-                {signers.length > 1 ? <div className="flex justify-end border-t border-border/60 pt-2"><Button type="button" variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive" onClick={() => { setConfirmed(false); setSigners(current => current.filter((_, n) => n !== index)); }}><Trash2 className="size-3.5" />{tx("Удалить подписанта", "Person entfernen")}</Button></div> : null}
-              </fieldset>)}
+                <div className="flex shrink-0 flex-col gap-1">
+                  <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={`${tx("Изменить подписанта", "Person bearbeiten")} ${index + 1}`} onClick={() => setEditingSigners(current => [...current, index])}><Pencil className="size-3.5" /></Button>
+                  {signers.length > 1 ? <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={busy} aria-label={`${tx("Удалить подписанта", "Person entfernen")} ${index + 1}`} onClick={() => removeSigner(index)}><Trash2 className="size-3.5" /></Button> : null}
+                </div>
+              </div>)}
               {signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
             </div>
             <div className="border-t border-border/60 bg-muted/10 p-4">
               <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{tx("Я проверил сохранённый PDF и адреса. Отправить этот документ указанным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die genannten Personen senden.")}</span></label>
               <div className="mt-3 flex justify-end">
-                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !confirmed || !validSigners(signers)} onClick={() => void run(async () => { await createSignatureRequest(documentId, signers); previousPending.current = true; setSigners(initialSigners()); setConfirmed(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
+                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !confirmed || !validSigners(signers)} onClick={() => void run(async () => { await createSignatureRequest(documentId, signers); previousPending.current = true; setSigners(baseline); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
               </div>
             </div>
           </section> : null}

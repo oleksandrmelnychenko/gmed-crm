@@ -622,6 +622,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .unwrap()
         .is_none()
     );
+    verify_signer_defaults(&connection_state, &auth).await;
     handle.abort();
     for key in created_keys {
         documents::remove_document_blob(&key).await;
@@ -632,4 +633,130 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .await
         .unwrap();
     admin.close().await;
+}
+
+async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
+    async fn call(
+        state: &AppState,
+        auth: &AuthUser,
+        method: Method,
+        body: Value,
+    ) -> (StatusCode, Value) {
+        let response = router()
+            .with_state(state.clone())
+            .layer(Extension(auth.clone()))
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/document-signatures/signer-defaults")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 10000).await.unwrap()).unwrap();
+        (status, value)
+    }
+    assert_eq!(
+        call(state, auth, Method::GET, json!(null)).await.1,
+        json!({"signers":[]})
+    );
+    let manager = AuthUser {
+        role: Role::PatientManager,
+        ..auth.clone()
+    };
+    for method in [Method::GET, Method::PUT] {
+        assert_eq!(
+            call(state, &manager, method, json!({"signers":[]})).await.0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    let agency =
+        json!({"first_name":"Max","last_name":"Muster","email":"max@example.org","role":"agency"});
+    let defaults = json!({"signers":[agency.clone()]});
+    assert_eq!(
+        call(state, auth, Method::PUT, defaults.clone()).await,
+        (StatusCode::OK, defaults.clone())
+    );
+    assert_eq!(
+        call(state, auth, Method::GET, json!(null)).await.1,
+        defaults
+    );
+    assert_eq!(
+        call(state, auth, Method::PUT, json!({"signers":signers()}))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+
+    let patient_id = Uuid::new_v4();
+    let source_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO patients(id,patient_id,first_name,last_name,birth_date,gender,email,created_by) VALUES($1,$2,'Erika','Mustermann','1980-01-01','female','erika@example.org',$3)")
+        .bind(patient_id).bind(format!("SIGNATURE-{patient_id}")).bind(auth.user_id).execute(&state.db).await.unwrap();
+    sqlx::query("INSERT INTO documents(id,patient_id,auto_name,art,mime_type,storage_key,version_root_document_id,uploaded_by) VALUES($1,$2,'Defaults fixture','other','application/pdf','fixture.pdf',$1,$3)")
+        .bind(source_id).bind(patient_id).bind(auth.user_id).execute(&state.db).await.unwrap();
+    let source = sqlx::query("SELECT * FROM documents WHERE id=$1")
+        .bind(source_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    let suggested = defaults::suggested(state, auth, &source).await.unwrap();
+    assert_eq!(suggested[0].email, "erika@example.org");
+    assert_eq!(serde_json::to_value(&suggested[1]).unwrap(), agency);
+    // Even when an individual document is shared, the patient profile must not leak.
+    let denied = defaults::suggested(state, &manager, &source).await.unwrap();
+    assert!(denied[0].first_name.is_empty() && denied[0].email.is_empty());
+    assert_eq!(denied[1].email, "max@example.org");
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$2)")
+        .bind(patient_id)
+        .bind(auth.user_id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        defaults::suggested(state, &manager, &source).await.unwrap()[0].email,
+        "erika@example.org"
+    );
+    let lead_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO leads(id,first_name,last_name,email,created_by) VALUES($1,'Lena','Beispiel','lena@example.org',$2)")
+        .bind(lead_id).bind(auth.user_id).execute(&state.db).await.unwrap();
+    sqlx::query("UPDATE documents SET patient_id=NULL,lead_id=$2 WHERE id=$1")
+        .bind(source_id)
+        .bind(lead_id)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    let source = sqlx::query("SELECT * FROM documents WHERE id=$1")
+        .bind(source_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        defaults::suggested(state, &manager, &source).await.unwrap()[0].email,
+        "lena@example.org"
+    );
+    let it_admin = AuthUser {
+        role: Role::ItAdmin,
+        ..auth.clone()
+    };
+    assert!(
+        defaults::suggested(state, &it_admin, &source)
+            .await
+            .unwrap()[0]
+            .email
+            .is_empty()
+    );
+    assert_eq!(
+        call(state, &it_admin, Method::PUT, json!({"signers":[]}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let cleared = defaults::suggested(state, auth, &source).await.unwrap();
+    assert_eq!(cleared.len(), 2);
+    assert_eq!(cleared[1].role, "agency");
+    assert!(cleared[1].email.is_empty());
 }

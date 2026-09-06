@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import { Download, FileSignature, LoaderCircle } from "lucide-react";
+import { FileSignature, LoaderCircle } from "lucide-react";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -8,9 +8,9 @@ import { OverlayDirtyContext } from "@/components/ui/dismissal-guard";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
-import { downloadDocumentFile } from "../data/document-api";
 import type { DocumentItem } from "../model/types";
 import { DocumentSignaturePanel } from "./document-signature-panel";
+import { SignatureDocumentPreview } from "./signature-document-preview";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
 type Props = {
@@ -47,16 +47,14 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
       if (!nextOpen) setDirty(false);
       if (!nextOpen && changed.current) { changed.current = false; onDone?.(); }
     }} dirty={dirty}>
-      <DialogContent className="grid max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-3xl" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
+      <DialogContent className="grid h-[min(940px,calc(100dvh-1rem))] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(92dvh,940px)] sm:w-[96vw] sm:max-w-[1480px]" onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onKeyDown={event => {
         if (["Enter", " ", "ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) event.stopPropagation();
       }}>
         <DialogHeader className="border-b border-border/70 px-5 py-4 pr-14">
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription className="break-words text-xs">{title}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 overflow-y-auto bg-muted/10 p-4 sm:p-5">
           {open ? <SignatureWorkspace key={documentId ?? `${scope?.patientId}:${scope?.orderId}:${scope?.leadId}`} documentId={documentId} scope={scope} title={title} onDirtyChange={setDirty} onDone={() => { changed.current = true; }} /> : null}
-        </div>
       </DialogContent>
     </Dialog>
   </>;
@@ -72,7 +70,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [selectedId, setSelectedId] = useState(documentId ?? "");
   const [loading, setLoading] = useState(!documentId);
   const [error, setError] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [previewedId, setPreviewedId] = useState("");
   const patientId = scope?.patientId;
   const orderId = scope?.orderId;
   const leadId = scope?.leadId;
@@ -94,14 +92,11 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   }, [documentId, patientId, orderId, leadId]);
 
   const selectedTitle = documentId ? title : documents.find(row => row.id === selectedId)?.auto_name ?? title;
-  return <div className="grid gap-4">
-    <section className="rounded-xl border border-border/70 bg-card shadow-xs">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
+  return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
+    <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
         <AdminSectionTitle>{tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
-        {selectedId ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-md" disabled={downloading} onClick={() => {
-          setDownloading(true); setError(false);
-          void downloadDocumentFile(selectedId, selectedTitle).catch(() => setError(true)).finally(() => setDownloading(false));
-        }}><Download className="size-3.5" />{tx("Скачать исходный документ", "Ausgangsdokument herunterladen")}</Button> : null}
+        {selectedId ? <span className="min-w-0 break-words text-xs text-muted-foreground">{selectedTitle}</span> : null}
       </div>
       {!documentId || error ? <div className="space-y-3 p-4">
         {!documentId ? <>
@@ -112,7 +107,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
@@ -122,10 +117,13 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
         </> : null}
         {error ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive">{tx("Не удалось загрузить документ. Повторите открытие окна.", "Dokument konnte nicht geladen werden. Öffnen Sie das Fenster erneut.")}</p> : null}
       </div> : null}
+      {selectedId ? <SignatureDocumentPreview key={selectedId} documentId={selectedId} onReady={setPreviewedId} /> : null}
     </section>
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} expanded onDirtyChange={onDirtyChange} onDone={() => {
+    <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId} expanded onDirtyChange={onDirtyChange} onDone={() => {
       clearApiCache("/documents");
       onDone?.();
     }} /> : null}
+    </section>
   </div>;
 }

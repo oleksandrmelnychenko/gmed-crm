@@ -1,5 +1,6 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod connection;
+mod defaults;
 pub mod provider;
 
 #[cfg(test)]
@@ -31,6 +32,7 @@ use provider::{MAX_PDF, Signer, VerifiedRequest, normalize_signers, sha256};
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(connection::router())
+        .merge(defaults::router())
         .route("/documents/{id}/signature-requests", get(list).post(create))
         .route("/document-signature-requests/{id}/refresh", post(refresh))
         .route("/document-signature-requests/{id}/withdraw", post(withdraw))
@@ -102,9 +104,15 @@ async fn list(
     let provider = connection::current_provider(&state)
         .await
         .map_err(|e| error(StatusCode::SERVICE_UNAVAILABLE, e))?;
+    let suggested_signers = if can_send {
+        defaults::suggested(&state, &auth, &source).await?
+    } else {
+        vec![]
+    };
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
+        "suggested_signers":suggested_signers,
         "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
 }
 

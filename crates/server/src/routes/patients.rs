@@ -9965,7 +9965,7 @@ fn assignment_allowed(assigner_role: Role, target_role: &str) -> bool {
     }
 }
 
-async fn has_patient_access(
+pub(crate) async fn has_patient_access(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,

@@ -10,6 +10,7 @@ export type SignatureRequest = {
 export type SignatureState = {
   enabled: boolean; region: "DE"; test_mode: boolean; can_send: boolean; can_configure: boolean;
   ineligible_reason: string | null; requests: SignatureRequest[];
+  suggested_signers?: Signer[];
 };
 export const isSignaturePending = (status: SignatureStatus) => ["submitting", "submission_unknown", "pending"].includes(status);
 export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
@@ -20,6 +21,8 @@ export const fetchSignatureConnection = () => apiFetch<SignatureConnection>("/do
 export const saveSignatureConnection = (username: string, apiKey: string, mode: "demo" | "live") => apiFetch<SignatureConnection>("/document-signatures/connection", { method: "POST", body: JSON.stringify({ username, api_key: apiKey, mode }), timeoutMs: 60_000 });
 export const checkSignatureConnection = () => apiFetch("/document-signatures/connection/check", { method: "POST", timeoutMs: 60_000 });
 export const disconnectSignatureConnection = () => apiFetch("/document-signatures/connection/disconnect", { method: "POST" });
+export const fetchSignatureDefaults = () => apiFetch<{ signers: Signer[] }>("/document-signatures/signer-defaults", { forceFresh: true });
+export const saveSignatureDefaults = (signers: Signer[]) => apiFetch<{ signers: Signer[] }>("/document-signatures/signer-defaults", { method: "PUT", body: JSON.stringify({ signers }) });
 export async function downloadSignatureReport(id: string) {
   const { blob } = await apiFetchFile(`/document-signature-requests/${id}/report`);
   const url = URL.createObjectURL(blob);

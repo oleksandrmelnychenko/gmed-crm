@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
 
 const documentId = "ea3a0c15-792b-4a3a-9a7e-006300000001";
 const document = { id: documentId, auto_name: "Rahmenvertrag – Testperson", original_filename: "vertrag.pdf", art: "framework_contract", category: "administrative", status: "active", visibility: "internal", is_medical: false, mime_type: "application/pdf", has_stored_file: true, file_size: 1000, version_root_document_id: documentId, version_number: 1, version_count: 1, is_latest_version: true, patient_id: null, order_id: null, appointment_id: null, klinik: null, ursprung: null, notes: null, generated_template_id: "framework_contract", data_sensitivity: "internal", created_at: "2026-09-05T10:00:00Z", updated_at: "2026-09-05T10:00:00Z" };
@@ -7,6 +10,8 @@ async function prepare(page: Page, enabled = true) {
   await page.routeWebSocket("**/api/**", socket => socket.close());
   const submissions: unknown[] = [];
   const connections: unknown[] = [];
+  let defaults: unknown[] = [];
+  const defaultSaves: unknown[] = [];
   let configured = enabled;
   let connectionUsername: string | null = null;
   let connectionMode = "demo";
@@ -24,6 +29,17 @@ async function prepare(page: Page, enabled = true) {
     if (path === `/documents/${documentId}`) body = document;
     if (path === `/documents/${documentId}/versions`) body = [document];
     if (path === "/documents/meta/categories") body = { categories: [], arts: [] };
+    if (/^\/documents\/[^/]+\/download$/.test(path)) {
+      await route.fulfill({ contentType: "application/pdf", body: previewPdf });
+      return;
+    }
+    if (path === "/document-signatures/signer-defaults") {
+      if (route.request().method() === "PUT") {
+        defaults = route.request().postDataJSON().signers;
+        defaultSaves.push(defaults);
+      }
+      body = { signers: defaults };
+    }
     if (path === "/documents/templates") body = { templates: [], text_blocks: [] };
     if (path === `/documents/${documentId}/text-extraction`) body = null;
     if (path === "/document-signatures/connection") {
@@ -42,7 +58,7 @@ async function prepare(page: Page, enabled = true) {
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
-  return { submissions, connections, setStatus: (next: string) => { status = next; }, complete: () => { status = "completed"; } };
+  return { submissions, connections, defaultSaves, setStatus: (next: string) => { status = next; }, complete: () => { status = "completed"; } };
 }
 
 test("German workflow requires checked recipients and reconciles uncertain sending without duplication", async ({ page }) => {
@@ -155,6 +171,9 @@ test("contract picker uses its patient context and resets recipients when the PD
   await picker.click();
   await expect(page.getByRole("option", { name: /Bild/ })).toHaveCount(0);
   await page.getByRole("option", { name: /Rahmenvertrag – Testperson/ }).click();
+  const pdf = dialog.locator('iframe[title="PDF zur Unterschrift"]');
+  await expect(pdf).toHaveAttribute("src", /^blob:/);
+  const firstPreview = await pdf.getAttribute("src");
   await dialog.getByLabel("Vorname", { exact: true }).first().fill("Erika");
   await dialog.getByRole("checkbox").check();
   await picker.click();
@@ -165,6 +184,8 @@ test("contract picker uses its patient context and resets recipients when the PD
   await picker.click();
   await page.getByRole("option", { name: /Zweites PDF/ }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Ohne Speichern schließen", exact: true }).click();
+  await expect(pdf).toHaveAttribute("src", /^blob:/);
+  await expect(pdf).not.toHaveAttribute("src", firstPreview!);
   await expect(dialog.getByLabel("Vorname", { exact: true }).first()).toHaveValue("");
   await expect(dialog.getByRole("checkbox")).not.toBeChecked();
   await expect(dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true })).toBeDisabled();
@@ -490,5 +511,116 @@ test("separate German connection dialog validates setup and clears the secret", 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
   await page.screenshot({ path: "../artifacts/design-qa/signature-admin-mobile.png" });
+  expect(fixture.submissions).toHaveLength(0);
+});
+
+
+for (const lang of ["de", "ru"] as const) {
+  test(`central agency defaults and document client form an editable preview workspace in ${lang}`, async ({ page }) => {
+    const fixture = await prepare(page);
+    await page.addInitScript(language => localStorage.setItem("gmed_lang", language), lang);
+    const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+    const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+    const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
+    await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
+      if (route.request().method() === "POST" || fixture.submissions.length) return route.fallback();
+      await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, requests: [], suggested_signers: [client, agency] } });
+    });
+    await page.goto("/admin/signatures");
+    await page.getByRole("button", { name: tx("Настроить представителей", "Vertretungen einrichten"), exact: true }).click();
+    await page.getByLabel(tx("Имя", "Vorname"), { exact: true }).fill(agency.first_name);
+    await page.getByLabel(tx("Фамилия", "Nachname"), { exact: true }).fill(agency.last_name);
+    await page.getByLabel("E-Mail", { exact: true }).fill(agency.email);
+    await page.getByRole("button", { name: tx("Сохранить представителей", "Vertretungen speichern"), exact: true }).click();
+    await expect(page.getByText("Max Muster", { exact: true })).toBeVisible();
+    expect(fixture.defaultSaves).toEqual([[agency]]);
+    await page.reload();
+    await expect(page.getByText("Max Muster", { exact: true })).toBeVisible();
+    await page.screenshot({ path: `../artifacts/design-qa/signature-defaults-${lang}-desktop.png` });
+    await page.goto(`/documents/${documentId}`);
+    const action = page.getByRole("button", { name: `${tx("Электронная подпись", "Elektronische Unterschrift")}: vertrag.pdf`, exact: true });
+    await action.click();
+    const dialog = page.getByRole("dialog", { name: tx("Электронная подпись", "Elektronische Unterschrift"), exact: true });
+    const pdf = dialog.locator("iframe");
+    await expect(pdf).toHaveAttribute("src", /^blob:/);
+    await expect(dialog.getByRole("button", { name: tx("Скачать исходный документ", "Ausgangsdokument herunterladen"), exact: true })).toHaveCount(0);
+    await expect(dialog.getByText("Erika Mustermann", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Max Muster", { exact: true })).toBeVisible();
+    await expect(dialog.getByLabel(tx("Имя", "Vorname"), { exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await action.click();
+    await expect(pdf).toBeVisible();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const left = await pdf.boundingBox();
+    const right = await dialog.getByRole("region", { name: tx("Подписание документа", "Dokument unterzeichnen"), exact: true }).boundingBox();
+    expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x);
+    // Full Chromium includes the native PDF viewer; headless shell only tests the iframe contract.
+    if (test.info().project.use.channel === "chromium") {
+      await expect.poll(async () => {
+        const viewer = page.frames().find(frame => frame.url().startsWith("chrome-extension:"));
+        return viewer ? viewer.locator("viewer-toolbar").evaluate(element => element.shadowRoot?.textContent ?? "").catch(() => "") : "";
+      }).toContain("GMED - Skribble DEMO integration test");
+    }
+    await dialog.screenshot({ path: `../artifacts/design-qa/signature-workspace-${lang}-desktop.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+    await dialog.getByText("Max Muster", { exact: true }).scrollIntoViewIfNeeded();
+    await dialog.screenshot({ path: `../artifacts/design-qa/signature-workspace-${lang}-mobile.png` });
+    await dialog.getByRole("checkbox").check();
+    await dialog.getByRole("button", { name: `${tx("Изменить подписанта", "Person bearbeiten")} 1`, exact: true }).click();
+    const firstName = dialog.getByLabel(tx("Имя", "Vorname"), { exact: true });
+    await firstName.fill("Erika Maria");
+    await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(firstName).toHaveValue("Erika Maria");
+    await dialog.getByRole("button", { name: tx("Готово", "Fertig"), exact: true }).click();
+    await dialog.getByRole("checkbox").check();
+    await dialog.getByRole("button", { name: tx("Отправить на подпись", "Zur Unterschrift senden"), exact: true }).click();
+    await expect.poll(() => fixture.submissions.length).toBe(1);
+    expect(fixture.submissions).toEqual([{ signers: [{ ...client, first_name: "Erika Maria" }, agency] }]);
+    expect(fixture.defaultSaves).toEqual([[agency]]);
+  });
+}
+
+test("preview failures block sending until a successful retry and completed DEMO hides the new composer", async ({ page }) => {
+  const fixture = await prepare(page);
+  const signers = [
+    { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" },
+    { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" },
+  ];
+  let completed = false;
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, suggested_signers: signers,
+    requests: completed ? [{ id: "completed-demo", status: "completed", test_mode: true, signers, evidence: {}, has_report: true, result_document_id: documentId, last_error: null, created_at: document.created_at }] : [],
+  } }));
+  let denied = true;
+  await page.route(`**/api/v1/documents/${documentId}/download`, route => denied ? route.fulfill({ status: 503, json: { error: "unavailable" } }) : route.fallback());
+  await page.goto(`/documents/${documentId}`);
+  const action = page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true });
+  await action.click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await expect(dialog.getByText(/PDF konnte nicht geöffnet werden/)).toBeVisible();
+  await dialog.getByRole("checkbox").check();
+  const send = dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true });
+  await expect(send).toBeDisabled();
+  denied = false;
+  await dialog.getByRole("button", { name: "Erneut laden", exact: true }).click();
+  await expect(dialog.locator("iframe")).toBeVisible();
+  await expect(send).toBeEnabled();
+  await dialog.getByRole("checkbox").uncheck();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  completed = true;
+  await action.click();
+  await expect(dialog.getByText("TEST · PDF und Protokoll gespeichert", { exact: true })).toBeVisible();
+  await expect(send).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Neue Signaturanfrage", exact: true }).click();
+  await expect(send).toBeDisabled();
+  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
   expect(fixture.submissions).toHaveLength(0);
 });
