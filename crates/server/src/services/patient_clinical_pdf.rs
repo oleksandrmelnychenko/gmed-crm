@@ -9,11 +9,12 @@ use printpdf::{
 };
 use serde_json::Value;
 
-use super::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
+use super::patient_pdf_brand::{PatientPdfBrand, append_company_chrome, append_company_footer};
 
 const LEFT: f32 = 25.0;
 const RIGHT: f32 = 185.0;
 const WIDTH: f32 = RIGHT - LEFT;
+const CONTINUATION_TOP: f32 = 277.0;
 const BOTTOM: f32 = 34.0;
 
 pub struct ClinicalReportContext {
@@ -306,7 +307,9 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     ("certainty", "Достоверность", "Diagnosesicherheit"),
                     ("laterality", "Сторона", "Seite"),
                 ] {
-                    if key == "certainty" && value(row, key) == "zustand_nach" {
+                    if key == "certainty"
+                        && matches!(value(row, key).as_str(), "zustand_nach" | "bestaetigt")
+                    {
                         continue;
                     }
                     field(
@@ -607,16 +610,6 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     &mut lines,
                     context.tx("Срок", "Termin"),
                     recorded_time(row, "due_at", ""),
-                );
-                field(
-                    &mut lines,
-                    context.tx("Выполнение", "Umsetzung"),
-                    code(context, &value(row, "lifecycle_status")),
-                );
-                field(
-                    &mut lines,
-                    context.tx("Статус", "Status"),
-                    code(context, &value(row, "status")),
                 );
                 Entry {
                     title: value(row, "title"),
@@ -973,7 +966,16 @@ impl Layout<'_> {
             Mm(297.0),
             std::mem::take(&mut self.ops),
         ));
-        self.header()?;
+        append_company_footer(
+            &mut self.ops,
+            &self.context.brand,
+            &self.regular,
+            LEFT,
+            RIGHT,
+            21.5,
+            18.5,
+        );
+        self.y = CONTINUATION_TOP;
         if !self.current_section.is_empty() {
             let title = format!(
                 "{} ({})",
@@ -1111,7 +1113,8 @@ mod tests {
                 "diagnoses":[
                     {"id":"main-1", "kind":"main", "label":"Klinischer Befund - DEMO", "certainty":"verdacht", "status":"active", "diagnosed_on":"2026-09-01", "note":"Опис збережений лікарем.\nДругий абзац.", "source_document_name":"Befund-DEMO.pdf", "doctor_name":"Erika Beispiel", "doctor_title":"Dr. med."},
                     {"id":"child-1", "parent_id":"main-1", "kind":"prozedur", "label":"Kontrolluntersuchung - DEMO", "ops_code":"DEMO-OPS", "status":"completed"},
-                    {"id":"secondary-1", "parent_id":"main-1", "kind":"secondary", "label":"Zusätzlicher Eintrag", "certainty":"zustand_nach", "status":"resolved", "chronifizierung":"chronisch"}
+                    {"id":"secondary-1", "parent_id":"main-1", "kind":"secondary", "label":"Zusätzlicher Eintrag", "certainty":"zustand_nach", "status":"resolved", "chronifizierung":"chronisch"},
+                    {"id":"confirmed-1", "kind":"main", "label":"Dokumentierte Diagnose - DEMO", "certainty":"bestaetigt", "status":"active"}
                 ],
                 "narrative":{"anamnese_aktuelle":"Gespeicherte Angaben zum aktuellen Anlass.\nЗбережений опис скарг.", "specializations":[{"name_ru":"Кардиология", "name_de":"Kardiologie", "narrative_text":"Fachspezifische Anamnese - DEMO", "assessment_text":"Fachspezifische Beurteilung - DEMO"}], "source_document_name":"Anamnese-DEMO.pdf"},
                 "examinations":[
@@ -1144,6 +1147,7 @@ mod tests {
                 "Другий абзац.",
                 "DEMO-OPS",
                 "Zusätzlicher Eintrag",
+                "Dokumentierte Diagnose - DEMO",
                 "Z.n. Zusätzlicher Eintrag",
                 "Fachspezifische Anamnese - DEMO",
                 "Fachspezifische Beurteilung - DEMO",
@@ -1166,6 +1170,10 @@ mod tests {
                 text.contains(context.tx("ID пациента: P-DEMO-0042", "Patienten-ID: P-DEMO-0042"))
             );
             assert!(text.contains(context.tx("Подозрение", "Verdacht")));
+            assert!(!text.contains(context.tx(
+                "Достоверность: Подтверждено",
+                "Diagnosesicherheit: Bestätigt"
+            )));
             assert!(text.contains(context.tx("День: -", "Mittags: -")));
             assert!(!text.contains("PRIVATE_INTERNAL_NOTE_NEVER_EXPORT"));
             assert!(!text.contains("Erledigte Empfehlung - NICHT EXPORTIEREN"));
@@ -1173,6 +1181,8 @@ mod tests {
             assert!(!text.contains(context.tx("Сопутствующий диагноз:", "Nebendiagnose:")));
             assert!(!text.contains(context.tx("Состояние после", "Zustand nach")));
             assert!(!text.contains(context.tx("Течение:", "Verlaufstyp:")));
+            assert!(!text.contains(context.tx("Статус: Активно", "Status: Aktiv")));
+            assert!(!text.contains(context.tx("Выполнение:", "Umsetzung:")));
             assert!(!text.contains("Geplante Untersuchung - NICHT EXPORTIEREN"));
             assert!(!text.contains("Laborwert - NICHT IN DER ZUSAMMENFASSUNG"));
             assert!(!text.contains("1/2-0-0-0"));
@@ -1185,6 +1195,63 @@ mod tests {
                         "clinical-report-de.pdf"
                     }),
                     &bytes,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn clinical_report_recommendations_omit_workflow_labels_but_keep_open_items() {
+        for russian in [false, true] {
+            let mut context = example(russian);
+            context.included_sections = Some(vec!["recommendations".into()]);
+            let bytes = build_clinical_report_pdf(&context).unwrap();
+            let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+            assert!(text.contains(context.tx("Рекомендации", "Empfehlungen")));
+            assert!(text.contains("Offene Empfehlung - DEMO"));
+            assert!(text.contains("Noch durchzuführen."));
+            assert!(!text.contains("Erledigte Empfehlung - NICHT EXPORTIEREN"));
+            assert!(!text.contains(context.tx("Статус:", "Status:")));
+            assert!(!text.contains(context.tx("Выполнение:", "Umsetzung:")));
+        }
+    }
+
+    #[test]
+    fn clinical_report_prints_patient_header_only_on_first_page() {
+        for russian in [false, true] {
+            let mut context = example(russian);
+            context.data["narrative"]["anamnese_aktuelle"] =
+                json!("Gespeicherter Verlauf / Збережені дані.\n".repeat(60));
+            let bytes = build_clinical_report_pdf(&context).unwrap();
+            let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap();
+            assert!(pages.len() > 1);
+            for (index, page) in pages.iter().enumerate() {
+                for label in [
+                    context.tx("Медицинская сводка", "Medizinische Zusammenfassung"),
+                    "P-DEMO-0042",
+                    context.tx("Дата рождения:", "Geburtsdatum:"),
+                    context.tx("Сформировал:", "Erstellt von:"),
+                ] {
+                    assert_eq!(page.contains(label), index == 0, "page {}: {label}", index + 1);
+                }
+                assert!(page.contains("contact@gmed-health.com"));
+                assert!(page.contains(&format!(
+                    "{} {} / {}",
+                    context.tx("Страница", "Seite"),
+                    index + 1,
+                    pages.len()
+                )));
+            }
+            if let Ok(dir) = std::env::var("GMED_CLINICAL_PDF_QA_DIR") {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join(if russian {
+                        "clinical-multipage-ru.pdf"
+                    } else {
+                        "clinical-multipage-de.pdf"
+                    }),
+                    bytes,
                 )
                 .unwrap();
             }
@@ -1222,9 +1289,10 @@ mod tests {
         let bytes = build_clinical_report_pdf(&context).unwrap();
         let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap();
         assert!(pages.len() > 4);
-        for page in &pages {
-            assert!(page.contains("P-DEMO-0042"));
+        for (index, page) in pages.iter().enumerate() {
+            assert_eq!(page.contains("P-DEMO-0042"), index == 0);
             assert!(page.contains("Страница"));
+            assert!(page.contains("contact@gmed-health.com"));
         }
         let text = pages.join("\n");
         // Headers interrupt sentences at page breaks, so count individual

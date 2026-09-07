@@ -298,6 +298,10 @@ async function installSecureChatApiMocks(
       return json(route, buildConversations());
     }
 
+    if (path === "/messages/unread-total") {
+      return json(route, { count: buildConversations().reduce((total, conversation) => total + conversation.unread, 0) });
+    }
+
     if (path === "/messages/allowed-peers") {
       const search = url.searchParams.get("search")?.toLowerCase().trim();
       const candidates = [
@@ -482,15 +486,100 @@ async function installSecureChatApiMocks(
 }
 
 test.describe("chat secure flows", () => {
-  async function openCeoChat(page: Page) {
+  async function openCeoChat(page: Page, openConversation = true) {
     await page.goto("/login");
     await page.locator("#email").fill("admin@gmed.de");
     await page.locator("#password").fill("admin123");
     await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
     await page.waitForURL(/\/$/);
     await page.goto("/chat");
-    await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
+    if (openConversation) await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
   }
+
+  test("opening a conversation clears both unread badges despite unavailable already-read history and no websocket", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    const incoming = api.getMessages()[0];
+    api.setMessages([{ ...incoming, id: "old-unavailable", created_at: "2026-04-12T09:00:00Z",
+      is_read: true, read_at: "2026-04-12T10:00:00Z", is_e2e: true, message: null,
+      recipient_key_fingerprint: "missing-historical-key", sender_key_fingerprint: "missing-peer-key" }, incoming]);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await openCeoChat(page, false);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    const nav = page.locator('a[href="/chat"]').filter({ visible: true }).first();
+    await expect(conversation.getByText("1", { exact: true })).toBeVisible();
+    await expect(nav.getByText("1", { exact: true })).toBeVisible();
+    await conversation.click();
+    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+    await expect(nav.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+    expect(api.getMessages().every(message => message.is_read)).toBe(true);
+  });
+
+  test("a rejected read receipt keeps both unread badges and clicking the active conversation retries", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    let reject = true;
+    let attempts = 0;
+    await page.route(`**/messages/${api.peerId}/read`, route => {
+      attempts++;
+      return reject ? json(route, { message: "Temporarily unavailable" }, 503) : route.fallback();
+    });
+    await openCeoChat(page);
+    await expect.poll(() => attempts).toBeGreaterThan(0);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    const nav = page.locator('a[href="/chat"]').filter({ visible: true }).first();
+    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("1", { exact: true })).toBeVisible();
+    await expect(nav.getByText("1", { exact: true })).toBeVisible();
+    reject = false;
+    await conversation.click();
+    await expect(conversation.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+    await expect(nav.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("a stale counter response cannot restore unread badges after a successful read receipt", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await openCeoChat(page, false);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    const nav = page.locator('a[href="/chat"]').filter({ visible: true }).first();
+    await expect(nav.getByText("1", { exact: true })).toBeVisible();
+    let release!: () => void;
+    let requested = false;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    await page.route("**/messages/unread-total", async route => {
+      if (requested) return route.fallback();
+      requested = true;
+      await pending;
+      return json(route, { count: 1, stale: true });
+    });
+    try {
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(() => requested).toBe(true);
+      await conversation.click();
+      await expect(nav.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+      const oldResponse = page.waitForResponse(async response => response.url().endsWith("/messages/unread-total") && (await response.json()).stale === true);
+      release();
+      await oldResponse;
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expect(nav.getByText("1", { exact: true })).toHaveCount(0);
+    } finally { release(); }
+  });
+
+  test("a successful read receipt clears the conversation badge even if refreshing the list fails", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await page.route("**/messages/conversations", route => api.getMessages().every(message => message.is_read)
+      ? json(route, { message: "Temporary list failure" }, 503) : route.fallback());
+    await openCeoChat(page);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    await expect(conversation.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
+    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+  });
 
   test("a newly signed-in CEO registers a device key before visiting chat", async ({ page }) => {
     const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);

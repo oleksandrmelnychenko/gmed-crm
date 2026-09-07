@@ -1879,9 +1879,6 @@ function useContractsPageContent() {
     try {
       await updateQuoteStatus(selectedQuoteId, {
         status: quoteStatusForm.status,
-        paid_amount: toOptional(quoteStatusForm.paidAmount)
-          ? Number(quoteStatusForm.paidAmount)
-          : null,
         notes: toOptional(quoteStatusForm.notes),
       });
       setQuotesReloadToken((current) => current + 1);
@@ -3122,10 +3119,8 @@ function useContractsPageContent() {
                             step="0.01"
                             min="0"
                             className={shellInputClassName}
-                            value={quoteStatusForm.paidAmount}
-                            onChange={(event) =>
-                              setQuoteStatusForm((current) => ({ ...current, paidAmount: event.target.value }))
-                            }
+                            value={String(quoteDetail?.paid_amount ?? "0")}
+                            readOnly
                           />
                         </Field>
                         <Field label={t.contracts_notes} className="sm:col-span-2">

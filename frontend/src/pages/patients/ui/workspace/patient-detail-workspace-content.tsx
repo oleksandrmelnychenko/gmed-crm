@@ -53,13 +53,14 @@ import {
   fetchClinicalDocumentImports,
   type ClinicalDocumentImportSummary,
 } from "../../data/clinical-document-import";
-import { buildPatientOrderCreateHref } from "../../model/patient-order-navigation";
 import {
   functionalLabelChipClass,
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
 import { ClinicalReportPdfAction } from "../sections/clinical-report-pdf-action";
+import { LabResultsPdfAction } from "../sections/lab-results-pdf-action";
+import { MedicationPlanPdfAction } from "../sections/medication-plan-pdf-action";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -74,6 +75,10 @@ const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
 const loadPatientWorkflowTab = () => import("../sections/patient-workflow-section");
 const loadPatientTimelineTab = () => import("../sections/patient-timeline-section");
 const loadLeadWizard = () => import("@/pages/leads/ui/lead-wizard");
+const LazyPatientOrderCreateSheet = lazy(async () => {
+  const mod = await import("../sheets/patient-order-create-sheet");
+  return { default: mod.PatientOrderCreateSheet };
+});
 
 const LazyPatientProfileTab = lazy(async () => {
   const mod = await loadPatientProfileTab();
@@ -556,6 +561,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
   const [accountStatementLoading, setAccountStatementLoading] = useState(false);
   const [repeatIntakeOpen, setRepeatIntakeOpen] = useState(false);
+  const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -619,7 +625,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       void fetchClinicalDocumentImports(id)
         .then(({ items }) => {
           if (cancelled) return;
-          setClinicalImports(items);
+          setClinicalImports(Array.isArray(items) ? items : []);
         })
         .catch(() => undefined);
     };
@@ -708,7 +714,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             </span>
           </button>
         ) : null}
-        {canViewClinical && id ? <ClinicalReportPdfAction patientId={id} /> : null}
+        {canViewClinical && id ? (
+          <>
+            <ClinicalReportPdfAction patientId={id} />
+            <LabResultsPdfAction patientId={id} className="h-9 px-3.5" />
+            <MedicationPlanPdfAction patientId={id} lang={lang} className="h-9 px-3.5" />
+          </>
+        ) : null}
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
@@ -824,6 +836,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onLegalStatusSheetOpenChange={onLegalStatusSheetOpenChange}
               onNotesSheetOpenChange={onNotesSheetOpenChange}
               onOpenTab={handleWorkspaceTabChange}
+              onCreateOrder={() => setCreateOrderOpen(true)}
               openProfileEditor={onOpenProfileEditor}
               patientDetailStatusLabel={patientDetailStatusLabel}
               reload={reload}
@@ -874,7 +887,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               emptyLabel={emptyOrdersLabel}
               formatDate={formatDate}
               onCreateOrder={canCreateOrders && id
-                ? () => staffGo(buildPatientOrderCreateHref(id))
+                ? () => setCreateOrderOpen(true)
                 : undefined}
               onOpenOrder={onOpenOrder}
               orderPhaseLabel={orderPhaseLabel}
@@ -1083,6 +1096,20 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           ) : null}
         </Suspense>
       </Tabs>
+
+      {createOrderOpen && canCreateOrders ? (
+        <Suspense fallback={<TabLoader />}>
+          <LazyPatientOrderCreateSheet
+            key={detail.id}
+            patient={detail}
+            onClose={() => setCreateOrderOpen(false)}
+            onCreated={() => {
+              setCreateOrderOpen(false);
+              reload();
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       {repeatIntakeOpen ? (
         <Suspense

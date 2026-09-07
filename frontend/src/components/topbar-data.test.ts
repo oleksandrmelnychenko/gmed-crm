@@ -16,6 +16,14 @@ const queueLead = (id: string, createdAt: string) => ({
   created_at: createdAt,
 });
 
+it("renders payment deadlines as localized follow-up notices with the correct currency", () => {
+  const notice = { kind: "order_payment_status", body: JSON.stringify({order_number:"A-1",payment_status:"overdue",received_amount:"40",remaining_amount:"60",currency:"USD"}) } as Notification;
+  const copy = localizedNotificationCopy(notice,"de");
+  expect(copy.title).toContain("Zahlungsfrist überschritten");
+  expect(copy.body).toContain("60,00 $");
+  expect(localizedNotificationCopy(notice,"ru").title).toContain("Срок оплаты истёк");
+});
+
 describe("oldestNewLead", () => {
   it("selects the earliest unprocessed lead for FIFO handling", () => {
     expect(

@@ -66,6 +66,7 @@ async fn main() {
     .with_document_signatures(signature_provider);
     gmed_server::document_signatures::spawn_worker(app_state.clone());
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());
+    gmed_server::services::order_payment_tracking::spawn_scheduler(app_state.clone());
     gmed_server::routes::cases::spawn_medication_expiry_scheduler(app_state.clone());
     gmed_server::routes::orders::spawn_external_invoice_deadline_scheduler(app_state.clone());
     gmed_server::routes::appointments::spawn_interpreter_report_billing_sync_scheduler(

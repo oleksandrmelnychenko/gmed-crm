@@ -30,7 +30,7 @@ async function mount(page: Page, lang: "ru" | "de", view = "overview", empty = f
 }
 
 for (const lang of ["ru", "de"] as const) {
-  test(`medication PDF downloads from overview and clinical section in ${lang}`, async ({page}) => {
+  test(`medication PDF action downloads above overview and clinical content in ${lang}`, async ({page}) => {
     const pdf = await readFile("public/demo/datev/demo-datev-001.pdf");
     for (const view of ["overview", "clinical"]) {
       await page.setViewportSize({width: view === "overview" ? 1440 : 390, height: 1000});
@@ -80,7 +80,10 @@ test("PDF export prevents duplicate requests and recovers after an error", async
   await expect(button).toBeEnabled();
 });
 
-test("empty medication section does not offer an empty PDF download", async ({page}) => {
+test("medication PDF action explains when the patient has no current medications", async ({page}) => {
   const button = await mount(page, "de", "overview", true);
-  await expect(button).toBeDisabled();
+  await page.route("**/medikationsplan.pdf?*", route => route.fulfill({status: 422, contentType: "application/json", body: '{"error":"Unprocessable Entity","message":"medication_plan_empty"}'}));
+  await button.click();
+  await expect(page.getByText("Keine aktuellen Medikamente für den Medikationsplan vorhanden.")).toBeVisible();
+  await expect(button).toBeEnabled();
 });

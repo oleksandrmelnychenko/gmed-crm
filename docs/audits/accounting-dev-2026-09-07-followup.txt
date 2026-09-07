@@ -1,0 +1,14 @@
+BEGIN
+SET
+quotes|KV-20260721-0009|accepted|A-20260714-0015|200|2026-07-21|1600.00|2
+quotes|KV-20260721-0020|accepted|A-20260714-0015|1|2026-07-21|1600.00|2
+quotes|KV-20260904-0028|accepted|A-20260904-0022|100|2026-09-04|0|0
+quotes|KV-20260905-0030|accepted|A-20260904-0022|100|2026-09-05|0|0
+ledger_sources|external_invoice_payment|expense|350.00|2026-07-15|f|f|f|
+ledger_sources|invoice_payment|income|1200.00|2026-07-18|t|f|f|
+ledger_sources|external_invoice_payment|expense|180.00|2026-07-24|f|f|f|
+ledger_sources|invoice_payment|income|400.00|2026-07-30|t|f|f|
+ledger_sources|external_invoice_payment|expense|93.42|2026-09-06|f|t|t|11280360012511
+orphan_expense|2|530.00
+quote_amount_snapshots|A-20260711-0012|3445.05|KV-20260711-0004|1190|draft
+COMMIT

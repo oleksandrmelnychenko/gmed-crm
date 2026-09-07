@@ -163,7 +163,7 @@ type RouteRule = {
   };
 };
 
-export type StaffNavSection = "main" | "crm" | "medicine" | "admin";
+export type StaffNavSection = "main" | "crm" | "medicine" | "accounting" | "admin";
 export type PatientPortalNavItem = {
   id: string;
   to: string;
@@ -200,6 +200,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/task-manager",
     roles: ROLES_TASK_MANAGER,
     nav: { section: "main", labelKey: "nav_task_manager" },
+  },
+  {
+    id: "projects",
+    match: "exact",
+    path: "/projects",
+    roles: ROLES_PROJECTS,
+    nav: { section: "main", labelKey: "nav_projects", after: "task-manager" },
   },
   {
     id: "admin/access",
@@ -283,7 +290,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/datev",
     roles: ROLES_ADMIN,
-    nav: { section: "admin", labelKey: "nav_datev", after: "admin/settings" },
+    nav: { section: "accounting", labelKey: "nav_datev", after: "finance-catalog" },
   },
   { id: "admin", match: "prefix", path: "/admin", roles: ROLES_ADMIN },
   {
@@ -312,24 +319,17 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/specializations",
     roles: ROLES_SPECIALIZATIONS,
     nav: {
-      section: "crm",
+      section: "medicine",
       labelKey: "nav_specializations",
-      after: "files",
+      after: "employees",
     },
   },
   {
-    id: "documents",
-    match: "prefix",
-    path: "/documents",
-    roles: ROLES_DOCUMENTS,
-    nav: { section: "crm", labelKey: "nav_documents" },
-  },
-  {
-    id: "files",
+    id: "medications",
     match: "exact",
-    path: "/files",
-    roles: ROLES_FILES,
-    nav: { section: "crm", labelKey: "nav_files", after: "documents" },
+    path: "/medications",
+    roles: ["ceo"],
+    nav: { section: "medicine", labelKey: "nav_medications", after: "specializations" },
   },
   {
     id: "chat",
@@ -366,36 +366,18 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ["ceo"],
   },
   {
-    id: "contracts",
+    id: "leads",
     match: "exact",
-    path: "/contracts",
-    roles: ROLES_CONTRACTS_INVOICES,
-    nav: { section: "crm", labelKey: "nav_contracts" },
+    path: "/leads",
+    roles: ROLES_LEADS,
+    nav: { section: "crm", labelKey: "leads_title" },
   },
   {
-    id: "invoices",
-    match: "exact",
-    path: "/invoices",
-    roles: ROLES_CONTRACTS_INVOICES,
-    nav: { section: "crm", labelKey: "nav_invoices" },
-  },
-  {
-    id: "company-finance",
-    match: "exact",
-    path: "/company-finance",
-    roles: ROLES_REPORTS,
-    nav: {
-      section: "crm",
-      labelKey: "nav_company_finance",
-      after: "invoices",
-    },
-  },
-  {
-    id: "finance-catalog",
-    match: "exact",
-    path: "/finance-catalog",
-    roles: ROLES_FINANCE_CATALOG,
-    nav: { section: "crm", labelKey: "nav_finance_catalog" },
+    id: "patients",
+    match: "prefix",
+    path: "/patients",
+    roles: ROLES_PATIENTS,
+    nav: { section: "crm", labelKey: "patients_title" },
   },
   {
     id: "orders",
@@ -405,18 +387,64 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "crm", labelKey: "orders_title" },
   },
   {
-    id: "leads",
+    id: "contracts",
     match: "exact",
-    path: "/leads",
-    roles: ROLES_LEADS,
-    nav: { section: "crm", labelKey: "leads_title" },
+    path: "/contracts",
+    roles: ROLES_CONTRACTS_INVOICES,
+    nav: { section: "crm", labelKey: "nav_contracts" },
   },
   {
-    id: "projects",
+    id: "providers",
+    match: "prefix",
+    path: "/providers",
+    roles: ROLES_PROVIDERS,
+    nav: { section: "crm", labelKey: "nav_providers" },
+  },
+  {
+    id: "services",
     match: "exact",
-    path: "/projects",
-    roles: ROLES_PROJECTS,
-    nav: { section: "crm", labelKey: "nav_projects", after: "leads" },
+    path: "/services",
+    roles: ROLES_SERVICES,
+    nav: { section: "crm", labelKey: "nav_my_services" },
+  },
+  {
+    id: "documents",
+    match: "prefix",
+    path: "/documents",
+    roles: ROLES_DOCUMENTS,
+    nav: { section: "crm", labelKey: "nav_documents" },
+  },
+  {
+    id: "files",
+    match: "exact",
+    path: "/files",
+    roles: ROLES_FILES,
+    nav: { section: "crm", labelKey: "nav_files", after: "documents" },
+  },
+  {
+    id: "invoices",
+    match: "exact",
+    path: "/invoices",
+    roles: ROLES_CONTRACTS_INVOICES,
+    nav: { section: "accounting", labelKey: "nav_invoices" },
+  },
+  {
+    id: "company-finance",
+    match: "exact",
+    path: "/company-finance",
+    roles: ROLES_REPORTS,
+    nav: {
+      section: "accounting",
+      labelKey: "nav_company_finance",
+      after: "invoices",
+    },
+  },
+  {
+    id: "finance-catalog",
+    match: "exact",
+    path: "/finance-catalog",
+    roles: ROLES_FINANCE_CATALOG,
+    nav: { section: "accounting", labelKey: "nav_finance_catalog" },
   },
   {
     id: "cases",
@@ -430,27 +458,6 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/sops",
     roles: ROLES_SOPS,
     nav: { section: "main", labelKey: "nav_learning" },
-  },
-  {
-    id: "providers",
-    match: "prefix",
-    path: "/providers",
-    roles: ROLES_PROVIDERS,
-    nav: { section: "crm", labelKey: "nav_providers" },
-  },
-  {
-    id: "patients",
-    match: "prefix",
-    path: "/patients",
-    roles: ROLES_PATIENTS,
-    nav: { section: "crm", labelKey: "patients_title" },
-  },
-  {
-    id: "services",
-    match: "exact",
-    path: "/services",
-    roles: ROLES_SERVICES,
-    nav: { section: "crm", labelKey: "nav_my_services" },
   },
   {
     id: "privacy",

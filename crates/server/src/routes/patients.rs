@@ -11106,6 +11106,9 @@ struct PatientDiagnosisInput {
 
 #[derive(Deserialize)]
 struct PatientMedicationInput {
+    /// Explicit review of this exact pair; absent for imported or unreviewed names.
+    #[serde(default)]
+    name_pair_confirmation: Option<super::medication_names::PairInput>,
     #[serde(default)]
     id: Option<String>,
     #[serde(default)]
@@ -12801,8 +12804,12 @@ async fn save_patient_medications(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
-        if let Err(error) =
-            super::medication_names::remember_pair(&mut tx, &handelsname, &wirkstoff).await
+        if item
+            .name_pair_confirmation
+            .as_ref()
+            .is_some_and(|confirmation| confirmation.confirms(&handelsname, &wirkstoff))
+            && let Err(error) =
+                super::medication_names::remember_pair(&mut tx, &handelsname, &wirkstoff).await
         {
             tracing::error!(%error, "remember medication name pair");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -14752,7 +14759,7 @@ async fn get_patient_lab_results_pdf(
         r#"SELECT lr.measured_at, lr.measured_at_precision, lr.panel, lr.laboratory_name,
                   lr.analyte_name, lr.result_text, lr.numeric_result, lr.comparator, lr.unit,
                   lr.reference_text, lr.reference_low, lr.reference_high,
-                  lr.interpretation_note, lr.abnormal_flag, lr.source_page,
+                  lr.interpretation_note, lr.abnormal_flag, lr.source_document_id,
                   COALESCE(d.original_filename, d.auto_name) AS source_document_name
            FROM patient_lab_results lr
            LEFT JOIN documents d ON d.id = lr.source_document_id
@@ -14842,11 +14849,10 @@ async fn get_patient_lab_results_pdf(
             };
             let reference_text = text(row, "reference_text");
             let reference = if reference_text.trim().is_empty() {
-                [number(row, "reference_low"), number(row, "reference_high")]
-                    .into_iter()
-                    .filter(|value| !value.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" - ")
+                crate::services::patient_lab_results_pdf::format_reference_bounds(
+                    &number(row, "reference_low"),
+                    &number(row, "reference_high"),
+                )
             } else {
                 reference_text
             };
@@ -14858,22 +14864,10 @@ async fn get_patient_lab_results_pdf(
                 "abnormal" => tx("Отклонение", "Auffällig"),
                 _ => tx("Не определено", "Nicht bestimmt"),
             };
-            let mut notes = Vec::new();
-            let interpretation = text(row, "interpretation_note");
-            if !interpretation.trim().is_empty() {
-                notes.push(format!(
-                    "{}: {interpretation}",
-                    tx("Комментарий", "Kommentar")
-                ));
-            }
-            let source = text(row, "source_document_name");
-            if !source.trim().is_empty() {
-                notes.push(format!("{}: {source}", tx("Документ", "Dokument")));
-            }
-            if let Some(page) = row.try_get::<Option<i32>, _>("source_page").ok().flatten() {
-                notes.push(format!("{}: {page}", tx("Страница", "Seite")));
-            }
             crate::services::patient_lab_results_pdf::LabResultEntry {
+                measured_date: measured_at.date_naive(),
+                source_document_id: row.try_get::<Option<Uuid>, _>("source_document_id").ok().flatten(),
+                source_document_name: text(row, "source_document_name"),
                 cells: [
                     measured,
                     text(row, "panel"),
@@ -14883,9 +14877,15 @@ async fn get_patient_lab_results_pdf(
                     text(row, "unit"),
                     reference,
                     localized_flag.into(),
-                    notes.join("\n"),
+                    text(row, "interpretation_note"),
                 ],
-                abnormal: !matches!(flag.as_str(), "normal" | "unknown" | ""),
+                flag: match flag.as_str() {
+                    "normal" => crate::services::patient_lab_results_pdf::LabResultFlag::Normal,
+                    "low" | "high" | "abnormal" => {
+                        crate::services::patient_lab_results_pdf::LabResultFlag::Abnormal
+                    }
+                    _ => crate::services::patient_lab_results_pdf::LabResultFlag::Unknown,
+                },
             }
         })
         .collect();
@@ -15084,10 +15084,7 @@ async fn get_patient_medikationsplan_pdf(
                 .collect::<Vec<_>>()
                 .join(" ");
             if !prescribed_by.is_empty() {
-                notes.push(format!(
-                    "{}: {prescribed_by}",
-                    tx("Назначивший врач", "Verordnender Arzt")
-                ));
+                notes.push(prescribed_by);
             }
             for (key, label) in [
                 ("einnahme_von", tx("Приём с", "Einnahme ab")),

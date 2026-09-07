@@ -21,7 +21,7 @@ const GROUP_ORDER: readonly OrderSectionGroup[] = [
   "commercial",
 ];
 
-export function OrderWorkspaceNav() {
+export function OrderWorkspaceNav({ mobile = false }: { mobile?: boolean }) {
   const { orderId } = useParams<{ orderId: string }>();
   const [searchParams] = useSearchParams();
   const { t, lang } = useLang();
@@ -29,6 +29,7 @@ export function OrderWorkspaceNav() {
   const patientContext = searchParams.get("patient");
   const providerContext = searchParams.get("provider");
   const doctorContext = searchParams.get("doctor");
+  const taxonomyContext = searchParams.get("taxonomy");
   const [orderPhase, setOrderPhase] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,6 +65,7 @@ export function OrderWorkspaceNav() {
     if (patientContext) params.set("patient", patientContext);
     if (providerContext) params.set("provider", providerContext);
     if (doctorContext) params.set("doctor", doctorContext);
+    if (taxonomyContext) params.set("taxonomy", taxonomyContext);
     if (sectionKey !== "overview") params.set("section", sectionKey);
     const query = params.toString();
     return query ? `/orders/${orderId}?${query}` : `/orders/${orderId}`;
@@ -94,6 +96,29 @@ export function OrderWorkspaceNav() {
     }
     return acc;
   }, []);
+
+  if (mobile) {
+    return (
+      <nav aria-label={t.orders_title} data-workspace-rail="order-mobile" className="mb-3 min-w-0 rounded-lg border border-border/70 bg-card p-2 lg:hidden">
+        <StaffLink to={backHref} className="mb-2 inline-flex items-center gap-1.5 px-1 text-xs text-muted-foreground">
+          <ArrowLeft aria-hidden className="size-3.5" />{backLabel}
+        </StaffLink>
+        <div className="flex gap-1 overflow-x-auto pb-1">
+          {groupedSections.flatMap(group => group.items).map(item => (
+            <StaffLink
+              key={item.key}
+              replace
+              to={buildSectionLink(item.key)}
+              aria-current={currentSection === item.key ? "page" : undefined}
+              className={cn("inline-flex h-8 shrink-0 items-center rounded-md px-3 text-xs font-medium", currentSection === item.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted")}
+            >
+              {orderSectionLabel(item, lang)}
+            </StaffLink>
+          ))}
+        </div>
+      </nav>
+    );
+  }
 
   return (
     <aside

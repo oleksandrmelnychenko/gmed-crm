@@ -4,6 +4,28 @@ import { preferPersistedCommercialLines, resolveServiceDescriptionItems, resolve
 import type { Leistung } from "@/pages/orders/model/types";
 
 describe("lead wizard service document descriptions", () => {
+  const catalogTemplate = "Individuelle Beratung und Informationsvermittlung in Bezug auf eine Möglichkeit eine medizinische Untersuchung bei den Fachärzten für [Fachrichtung 1], [Fachrichtung 2], [Fachrichtung 3], [Fachrichtung n], und [Fachrichtung n+1] im Zeitraum [Datum Beginn] bis [Datum Ende] in München durchzuführen;";
+
+  it("binds the catalog's full specialty pattern once and reevaluates changed lead dates and specialties", () => {
+    const items = [{ id: "consultation", text: catalogTemplate }, { id: "administration", text: "Administrative Unterstützung;\nWeitere Leistungen;" }];
+    const first = resolveServiceDescriptionItems(items, {
+      dateFrom: "2026-09-10", dateTo: "2026-09-17", specialties: ["Dermatologie", "Orthopädie", "Dermatologie"],
+    });
+    expect(first[0].text).toBe("Individuelle Beratung und Informationsvermittlung in Bezug auf eine Möglichkeit eine medizinische Untersuchung bei den Fachärzten für Dermatologie und Orthopädie im Zeitraum 10.09.2026 bis 17.09.2026 in München durchzuführen;");
+    const changed = resolveServiceDescriptionItems(items, {
+      dateFrom: "2026-10-01", dateTo: "2026-10-05", specialties: ["Kardiologie"],
+    });
+    expect(changed[0].text).toContain("für Kardiologie im Zeitraum 01.10.2026 bis 05.10.2026");
+    expect(changed[1]).toEqual(items[1]);
+    expect(items[0].text).toBe(catalogTemplate);
+  });
+
+  it("accepts spacing in editable placeholders and inserts specialty names literally", () => {
+    expect(resolveServiceDescriptionTemplate(
+      "Für [ Fachrichtung 1 ], [Fachrichtung n + 1 ]: [ Datum Beginn ] bis [Datum Ende ]. [Unbekannt]",
+      { dateFrom: "2026-09-10", dateTo: "2026-09-17", specialties: ["Fachbereich $&"] },
+    )).toBe("Für Fachbereich $&: 10.09.2026 bis 17.09.2026. [Unbekannt]");
+  });
   it("keeps the order's description snapshot when catalog wording changes", () => {
     const descriptionItems = [{ id: "original", text: "Original\n\nwording" }];
     const [line] = preferPersistedCommercialLines([], [{

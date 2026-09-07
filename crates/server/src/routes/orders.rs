@@ -128,6 +128,7 @@ struct UpdateOrderCommercialBasisRequest {
     signed_agency: Option<bool>,
     prepayment_required: Option<bool>,
     prepayment_amount: Option<String>,
+    prepayment_due_at: Option<String>,
     needs_description: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
@@ -455,7 +456,9 @@ async fn list_orders(
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   o.total_estimated, o.signed_patient, o.signed_agency,
-                  o.prepayment_required, o.prepayment_amount, o.date_from, o.date_to, o.created_at,
+                  o.prepayment_required, o.prepayment_amount, o.prepayment_due_at, o.date_from, o.date_to, o.created_at,
+                  (SELECT jsonb_build_object('status',payment_status,'required_amount',required_amount::text,'received_amount',received_amount::text,'remaining_amount',remaining_amount::text,'currency',currency,'due_at',prepayment_due_at)
+                   FROM order_payment_tracking WHERE order_id=o.id) AS payment_tracking,
                   o.case_id, cs.case_id AS case_code,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
@@ -577,6 +580,8 @@ async fn list_orders(
                     "signed_agency": r.try_get::<bool, _>("signed_agency").unwrap_or(false),
                     "prepayment_required": r.try_get::<bool, _>("prepayment_required").unwrap_or(false),
                     "prepayment_amount": r.try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount").unwrap_or_default(),
+                    "prepayment_due_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default(),
+                    "payment_tracking": r.try_get::<Option<serde_json::Value>, _>("payment_tracking").unwrap_or_default(),
                     "date_from": r.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
                     "date_to": r.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
                     "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
@@ -663,7 +668,7 @@ async fn list_debt_management_queue(
                   COALESCE((
                     SELECT SUM(
                         CASE
-                            WHEN i.status NOT IN ('paid', 'cancelled')
+                            WHEN i.status NOT IN ('draft', 'paid', 'cancelled')
                             THEN GREATEST(
                                 i.total_gross
                                 - COALESCE(i.credited_amount, 0)
@@ -1216,7 +1221,7 @@ async fn load_order_process_readiness(
                   COALESCE(
                     SUM(
                         CASE
-                            WHEN status NOT IN ('paid', 'cancelled')
+                            WHEN status NOT IN ('draft', 'paid', 'cancelled')
                             THEN GREATEST(
                                 total_gross
                                 - COALESCE(credited_amount, 0)
@@ -1238,7 +1243,7 @@ async fn load_order_process_readiness(
                   COUNT(*) FILTER (
                     WHERE order_id = $2
                       AND invoice_type = 'advance'
-                      AND status <> 'cancelled'
+                      AND status NOT IN ('draft', 'cancelled')
                 ) AS advance_invoice_count,
                   COUNT(*) FILTER (
                     WHERE order_id = $2
@@ -1324,10 +1329,14 @@ async fn load_order_process_readiness(
     if !contract_gate_ready {
         blocking_reasons.push("Order signatures are still incomplete".to_string());
     }
-    if payment_gate_required && !payment_gate_ready {
-        blocking_reasons.push("Advance invoice exists but payment is still missing".to_string());
-    }
+    // Payment progress is tracked and notified independently of operational access.
 
+    let payment_tracking: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_build_object('status',payment_status,'required_amount',required_amount::text,'received_amount',received_amount::text,'remaining_amount',remaining_amount::text,'currency',currency,'due_at',prepayment_due_at) FROM order_payment_tracking WHERE order_id=$1"
+    ).bind(order_id).fetch_optional(&state.db).await.map_err(|error| {
+        tracing::error!(%error,"load order payment tracking");
+        err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load payment tracking")
+    })?.unwrap_or(serde_json::Value::Null);
     let execution_ready = blocking_reasons.is_empty();
 
     Ok(OrderProcessReadiness {
@@ -1351,6 +1360,7 @@ async fn load_order_process_readiness(
             "contract_gate_ready": contract_gate_ready,
             "signed_patient": signed_patient,
             "signed_agency": signed_agency,
+            "payment_tracking": payment_tracking,
             "payment_gate_required": payment_gate_required,
             "payment_gate_ready": payment_gate_ready,
             "advance_invoice_count": advance_invoice_count,
@@ -3966,6 +3976,19 @@ async fn update_order_commercial_basis(
         },
         None => None,
     };
+    let prepayment_due_patch = match body.prepayment_due_at.as_deref() {
+        None => None,
+        Some("") => Some(None),
+        Some(value) => match chrono::DateTime::parse_from_rfc3339(value) {
+            Ok(date) => Some(Some(date.with_timezone(&chrono::Utc))),
+            Err(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "prepayment_due_at must be an ISO date and time with timezone",
+                );
+            }
+        },
+    };
     let date_from_patch = match body.date_from.as_deref() {
         Some(value) => match parse_optional_order_date(Some(value)) {
             Ok(value) => Some(value),
@@ -4053,6 +4076,7 @@ async fn update_order_commercial_basis(
                  WHEN $6 IS FALSE THEN NULL
                  ELSE COALESCE($7, prepayment_amount)
              END,
+             prepayment_due_at = CASE WHEN $6 IS FALSE THEN NULL WHEN $13 THEN $14 ELSE prepayment_due_at END,
              needs_description = COALESCE($8, needs_description),
              date_from = CASE WHEN $9 THEN $10 ELSE date_from END,
              date_to = CASE WHEN $11 THEN $12 ELSE date_to END,
@@ -4086,7 +4110,7 @@ async fn update_order_commercial_basis(
            )
          RETURNING contract_id, total_estimated, signed_patient, signed_agency,
                    signed_patient_at, signed_agency_at, prepayment_required,
-                   prepayment_amount, signed_at,
+                   prepayment_amount, prepayment_due_at, signed_at,
                    date_from, date_to"#,
     )
     .bind(order_id)
@@ -4101,6 +4125,8 @@ async fn update_order_commercial_basis(
     .bind(date_from_patch.flatten())
     .bind(date_to_patch.is_some())
     .bind(date_to_patch.flatten())
+    .bind(prepayment_due_patch.is_some())
+    .bind(prepayment_due_patch.flatten())
     .fetch_optional(&state.db)
     .await
     {
@@ -4146,10 +4172,14 @@ async fn update_order_commercial_basis(
                     "signed_agency": signed_agency,
                     "prepayment_required": prepayment_required,
                     "prepayment_amount": prepayment_amount.map(|value| value.to_string()),
+                    "prepayment_due_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default(),
                     "date_from": date_from.map(|value| value.to_string()),
                     "date_to": date_to.map(|value| value.to_string()),
                 }),
             ));
+            if let Err(error) = crate::services::order_payment_tracking::sync_notifications(&state, Some(order_id)).await {
+                tracing::error!(%error, %order_id, "notify commercial payment deadline change");
+            }
             Json(serde_json::json!({
                 "ok": true,
                 "order_id": order_id,
@@ -4164,6 +4194,7 @@ async fn update_order_commercial_basis(
                 "signed_at": signed_at.map(|value| value.to_rfc3339()),
                 "prepayment_required": prepayment_required,
                 "prepayment_amount": prepayment_amount.map(|value| value.to_string()),
+                    "prepayment_due_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default(),
                 "date_from": date_from.map(|value| value.to_string()),
                 "date_to": date_to.map(|value| value.to_string()),
             }))

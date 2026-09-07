@@ -3,6 +3,7 @@ export type InvoiceBillingRelease = {
   billing_release_status: "pending" | "granted" | "denied";
   billing_release_note: string | null;
   package_coverage_status: string;
+  services?: Array<{ id: string; status: string }> | null;
 };
 export type InvoiceStatus =
   | "draft"
@@ -156,6 +157,7 @@ type InvoicePayer = {
 };
 
 export type InvoiceItem = {
+  currency?: string;
   id: string;
   quote_id: string | null;
   quote_number: string | null;
@@ -242,6 +244,8 @@ export type AccountingEntry = {
 };
 
 export type AccountingLedgerPayload = {
+  currency?: string;
+  available_currencies?: string[];
   year: number;
   summary: {
     income_gross: string;
@@ -278,6 +282,7 @@ export type OrderOption = {
 };
 
 export type QuoteOption = {
+  currency?: string;
   id: string;
   order_id: string;
   order_number: string;
@@ -285,6 +290,8 @@ export type QuoteOption = {
   patient_name: string;
   patient_pid: string;
   quote_number: string;
+  status?: string;
+  active_invoice_types?: string[];
   total_gross: unknown;
   line_items: InvoiceLineItem[];
 };

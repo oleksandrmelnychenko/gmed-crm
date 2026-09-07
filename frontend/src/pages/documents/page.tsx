@@ -93,6 +93,7 @@ import {
 import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, getLang, t as translateCatalog, uiText, useLang } from "@/lib/i18n";
+import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { PatientDocumentsPage } from "@/pages/patients/portal-documents-page";
@@ -563,40 +564,6 @@ function formatCreateShareError(
     return translations.documents_share_external_release_required;
   }
   return error.message;
-}
-
-function formatDocumentSourceLabel(
-  source?: string | null,
-  tr: ReturnType<typeof runtimeTranslations> = runtimeTranslations(),
-) {
-  const normalized = source?.trim().toLowerCase();
-  if (!normalized) return tr.common_not_set;
-
-  switch (normalized) {
-    case "patient_portal":
-      return tr.documents_patient_portal;
-    case "interpreter_upload":
-      return `${tr.role_interpreter} - ${tr.documents_upload}`;
-    case "patient_upload":
-      return `${tr.role_patient} - ${tr.documents_upload}`;
-    case "staff_upload":
-      return `${tr.activity_user} - ${tr.documents_upload}`;
-    case "upload":
-      return tr.documents_upload;
-    case "generated":
-    case "document_generation":
-    case "template":
-      return tr.documents_generate_from_template;
-    case "translation":
-    case "translation_request":
-      return tr.documents_translation_requests;
-    case "manual":
-      return tr.orders_billing_source_manual;
-    case "manual_intake":
-      return `${tr.orders_billing_source_manual} · ${tr.documents_upload}`;
-    default:
-      return formatUnknownValue(source, tr);
-  }
 }
 
 function formatExtractionMethodLabel(method?: string | null) {

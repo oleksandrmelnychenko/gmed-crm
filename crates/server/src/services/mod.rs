@@ -10,6 +10,7 @@ pub mod medication_evidence_reviews;
 pub mod medication_identity;
 pub mod medication_intelligence_sources;
 pub mod order_service_groups;
+pub mod order_payment_tracking;
 pub mod patient_clinical_pdf;
 pub mod patient_lab_results_pdf;
 pub mod patient_medication_pdf;

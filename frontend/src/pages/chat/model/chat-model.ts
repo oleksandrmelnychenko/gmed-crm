@@ -45,6 +45,13 @@ export function mergeChatMessages(current: Message[], incoming: Message[]) {
   ]);
 }
 
+export function canMarkLoadedMessagesRead(messages: Message[], myId: string) {
+  const unreadIncoming = messages.filter((message) => message.to_user === myId && !message.is_read);
+  // An unavailable historical message that was already read must not block
+  // newer readable messages. Do not acknowledge currently unread ciphertext.
+  return unreadIncoming.length > 0 && unreadIncoming.every((message) => !message.decryption_failed);
+}
+
 export function reconcileChatMessages(current: Message[], incoming: Message[], pageSize = 100) {
   const ordered = sortChatMessages(incoming);
   const oldest = ordered.at(-1);

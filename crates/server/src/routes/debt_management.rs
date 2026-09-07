@@ -108,7 +108,7 @@ pub(crate) async fn load_order_debt_management_state(
         .try_get("status")
         .unwrap_or_else(|_| "not_required".to_string());
     let effective_status = effective_status(&status, overdue_invoice_count);
-    let blocking = overdue_invoice_count > 0 || debt_status_is_open(&effective_status);
+    let blocking = false;
     let blocking_reason = build_blocking_reason(
         &effective_status,
         overdue_invoice_count,
@@ -117,13 +117,14 @@ pub(crate) async fn load_order_debt_management_state(
 
     Ok(OrderDebtManagementState {
         blocking,
-        blocking_reason: blocking_reason.clone(),
+        blocking_reason: None,
         payload: json!({
             "status": status,
             "effective_status": effective_status,
             "workflow_required": overdue_invoice_count > 0 || debt_status_is_open(&status),
             "blocking": blocking,
-            "blocking_reason": blocking_reason,
+            "blocking_reason": null,
+            "attention_reason": blocking_reason,
             "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
             "owner_user_id": row.try_get::<Option<Uuid>, _>("owner_user_id").unwrap_or_default(),
             "owner_name": row.try_get::<Option<String>, _>("owner_name").unwrap_or_default(),
@@ -155,7 +156,7 @@ pub(crate) async fn load_patient_debt_management_state(
                 COALESCE(
                     SUM(
                         CASE
-                            WHEN status NOT IN ('paid', 'cancelled')
+                            WHEN status NOT IN ('draft', 'paid', 'cancelled')
                             THEN GREATEST(
                                 total_gross
                                 - COALESCE(credited_amount, 0)
@@ -221,7 +222,7 @@ pub(crate) async fn load_patient_debt_management_state(
                     SELECT COALESCE(
                         SUM(
                             CASE
-                                WHEN i.status NOT IN ('paid', 'cancelled')
+                                WHEN i.status NOT IN ('draft', 'paid', 'cancelled')
                                 THEN GREATEST(
                                     i.total_gross
                                     - COALESCE(i.credited_amount, 0)
@@ -290,7 +291,7 @@ pub(crate) async fn load_patient_debt_management_state(
             "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
             "status": status,
             "effective_status": effective_status,
-            "blocking": order_overdue_invoice_count > 0 || debt_status_is_open(&effective_status),
+            "blocking": false,
             "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
             "owner_user_id": row.try_get::<Option<Uuid>, _>("owner_user_id").unwrap_or_default(),
             "owner_name": row.try_get::<Option<String>, _>("owner_name").unwrap_or_default(),
@@ -316,14 +317,10 @@ pub(crate) async fn load_patient_debt_management_state(
         effective_status(&status, order_overdue_invoice_count)
     });
 
-    let blocking = overdue_invoice_count > 0
-        || latest_effective_status
-            .as_deref()
-            .map(debt_status_is_open)
-            .unwrap_or(false);
+    let blocking = false;
     let blocking_reason = if overdue_invoice_count > 0 {
         Some(format!(
-            "{overdue_invoice_count} overdue invoice(s) keep the patient in debt-management hold"
+            "{overdue_invoice_count} overdue invoice(s) require payment follow-up"
         ))
     } else if let Some(status) = latest_effective_status {
         build_blocking_reason(&status, 0, None)
@@ -333,12 +330,13 @@ pub(crate) async fn load_patient_debt_management_state(
 
     Ok(PatientDebtManagementState {
         blocking,
-        blocking_reason: blocking_reason.clone(),
+        blocking_reason: None,
         overdue_invoice_count,
         outstanding_balance,
         payload: json!({
             "blocking": blocking,
-            "blocking_reason": blocking_reason,
+            "blocking_reason": null,
+            "attention_reason": blocking_reason,
             "overdue_invoice_count": overdue_invoice_count,
             "outstanding_balance": decimal_to_string(outstanding_balance),
             "latest_workflow": latest_payload,

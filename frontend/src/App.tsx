@@ -169,6 +169,10 @@ const FinanceCatalogPage = lazy(() =>
   })),
 );
 
+const MedicationsPage = lazy(() =>
+  import("@/pages/medications/page").then((module) => ({ default: module.MedicationsPage })),
+);
+
 const DocumentsPage = lazy(() =>
   import("@/pages/documents").then((module) => ({
     default: module.DocumentsPage,
@@ -412,6 +416,7 @@ function AppRoutes() {
             <Route path="invoices" element={<InvoicesPage />} />
             <Route path="company-finance" element={<CompanyFinancePage />} />
             <Route path="finance-catalog" element={<FinanceCatalogPage />} />
+            <Route path="medications" element={<MedicationsPage />} />
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/intake" element={<DocumentsPage />} />
             <Route path="documents/translation-requests" element={<DocumentsPage />} />

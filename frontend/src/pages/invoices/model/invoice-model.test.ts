@@ -6,8 +6,15 @@ import {
   createInvoiceLineSelection,
   invoiceLineQuantityAvailable,
   isInvoiceSelectionValid,
+  isQuoteAvailableForInvoice,
+  formatCurrency,
 } from "./invoice-model";
-import type { InvoiceLineItem } from "./types";
+import type { InvoiceLineItem, QuoteOption } from "./types";
+
+it("formats the invoice currency without converting or relabelling the amount", () => {
+  expect(formatCurrency("1234.56", "de-DE", "USD")).toBe("1.234,56 $");
+  expect(formatCurrency("1234.56", "ru-RU", "EUR")).toBe("1.234,56 €");
+});
 
 function line(overrides: Partial<InvoiceLineItem> = {}): InvoiceLineItem {
   return {
@@ -22,6 +29,34 @@ function line(overrides: Partial<InvoiceLineItem> = {}): InvoiceLineItem {
     ...overrides,
   };
 }
+
+describe("quotes available for invoicing", () => {
+  const quote: QuoteOption = { id: "quote", order_id: "order", order_number: "A-1", patient_id: "patient", patient_name: "Test", patient_pid: "P-1", quote_number: "KV-1", total_gross: "238", status: "accepted", line_items: [line()] };
+
+  it("hides fully billed scope, including paid final invoices, for every invoice type", () => {
+    for (const type of ["advance", "interim", "final"] as const) {
+      expect(isQuoteAvailableForInvoice({ ...quote, line_items: [line({ remaining_quantity: "0" })] }, type)).toBe(false);
+      expect(isQuoteAvailableForInvoice({ ...quote, active_invoice_types: ["final"] }, type)).toBe(false);
+    }
+  });
+
+  it("keeps a settlement after a paid advance but prevents a second advance", () => {
+    const prepaid = { ...quote, active_invoice_types: ["advance"] };
+    expect(isQuoteAvailableForInvoice(prepaid, "final")).toBe(true);
+    expect(isQuoteAvailableForInvoice(prepaid, "interim")).toBe(true);
+    expect(isQuoteAvailableForInvoice(prepaid, "advance")).toBe(false);
+  });
+
+  it("keeps remaining interim quantities and reopened scope after cancellation", () => {
+    expect(isQuoteAvailableForInvoice({ ...quote, active_invoice_types: ["interim"], line_items: [line({ remaining_quantity: "0.5" })] }, "final")).toBe(true);
+    expect(isQuoteAvailableForInvoice({ ...quote, active_invoice_types: [] }, "final")).toBe(true);
+  });
+
+  it("excludes rejected, expired and lead-only quotes", () => {
+    for (const status of ["rejected", "expired"]) expect(isQuoteAvailableForInvoice({ ...quote, status }, "final")).toBe(false);
+    expect(isQuoteAvailableForInvoice({ ...quote, patient_id: "" }, "final")).toBe(false);
+  });
+});
 
 describe("invoice creation totals", () => {
   it("shows net, VAT and gross for the actually selected quantities", () => {

@@ -1,0 +1,63 @@
+   Compiling gmed-server v0.1.0 (C:\Users\oleks\Developer\gmed\crates\server)
+    Finished `test` profile [unoptimized] target(s) in 2.63s
+     Running tests\accounting_audit_api.rs (target\debug\deps\accounting_audit_api-199c9e24347eafd2.exe)
+
+running 8 tests
+allocated=100.00, retained_cash=0, reversal_http=200 OK
+
+thread 'audit_allocated_advance_payment_reversal_must_be_blocked' (32720) panicked at crates\server\tests\accounting_audit_api.rs:326:5:
+assertion `left == right` failed: Must release the 100 allocation first: {"invoice":{"adjusted_total_gross":"100","available_prepayments":[],"balance_due":"100","contract_id":null,"created_at":"2026-09-07T19:06:05.883099+00:00","credit_balance":"0","credited_amount":"0","due_date":"2026-09-21","hide_amounts_from_patient":false,"id":"97bea230-5ed0-4f2c-b5a6-2b3fafff6a40","invoice_number":"INV-advance-7865c50481a8448c8ae8bca94102db88","invoice_type":"advance","issued_at":"2026-09-07T19:06:05.883099+00:00","line_items":[{"description":"Care service","is_cost_passthrough":false,"line_gross":"100","line_net":"84.03","line_vat":"15.97","quantity":"1","unit_price":"84.03","vat_rate":"19","vat_source":"legacy","vat_source_explanation":"VAT is a legacy snapshot on this service line at 19%."}],"line_items_visible_to_patient":true,"notes":"Payment journal test","order_id":"b072ee8a-75a7-48fc-a8e6-16a1fc8b3b8f","order_number":"ORD-accounting-audit-cc6f1e56798e4b6ba39e587b98dd7aa8","paid_amount":"0","paid_at":null,"patient_id":"9e4f8f75-cc02-45ee-ac11-f32054526a5d","patient_name":"Payment Journal","patient_pid":"PT-accounting-audit-cc6f1e56798e4b6ba39e587b98dd7aa8","payer":{"contact_email":null,"contact_name":null,"contact_phone":null,"contact_relationship":null,"notes":null,"patient_relation_id":null,"relation_patient_name":null,"relation_patient_pid":null,"relation_type":null,"updated_at":null},"pdf_visible_to_patient":true,"portal_visibility":{"amounts_visible_to_patient":true,"line_items_visible_to_patient":true,"pdf_visible_to_patient":true,"redaction_reason":null,"visible_to_patient":true},"portal_visible":true,"prepayment_allocations":[],"prepayment_applied_amount":"0","quote_id":null,"quote_number":null,"refundable_cash_amount":"0","status":"sent","supporting_documents":[],"total_gross":"100","total_net":"84.03","total_vat":"15.97","updated_at":"2026-09-07T19:06:20.074405+00:00","visibility_note":null,"visibility_updated_at":null},"reversal_transaction_id":"19b39e2a-9331-4149-8c9e-7f228730f4f1"}
+  left: 200
+ right: 409
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test audit_allocated_advance_payment_reversal_must_be_blocked ... FAILED
+
+thread 'audit_company_position_must_include_invoice_cash_credit' (15420) panicked at crates\server\tests\accounting_audit_api.rs:374:5:
+assertion `left == right` failed: Company position must agree with patient statement
+  left: None
+ right: Some(String("-40"))
+test audit_company_position_must_include_invoice_cash_credit ... FAILED
+test audit_control_partial_payment_replay_and_overpayment ... ok
+
+thread 'audit_draft_invoice_must_not_be_patient_debt' (29056) panicked at crates\server\tests\accounting_audit_api.rs:481:5:
+assertion `left == right` failed: An unpublished draft must not create patient debt
+  left: String("100")
+ right: "0"
+test audit_draft_invoice_must_not_be_patient_debt ... FAILED
+
+thread 'audit_invoice_must_expose_its_order_currency' (32000) panicked at crates\server\tests\accounting_audit_api.rs:516:5:
+assertion `left == right` failed: Invoice UI must receive the actual order currency
+  left: Null
+ right: "USD"
+test audit_invoice_must_expose_its_order_currency ... FAILED
+
+thread 'audit_payment_reversal_must_not_precede_receipt' (36736) panicked at crates\server\tests\accounting_audit_api.rs:407:5:
+Expected rejection of reversal before original receipt; got 200 OK: {"invoice":{"adjusted_total_gross":"100","available_prepayments":[],"balance_due":"100","contract_id":null,"created_at":"2026-09-07T19:07:26.361181+00:00","credit_balance":"0","credited_amount":"0","due_date":"2026-09-21","hide_amounts_from_patient":false,"id":"a1405e40-4066-493c-8525-ac494b4ee4b2","invoice_number":"INV-dates-4078459b7821470faebff62758f8996c","invoice_type":"final","issued_at":"2026-09-07T19:07:26.361181+00:00","line_items":[{"description":"Care service","is_cost_passthrough":false,"line_gross":"100","line_net":"84.03","line_vat":"15.97","quantity":"1","unit_price":"84.03","vat_rate":"19","vat_source":"legacy","vat_source_explanation":"VAT is a legacy snapshot on this service line at 19%."}],"line_items_visible_to_patient":true,"notes":"Payment journal test","order_id":"68e298ab-81eb-427a-a244-95d0efa20ad9","order_number":"ORD-accounting-audit-45095c74cf5c42da843d2e498e29a8e9","paid_amount":"0","paid_at":null,"patient_id":"8f11f0ff-3656-41f8-b3ca-cc8730a97acf","patient_name":"Payment Journal","patient_pid":"PT-accounting-audit-45095c74cf5c42da843d2e498e29a8e9","payer":{"contact_email":null,"contact_name":null,"contact_phone":null,"contact_relationship":null,"notes":null,"patient_relation_id":null,"relation_patient_name":null,"relation_patient_pid":null,"relation_type":null,"updated_at":null},"pdf_visible_to_patient":true,"portal_visibility":{"amounts_visible_to_patient":true,"line_items_visible_to_patient":true,"pdf_visible_to_patient":true,"redaction_reason":null,"visible_to_patient":true},"portal_visible":true,"prepayment_allocations":[],"prepayment_applied_amount":"0","quote_id":null,"quote_number":null,"refundable_cash_amount":"0","status":"sent","supporting_documents":[],"total_gross":"100","total_net":"84.03","total_vat":"15.97","updated_at":"2026-09-07T19:07:33.585385+00:00","visibility_note":null,"visibility_updated_at":null},"reversal_transaction_id":"b8faac2b-0572-49e8-984d-de596b79709d"}
+test audit_payment_reversal_must_not_precede_receipt ... FAILED
+
+thread 'audit_payment_reversal_must_use_original_financial_account' (28844) panicked at crates\server\tests\accounting_audit_api.rs:446:5:
+assertion `left == right` failed: Reversal must remove cash from the original account
+  left: aff6b25a-7eb2-48a1-9556-2d11aa7e8b07
+ right: 30932f86-7940-4204-8214-6afceda45a83
+test audit_payment_reversal_must_use_original_financial_account ... FAILED
+
+thread 'audit_refunded_invoice_must_reopen_after_credit_reversal' (28196) panicked at crates\server\tests\accounting_audit_api.rs:268:5:
+assertion `left == right` failed: 40 remains payable after refund and credit reversal
+  left: String("paid")
+ right: "partially_paid"
+test audit_refunded_invoice_must_reopen_after_credit_reversal ... FAILED
+
+failures:
+
+failures:
+    audit_allocated_advance_payment_reversal_must_be_blocked
+    audit_company_position_must_include_invoice_cash_credit
+    audit_draft_invoice_must_not_be_patient_debt
+    audit_invoice_must_expose_its_order_currency
+    audit_payment_reversal_must_not_precede_receipt
+    audit_payment_reversal_must_use_original_financial_account
+    audit_refunded_invoice_must_reopen_after_credit_reversal
+
+test result: FAILED. 1 passed; 7 failed; 0 ignored; 0 measured; 0 filtered out; finished in 131.24s
+
+error: test failed, to rerun pass `-p gmed-server --test accounting_audit_api`

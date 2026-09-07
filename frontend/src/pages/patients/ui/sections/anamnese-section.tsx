@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -618,7 +619,7 @@ export function AnamneseSection({
                 {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                 <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
               </span>
-              <input
+              <Input
                 type="datetime-local"
                 required
                 aria-invalid={anamnesisTimeMissing}

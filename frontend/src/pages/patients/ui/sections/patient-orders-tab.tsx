@@ -4,10 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
-import {
-  DataTablePager,
-  useDataTablePagination,
-} from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   EmptyCell,
@@ -61,10 +57,6 @@ export function PatientOrdersTab({
 }: PatientOrdersTabProps) {
   const { t: dict, lang } = useLang();
   const labelLang = lang === "de" ? "de" : "ru";
-  const pagination = useDataTablePagination(
-    orders,
-    orders.map((item) => item.id).join(":"),
-  );
   const orderNumberLabel = dict.uiText["orders_auftrag"] ?? "orders_auftrag";
   const columns = useMemo<ColumnDef<OrderItem>[]>(
     () => [
@@ -228,23 +220,13 @@ export function PatientOrdersTab({
           <EmptyCell>{emptyLabel}</EmptyCell>
         ) : (
           <DataTableSurface
-            rows={pagination.pagedRows}
+            rows={orders}
+            pagination={{pageSize: 50, resetKey: orders.map((item) => item.id).join(":")}}
             columns={columns}
             rowId={(item) => item.id}
             dictionary={dict as unknown as Record<string, string>}
             emptyState={<EmptyCell>{emptyLabel}</EmptyCell>}
             onRowClick={(item) => onOpenOrder(item.id)}
-            toolbarAfter={
-              <DataTablePager
-                pageIndex={pagination.pageIndex}
-                pageSize={pagination.pageSize}
-                totalPages={pagination.totalPages}
-                totalRows={pagination.totalRows}
-                previousLabel={dict.pagination_previous}
-                nextLabel={dict.pagination_next}
-                onPageChange={pagination.onPageChange}
-              />
-            }
           />
         )}
     </TabsContent>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canMarkLoadedMessagesRead,
   chatMessageDateKey,
   isSameChatMessageGroup,
   mergeChatMessages,
@@ -19,6 +20,23 @@ function message(id: string, minute: number, overrides: Partial<Message> = {}): 
 }
 
 describe("chat synchronization", () => {
+  it("does not let already-read undecryptable history block a new readable message", () => {
+    expect(canMarkLoadedMessagesRead([
+      message("old", 1, { to_user: "me", is_read: true, decryption_failed: true }),
+      message("new", 2, { to_user: "me" }),
+    ], "me")).toBe(true);
+  });
+
+  it("does not acknowledge unread ciphertext or a page with no unread incoming messages", () => {
+    expect(canMarkLoadedMessagesRead([
+      message("new", 2, { to_user: "me", decryption_failed: true }),
+      message("readable", 3, { to_user: "me" }),
+    ], "me")).toBe(false);
+    expect(canMarkLoadedMessagesRead([message("outgoing", 2)], "me")).toBe(false);
+    expect(canMarkLoadedMessagesRead([message("read", 2, { to_user: "me", is_read: true })], "me")).toBe(false);
+    expect(canMarkLoadedMessagesRead([], "me")).toBe(false);
+  });
+
   it("keeps failed sends when refreshing and replaces the optimistic row by client id", () => {
     const failed = message("local-retry", 5, { client_message_id: "retry", delivery_state: "failed" });
     const sending = message("local-send", 6, { client_message_id: "send", delivery_state: "sending" });

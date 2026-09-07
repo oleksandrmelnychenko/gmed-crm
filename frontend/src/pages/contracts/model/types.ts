@@ -33,6 +33,7 @@ type QuoteLineItem = {
 };
 
 export type QuoteItem = {
+  currency?: string;
   id: string;
   order_id: string;
   order_number: string;

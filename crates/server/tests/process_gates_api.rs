@@ -429,7 +429,7 @@ async fn updating_lead_gates_allows_qualification_but_conversion_requires_onboar
 }
 
 #[tokio::test]
-async fn overdue_debt_blocks_execution_even_with_billing_release() {
+async fn overdue_debt_remains_visible_without_blocking_execution() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -523,17 +523,18 @@ async fn overdue_debt_blocks_execution_even_with_billing_release() {
         Some(json!({ "phase": "execution" })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["blocking_reasons"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| {
-                let reason = item.as_str().unwrap_or_default();
-                reason.contains("debt-management") || reason.contains("overdue invoice")
-            })
-    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["process_gates"]["debt_hold"], false);
+    assert_eq!(detail["process_gates"]["overdue_invoice_count"], 1);
 }
 
 #[tokio::test]
@@ -605,7 +606,7 @@ async fn debt_management_queue_and_order_detail_reflect_workflow_updates() {
         billing_id.to_string()
     );
     assert!(
-        gates["debt_management"]["blocking_reason"]
+        gates["debt_management"]["attention_reason"]
             .as_str()
             .unwrap_or_default()
             .contains("payment-plan")
@@ -843,7 +844,7 @@ async fn planning_preparation_blocks_execution_until_plan_slots_and_handoffs_are
 }
 
 #[tokio::test]
-async fn existing_customer_recheck_reports_missing_data_and_debt_hold() {
+async fn existing_customer_recheck_reports_missing_data_without_a_debt_hold() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -880,7 +881,7 @@ async fn existing_customer_recheck_reports_missing_data_and_debt_hold() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["can_create_order"], false);
     assert_eq!(body["base_data_ready"], false);
-    assert_eq!(body["debt_hold"], true);
+    assert_eq!(body["debt_hold"], false);
     assert_eq!(body["overdue_invoice_count"], 1);
     assert!(
         body["base_data_missing_fields"]
@@ -890,7 +891,7 @@ async fn existing_customer_recheck_reports_missing_data_and_debt_hold() {
             .any(|item| item == "country")
     );
     assert!(
-        body["blocking_reasons"]
+        !body["blocking_reasons"]
             .as_array()
             .unwrap()
             .iter()

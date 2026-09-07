@@ -1,0 +1,159 @@
+ set_config 
+------------
+ 
+(1 row)
+
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 53s
+     Running tests/accounting_audit_api.rs (target/debug/deps/accounting_audit_api-9f2f455de0538b8f)
+
+running 18 tests
+test accounting_migrations_must_bootstrap_from_empty_database ... ok
+allocated=100.00, retained_cash=100.00, reversal_http=409 Conflict
+test audit_allocated_advance_payment_reversal_must_be_blocked ... ok
+test audit_company_position_must_include_invoice_cash_credit ... ok
+test audit_control_partial_payment_replay_and_overpayment ... ok
+test audit_draft_invoice_cannot_consume_an_advance ... ok
+test audit_draft_invoice_must_not_be_patient_debt ... ok
+test audit_invoice_must_expose_its_order_currency ... ok
+test audit_ledger_keeps_currencies_separate ... ok
+test audit_orderless_expense_appears_in_patient_statement_and_summary ... ok
+test audit_partial_payments_must_preserve_invoice_vat_total ... ok
+test audit_payment_deadline_notifies_once_without_blocking_work ... ok
+test audit_payment_reversal_must_not_precede_receipt ... ok
+test audit_payment_reversal_must_use_original_financial_account ... ok
+test audit_quote_manual_flag_is_not_a_payment ... ok
+test audit_refund_reversal_preserves_original_account ... ok
+test audit_refunded_invoice_must_reopen_after_credit_reversal ... ok
+test audit_released_advance_remains_in_historical_statement ... ok
+test audit_reversal_preserves_exact_vat_and_inactive_account ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.37s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 03s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 2 tests
+test routes::invoices::tests::invoice_footer_includes_current_and_total_pages ... ok
+test routes::invoices::tests::invoice_pdf_preserves_cyrillic_text ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.17s
+
+    Finished `test` profile [unoptimized] target(s) in 0.33s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 26 tests
+test routes::leads::auto_purge_tests::active_patient_is_never_purged ... ok
+test routes::leads::auto_purge_tests::already_anonymized_sentinel_name_is_skipped ... ok
+test routes::leads::auto_purge_tests::already_marked_delete_anonymized_is_skipped ... ok
+test routes::leads::auto_purge_tests::archived_older_than_retention_is_purged ... ok
+test routes::leads::auto_purge_tests::boundary_at_exactly_retention_days_is_purged ... ok
+test routes::leads::auto_purge_tests::archived_within_retention_is_kept ... ok
+test routes::leads::auto_purge_tests::deleted_patient_is_never_purged_again ... ok
+test routes::leads::auto_purge_tests::converted_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::in_progress_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::inactive_patient_is_never_purged ... ok
+test routes::leads::auto_purge_tests::new_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::not_qualified_older_than_retention_is_purged ... ok
+test routes::leads::auto_purge_tests::prospect_of_converted_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::prospect_of_unconverted_lead_is_purged ... ok
+test routes::leads::lead_conversion_readiness_tests::address_is_not_required_before_healthcare_consent ... ok
+test routes::leads::lead_conversion_readiness_tests::complete_address_is_required_after_healthcare_consent ... ok
+test routes::leads::lead_conversion_readiness_tests::converted_patient_id_forces_conversion_ready_false ... ok
+test routes::leads::lead_conversion_readiness_tests::enhanced_due_diligence_country_detection_covers_blacklist_and_high_risk ... ok
+test routes::leads::lead_conversion_readiness_tests::conversion_readiness_is_true_for_fully_ready_qualified_lead ... ok
+test routes::leads::lead_conversion_readiness_tests::order_cost_estimate_document_is_required_for_conversion ... ok
+test routes::leads::lead_conversion_readiness_tests::enhanced_due_diligence_document_is_required_for_risk_country ... ok
+test routes::leads::lead_conversion_readiness_tests::signed_confidentiality_release_is_required_for_conversion ... ok
+test routes::leads::lead_conversion_readiness_tests::signed_lead_can_convert_while_awaiting_prepayment ... ok
+test routes::leads::questionnaire_mapping_tests::intake_language_uses_supported_code_or_locale_fallback ... ok
+test routes::leads::questionnaire_mapping_tests::questionnaire_country_codes_become_patient_country_names ... ok
+test routes::leads::questionnaire_mapping_tests::questionnaire_contacts_are_deduplicated_and_keep_whatsapp_context ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 261 filtered out; finished in 0.01s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 7.62s
+     Running tests/contracts_quotes_api.rs (target/debug/deps/contracts_quotes_api-9a156f687dc5693e)
+
+running 19 tests
+test agency_service_catalog_supports_create_read_only_visibility_and_update ... ok
+test billing_can_accept_an_unpaid_quote_but_interpreter_cannot_access_quote ... ok
+test ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes ... ok
+test ceo_can_manage_contracts_and_quotes_without_patient_assignment ... ok
+test create_order_rejects_contract_from_other_patient ... ok
+test framework_contract_can_be_completed_for_lead_without_creating_patient ... ok
+test framework_contract_create_list_and_sign_flow_work ... ok
+test framework_contract_create_returns_user_facing_patient_validation_errors ... ok
+test lead_order_and_service_are_idempotent_without_creating_patient ... ok
+test order_service_can_select_an_explicit_catalog_price_version ... ok
+test order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived ... ok
+test patient_contract_status_is_derived_across_multiple_framework_contracts ... ok
+test quote_commercial_invariants_use_persisted_order_lines ... ok
+test quote_creation_from_order_services_computes_totals_and_updates_order ... ok
+test quote_versions_capture_initial_and_status_update_snapshots ... ok
+test sales_and_concierge_cannot_access_agency_service_catalog ... ok
+test sales_and_concierge_cannot_access_contracts_or_quotes_workspaces ... ok
+test service_group_can_select_an_explicit_catalog_price_version ... ok
+test unused_agency_service_can_be_deleted ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 186.07s
+
+
+running 32 tests
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+test convert_lead_requires_patient_manager ... ok
+test convert_lead_requires_qualified ... ok
+test converted_lead_is_absent_from_registry_but_detail_remains_auditable ... ok
+test create_and_get_lead ... ok
+test create_lead_requires_name ... ok
+test failed_lead_purges_only_unconverted_prospect_and_preserves_attached_patient ... ok
+test full_lead_lifecycle ... ok
+test get_nonexistent_lead_returns_404 ... ok
+
+thread 'lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment' (394) panicked at crates/server/tests/leads_api.rs:1372:5:
+assertion `left == right` failed: {"error":"Conflict","message":"Patient-first lead requires a prospect patient before conversion"}
+  left: 409
+ right: 200
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment ... FAILED
+
+thread 'lead_order_draft_is_idempotent_before_patient_conversion' (398) panicked at crates/server/tests/leads_api.rs:2643:5:
+assertion `left == right` failed
+  left: String("100")
+ right: "175"
+test lead_order_draft_is_idempotent_before_patient_conversion ... FAILED
+test lead_readiness_normalizes_cost_passthrough_vat ... ok
+test leads_list_forbidden_for_billing ... ok
+test leads_list_forbidden_for_interpreter ... ok
+test leads_list_ok_for_ceo ... ok
+test leads_list_ok_for_patient_manager ... ok
+test leads_list_ok_for_sales ... ok
+test leads_list_requires_auth ... ok
+test list_leads_exposes_conversion_ready_field ... ok
+test patient_first_conversion_activates_the_prospect_and_keeps_case_provenance ... ok
+test public_lead_intake_stores_contact_form_submissions_as_leads ... ok
+test public_lead_intake_stores_wizard_submissions_as_questionnaire_leads ... ok
+test qualify_lead_flow ... ok
+test qualify_lead_invalid_status_rejected ... ok
+test ready_lead_conversion_atomically_transfers_onboarding_artifacts ... ok
+test returning_patient_attach_reuses_identity_without_overwriting_master_data ... ok
+test stats_forbidden_for_interpreter ... ok
+test stats_leads_by_status_returns_array ... ok
+test stats_leads_monthly_returns_array ... ok
+test stats_leads_returns_data ... ok
+test wizard_convert_requires_identity_basics ... ok
+test wizard_convert_uses_the_full_readiness_gate ... ok
+test wizard_lead_fields_round_trip_through_update ... ok
+
+failures:
+
+failures:
+    lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment
+    lead_order_draft_is_idempotent_before_patient_conversion
+
+test result: FAILED. 30 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 270.69s
+
+error: test failed, to rerun pass `-p gmed-server --test leads_api`

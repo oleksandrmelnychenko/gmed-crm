@@ -6,16 +6,19 @@ export type SignatureRequest = {
   id: string; status: SignatureStatus; test_mode: boolean; signers: Signer[];
   source_document_id?: string;
   result_document_id: string | null; has_report: boolean; last_error: string | null; created_at: string;
+  updated_at?: string;
+  can_withdraw?: boolean;
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };
 export type SignatureState = {
   enabled: boolean; region: "DE"; test_mode: boolean; can_send: boolean; can_configure: boolean;
   ineligible_reason: string | null; requests: SignatureRequest[];
   suggested_signers?: Signer[];
+  review_package?: { template: "privacy_information" | "cost_estimate"; documents: { id: string; title: string; version: number }[] } | null;
 };
 export const isSignaturePending = (status: SignatureStatus) => ["submitting", "submission_unknown", "pending"].includes(status);
 export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
-export const createSignatureRequest = (id: string, signers: Signer[]) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", body: JSON.stringify({ signers }) });
+export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}) }) });
 export const signatureAction = (id: string, action: "refresh" | "withdraw") => apiFetch(`/document-signature-requests/${id}/${action}`, { method: "POST" });
 export type SignatureConnection = { configured: boolean; region: "DE"; mode: "demo" | "live"; username: string | null; source: "database" | "environment" };
 export const fetchSignatureConnection = () => apiFetch<SignatureConnection>("/document-signatures/connection", { forceFresh: true });

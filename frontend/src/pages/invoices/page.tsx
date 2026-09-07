@@ -8,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -65,6 +66,7 @@ import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
+import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -281,8 +283,8 @@ async function downloadInvoicePdf(
   URL.revokeObjectURL(url);
 }
 
-async function downloadAccountingLedgerExport(year: string) {
-  const blob = await fetchAccountingLedgerExportBlob(year);
+async function downloadAccountingLedgerExport(year: string, currency: string) {
+  const blob = await fetchAccountingLedgerExportBlob(year, currency);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -398,7 +400,8 @@ function useStaffInvoicesPageContent() {
   const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const formatMoney = (value: unknown) => formatCurrency(value, locale);
+  const [accountingCurrency, setAccountingCurrency] = useState("EUR");
+  const formatMoney = (value: unknown, currency = "EUR") => formatCurrency(value, locale, currency);
   const text = {
     accessDenied: t.invoices_workspace_access_denied,
     workspaceKicker: t.invoices_workspace_kicker,
@@ -535,6 +538,10 @@ function useStaffInvoicesPageContent() {
     paymentReference: lang === "de" ? "Referenz" : "Референс",
     paymentDate: lang === "de" ? "Eingangsdatum" : "Дата поступления",
     paymentNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    importedOpeningPaymentNote:
+      lang === "de"
+        ? "Übernommener Anfangsbestand der Zahlungen"
+        : "Перенесённый начальный остаток оплаты",
     noPayments: lang === "de" ? "Noch keine Zahlungen erfasst." : "Платежей ещё нет.",
     reversal: lang === "de" ? "Stornierung" : "Сторнирование",
     reversePayment: lang === "de" ? "Zahlung stornieren" : "Сторнировать платёж",
@@ -887,12 +894,15 @@ function useStaffInvoicesPageContent() {
   const invoiceParam = searchParams.get("invoice") ?? "";
 
   useEffect(() => {
-    if (!selectedCreateQuote?.line_items.length || Object.keys(createForm.lineQuantities).length > 0) return;
+    if (!createOpen || !selectedCreateQuote?.line_items.length) return;
+    if (createForm.invoiceType !== "final" && Object.keys(createForm.lineQuantities).length > 0) return;
+    const selection = createInvoiceLineSelection(selectedCreateQuote.line_items, createForm.invoiceType);
+    if (!hasFormChanges({ selectedLineIndexes: createForm.selectedLineIndexes, lineQuantities: createForm.lineQuantities }, selection)) return;
     setCreateForm((current) => ({
       ...current,
-      ...createInvoiceLineSelection(selectedCreateQuote.line_items, current.invoiceType),
+      ...selection,
     }));
-  }, [createForm.invoiceType, createForm.lineQuantities, selectedCreateQuote]);
+  }, [createOpen, createForm.invoiceType, createForm.lineQuantities, createForm.selectedLineIndexes, selectedCreateQuote]);
 
   useEffect(() => {
     const firstAvailable = detail?.available_prepayments?.[0];
@@ -1099,7 +1109,7 @@ function useStaffInvoicesPageContent() {
         width: 140,
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
-            {formatMoney(row.paid_amount)}
+            {formatMoney(row.paid_amount, row.currency)}
           </span>
         ),
       },
@@ -1113,7 +1123,7 @@ function useStaffInvoicesPageContent() {
         width: 140,
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
-            {formatMoney(row.balance_due)}
+            {formatMoney(row.balance_due, row.currency)}
           </span>
         ),
       },
@@ -1127,7 +1137,7 @@ function useStaffInvoicesPageContent() {
         width: 150,
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
-            {formatMoney(row.total_gross)}
+            {formatMoney(row.total_gross, row.currency)}
           </span>
         ),
       },
@@ -1300,7 +1310,7 @@ function useStaffInvoicesPageContent() {
       width: 130,
       render: (row) => (
         <span className="block text-right tabular-nums text-foreground">
-          {formatMoney(row.amount_net)}
+          {formatMoney(row.amount_net, row.currency)}
         </span>
       ),
     },
@@ -1314,7 +1324,7 @@ function useStaffInvoicesPageContent() {
       width: 130,
       render: (row) => (
         <span className="block text-right tabular-nums text-foreground">
-          {formatMoney(row.amount_vat)}
+          {formatMoney(row.amount_vat, row.currency)}
         </span>
       ),
     },
@@ -1328,7 +1338,7 @@ function useStaffInvoicesPageContent() {
       width: 140,
       render: (row) => (
         <span className="block text-right tabular-nums text-foreground">
-          {formatMoney(row.amount_gross)}
+          {formatMoney(row.amount_gross, row.currency)}
         </span>
       ),
     },
@@ -1356,7 +1366,7 @@ function useStaffInvoicesPageContent() {
       width: 170,
       render: (row) => (
         <span className="block text-right tabular-nums text-foreground">
-          {formatMoney(row.income_gross)}
+          {formatMoney(row.income_gross, accountingLedger?.currency ?? accountingCurrency)}
         </span>
       ),
     },
@@ -1370,7 +1380,7 @@ function useStaffInvoicesPageContent() {
       width: 170,
       render: (row) => (
         <span className="block text-right tabular-nums text-foreground">
-          {formatMoney(row.expense_gross)}
+          {formatMoney(row.expense_gross, accountingLedger?.currency ?? accountingCurrency)}
         </span>
       ),
     },
@@ -1391,13 +1401,21 @@ function useStaffInvoicesPageContent() {
               value > 0 ? "text-emerald-700" : value < 0 ? "text-rose-700" : "text-foreground",
             )}
           >
-            {formatMoney(row.net_surplus)}
+            {formatMoney(row.net_surplus, accountingLedger?.currency ?? accountingCurrency)}
           </span>
         );
       },
     },
   ];
   const nextDunning = useMemo(() => nextDunningLevel(dunningEvents), [dunningEvents]);
+  const dunningRequestPending = useRef(false);
+  const dunningBlockKey = dunningBlockReason(
+    detailBusy || detailError || detail?.id !== selectedInvoiceId ? null : detail,
+  );
+  const canCreateDunning = access.canManage && !dunningBusy && !dunningBlockKey && !dunningError && Boolean(nextDunning);
+  const dunningActionLabel = nextDunning === "collections"
+    ? t.invoices_workspace_record_collections
+    : nextDunning ? text.createDunning : text.noFurtherEscalation;
   const accountingEntries = Array.isArray(accountingLedger?.entries) ? accountingLedger.entries : [];
   const accountingMonthly = Array.isArray(accountingLedger?.monthly) ? accountingLedger.monthly : [];
   const accountingEntriesPagination = useDataTablePagination(
@@ -1562,7 +1580,7 @@ function useStaffInvoicesPageContent() {
     async function loadAccountingLedger() {
       dispatchWorkspaceState({ accountingBusy: true });
       try {
-        const data = await fetchAccountingLedger(accountingYear);
+        const data = await fetchAccountingLedger(accountingYear, accountingCurrency);
         if (!ignore) {
           dispatchWorkspaceState({
             accountingLedger: data,
@@ -1584,7 +1602,7 @@ function useStaffInvoicesPageContent() {
     return () => {
       ignore = true;
     };
-  }, [access.canAccounting, accountingYear, reloadToken, t.common_error]);
+  }, [access.canAccounting, accountingYear, accountingCurrency, reloadToken, t.common_error]);
 
   async function handleCreateInvoice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1609,7 +1627,10 @@ function useStaffInvoicesPageContent() {
         due_date: createForm.dueDate || null,
         notes: createForm.notes.trim() || null,
         line_items: selectedLines,
-      }, selectedCreateQuote.order_id);
+      }, selectedCreateQuote.order_id, createForm.selectedLineIndexes.flatMap((index) => {
+        const id = selectedCreateQuote.line_items[index]?.source_order_leistung_id;
+        return id ? [id] : [];
+      }));
       clearApiCache();
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));
@@ -1869,7 +1890,8 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleCreateDunning() {
-    if (!selectedInvoiceId || !nextDunning) return;
+    if (!selectedInvoiceId || !nextDunning || !canCreateDunning || dunningRequestPending.current) return;
+    dunningRequestPending.current = true;
     setDunningBusy(true);
     try {
       const created = await createDunningEvent(selectedInvoiceId, {
@@ -1882,8 +1904,9 @@ function useStaffInvoicesPageContent() {
       setDunningError(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setDunningError(error instanceof Error ? error.message : t.common_error);
+      setDunningError(t[dunningErrorKey(error)]);
     } finally {
+      dunningRequestPending.current = false;
       setDunningBusy(false);
     }
   }
@@ -1942,6 +1965,8 @@ function useStaffInvoicesPageContent() {
                   type="button"
                   className="h-9 rounded-lg px-3.5"
                   onClick={() => {
+                    clearApiCache();
+                    setReloadToken((current) => current + 1);
                     setCreateForm(blankCreateForm(filters.quoteId));
                     setCreateError(null);
                     setCreateOpen(true);
@@ -2253,6 +2278,18 @@ function useStaffInvoicesPageContent() {
                         {titleWithDot(text.accountingTitle)}
                       </span>
                       <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
+                      <ToolbarField label={lang === "de" ? "Währung" : "Валюта"}>
+                        <select
+                          value={accountingCurrency}
+                          onChange={(event) => setAccountingCurrency(event.target.value)}
+                          aria-label={lang === "de" ? "Währung" : "Валюта"}
+                          className={cn(shellInputClassName, "h-8 w-24 rounded-md text-xs")}
+                        >
+                          {[...new Set([accountingCurrency, "EUR", ...(accountingLedger?.available_currencies ?? [])])].sort().map((currency) => (
+                            <option key={currency} value={currency}>{currency}</option>
+                          ))}
+                        </select>
+                      </ToolbarField>
                       <ToolbarField label={t.dash_this_year}>
                       <Input
                         type="number"
@@ -2279,7 +2316,7 @@ function useStaffInvoicesPageContent() {
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          void downloadAccountingLedgerExport(accountingYear).catch((error) =>
+                          void downloadAccountingLedgerExport(accountingYear, accountingCurrency).catch((error) =>
                             setAccountingError(
                               error instanceof Error ? error.message : t.common_error,
                             ),
@@ -2380,7 +2417,7 @@ function useStaffInvoicesPageContent() {
         onOpenChange={setCreateOpen}
         onFormChange={(value) => { setCreateForm(value); setCreateError(null); }}
         onSubmit={handleCreateInvoice}
-        onRetry={() => { clearApiCache(); setReloadToken((current) => current + 1); }}
+        onRetry={() => { setCreateError(null); clearApiCache(); setReloadToken((current) => current + 1); }}
       />
 
       <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => {
@@ -2404,7 +2441,7 @@ function useStaffInvoicesPageContent() {
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
               <div className="space-y-4 rounded-xl">
                 <section className="rounded-lg border border-border/70 bg-card">
-                  <div className="relative overflow-hidden p-3.5">
+                  <div className="relative overflow-hidden p-4">
                     <span
                       className={cn(
                         "absolute left-0 top-4 h-12 w-1 rounded-r-full",
@@ -2419,11 +2456,11 @@ function useStaffInvoicesPageContent() {
                     />
                     <div className="grid gap-4 pl-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="h-px w-8 bg-border" />
+                        <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge tone={statusBadgeClass(detail.status)}>
                             {invoiceStatusLabel(detail.status)}
                           </StatusBadge>
+                          <Badge variant="outline" className="rounded-full font-mono text-xs">{invoiceTypeLabel(detail.invoice_type)}</Badge>
                         </div>
                         <h3 className="mt-2 text-lg font-semibold leading-none text-foreground">
                           {detail.patient_name}
@@ -2433,14 +2470,9 @@ function useStaffInvoicesPageContent() {
                             .filter(Boolean)
                             .join(" - ")}
                         </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Badge variant="outline" className="rounded-full">
-                            {invoiceTypeLabel(detail.invoice_type)}
-                          </Badge>
-                        </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-3 border-t border-dashed border-border pt-3">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-orange-50 text-orange-700">
+                      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                           <FileText aria-hidden="true" className="size-4" />
                         </div>
                         <div className="min-w-[12rem] flex-1">
@@ -2451,10 +2483,10 @@ function useStaffInvoicesPageContent() {
                             {invoiceTypeLabel(detail.invoice_type)} · PDF
                           </p>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <Button
                             type="button"
-                            variant="outline"
+                            variant="default"
                             size="sm"
                             className="h-8 gap-1.5 rounded-lg"
                             disabled={invoicePdfPreviewBusy}
@@ -2507,50 +2539,50 @@ function useStaffInvoicesPageContent() {
                     </Button>
                   }
                 >
-                  <div className="space-y-5">
-                    <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="grid gap-x-5 sm:grid-cols-2">
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number} />
                       <SummaryLine label={text.createQuoteSection} value={detail.quote_number ?? t.common_not_set} />
                       <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
-                      <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross)} />
+                      <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross, detail?.currency)} />
                       {Number(detail.credited_amount ?? 0) > 0 ? (
                         <SummaryLine
                           label={lang === "de" ? "Gutschriften" : "Кредит-ноты"}
-                          value={`−${formatMoney(detail.credited_amount)}`}
+                          value={`−${formatMoney(detail.credited_amount, detail?.currency)}`}
                         />
                       ) : null}
                       {Number(detail.credited_amount ?? 0) > 0 ? (
                         <SummaryLine
                           label={lang === "de" ? "Korrigierter Betrag" : "Сумма после корректировок"}
-                          value={formatMoney(detail.adjusted_total_gross ?? detail.total_gross)}
+                          value={formatMoney(detail.adjusted_total_gross ?? detail.total_gross, detail?.currency)}
                         />
                       ) : null}
-                      <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount)} />
+                      <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount, detail?.currency)} />
                       <SummaryLine
                         label={text.prepaymentApplied}
-                        value={formatMoney(detail.prepayment_applied_amount ?? 0)}
+                        value={formatMoney(detail.prepayment_applied_amount ?? 0, detail?.currency)}
                       />
-                      <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due)} />
+                      <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due, detail?.currency)} />
                       {Number(detail.credit_balance ?? 0) > 0 ? (
                         <SummaryLine
                           label={lang === "de" ? "Guthaben des Patienten" : "Переплата пациента"}
-                          value={formatMoney(detail.credit_balance)}
+                          value={formatMoney(detail.credit_balance, detail?.currency)}
                         />
                       ) : null}
                     </div>
-                    <div className="space-y-2.5">
+                    {detail.notes ? <div className="space-y-2.5">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.notes)}</h2>
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-background/60 p-3.5 text-sm leading-snug text-muted-foreground">
-                        {detail.notes || t.common_not_set}
+                        {detail.notes}
                       </div>
-                    </div>
+                    </div> : null}
                   </div>
                 </SectionCard>
 
@@ -2706,7 +2738,11 @@ function useStaffInvoicesPageContent() {
                                   </div>
                                   {payment.note ? (
                                     <div className="mt-2 text-xs text-muted-foreground">
-                                      {payment.note}
+                                      {payment.transaction_type === "payment" &&
+                                      payment.payment_method === "legacy_import" &&
+                                      payment.note === "Imported opening payment balance"
+                                        ? text.importedOpeningPaymentNote
+                                        : payment.note}
                                     </div>
                                   ) : null}
                                   {payment.created_by_name ? (
@@ -2723,7 +2759,7 @@ function useStaffInvoicesPageContent() {
                                     )}
                                   >
                                     {isReversal ? "−" : "+"}
-                                    {formatMoney(payment.amount_gross)}
+                                    {formatMoney(payment.amount_gross, detail?.currency)}
                                   </div>
                                   {canReverse ? (
                                     <Button
@@ -2859,7 +2895,7 @@ function useStaffInvoicesPageContent() {
                                   </div>
                                 </div>
                                 <div className="text-right">
-                                  <div className={cn("font-mono font-semibold tabular-nums", isReversal ? "text-foreground" : "text-emerald-700")}>{isReversal ? "+" : "−"}{formatMoney(credit.amount_gross)}</div>
+                                  <div className={cn("font-mono font-semibold tabular-nums", isReversal ? "text-foreground" : "text-emerald-700")}>{isReversal ? "+" : "−"}{formatMoney(credit.amount_gross, detail?.currency)}</div>
                                   {canReverse ? (
                                     <Button type="button" variant="ghost" size="sm" className="mt-1 h-7 px-2 text-xs" onClick={() => { setReversingCreditNoteId(credit.id); setCreditNoteReversalReason(""); }}>
                                       {lang === "de" ? "Stornieren" : "Отменить"}
@@ -2895,7 +2931,7 @@ function useStaffInvoicesPageContent() {
                           {lang === "de" ? "Verfügbar zur Auszahlung" : "Доступно к возврату"}
                         </div>
                         <div className="font-mono font-semibold tabular-nums text-foreground">
-                          {formatMoney(detail.refundable_cash_amount ?? 0)}
+                          {formatMoney(detail.refundable_cash_amount ?? 0, detail?.currency)}
                         </div>
                       </div>
                     </div>
@@ -3075,7 +3111,7 @@ function useStaffInvoicesPageContent() {
                                     )}
                                   >
                                     {isReversal ? "+" : "−"}
-                                    {formatMoney(refund.amount_gross)}
+                                    {formatMoney(refund.amount_gross, detail?.currency)}
                                   </div>
                                   {canReverse ? (
                                     <Button
@@ -3146,7 +3182,7 @@ function useStaffInvoicesPageContent() {
                                 {allocation.advance_invoice_number}
                               </span>
                               <span className="font-mono font-semibold tabular-nums text-foreground">
-                                {formatMoney(allocation.amount_gross)}
+                                {formatMoney(allocation.amount_gross, detail?.currency)}
                               </span>
                               {access.canManage ? (
                                 <Button
@@ -3195,7 +3231,7 @@ function useStaffInvoicesPageContent() {
                             >
                               {detail.available_prepayments?.map((advance) => (
                                 <option key={advance.invoice_id} value={advance.invoice_id}>
-                                  {advance.invoice_number} · {formatMoney(advance.available_amount)}
+                                  {advance.invoice_number} · {formatMoney(advance.available_amount, detail?.currency)}
                                 </option>
                               ))}
                             </NativeComboboxSelect>
@@ -3314,7 +3350,7 @@ function useStaffInvoicesPageContent() {
                           label={t.revenue_invoices_preview_amounts}
                           value={
                             detail.portal_visibility?.amounts_visible_to_patient
-                              ? formatMoney(detail.total_gross)
+                              ? formatMoney(detail.total_gross, detail?.currency)
                               : t.revenue_invoices_hidden_from_patient
                           }
                         />
@@ -3391,7 +3427,12 @@ function useStaffInvoicesPageContent() {
                     </section>
                   </div>
 
-                {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
+                {dunningBlockKey ? (
+                  <p id="invoice-dunning-block-reason" className="text-sm text-muted-foreground">
+                    {t[dunningBlockKey]}
+                  </p>
+                ) : null}
+                {dunningError && !dunningDialogOpen ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
                 <DataTableSurface
                   rows={dunningEvents}
                   columns={
@@ -3430,7 +3471,7 @@ function useStaffInvoicesPageContent() {
                         width: 140,
                         render: (event) => (
                           <span className="block text-right font-mono text-xs font-semibold tabular-nums text-foreground">
-                            {formatMoney(event.balance_due)}
+                            {formatMoney(event.balance_due, detail?.currency)}
                           </span>
                         ),
                       },
@@ -3480,10 +3521,14 @@ function useStaffInvoicesPageContent() {
                         type="button"
                         size="sm"
                         className="h-8 shrink-0 self-center rounded-lg"
-                        onClick={() => setDunningDialogOpen(true)}
-                        disabled={!access.canManage || !nextDunning}
+                        onClick={() => {
+                          setDunningError(null);
+                          setDunningDialogOpen(true);
+                        }}
+                        disabled={!canCreateDunning}
+                        aria-describedby={dunningBlockKey ? "invoice-dunning-block-reason" : undefined}
                       >
-                        {nextDunning ? text.createDunning : text.noFurtherEscalation}
+                        {dunningActionLabel}
                       </Button>
                       <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
                     </>
@@ -3497,6 +3542,9 @@ function useStaffInvoicesPageContent() {
                 ) : (
                   <DataTableSurface
                     rows={detail.line_items.map((line, index) => ({ line, index }))}
+                    rowHeightOverrides={{ comfortable: 72 }}
+                    mobilePrimaryColumnId="description"
+                    mobileDetailColumnIds={["vat_source", "vat_rate", "net", "vat", "gross"]}
                     columns={
                       [
                         {
@@ -3506,6 +3554,7 @@ function useStaffInvoicesPageContent() {
                           sortable: true,
                           required: true,
                           width: 56,
+                          cellClassName: "h-full py-2",
                           render: (row) => (
                             <span className="font-mono text-xs font-semibold tabular-nums text-muted-foreground">
                               {row.index + 1}
@@ -3520,7 +3569,8 @@ function useStaffInvoicesPageContent() {
                           sortable: true,
                           searchable: true,
                           required: true,
-                          width: 260,
+                          minWidth: 320,
+                          cellClassName: "h-full py-2",
                           render: (row) => {
                             const lineDescription = agencyServiceNameLabel(
                               undefined,
@@ -3528,36 +3578,19 @@ function useStaffInvoicesPageContent() {
                               t,
                             );
                             return (
-                              <div
-                                className="min-w-0"
-                                title={row.line.vat_source_explanation ?? undefined}
-                              >
-                                <span className="flex min-w-0 items-center gap-1.5">
-                                  <span
-                                    className="truncate text-xs font-medium text-foreground"
-                                    title={lineDescription}
-                                  >
-                                    {lineDescription}
-                                  </span>
-                                  <span className="shrink-0 rounded-full border border-border/60 bg-muted/25 px-2 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
-                                    {taxProfileLabel(
-                                      row.line.tax_profile_name,
-                                      row.line.tax_profile_key,
-                                      row.line.vat_source,
-                                    )}
-                                  </span>
-                                  {row.line.is_cost_passthrough ? (
-                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-700">
-                                      {t.orders_cost_pass_through_badge}
-                                    </span>
-                                  ) : null}
+                              <div className="min-w-0 w-full space-y-1">
+                                <span
+                                  className="line-clamp-2 break-words text-xs font-medium leading-4 text-foreground"
+                                  title={lineDescription}
+                                >
+                                  {lineDescription}
                                 </span>
-                                {row.line.notes ? (
+                                {row.line.is_cost_passthrough ? (
                                   <span
-                                    className="block truncate text-[11px] text-muted-foreground"
-                                    title={row.line.notes}
+                                    className="inline-block max-w-full truncate rounded-full border border-amber-200 bg-amber-50 px-2 text-[10px] font-medium leading-4 text-amber-700"
+                                    title={t.orders_cost_pass_through_badge}
                                   >
-                                    {row.line.notes}
+                                    {t.orders_cost_pass_through_badge}
                                   </span>
                                 ) : null}
                               </div>
@@ -3565,13 +3598,39 @@ function useStaffInvoicesPageContent() {
                           },
                         },
                         {
+                          id: "vat_source",
+                          label: text.vatSource,
+                          accessor: (row) =>
+                            taxProfileLabel(row.line.tax_profile_name, row.line.tax_profile_key, row.line.vat_source),
+                          filterType: "text",
+                          sortable: true,
+                          searchable: true,
+                          width: 192,
+                          cellClassName: "h-full py-2",
+                          render: (row) => (
+                            <div
+                              className="min-w-0 w-full"
+                              title={row.line.vat_source_explanation || taxProfileLabel(row.line.tax_profile_name, row.line.tax_profile_key, row.line.vat_source)}
+                            >
+                              <StatusBadge tone="brand" className="max-w-full normal-case tracking-normal">
+                                <span className="truncate">
+                                  {taxProfileLabel(row.line.tax_profile_name, row.line.tax_profile_key, row.line.vat_source)}
+                                </span>
+                              </StatusBadge>
+                            </div>
+                          ),
+                        },
+                        {
                           id: "vat_rate",
                           label: `${t.invoices_vat} %`,
-                          accessor: (row) => row.line.vat_rate,
+                          accessor: (row) => Number(row.line.vat_rate),
+                          filterType: "number",
                           sortable: true,
-                          width: 90,
+                          width: 80,
+                          align: "right",
+                          cellClassName: "h-full py-2",
                           render: (row) => (
-                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+                            <span className="whitespace-nowrap font-mono text-xs leading-4 tabular-nums text-foreground">
                               {row.line.vat_rate}%
                             </span>
                           ),
@@ -3580,11 +3639,14 @@ function useStaffInvoicesPageContent() {
                           id: "net",
                           label: text.net,
                           accessor: (row) => Number(row.line.line_net),
+                          filterType: "number",
                           sortable: true,
-                          width: 110,
+                          width: 120,
+                          align: "right",
+                          cellClassName: "h-full py-2",
                           render: (row) => (
-                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-                              {formatMoney(row.line.line_net)}
+                            <span className="whitespace-nowrap text-right font-mono text-xs leading-4 tabular-nums text-foreground">
+                              {formatMoney(row.line.line_net, detail?.currency)}
                             </span>
                           ),
                         },
@@ -3592,11 +3654,14 @@ function useStaffInvoicesPageContent() {
                           id: "vat",
                           label: t.invoices_vat,
                           accessor: (row) => Number(row.line.line_vat),
+                          filterType: "number",
                           sortable: true,
-                          width: 110,
+                          width: 120,
+                          align: "right",
+                          cellClassName: "h-full py-2",
                           render: (row) => (
-                            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-                              {formatMoney(row.line.line_vat)}
+                            <span className="whitespace-nowrap text-right font-mono text-xs leading-4 tabular-nums text-foreground">
+                              {formatMoney(row.line.line_vat, detail?.currency)}
                             </span>
                           ),
                         },
@@ -3604,11 +3669,14 @@ function useStaffInvoicesPageContent() {
                           id: "gross",
                           label: text.gross,
                           accessor: (row) => Number(row.line.line_gross),
+                          filterType: "number",
                           sortable: true,
-                          width: 120,
+                          width: 128,
+                          align: "right",
+                          cellClassName: "h-full py-2",
                           render: (row) => (
-                            <span className="block text-right font-mono text-xs font-semibold tabular-nums text-foreground">
-                              {formatMoney(row.line.line_gross)}
+                            <span className="whitespace-nowrap text-right font-mono text-xs font-semibold leading-4 tabular-nums text-foreground">
+                              {formatMoney(row.line.line_gross, detail?.currency)}
                             </span>
                           ),
                         },
@@ -3782,27 +3850,38 @@ function useStaffInvoicesPageContent() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={dunningDialogOpen} onOpenChange={setDunningDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <div className="space-y-5">
-            <DialogHeader>
+      <Dialog open={dunningDialogOpen} onOpenChange={(open) => { if (!dunningBusy) setDunningDialogOpen(open); }}>
+        <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
+          <div>
+            <DialogHeader className="border-b border-border px-6 py-4 pr-12">
               <DialogTitle>{text.nextEscalation}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 rounded-xl p-4">
-              {dunningError ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
+            <div className="space-y-4 px-6 py-5">
+              {dunningError ? (
+                <ShellBanner tone="error">
+                  <div className="space-y-2">
+                    <p>{dunningError}</p>
+                    <Button type="button" size="sm" variant="outline" disabled={detailBusy} onClick={() => setReloadToken((current) => current + 1)}>
+                      {t.common_refresh}
+                    </Button>
+                  </div>
+                </ShellBanner>
+              ) : dunningBlockKey ? <ShellBanner tone="warning">{t[dunningBlockKey]}</ShellBanner> : null}
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
-                  <div className="text-xs text-muted-foreground">{text.nextEscalation}</div>
+                  <div className="text-xs text-muted-foreground">{text.dunningAction}</div>
                   <div className="mt-1">
                     <StatusBadge tone={nextDunning ? dunningLevelTone(nextDunning) : "neutral"}>
-                      {nextDunning ? dunningLevelLabel(nextDunning) : text.completed}
+                      {nextDunning === "collections"
+                        ? t.invoices_workspace_dunning_level_collections
+                        : nextDunning ? dunningLevelLabel(nextDunning) : text.noFurtherEscalation}
                     </StatusBadge>
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/70 bg-card px-4 py-3">
-                  <div className="text-xs text-muted-foreground">{text.balancePrefix}</div>
+                  <div className="text-xs text-muted-foreground">{t.invoices_workspace_balance_due}</div>
                   <div className="mt-1 text-lg font-semibold leading-none text-foreground">
-                    {detail ? formatMoney(detail.balance_due) : t.common_not_set}
+                    {detail ? formatMoney(detail.balance_due, detail?.currency) : t.common_not_set}
                   </div>
                 </div>
               </div>
@@ -3811,20 +3890,23 @@ function useStaffInvoicesPageContent() {
                   className={textareaClassName}
                   value={dunningForm.note}
                   onChange={(event) => setDunningForm({ note: event.target.value })}
-                  disabled={!access.canManage || !nextDunning}
+                  disabled={!canCreateDunning}
                   placeholder={text.dunningPlaceholder}
                 />
               </Field>
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  disabled={dunningBusy || !access.canManage || !nextDunning}
-                  onClick={() => void handleCreateDunning()}
-                >
-                  {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                  {nextDunning ? text.createDunning : text.noFurtherEscalation}
-                </Button>
-              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-muted/40 px-6 py-4">
+              <Button type="button" variant="outline" disabled={dunningBusy} onClick={() => setDunningDialogOpen(false)}>
+                {t.common_cancel}
+              </Button>
+              <Button
+                type="button"
+                disabled={!canCreateDunning}
+                onClick={() => void handleCreateDunning()}
+              >
+                {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                {dunningActionLabel}
+              </Button>
             </div>
           </div>
         </DialogContent>
@@ -4132,15 +4214,15 @@ export function InvoicesPage() {
 
 function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="rounded-lg border border-border/70 bg-card p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div>
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
           {description ? <p className={tokens.text.muted}>{description}</p> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
-      <div className="mt-5">{children}</div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }
@@ -4156,10 +4238,9 @@ function MiniMetric({ label, value }: { label: string; value: ReactNode }) {
 
 function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg py-2">
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <span className="h-px min-w-6 flex-1 bg-border/70" />
-      <span className="max-w-[48%] text-right text-sm font-semibold leading-tight text-foreground">{value}</span>
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-start gap-3 border-b border-border/60 py-2.5">
+      <span className="text-xs leading-5 text-muted-foreground">{label}</span>
+      <span className={cn("min-w-0 break-words text-right text-sm font-medium leading-5 text-foreground", typeof value === "string" && value.includes("€") && "whitespace-nowrap font-mono tabular-nums")}>{value}</span>
     </div>
   );
 }
@@ -4167,7 +4248,7 @@ function SummaryLine({ label, value }: { label: string; value: ReactNode }) {
 function titleWithDot(title: ReactNode) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
       <span>{title}</span>
     </span>
   );

@@ -96,6 +96,7 @@ const textByLanguage = {
     all: "Все",
     debit: "Долг",
     credit: "Переплата",
+    settledPatient: "Без долга",
     reconciliation: "Сверка",
     patient: "Пациент",
     invoicesDue: "По счетам",
@@ -180,6 +181,7 @@ const textByLanguage = {
     all: "Alle",
     debit: "Forderung",
     credit: "Guthaben",
+    settledPatient: "Ausgeglichen",
     reconciliation: "Abstimmung",
     patient: "Patient",
     invoicesDue: "Rechnungen offen",
@@ -257,7 +259,7 @@ function SummaryCard({
 }: {
   label: string;
   value: string;
-  tone?: "default" | "positive" | "negative" | "warning";
+  tone?: "default" | "positive" | "negative" | "warning" | "info";
 }) {
   return (
     <div
@@ -267,6 +269,7 @@ function SummaryCard({
         tone === "positive" && "border-l-emerald-400",
         tone === "negative" && "border-l-rose-400",
         tone === "warning" && "border-l-amber-400",
+        tone === "info" && "border-l-sky-400",
       )}
     >
       <p className="line-clamp-2 min-h-7 text-[10px] font-medium leading-3.5 text-muted-foreground sm:min-h-0 sm:truncate sm:text-[11px]" title={label}>{label}</p>
@@ -276,6 +279,7 @@ function SummaryCard({
           tone === "positive" && "text-emerald-700 dark:text-emerald-400",
           tone === "negative" && "text-rose-700 dark:text-rose-400",
           tone === "warning" && "text-amber-700 dark:text-amber-400",
+          tone === "info" && "text-sky-700 dark:text-sky-400",
         )}
         title={value}
       >
@@ -448,11 +452,10 @@ export function CompanyFinancePage() {
           <StaffLink className="truncate font-medium text-foreground hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>
             {row.patient_name || row.patient_pid}
           </StaffLink>
-          {!row.is_active || row.reconciliation_required ? (
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            {!row.is_active ? <Badge variant="outline" className="rounded-full text-[10px]">{text.inactive}</Badge> : null}
-            {row.reconciliation_required ? <Badge className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" variant="outline">{text.reconciliation}</Badge> : null}
-          </div>
+          {!row.is_active ? (
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <Badge variant="outline" className="rounded-full text-[10px]">{text.inactive}</Badge>
+            </div>
           ) : null}
         </div>
       ),
@@ -460,7 +463,7 @@ export function CompanyFinancePage() {
     { id: "invoice_due", label: text.invoicesDue, accessor: (row) => parseAmount(row.invoice_due), filterType: "number", sortable: true, width: 145, render: (row) => money(row.invoice_due) },
     { id: "external_receivable", label: text.externalReceivable, accessor: (row) => parseAmount(row.external_receivable), filterType: "number", sortable: true, width: 150, render: (row) => money(row.external_receivable) },
     { id: "manual_balance", label: text.adjustments, accessor: (row) => parseAmount(row.manual_balance), filterType: "number", sortable: true, width: 140, render: (row) => money(row.manual_balance) },
-    { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.available_prepayment) > 0 ? <span className="text-rose-700 dark:text-rose-400">− {money(row.available_prepayment)}</span> : money("0") },
+    { id: "prepayment", label: text.advances, accessor: (row) => parseAmount(row.available_prepayment), filterType: "number", sortable: true, width: 140, render: (row) => parseAmount(row.available_prepayment) > 0 ? <span className="text-sky-700 dark:text-sky-400">− {money(row.available_prepayment)}</span> : money("0") },
     {
       id: "balance",
       label: text.balance,
@@ -469,9 +472,36 @@ export function CompanyFinancePage() {
       sortable: true,
       width: 150,
       render: (row) => (
-        <div className={cn("font-semibold", row.balance_side === "debit" && "text-emerald-700 dark:text-emerald-400", row.balance_side === "credit" && "text-rose-700 dark:text-rose-400")}>
+        <span className={cn("font-semibold", row.balance_side === "debit" && "text-rose-700 dark:text-rose-400", row.balance_side === "credit" && "text-sky-700 dark:text-sky-400")}>
           {money(row.calculated_balance)}
-          <div className="text-[10px] font-normal text-muted-foreground">{row.balance_side === "debit" ? text.debit : row.balance_side === "credit" ? text.credit : "—"}</div>
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: text.status,
+      accessor: (row) => [row.balance_side, ...(row.reconciliation_required ? ["reconciliation"] : [])],
+      filterType: "tag_array",
+      filterOptions: [
+        { value: "debit", label: text.debit },
+        { value: "credit", label: text.credit },
+        { value: "settled", label: text.settledPatient },
+        { value: "reconciliation", label: text.reconciliation },
+      ],
+      sortable: true,
+      width: 200,
+      cellClassName: "whitespace-normal",
+      render: (row) => (
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge variant="outline" className={cn(
+            "text-[10px]",
+            row.balance_side === "debit" && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400",
+            row.balance_side === "credit" && "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400",
+            row.balance_side === "settled" && "bg-muted/40 text-muted-foreground",
+          )}>
+            {row.balance_side === "debit" ? text.debit : row.balance_side === "credit" ? text.credit : text.settledPatient}
+          </Badge>
+          {row.reconciliation_required ? <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">{text.reconciliation}</Badge> : null}
         </div>
       ),
     },
@@ -714,9 +744,9 @@ export function CompanyFinancePage() {
       {summary ? (
         <>
           <section className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
-            <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone="positive" />
-            <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone="negative" />
-            <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone="negative" />
+            <SummaryCard label={text.patientReceivables} value={money(summary.patient_receivables_calculated)} tone={parseAmount(summary.patient_receivables_calculated) > 0 ? "negative" : "default"} />
+            <SummaryCard label={text.patientCredits} value={money(summary.patient_credits)} tone={parseAmount(summary.patient_credits) > 0 ? "info" : "default"} />
+            <SummaryCard label={text.providerPayables} value={money(summary.provider_payables)} tone={parseAmount(summary.provider_payables) > 0 ? "negative" : "default"} />
             <SummaryCard label={text.expectedCosts} value={money(summary.expected_provider_costs)} tone="warning" />
             <SummaryCard
               label={text.calculatedPosition}
@@ -795,7 +825,9 @@ export function CompanyFinancePage() {
               rowId={(row) => row.patient_id}
               storageKey="company-finance-patients"
               defaultDensity="compact"
-              rowHeightOverrides={{ comfortable: 60, compact: 56, condensed: 52 }}
+              rowHeightOverrides={{ comfortable: 52, compact: 44, condensed: 40 }}
+              mobilePrimaryColumnId="patient"
+              mobileDetailColumnIds={["balance", "status", "invoice_due", "external_receivable", "manual_balance", "prepayment"]}
               toolbarClassName="sm:flex-wrap"
               defaultSort={[{ field: "patient", dir: "asc" }]}
               emptyState={text.noRows}

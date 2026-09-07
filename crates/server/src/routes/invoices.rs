@@ -138,6 +138,7 @@ struct ListMyInvoicesQuery {
 
 #[derive(Deserialize)]
 struct AccountingLedgerQuery {
+    currency: Option<String>,
     year: Option<i32>,
     patient_id: Option<Uuid>,
 }
@@ -382,7 +383,6 @@ struct InvoicePdfLineItem {
     vat_rate: String,
     is_cost_passthrough: bool,
     line_gross: String,
-    notes: Option<String>,
 }
 
 #[derive(Clone)]
@@ -400,6 +400,7 @@ struct InvoicePdfAgency {
 }
 
 struct InvoicePdfContext {
+    currency: String,
     invoice_id: Uuid,
     patient_id: Uuid,
     invoice_number: String,
@@ -828,11 +829,206 @@ async fn provider_payment_journal_target_gross(
     }))
 }
 
+struct InvoiceCashLine {
+    category: String,
+    amount_net: Decimal,
+    amount_vat: Decimal,
+    amount_gross: Decimal,
+    financial_account_id: Option<Uuid>,
+    currency: String,
+}
+
+async fn invoice_cash_lines(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    transaction_id: Uuid,
+    is_refund: bool,
+    is_reversal: bool,
+    signed_gross: Decimal,
+) -> Result<Vec<InvoiceCashLine>, sqlx::Error> {
+    if is_reversal {
+        // A reversal mirrors the original booked amounts and account, including
+        // rounding. Recalculating it against today's default account is unsafe.
+        let rows = sqlx::query(
+            r#"SELECT entry.category, SUM(entry.amount_net) AS amount_net,
+                      SUM(entry.amount_vat) AS amount_vat,
+                      SUM(entry.amount_gross) AS amount_gross,
+                      entry.financial_account_id, entry.currency
+               FROM accounting_entries entry
+               WHERE entry.source_invoice_id = $1 AND entry.direction = 'income'
+                 AND ((NOT $3 AND (
+                     entry.source_invoice_payment_transaction_id = (
+                         SELECT reverses_transaction_id FROM invoice_payment_transactions WHERE id = $2
+                     ) OR (
+                         entry.entry_kind = 'invoice_payment'
+                         AND entry.source_invoice_payment_transaction_id IS NULL
+                         AND EXISTS (
+                             SELECT 1 FROM invoice_payment_transactions reversal
+                             JOIN invoice_payment_transactions original ON original.id = reversal.reverses_transaction_id
+                             WHERE reversal.id = $2 AND original.payment_method = 'legacy_import'
+                               AND NOT EXISTS (SELECT 1 FROM accounting_entries linked
+                                   WHERE linked.source_invoice_payment_transaction_id = original.id)
+                         )
+                     )
+                 )) OR ($3 AND entry.source_invoice_refund_transaction_id = (
+                     SELECT reverses_transaction_id FROM invoice_refund_transactions WHERE id = $2
+                 )))
+               GROUP BY entry.category, entry.financial_account_id, entry.currency"#,
+        )
+        .bind(context.invoice_id)
+        .bind(transaction_id)
+        .bind(is_refund)
+        .fetch_all(&mut **transaction)
+        .await?;
+        let lines: Vec<_> = rows
+            .into_iter()
+            .map(|row| {
+                Ok(InvoiceCashLine {
+                    category: row.try_get("category")?,
+                    amount_net: -row.try_get::<Decimal, _>("amount_net")?,
+                    amount_vat: -row.try_get::<Decimal, _>("amount_vat")?,
+                    amount_gross: -row.try_get::<Decimal, _>("amount_gross")?,
+                    financial_account_id: row.try_get("financial_account_id")?,
+                    currency: row.try_get("currency")?,
+                })
+            })
+            .collect::<Result<_, sqlx::Error>>()?;
+        if lines.iter().map(|line| line.amount_gross).sum::<Decimal>() != signed_gross {
+            return Err(sqlx::Error::Protocol(
+                "Original payment accounting must be reconciled before reversal".to_string(),
+            ));
+        }
+        return Ok(lines);
+    }
+
+    // Allocate the change in cumulative booked cash, so splitting one receipt
+    // into installments cannot lose VAT cents. Invoice rows are locked by callers.
+    let rows = sqlx::query(
+        r#"SELECT category, COALESCE(SUM(amount_gross), 0) AS gross,
+                  COALESCE(SUM(amount_vat), 0) AS vat
+           FROM accounting_entries
+           WHERE source_invoice_id = $1 AND direction = 'income'
+             AND entry_kind IN ('invoice_payment', 'invoice_refund')
+           GROUP BY category"#,
+    )
+    .bind(context.invoice_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut booked = BTreeMap::new();
+    let mut previous_gross = Decimal::ZERO;
+    for row in rows {
+        let gross: Decimal = row.try_get("gross")?;
+        previous_gross += gross;
+        booked.insert(
+            row.try_get::<String, _>("category")?,
+            (gross, row.try_get::<Decimal, _>("vat")?),
+        );
+    }
+    let retained_gross = previous_gross + signed_gross;
+    let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
+    let target_passthrough_gross =
+        proportional_share(retained_gross, passthrough_gross, context.total_gross);
+    let targets = [
+        (
+            "service_revenue",
+            retained_gross - target_passthrough_gross,
+            proportional_share(
+                retained_gross,
+                context.total_vat - passthrough_vat,
+                context.total_gross,
+            ),
+        ),
+        (
+            "cost_passthrough_revenue",
+            target_passthrough_gross,
+            proportional_share(retained_gross, passthrough_vat, context.total_gross),
+        ),
+    ];
+    Ok(targets
+        .into_iter()
+        .map(|(category, target_gross, target_vat)| {
+            let (old_gross, old_vat) = booked.get(category).copied().unwrap_or_default();
+            let amount_gross = target_gross - old_gross;
+            let amount_vat = target_vat - old_vat;
+            InvoiceCashLine {
+                category: category.to_string(),
+                amount_gross,
+                amount_vat,
+                amount_net: amount_gross - amount_vat,
+                financial_account_id: None,
+                currency: context.currency.clone(),
+            }
+        })
+        .filter(|line| line.amount_gross != Decimal::ZERO || line.amount_vat != Decimal::ZERO)
+        .collect())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn insert_invoice_cash_accounting_entries(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    transaction_id: Uuid,
+    transaction_type: &str,
+    amount_gross: Decimal,
+    payment_method: &str,
+    payment_reference: Option<&str>,
+    entry_date: NaiveDate,
+    actor_id: Uuid,
+    is_refund: bool,
+) -> Result<(), sqlx::Error> {
+    let is_reversal = transaction_type == "reversal";
+    let signed_gross = if is_refund != is_reversal {
+        -amount_gross
+    } else {
+        amount_gross
+    };
+    let entry_kind = if is_refund {
+        "invoice_refund"
+    } else {
+        "invoice_payment"
+    };
+    let lines = invoice_cash_lines(
+        transaction,
+        context,
+        transaction_id,
+        is_refund,
+        is_reversal,
+        signed_gross,
+    )
+    .await?;
+    for line in lines {
+        sqlx::query(
+            r#"INSERT INTO accounting_entries (
+                entry_kind, direction, category, source_invoice_id,
+                source_invoice_payment_transaction_id, source_invoice_refund_transaction_id,
+                order_id, patient_id, entry_date, description,
+                amount_net, amount_vat, amount_gross, currency, metadata, created_by, financial_account_id
+            ) VALUES ($1, 'income', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
+        )
+        .bind(entry_kind).bind(&line.category).bind(context.invoice_id)
+        .bind((!is_refund).then_some(transaction_id)).bind(is_refund.then_some(transaction_id))
+        .bind(context.order_id).bind(context.patient_id).bind(entry_date)
+        .bind(format!("{} {} {}", entry_kind, transaction_type, context.invoice_number))
+        .bind(line.amount_net).bind(line.amount_vat).bind(line.amount_gross).bind(line.currency)
+        .bind(json!({
+            "invoice_number": context.invoice_number,
+            "invoice_payment_transaction_id": (!is_refund).then_some(transaction_id),
+            "invoice_refund_transaction_id": is_refund.then_some(transaction_id),
+            "payment_transaction_type": (!is_refund).then_some(transaction_type),
+            "refund_transaction_type": is_refund.then_some(transaction_type),
+            "payment_method": payment_method, "payment_reference": payment_reference,
+        }))
+        .bind(actor_id).bind(line.financial_account_id)
+        .execute(&mut **transaction).await?;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn insert_invoice_payment_accounting_entries(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     context: &InvoicePaymentContext,
-    payment_transaction_id: Uuid,
+    transaction_id: Uuid,
     transaction_type: &str,
     amount_gross: Decimal,
     payment_method: &str,
@@ -840,91 +1036,26 @@ async fn insert_invoice_payment_accounting_entries(
     entry_date: NaiveDate,
     actor_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    let signed_gross = if transaction_type == "reversal" {
-        -amount_gross
-    } else {
-        amount_gross
-    };
-    let (_, passthrough_vat_total, passthrough_gross_total) =
-        invoice_passthrough_totals(&context.line_items);
-    let service_vat_total = context.total_vat - passthrough_vat_total;
-    let passthrough_gross =
-        proportional_share(signed_gross, passthrough_gross_total, context.total_gross);
-    let passthrough_vat =
-        proportional_share(signed_gross, passthrough_vat_total, context.total_gross);
-    let service_gross = signed_gross - passthrough_gross;
-    let service_vat = proportional_share(signed_gross, service_vat_total, context.total_gross);
-    let description_prefix = if transaction_type == "reversal" {
-        "Invoice payment reversal"
-    } else {
-        "Invoice payment"
-    };
-
-    for (category, gross, vat, description) in [
-        (
-            "service_revenue",
-            service_gross,
-            service_vat,
-            format!("{description_prefix} {}", context.invoice_number),
-        ),
-        (
-            "cost_passthrough_revenue",
-            passthrough_gross,
-            passthrough_vat,
-            format!(
-                "Cost passthrough {description_prefix} {}",
-                context.invoice_number
-            ),
-        ),
-    ] {
-        let net = gross - vat;
-        if gross == Decimal::ZERO && vat == Decimal::ZERO && net == Decimal::ZERO {
-            continue;
-        }
-        sqlx::query(
-            r#"INSERT INTO accounting_entries (
-                    entry_kind, direction, category, source_invoice_id,
-                    source_invoice_payment_transaction_id, order_id, patient_id,
-                    entry_date, description, amount_net, amount_vat, amount_gross,
-                    currency, metadata, created_by
-               ) VALUES (
-                    'invoice_payment', 'income', $1, $2,
-                    $3, $4, $5,
-                    $6, $7, $8, $9, $10,
-                    $11, $12, $13
-               )"#,
-        )
-        .bind(category)
-        .bind(context.invoice_id)
-        .bind(payment_transaction_id)
-        .bind(context.order_id)
-        .bind(context.patient_id)
-        .bind(entry_date)
-        .bind(description)
-        .bind(round_accounting_money(net))
-        .bind(round_accounting_money(vat))
-        .bind(round_accounting_money(gross))
-        .bind(&context.currency)
-        .bind(serde_json::json!({
-            "invoice_number": context.invoice_number,
-            "invoice_payment_transaction_id": payment_transaction_id,
-            "payment_transaction_type": transaction_type,
-            "payment_method": payment_method,
-            "payment_reference": payment_reference,
-        }))
-        .bind(actor_id)
-        .execute(&mut **transaction)
-        .await?;
-    }
-
-    Ok(())
+    insert_invoice_cash_accounting_entries(
+        transaction,
+        context,
+        transaction_id,
+        transaction_type,
+        amount_gross,
+        payment_method,
+        payment_reference,
+        entry_date,
+        actor_id,
+        false,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn insert_invoice_refund_accounting_entries(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     context: &InvoicePaymentContext,
-    refund_transaction_id: Uuid,
+    transaction_id: Uuid,
     transaction_type: &str,
     amount_gross: Decimal,
     payment_method: &str,
@@ -932,84 +1063,19 @@ async fn insert_invoice_refund_accounting_entries(
     entry_date: NaiveDate,
     actor_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    let signed_gross = if transaction_type == "refund" {
-        -amount_gross
-    } else {
-        amount_gross
-    };
-    let (_, passthrough_vat_total, passthrough_gross_total) =
-        invoice_passthrough_totals(&context.line_items);
-    let service_vat_total = context.total_vat - passthrough_vat_total;
-    let passthrough_gross =
-        proportional_share(signed_gross, passthrough_gross_total, context.total_gross);
-    let passthrough_vat =
-        proportional_share(signed_gross, passthrough_vat_total, context.total_gross);
-    let service_gross = signed_gross - passthrough_gross;
-    let service_vat = proportional_share(signed_gross, service_vat_total, context.total_gross);
-    let description_prefix = if transaction_type == "refund" {
-        "Invoice cash refund"
-    } else {
-        "Invoice cash refund reversal"
-    };
-
-    for (category, gross, vat, description) in [
-        (
-            "service_revenue",
-            service_gross,
-            service_vat,
-            format!("{description_prefix} {}", context.invoice_number),
-        ),
-        (
-            "cost_passthrough_revenue",
-            passthrough_gross,
-            passthrough_vat,
-            format!(
-                "Cost passthrough {description_prefix} {}",
-                context.invoice_number
-            ),
-        ),
-    ] {
-        let net = gross - vat;
-        if gross == Decimal::ZERO && vat == Decimal::ZERO && net == Decimal::ZERO {
-            continue;
-        }
-        sqlx::query(
-            r#"INSERT INTO accounting_entries (
-                    entry_kind, direction, category, source_invoice_id,
-                    source_invoice_refund_transaction_id, order_id, patient_id,
-                    entry_date, description, amount_net, amount_vat, amount_gross,
-                    currency, metadata, created_by
-               ) VALUES (
-                    'invoice_refund', 'income', $1, $2,
-                    $3, $4, $5,
-                    $6, $7, $8, $9, $10,
-                    $11, $12, $13
-               )"#,
-        )
-        .bind(category)
-        .bind(context.invoice_id)
-        .bind(refund_transaction_id)
-        .bind(context.order_id)
-        .bind(context.patient_id)
-        .bind(entry_date)
-        .bind(description)
-        .bind(round_accounting_money(net))
-        .bind(round_accounting_money(vat))
-        .bind(round_accounting_money(gross))
-        .bind(&context.currency)
-        .bind(serde_json::json!({
-            "invoice_number": context.invoice_number,
-            "invoice_refund_transaction_id": refund_transaction_id,
-            "refund_transaction_type": transaction_type,
-            "payment_method": payment_method,
-            "payment_reference": payment_reference,
-        }))
-        .bind(actor_id)
-        .execute(&mut **transaction)
-        .await?;
-    }
-
-    Ok(())
+    insert_invoice_cash_accounting_entries(
+        transaction,
+        context,
+        transaction_id,
+        transaction_type,
+        amount_gross,
+        payment_method,
+        payment_reference,
+        entry_date,
+        actor_id,
+        true,
+    )
+    .await
 }
 
 pub async fn sync_external_invoice_accounting_entries_from_current_state(
@@ -2077,9 +2143,9 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "items_heading") => "Позиции",
         ("en", "items_heading") => "Line items",
         (_, "items_heading") => "Positionen",
-        ("uk", "item_description") => "Опис",
-        ("ru", "item_description") => "Описание",
-        ("en", "item_description") => "Description",
+        ("uk", "item_description") => "Позиція",
+        ("ru", "item_description") => "Позиция",
+        ("en", "item_description") => "Item",
         (_, "item_description") => "Leistung",
         ("uk", "item_quantity") => "К-сть",
         ("ru", "item_quantity") => "Кол-во",
@@ -2245,19 +2311,13 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
-            notes: item
-                .get("notes")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned),
         })
         .collect()
 }
 
-fn format_invoice_pdf_money(raw: &str) -> String {
+fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let parsed = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
-    format!("EUR {}", decimal_to_string(parsed))
+    format!("{} {}", currency, decimal_to_string(parsed))
 }
 
 fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
@@ -3376,7 +3436,7 @@ async fn load_invoice_detail(
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
                   i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
                   i.payer_updated_at,
-                  o.order_number, o.contract_id, q.quote_number,
+                  o.order_number, o.currency, o.contract_id, q.quote_number,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
                   pr.relation_type AS payer_relation_type,
                   COALESCE(NULLIF(trim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name) AS payer_relation_patient_name,
@@ -3566,6 +3626,7 @@ async fn load_invoice_detail(
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
         "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+                    "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|v| v.to_string()),
@@ -3622,7 +3683,7 @@ async fn load_invoice_pdf_context(
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.line_items, i.notes,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
-                  o.order_number, q.quote_number,
+                  o.order_number, o.currency, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
                   p.birth_date, p.languages,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
@@ -3677,6 +3738,9 @@ async fn load_invoice_pdf_context(
         .unwrap_or_default();
 
     Ok(Some(InvoicePdfContext {
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
         invoice_id,
         patient_id,
         invoice_number: row
@@ -3920,10 +3984,6 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 description.push_str(" · ");
                 description.push_str(invoice_pdf_label(&context.language, "cost_passthrough"));
             }
-            if let Some(note) = item.notes.as_deref() {
-                description.push_str(" · ");
-                description.push_str(note.trim());
-            }
             let quantity = if item.quantity.trim().is_empty() {
                 "1"
             } else {
@@ -3934,8 +3994,8 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             } else {
                 format!("{}%", item.vat_rate.trim())
             };
-            let unit_price = format_invoice_pdf_money(&item.unit_price);
-            let total = format_invoice_pdf_money(&item.line_gross);
+            let unit_price = format_invoice_pdf_money(&item.unit_price, &context.currency);
+            let total = format_invoice_pdf_money(&item.line_gross, &context.currency);
             layout.table_row(
                 &[
                     (&description, 82.0, InvoicePdfCellAlign::Left),
@@ -3954,37 +4014,40 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     layout.summary_row(
         invoice_pdf_label(&context.language, "total_net"),
-        &format_invoice_pdf_money(&context.total_net),
+        &format_invoice_pdf_money(&context.total_net, &context.currency),
         false,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "total_vat"),
-        &format_invoice_pdf_money(&context.total_vat),
+        &format_invoice_pdf_money(&context.total_vat, &context.currency),
         false,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "total_gross"),
-        &format_invoice_pdf_money(&context.total_gross),
+        &format_invoice_pdf_money(&context.total_gross, &context.currency),
         true,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "credited_amount"),
-        &format!("-{}", format_invoice_pdf_money(&context.credited_amount)),
+        &format!(
+            "-{}",
+            format_invoice_pdf_money(&context.credited_amount, &context.currency)
+        ),
         false,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "paid_amount"),
-        &format_invoice_pdf_money(&context.paid_amount),
+        &format_invoice_pdf_money(&context.paid_amount, &context.currency),
         false,
         false,
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "balance_due"),
-        &format_invoice_pdf_money(&context.balance_due),
+        &format_invoice_pdf_money(&context.balance_due, &context.currency),
         true,
         true,
     );
@@ -4000,7 +4063,20 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             6.0,
             0.0,
         );
-        layout.meta_grid(&bank_cells);
+        // Payment identifiers must be printed in full; the compact metadata
+        // grid truncates long values such as an IBAN.
+        for (label, value) in &bank_cells {
+            layout.table_row(
+                &[
+                    (label, 40.0, InvoicePdfCellAlign::Left),
+                    (value, 134.0, InvoicePdfCellAlign::Left),
+                ],
+                false,
+                false,
+                false,
+            );
+        }
+        layout.spacer(6.0);
     }
 
     if let Some(notes) = &context.notes {
@@ -4051,7 +4127,7 @@ async fn list_my_invoices(
                   i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
-                  o.order_number, q.quote_number,
+                  o.order_number, o.currency, q.quote_number,
                   COALESCE((
                     SELECT count(*)::bigint
                     FROM documents d
@@ -4121,6 +4197,7 @@ async fn list_my_invoices(
                         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
                         "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
                         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+                    "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
                         "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
@@ -4287,6 +4364,15 @@ async fn get_accounting_ledger(
     }
 
     let year = accounting_ledger_year(&query);
+    let currency = query
+        .currency
+        .as_deref()
+        .unwrap_or("EUR")
+        .trim()
+        .to_uppercase();
+    if currency.len() != 3 || !currency.bytes().all(|c| c.is_ascii_uppercase()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid currency");
+    }
     if let Some(patient_id) = query.patient_id
         && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
     {
@@ -4314,10 +4400,12 @@ async fn get_accounting_ledger(
            LEFT JOIN patients p ON p.id = ae.patient_id
            WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
              AND ($2::uuid IS NULL OR ae.patient_id = $2)
+             AND ae.currency = $3
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
     .bind(year)
     .bind(query.patient_id)
+    .bind(&currency)
     .fetch_all(&state.db)
     .await
     {
@@ -4415,8 +4503,19 @@ async fn get_accounting_ledger(
         })
         .collect::<Vec<_>>();
 
+    let available_currencies = match sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT currency FROM accounting_entries WHERE EXTRACT(YEAR FROM entry_date) = $1 AND ($2::uuid IS NULL OR patient_id = $2) ORDER BY currency"
+    ).bind(year).bind(query.patient_id).fetch_all(&state.db).await {
+        Ok(values) => values,
+        Err(error) => {
+            tracing::error!(error = %error, "load ledger currencies");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load ledger currencies");
+        }
+    };
     Json(serde_json::json!({
         "year": year,
+        "currency": currency,
+        "available_currencies": available_currencies,
         "summary": {
             "income_gross": decimal_to_string(income_gross),
             "expense_gross": decimal_to_string(expense_gross),
@@ -4441,6 +4540,15 @@ async fn export_accounting_ledger(
     }
 
     let year = accounting_ledger_year(&query);
+    let currency = query
+        .currency
+        .as_deref()
+        .unwrap_or("EUR")
+        .trim()
+        .to_uppercase();
+    if currency.len() != 3 || !currency.bytes().all(|c| c.is_ascii_uppercase()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid currency");
+    }
     if let Some(patient_id) = query.patient_id
         && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
     {
@@ -4458,10 +4566,12 @@ async fn export_accounting_ledger(
            LEFT JOIN patients p ON p.id = ae.patient_id
            WHERE EXTRACT(YEAR FROM ae.entry_date) = $1
              AND ($2::uuid IS NULL OR ae.patient_id = $2)
+             AND ae.currency = $3
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
     )
     .bind(year)
     .bind(query.patient_id)
+    .bind(&currency)
     .fetch_all(&state.db)
     .await
     {
@@ -4583,14 +4693,14 @@ async fn list_invoices(
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
-                  o.order_number, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
+                  o.order_number, o.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE ($1::text IS NULL
                    OR de_normalize(concat_ws(' ',
-                        i.invoice_number, o.order_number, q.quote_number,
+                        i.invoice_number, o.order_number, o.currency, q.quote_number,
                         p.patient_id, p.first_name, p.last_name,
                         p.email, p.phone_primary, p.phone_secondary,
                         i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone
@@ -4651,6 +4761,7 @@ async fn list_invoices(
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
                     "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
                     "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
+                    "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
                     "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|v| v.to_string()),
@@ -5134,10 +5245,10 @@ async fn recompute_invoice_settlement_status(
                       CASE
                           WHEN locked.status = 'cancelled' THEN locked.status
                            WHEN locked.total_gross - locked.credited_amount >= 0
-                            AND cash.paid_amount + locked.prepayment_applied_amount
+                            AND cash.paid_amount - refund.refunded_amount + locked.prepayment_applied_amount
                                 >= locked.total_gross - locked.credited_amount
                               THEN 'paid'
-                          WHEN cash.paid_amount + locked.prepayment_applied_amount > 0
+                          WHEN cash.paid_amount - refund.refunded_amount + locked.prepayment_applied_amount > 0
                               THEN 'partially_paid'
                           WHEN locked.status IN ('paid', 'partially_paid')
                            AND locked.due_date < CURRENT_DATE THEN 'overdue'
@@ -5510,6 +5621,17 @@ async fn release_invoice_prepayment(
             );
         }
     };
+    if let Err(error) = sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
+        .bind(auth.user_id.to_string())
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(%error, "set prepayment release actor");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release prepayment",
+        );
+    }
     let deleted = sqlx::query(
         r#"DELETE FROM invoice_prepayment_allocations
            WHERE id = $1
@@ -6399,7 +6521,7 @@ async fn reverse_invoice_payment(
         }
     };
     let row = match sqlx::query(
-        r#"SELECT payment.amount_gross, payment.payment_method,
+        r#"SELECT payment.amount_gross, payment.payment_method, payment.received_on,
                   payment.payment_reference, payment.transaction_type,
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.issued_at, invoice.total_vat, invoice.total_gross,
@@ -6441,6 +6563,15 @@ async fn reverse_invoice_payment(
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
         return err(StatusCode::CONFLICT, "Payment was already reversed");
+    }
+    if row
+        .try_get::<NaiveDate, _>("received_on")
+        .is_ok_and(|received_on| reversed_on < received_on)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Reversal date cannot precede the original payment",
+        );
     }
     let amount_gross = row
         .try_get::<Decimal, _>("amount_gross")
@@ -6489,7 +6620,12 @@ async fn reverse_invoice_payment(
                    SELECT SUM(CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END)
                    FROM invoice_refund_transactions
                    WHERE invoice_id = $1
-               ), 0) AS cash_refunded"#,
+               ), 0) AS cash_refunded,
+               COALESCE((
+                   SELECT SUM(amount_gross)
+                   FROM invoice_prepayment_allocations
+                   WHERE advance_invoice_id = $1
+               ), 0) AS allocated_advance"#,
     )
     .bind(invoice_id)
     .fetch_one(&mut *transaction)
@@ -6508,10 +6644,13 @@ async fn reverse_invoice_payment(
         < reversal_capacity
             .try_get::<Decimal, _>("cash_refunded")
             .unwrap_or(Decimal::ZERO)
+            + reversal_capacity
+                .try_get::<Decimal, _>("allocated_advance")
+                .unwrap_or(Decimal::ZERO)
     {
         return err(
             StatusCode::CONFLICT,
-            "Refunds must be reversed before this payment can be reversed",
+            "Refunds and applied advances must be reversed or released before this payment can be reversed",
         );
     }
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
@@ -8850,6 +8989,19 @@ async fn update_invoice_status(
         }
     }
 
+    if requested_status == "cancelled" {
+        if let Err(error) = sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
+            .bind(auth.user_id.to_string())
+            .execute(&mut *transaction)
+            .await
+        {
+            tracing::error!(%error, "set cancelled invoice allocation release actor");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to release invoice prepayment",
+            );
+        }
+    }
     if requested_status == "cancelled"
         && let Err(e) =
             sqlx::query("DELETE FROM invoice_prepayment_allocations WHERE target_invoice_id = $1")
@@ -9024,10 +9176,7 @@ async fn update_invoice_status(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        InvoicePdfAgency, InvoicePdfContext, InvoicePdfLineItem, build_invoice_pdf,
-        invoice_pdf_footer_line,
-    };
+    use super::{InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, invoice_pdf_footer_line};
     use chrono::{NaiveDate, Utc};
     use uuid::Uuid;
 
@@ -9038,7 +9187,8 @@ mod tests {
 
     #[test]
     fn invoice_pdf_preserves_cyrillic_text() {
-        let context = InvoicePdfContext {
+        let mut context = InvoicePdfContext {
+            currency: "EUR".to_string(),
             invoice_id: Uuid::new_v4(),
             patient_id: Uuid::new_v4(),
             invoice_number: "INV-UNIT-1".to_string(),
@@ -9063,15 +9213,12 @@ mod tests {
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
-            line_items: vec![InvoicePdfLineItem {
-                description: "Медицинская консультация".to_string(),
-                quantity: "1".to_string(),
-                unit_price: "145.00".to_string(),
-                vat_rate: "0".to_string(),
-                is_cost_passthrough: false,
-                line_gross: "145.00".to_string(),
-                notes: None,
-            }],
+            line_items: super::parse_invoice_pdf_line_items(&serde_json::json!([{
+                "description": "Медицинская консультация",
+                "quantity": "1", "unit_price": "145.00", "vat_rate": "0",
+                "is_cost_passthrough": false, "line_gross": "145.00",
+                "notes": "Подробное описание услуги, которое не должно попадать в счёт."
+            }])),
             agency: InvoicePdfAgency {
                 name: "GMED - Agentur für Patientenbetreuung".to_string(),
                 care_of: Some("Heorhii Hudiiev".to_string()),
@@ -9093,5 +9240,17 @@ mod tests {
         assert!(extracted_text.contains("PT-INV-UNIT"));
         assert!(extracted_text.contains("Макс Мюллер"));
         assert!(extracted_text.contains("Оплатить после получения счёта."));
+        assert!(!extracted_text.contains("Подробное описание услуги"));
+        assert!(extracted_text.contains("DE02120300000000202051"));
+        assert!(extracted_text.contains("145"));
+        assert!(extracted_text.contains("EUR"));
+        context.currency = "USD".to_string();
+        let usd_bytes = build_invoice_pdf(&context).unwrap();
+        let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
+        assert!(usd_text.contains("USD 145"));
+        assert!(!usd_text.contains("EUR"));
+        if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
+            std::fs::write(path, &bytes).unwrap();
+        }
     }
 }

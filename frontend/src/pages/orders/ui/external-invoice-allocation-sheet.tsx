@@ -92,9 +92,17 @@ export function ExternalInvoiceAllocationSheet({
     () => workspace?.candidate_invoices.find((candidate) => candidate.id === patientInvoiceId),
     [patientInvoiceId, workspace?.candidate_invoices],
   );
+  const normalizedAmount = amountGross.trim().replace(",", ".");
+  const numericAmount = Number(normalizedAmount);
+  const allocationLimit = Math.min(
+    Number(workspace?.remaining_receivable_gross ?? 0),
+    Number(selectedCandidate?.allocatable_capacity ?? 0),
+  );
+  const canAllocate = /^\d+(?:\.\d+)?$/.test(normalizedAmount)
+    && Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= allocationLimit;
 
   async function handleAllocate() {
-    if (!externalInvoiceId || !patientInvoiceId || !amountGross.trim()) return;
+    if (!externalInvoiceId || !patientInvoiceId || busy || loading || !canAllocate) return;
     setBusy(true);
     setError("");
     try {
@@ -103,7 +111,7 @@ export function ExternalInvoiceAllocationSheet({
         externalInvoiceId,
         allocationRequestId,
         patientInvoiceId,
-        amountGross.trim(),
+        normalizedAmount,
       );
       setAllocationRequestId(crypto.randomUUID());
       await load();
@@ -122,6 +130,7 @@ export function ExternalInvoiceAllocationSheet({
   }
 
   async function handleReverse(allocationId: string) {
+    if (busy || loading) return;
     if (!externalInvoiceId || !reversalNote.trim()) {
       setError(
         lang === "de"
@@ -180,7 +189,7 @@ export function ExternalInvoiceAllocationSheet({
                 loading ||
                 !workspace ||
                 !patientInvoiceId ||
-                !amountGross.trim() ||
+                !canAllocate ||
                 Number(workspace.remaining_receivable_gross) <= 0
               }
               onCancel={() => onOpenChange(false)}
@@ -223,8 +232,9 @@ export function ExternalInvoiceAllocationSheet({
                       void handleAllocate();
                     }}
                   >
-                    <Field label={lang === "de" ? "Patientenrechnung" : "Счёт пациента"}>
+                    <Field htmlFor="allocation-patient-invoice" label={lang === "de" ? "Patientenrechnung" : "Счёт пациента"}>
                       <select
+                        id="allocation-patient-invoice"
                         className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                         value={patientInvoiceId}
                         onChange={(event) => {
@@ -252,8 +262,9 @@ export function ExternalInvoiceAllocationSheet({
                         {lang === "de" ? "Offener Rechnungsbetrag" : "Остаток по счёту"}: {formatMoneyAmount(selectedCandidate.balance_due, currency)} · {lang === "de" ? "bereits aus Quellen zugeordnet" : "уже распределено из источников"}: {formatMoneyAmount(selectedCandidate.allocated_source_receivable, currency)}
                       </p>
                     ) : null}
-                    <Field label={lang === "de" ? "Quellforderung zuordnen" : "Сумма требования к распределению"}>
+                    <Field htmlFor="allocation-amount" label={lang === "de" ? "Quellforderung zuordnen" : "Сумма требования к распределению"}>
                       <Input
+                        id="allocation-amount"
                         inputMode="decimal"
                         value={amountGross}
                         onChange={(event) => setAmountGross(event.target.value)}
@@ -279,8 +290,9 @@ export function ExternalInvoiceAllocationSheet({
                       </p>
                     </div>
                     {activeAllocations.length > 0 ? (
-                      <Field label={lang === "de" ? "Stornogrund" : "Причина сторнирования"}>
+                      <Field htmlFor="allocation-reversal-note" label={lang === "de" ? "Stornogrund" : "Причина сторнирования"}>
                         <Input
+                          id="allocation-reversal-note"
                           value={reversalNote}
                           onChange={(event) => setReversalNote(event.target.value)}
                           placeholder={lang === "de" ? "Pflichtfeld vor Storno" : "Обязательно перед сторно"}

@@ -1,0 +1,421 @@
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/Cargo.toml: Cannot open: Permission denied
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/uploads: Cannot mkdir: Permission denied
+tar: crates/server/uploads: Cannot mkdir: Permission denied
+tar: crates/server/uploads/documents: Cannot mkdir: No such file or directory
+tar: crates/server/uploads/documents: Cannot mkdir: No such file or directory
+tar: crates/server/uploads/documents/1b41a196-14fe-43e6-a1f3-76ec083a71bd_signed.pdf: Cannot open: No such file or directory
+tar: crates/server/uploads/documents: Cannot mkdir: No such file or directory
+tar: crates/server/uploads/documents/7a9dd115-3e91-4ab2-b1e4-2db68127185d_fixture.pdf: Cannot open: No such file or directory
+tar: crates/server/uploads/documents: Cannot mkdir: No such file or directory
+tar: crates/server/uploads/documents/817aff04-5d81-4785-b96a-6d8cf235fb84_signature-report.pdf: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/accounting_audit_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/admin_compliance_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/admin_mfa_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/admin_security_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/agent3_clinical_services.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/appointments_portal_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/appointment_care_path_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/auth_sessions_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/bmp_import_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/case_anamnesis_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/clinical_redesign_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/company_financial_accounts_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/company_financial_account_transfers_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/company_financial_position_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/company_provider_settlements_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_booking_lifecycle_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_expense_receipts_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_key_custody_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_operational_items_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_partner_interactions_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/concierge_taxonomy_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/contracts_quotes_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/datev_setup_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/documents_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/external_invoices_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/external_invoice_allocations_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/feedback_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/financial_phase2_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/interpreters_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/invoices_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/invoice_credit_notes_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/invoice_payment_transactions_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/leads_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/medication_evidence_reviews_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/medication_expiry_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/medication_identity_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/medication_intelligence_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/medication_names_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/messages_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/messages_portal_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/me_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/operations_p0_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/order_economics_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_account_statement_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_balance_adjustments_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_clinical_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_portal_agent2_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_portal_subscriptions_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_repeat_intake_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/patient_resource_access_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/process_gates_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/provider_catalog_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/provider_people_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/provider_taxonomy_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/provider_templates_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/sops_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/staff_access_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/stats_api.rs: Cannot open: No such file or directory
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/support: Cannot mkdir: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/users_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/user_notifications_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/websocket_lifecycle_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/workflow_checklists_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests: Cannot mkdir: Permission denied
+tar: crates/server/tests/workspace_filters_api.rs: Cannot open: No such file or directory
+tar: crates/server/tests/support: Cannot mkdir: No such file or directory
+tar: crates/server/tests/support/mod.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/access.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/audit.rs: Cannot open: No such file or directory
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/bmp.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/business_metrics.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/config.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/crypto.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/file_scan.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/file_sniff.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/lib.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/main.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/pdf_logo.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/pdf_text.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/rate_limit.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/realtime.rs: Cannot open: No such file or directory
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/security_headers.rs: Cannot open: No such file or directory
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/service_description.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/settings.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/state.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/telemetry.rs: Cannot open: No such file or directory
+tar: crates/server/src: Cannot mkdir: Permission denied
+tar: crates/server/src/websocket.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/bfarm_rote_hand.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/bmp_import.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/drug_matching.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/gba_ais.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/interpreter_suggestions.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_ai_jobs.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_ai_provider.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_benefit_evidence.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_evidence_reviews.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_identity.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/medication_intelligence_sources.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/mod.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/order_service_groups.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/patient_clinical_pdf.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/patient_lab_results_pdf.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/patient_medication_pdf.rs: Cannot open: No such file or directory
+tar: crates/server/src/services: Cannot mkdir: No such file or directory
+tar: crates/server/src/services/patient_pdf_brand.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/access_policies.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/admin_compliance.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/admin_security.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/admin_settings.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/announcements.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/appointments.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/auth.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/bmp_imports.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/cases.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/clinical_document_imports.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/company_financials.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/company_financial_accounts.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/company_financial_account_transfers.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/company_provider_settlements.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/concierge_expenses.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/concierge_operational_items.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/concierge_services.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/contracts.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/custom_fields.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/datev.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/debt_management.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/documents.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/drug_products.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/e2e_support.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/feedback.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/health.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/internal_notes.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/interpreters.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/interpreter_patient_history.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/invoices.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/invoice_imports.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/key_rotation.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/leads.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/me.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/medication_evidence_reviews.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/medication_identity.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/medication_intelligence.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/medication_names.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/messages.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/mod.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/notifications.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/orders.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/order_service_groups.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/patients.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/patient_document_requests.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/patient_financials.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/patient_next_actions.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/patient_recommendations.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/projects.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/providers.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/provider_documents.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/provider_people.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/realtime.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/service_packages.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/sops.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/staff_access.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/stats.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/tasks.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/tax_profiles.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/users.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/user_notifications.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/visitor_intake.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/workflow_checklists.rs: Cannot open: No such file or directory
+tar: crates/server/src/routes: Cannot mkdir: No such file or directory
+tar: crates/server/src/routes/workflow_lifecycle.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/connection.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/defaults.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/mod.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/provider.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/summary.rs: Cannot open: No such file or directory
+tar: crates/server/src/document_signatures: Cannot mkdir: No such file or directory
+tar: crates/server/src/document_signatures/tests.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/blacklist.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/jwt.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/middleware.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/mod.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/password.rs: Cannot open: No such file or directory
+tar: crates/server/src/auth: Cannot mkdir: No such file or directory
+tar: crates/server/src/auth/tokens.rs: Cannot open: No such file or directory
+tar: crates/domain/Cargo.toml: Cannot open: Permission denied
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/domain/src: Cannot mkdir: Permission denied
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/domain/src: Cannot mkdir: Permission denied
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src: Cannot mkdir: Permission denied
+tar: crates/domain/src/error.rs: Cannot open: No such file or directory
+tar: crates/domain/src: Cannot mkdir: Permission denied
+tar: crates/domain/src/lib.rs: Cannot open: No such file or directory
+tar: crates/domain/src: Cannot mkdir: Permission denied
+tar: crates/domain/src/role.rs: Cannot open: No such file or directory
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src/access/data_sensitivity.rs: Cannot open: No such file or directory
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src/access/mod.rs: Cannot open: No such file or directory
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src/access/policy.rs: Cannot open: No such file or directory
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src/access/resource_access.rs: Cannot open: No such file or directory
+tar: crates/domain/src/access: Cannot mkdir: No such file or directory
+tar: crates/domain/src/access/share_status.rs: Cannot open: No such file or directory
+tar: crates/db/build.rs: Cannot open: Permission denied
+tar: crates/db/Cargo.toml: Cannot open: Permission denied
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: crates/db/src: Cannot mkdir: Permission denied
+tar: crates/db/src: Cannot mkdir: Permission denied
+tar: crates/db/src/lib.rs: Cannot open: No such file or directory
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Ignoring unknown extended header keyword 'SCHILY.fflags'
+tar: Exiting with failure status due to previous errors

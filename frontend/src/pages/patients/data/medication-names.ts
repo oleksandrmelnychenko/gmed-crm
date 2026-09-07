@@ -3,6 +3,23 @@ import { apiFetch } from "@/lib/api";
 export type MedicationNameField = "handelsname" | "wirkstoff";
 export type MedicationNameSuggestions = { items: string[]; has_more: boolean };
 
+export type MedicationPairConfirmation = { handelsname: string; wirkstoff: string };
+export type MedicationPairReview = {
+  known_pair: boolean;
+  handelsname: { exact: string | null; similar: string[] };
+  wirkstoff: { exact: string | null; similar: string[] };
+};
+
+export async function checkMedicationPair(pair: MedicationPairConfirmation, signal?: AbortSignal) {
+  const result = await apiFetch<MedicationPairReview>(`/medication-name-pairs/check?${new URLSearchParams(pair)}`, { cache: "no-store", signal });
+  if (!result || typeof result.known_pair !== "boolean" || [result.handelsname, result.wirkstoff].some(field =>
+    !field || (field.exact !== null && typeof field.exact !== "string") || !Array.isArray(field.similar)
+      || field.similar.some(name => typeof name !== "string" || !name.trim()))) {
+    throw new Error("Invalid medication pair review");
+  }
+  return result;
+}
+
 export async function fetchMedicationNames(
   field: MedicationNameField,
   query = "",

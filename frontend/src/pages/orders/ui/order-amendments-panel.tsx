@@ -46,7 +46,11 @@ function formatDate(value: string | null): string {
  * total with the note of what was agreed with the patient; it stays pending —
  * not applied to the total — until a different user approves it.
  */
-export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
+export function OrderAmendmentsPanel({ orderId, refreshKey, onChanged }: {
+  orderId: string;
+  refreshKey?: number;
+  onChanged?: () => void;
+}) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
@@ -59,7 +63,7 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
 
   function load() {
     return fetchOrderAmendments(orderId)
-      .then(setAmendments)
+      .then(rows => { setAmendments(rows); setError(""); })
       .catch((nextError: unknown) => {
         setError(
           nextError instanceof Error
@@ -73,22 +77,27 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
     let active = true;
     fetchOrderAmendments(orderId)
       .then((rows) => {
-        if (active) setAmendments(rows);
+        if (active) { setAmendments(rows); setError(""); }
       })
-      .catch(() => {
-        if (active) setAmendments([]);
+      .catch((nextError: unknown) => {
+        if (active) {
+          setAmendments(current => current ?? []);
+          setError(nextError instanceof Error ? nextError.message : lang === "de" ? "Konnte nicht laden" : "Не удалось загрузить");
+        }
       });
     return () => {
       active = false;
     };
-  }, [orderId]);
+  }, [orderId, refreshKey, lang]);
 
   async function run(action: () => Promise<unknown>) {
+    if (busy) return;
     setBusy(true);
     setError("");
     try {
       await action();
       await load();
+      onChanged?.();
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -109,7 +118,9 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
   }
 
   const pendingCount = amendments.filter((item) => item.status === "pending").length;
-  const deltaValid = delta.trim() !== "" && Number.isFinite(Number(delta.trim()));
+  const normalizedDelta = delta.trim().replace(",", ".");
+  const deltaValid = /^-?\d+(?:\.\d+)?$/.test(normalizedDelta)
+    && Number.isFinite(Number(normalizedDelta)) && Number(normalizedDelta) !== 0;
 
   return (
     <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
@@ -130,17 +141,21 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <Input
+            aria-label={tx("Изменение суммы", "Betragsänderung")}
+            disabled={busy}
             value={delta}
             onChange={(event) => setDelta(event.target.value)}
             placeholder={tx("Дельта, напр. 150 или -50", "Delta, z. B. 150 oder -50")}
-            className="h-9 w-40"
+            className="h-9 w-40 max-w-full"
             inputMode="decimal"
           />
           <Input
+            aria-label={tx("Что согласовано с пациентом", "Mit dem Patienten Vereinbartes")}
+            disabled={busy}
             value={note}
             onChange={(event) => setNote(event.target.value)}
             placeholder={tx("Что согласовано с пациентом", "Mit dem Patienten Vereinbartes")}
-            className="h-9 flex-1 min-w-[16rem]"
+            className="h-9 min-w-0 flex-[1_1_16rem]"
           />
           <Button
             type="button"
@@ -149,7 +164,7 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
             onClick={() =>
               void run(async () => {
                 await createOrderAmendment(orderId, {
-                  delta_amount: delta.trim(),
+                  delta_amount: normalizedDelta,
                   agreed_note: note.trim(),
                 });
                 setDelta("");
@@ -169,7 +184,7 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
       </div>
 
       {amendments.length === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-xs text-muted-foreground" hidden={Boolean(error)}>
           {tx("Изменений пока нет.", "Noch keine Änderungen.")}
         </p>
       ) : (
@@ -230,7 +245,14 @@ export function OrderAmendmentsPanel({ orderId }: { orderId: string }) {
         </ul>
       )}
 
-      {error ? <p className="mt-2 text-xs text-rose-600">{error}</p> : null}
+      {error ? (
+        <div className="mt-2 space-y-2">
+          <p role="alert" className="text-xs text-destructive">{error}</p>
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void load()}>
+            {tx("Повторить загрузку", "Erneut laden")}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

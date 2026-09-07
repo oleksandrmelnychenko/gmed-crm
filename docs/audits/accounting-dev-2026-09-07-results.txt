@@ -1,0 +1,47 @@
+BEGIN
+SET
+inventory|{"orders" : 20, "quotes" : 27, "invoices" : 4, "payments" : 2, "refunds" : 0, "credits" : 0, "advances_allocated" : 0, "external_invoices" : 1, "provider_payments" : 1, "ledger" : 5, "accounts" : 1, "transfers" : 0, "account_adjustments" : 1, "patient_adjustments" : 0}
+invoice_reconciliation|{"number" : "INV-20260710-0101", "type" : "final", "status" : "paid", "gross" : 1200.00, "paid" : 1200.00, "journal_net_cash" : 1200.00, "credited" : 0.00, "journal_credit" : 0, "prepayment" : 0.00, "allocated" : 0, "open" : 0.00, "cash_matches" : true, "credit_matches" : true, "prepayment_matches" : true, "due_date" : "2026-07-24"}
+invoice_reconciliation|{"number" : "INV-20260722-0102", "type" : "interim", "status" : "overdue", "gross" : 850.00, "paid" : 400.00, "journal_net_cash" : 400.00, "credited" : 0.00, "journal_credit" : 0, "prepayment" : 0.00, "allocated" : 0, "open" : 450.00, "cash_matches" : true, "credit_matches" : true, "prepayment_matches" : true, "due_date" : "2026-08-05"}
+invoice_reconciliation|{"number" : "INV-20260728-0103", "type" : "advance", "status" : "overdue", "gross" : 300.00, "paid" : 0.00, "journal_net_cash" : 0, "credited" : 0.00, "journal_credit" : 0, "prepayment" : 0.00, "allocated" : 0, "open" : 300.00, "cash_matches" : true, "credit_matches" : true, "prepayment_matches" : true, "due_date" : "2026-07-19"}
+invoice_reconciliation|{"number" : "INV-20260905-0001", "type" : "final", "status" : "draft", "gross" : 2963.10, "paid" : 0, "journal_net_cash" : 0, "credited" : 0.00, "journal_credit" : 0, "prepayment" : 0.00, "allocated" : 0, "open" : 2963.10, "cash_matches" : true, "credit_matches" : true, "prepayment_matches" : true, "due_date" : null}
+invoice_arithmetic_errors|0
+quote_arithmetic_errors|0
+external_arithmetic_errors|0
+ledger_arithmetic_errors|0
+invoice_line_totals|{"number" : "INV-20260710-0101", "gross" : 1200.00, "line_gross" : 1200.00, "net" : 1008.40, "line_net" : 1008.40, "vat" : 191.60, "line_vat" : 191.60}
+invoice_line_totals|{"number" : "INV-20260722-0102", "gross" : 850.00, "line_gross" : 850.00, "net" : 714.29, "line_net" : 714.29, "vat" : 135.71, "line_vat" : 135.71}
+invoice_line_totals|{"number" : "INV-20260728-0103", "gross" : 300.00, "line_gross" : 300.00, "net" : 252.10, "line_net" : 252.10, "vat" : 47.90, "line_vat" : 47.90}
+invoice_line_totals|{"number" : "INV-20260905-0001", "gross" : 2963.10, "line_gross" : 2963.1, "net" : 2490, "line_net" : 2490, "vat" : 473.10, "line_vat" : 473.1}
+payment_ledger|{"invoice" : "INV-20260710-0101", "type" : "payment", "method" : "legacy_import", "journal" : 1200.00, "ledger" : null, "entries" : 0}
+payment_ledger|{"invoice" : "INV-20260722-0102", "type" : "payment", "method" : "legacy_import", "journal" : 400.00, "ledger" : null, "entries" : 0}
+invoice_ledger|{"number" : "INV-20260710-0101", "net_cash" : 1200.00, "ledger_gross" : 1200.00}
+invoice_ledger|{"number" : "INV-20260722-0102", "net_cash" : 400.00, "ledger_gross" : 400.00}
+invoice_ledger|{"number" : "INV-20260728-0103", "net_cash" : 0.00, "ledger_gross" : 0}
+invoice_ledger|{"number" : "INV-20260905-0001", "net_cash" : 0, "ledger_gross" : 0}
+unlinked_ledger|external_invoice_payment|2|530.00
+unlinked_ledger|invoice_payment|2|1600.00
+overallocated_advance|0
+overallocated_quote_lines|0
+multiple_active_finals|0
+account_currency_errors|0
+unassigned_cash|0|0
+cash_before_account_opening|0|0
+provider_reconciliation|{"number" : "11280360012511", "scope" : "company", "status" : "paid", "paid_by" : "agency", "gross" : 93.42, "receivable" : 93.42, "liability" : 0.00, "journal" : 93.42, "ledger" : 93.42}
+quote_recorded_prepayments|KV-20260721-0009|200|0.00
+quote_recorded_prepayments|KV-20260721-0020|1|0.00
+quote_recorded_prepayments|KV-20260904-0028|100|0
+quote_recorded_prepayments|KV-20260905-0030|100|0
+invoice_status_counts|draft|1|2963.10|0
+invoice_status_counts|overdue|2|1150.00|400.00
+invoice_status_counts|paid|1|1200.00|1200.00
+ledger_totals|EUR|expense|provider_expense|3|523.88|99.54|623.42
+ledger_totals|EUR|income|service_revenue|2|1344.53|255.47|1600.00
+financial_trigger_inventory|accounting_entries|assign_and_validate_accounting_entry_account_trigger
+financial_trigger_inventory|invoice_payment_transactions|protect_invoice_payment_transaction_trigger
+financial_trigger_inventory|invoice_payment_transactions|validate_invoice_payment_transaction_trigger
+financial_trigger_inventory|invoices|validate_invoice_cancellation_financials_trigger
+financial_trigger_inventory|invoices|trg_protect_patient_invoice_source_allocations
+financial_trigger_inventory|invoices|set_updated_at_invoices
+financial_trigger_inventory|invoices|protect_cancelled_invoice_reactivation_trigger
+COMMIT

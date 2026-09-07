@@ -75,6 +75,8 @@ export type ColumnDef<T> = {
   required?: boolean;
   pinned?: "left" | "right";
   width?: number;
+  /** Minimum width for a flexible column that fills the remaining table space. */
+  minWidth?: number;
   group?: string;
   render?: (row: T) => ReactNode;
   headerRender?: () => ReactNode;

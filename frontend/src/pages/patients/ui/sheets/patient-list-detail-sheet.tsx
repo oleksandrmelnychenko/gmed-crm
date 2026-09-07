@@ -11,13 +11,13 @@ import {
   LoaderCircle,
   Mail,
   Phone,
+  Save,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { Input } from "@/components/ui/input";
-import { Banner, tokens } from "@/components/ui-shell";
+import { Banner, StatusBadge } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +59,7 @@ import {
   humanizeFunctionalLabel,
   parseFunctionalLabels,
   formInputClassName,
+  PatientFormSection,
 } from "../shared/patient-form-primitives";
 import { PatientFormFields } from "../shared/patient-form-fields";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -112,18 +113,11 @@ function PatientOverviewSection({
   const tr = t as unknown as Record<string, string>;
 
   return (
-    <section className={cn("rounded-xl p-3.5 space-y-2.5", tokens.surface.softCard)}>
+    <section className="space-y-3 rounded-xl border border-border border-l-4 border-l-[var(--brand)] bg-card p-4">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span
-          className={cn(
-            "rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.1em]",
-            detail.is_active
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-border bg-muted text-muted-foreground",
-          )}
-        >
+        <StatusBadge tone={detail.is_active ? "success" : "neutral"}>
           {detail.is_active ? t.common_active : t.common_inactive}
-        </span>
+        </StatusBadge>
         <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
           {getPatientGenderLabel(detail.gender, tr)}
         </Badge>
@@ -146,20 +140,20 @@ function PatientOverviewSection({
           <h2 className="text-lg font-semibold tracking-tight text-foreground">
             {getPatientDisplayName(detail)}
           </h2>
-          <p className="mt-0.5 text-[12px] text-muted-foreground">{detail.patient_id}</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{detail.patient_id}</p>
         </div>
-        <div className="grid gap-1 text-[12.5px] text-muted-foreground">
-          <div className="flex items-center gap-1.5">
+        <div className="grid min-w-0 gap-2 text-xs text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-2">
             <CalendarClock className="size-3.5 text-muted-foreground/70" />
             <span>{formatPatientDate(detail.birth_date, t.common_not_set)}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Phone className="size-3.5 text-muted-foreground/70" />
-            <span>{getPatientFieldValue(detail.phone_primary, t.common_not_set)}</span>
+            <span className="break-all">{getPatientFieldValue(detail.phone_primary, t.common_not_set)}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Mail className="size-3.5 text-muted-foreground/70" />
-            <span>{getPatientFieldValue(detail.email, t.common_not_set)}</span>
+            <span className="break-all">{getPatientFieldValue(detail.email, t.common_not_set)}</span>
           </div>
         </div>
       </div>
@@ -209,26 +203,23 @@ function PatientProfileSection({
   );
 
   return (
-    <div className="space-y-2.5">
-      <section className="space-y-2.5 rounded-xl border border-border/60 bg-card p-3.5">
-        <div className="text-sm font-semibold text-foreground">
-          {l("patients_identification")}
-        </div>
-        <div className="grid gap-2.5 md:grid-cols-3">
-          <div className="space-y-1">
-            <div className="text-[12px] font-medium text-muted-foreground">{t.patients_birth_date}</div>
-            <Input value={detail.birth_date ?? ""} disabled className={formInputClassName} />
+    <div className="space-y-3">
+      <PatientFormSection title={l("patients_identification")}>
+        <dl className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <dt className="text-xs text-muted-foreground">{t.patients_birth_date}</dt>
+            <dd className="font-mono text-sm text-foreground">{formatPatientDate(detail.birth_date, t.common_not_set)}</dd>
           </div>
-          <div className="space-y-1">
-            <div className="text-[12px] font-medium text-muted-foreground">{t.patients_gender}</div>
-            <Input value={getPatientGenderLabel(detail.gender, tr)} disabled className={formInputClassName} />
+          <div className="space-y-1.5">
+            <dt className="text-xs text-muted-foreground">{t.patients_gender}</dt>
+            <dd className="text-sm text-foreground">{getPatientGenderLabel(detail.gender, tr)}</dd>
           </div>
-          <div className="space-y-1">
-            <div className="text-[12px] font-medium text-muted-foreground">{t.patients_legal_status}</div>
-            <Input value={legalStatusSummary} disabled className={formInputClassName} />
+          <div className="min-w-0 space-y-1.5">
+            <dt className="text-xs text-muted-foreground">{t.patients_legal_status}</dt>
+            <dd className="text-sm text-foreground">{legalStatusSummary}</dd>
           </div>
-        </div>
-      </section>
+        </dl>
+      </PatientFormSection>
 
       <PatientFormFields
         form={form}
@@ -540,6 +531,7 @@ function PatientDetailSheet({
       }
       dispatchDetailSheetState((current) => ({
         form: { ...current.form, trustedContacts: persistedTrustedContacts },
+        initialForm: { ...form, trustedContacts: persistedTrustedContacts },
         initialTrustedContactIds: persistedTrustedContacts.flatMap((contact) => (
           contact.persistedId ? [contact.persistedId] : []
         )),
@@ -570,7 +562,10 @@ function PatientDetailSheet({
           : dictionary.patients_title || dictionary.patients_subtitle
       }
       width="detail-wide"
+      headerClassName="border-b border-border"
+      bodyClassName="bg-muted/10"
       onSubmit={detail && canCreateEdit ? handleSubmit : undefined}
+      footerError={error ? <div className="max-h-24 overflow-y-auto break-words">{error}</div> : undefined}
       footer={
         detail && !hideFooterActions ? (
           <>
@@ -586,9 +581,9 @@ function PatientDetailSheet({
               <Button
                 type="submit"
                 className="h-9 rounded-lg gap-1.5 px-3.5"
-                disabled={busy}
+                disabled={busy || !dirty}
               >
-                {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
                 {busy ? dictionary.patients_saving : dictionary.patients_save}
               </Button>
             ) : null}
@@ -604,7 +599,7 @@ function PatientDetailSheet({
       ) : detail ? (
         <>
           {detailError ? <Banner tone="error">{detailError}</Banner> : null}
-          {error ? <Banner tone="error">{error}</Banner> : null}
+          {hideFooterActions && error ? <Banner tone="error">{error}</Banner> : null}
           <PatientOverviewSection
             detail={detail}
             onOpenOrders={onOpenOrders}
@@ -616,7 +611,7 @@ function PatientDetailSheet({
           <PatientProfileSection
             detail={detail}
             form={form}
-            canEdit={canCreateEdit}
+            canEdit={canCreateEdit && !busy}
             onChange={(field, value) =>
               setForm((current) => ({ ...current, [field]: value }))
             }

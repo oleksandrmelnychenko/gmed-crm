@@ -215,8 +215,11 @@ export async function fetchPatientOrderRecheck(patientId: string) {
   return normalizePatientOrderRecheck(payload);
 }
 
-export function fetchOrders(path: string) {
-  return apiFetch<OrderSummary[]>(path);
+export function fetchOrders(
+  path: string,
+  options: { signal?: AbortSignal; forceFresh?: boolean } = {},
+) {
+  return apiFetch<OrderSummary[]>(path, options);
 }
 
 export function fetchOrder(orderId: string) {
@@ -341,6 +344,7 @@ export function updateOrderCommercialBasis(
     signed_patient?: boolean;
     signed_agency?: boolean;
     prepayment_required?: boolean;
+    prepayment_due_at?: string | null;
     prepayment_amount?: string;
     needs_description?: string;
     date_from?: string;
@@ -361,6 +365,7 @@ export function updateOrderCommercialBasis(
     signed_at: string | null;
     prepayment_required: boolean;
     prepayment_amount: string | null;
+    prepayment_due_at: string | null;
     date_from: string | null;
     date_to: string | null;
   }>(`/orders/${orderId}/commercial-basis`, payload);

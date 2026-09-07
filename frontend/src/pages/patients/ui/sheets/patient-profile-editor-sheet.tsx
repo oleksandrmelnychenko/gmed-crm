@@ -6,11 +6,11 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Mail, Phone, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle, Mail, Phone, Plus, Save, Trash2 } from "lucide-react";
 
 import {
   CountrySelect,
-  FormSection,
+  PatientFormSection as FormSection,
   FunctionalLabelChips,
   LanguageChips,
   NationalitySelect,
@@ -337,17 +337,17 @@ function PatientProfileEditorFormSections({
     }
   }
 
-  return (        <div className="space-y-3">
+  return (        <div className="space-y-4">
               <FormSection title={dictionary.patient_profile_editor_personal_data}>
-                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-5">
-                  <FormField label={dictionary.patient_profile_editor_title}>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+                  <FormField label={dictionary.patient_profile_editor_title} className="lg:col-span-2">
                     <Input
                       value={form.title}
                       onChange={(event) => updateField("title", event.target.value)}
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={dictionary.patient_profile_editor_first_name}>
+                  <FormField label={dictionary.patient_profile_editor_first_name} required className="lg:col-span-2">
                     <Input
                       value={form.firstName}
                       onChange={(event) => updateField("firstName", event.target.value)}
@@ -355,7 +355,7 @@ function PatientProfileEditorFormSections({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={dictionary.patient_profile_editor_last_name}>
+                  <FormField label={dictionary.patient_profile_editor_last_name} required className="lg:col-span-2">
                     <Input
                       value={form.lastName}
                       onChange={(event) => updateField("lastName", event.target.value)}
@@ -363,7 +363,7 @@ function PatientProfileEditorFormSections({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={dictionary.patients_birth_date}>
+                  <FormField label={dictionary.patients_birth_date} required className="lg:col-span-3">
                     <Input
                       type="date"
                       value={form.birthDate}
@@ -372,7 +372,7 @@ function PatientProfileEditorFormSections({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={dictionary.patients_gender}>
+                  <FormField label={dictionary.patients_gender} required className="lg:col-span-3">
                     <NativeComboboxSelect
                       value={form.gender}
                       onChange={(event) => updateField("gender", event.target.value)}
@@ -430,11 +430,11 @@ function PatientProfileEditorFormSections({
                   {contacts.map((contact) => (
                     <div
                       key={contact.id}
-                      className="rounded-xl border border-border/70 bg-card/50 p-3"
+                      className="min-w-0 rounded-lg border border-border bg-muted/10 p-3"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--brand)]/10 text-[var(--brand)]">
                             {contact.contactKind === "email" ? (
                               <Mail className="size-4" />
                             ) : (
@@ -468,6 +468,7 @@ function PatientProfileEditorFormSections({
                             type="button"
                             variant="outline"
                             size="icon-sm"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                             title={dictionary.common_remove}
                             aria-label={dictionary.common_remove}
                             onClick={() => removeContact(contact.id)}
@@ -477,7 +478,7 @@ function PatientProfileEditorFormSections({
                         </div>
                       </div>
 
-                      <div className="mt-2.5 grid gap-2.5 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(200px,1fr)_minmax(140px,0.8fr)_minmax(220px,1.4fr)]">
                         <FormField label={label("providers_contact_kind", dictionary.common_not_set)}>
                           <NativeComboboxSelect
                             value={contact.contactKind}
@@ -518,7 +519,7 @@ function PatientProfileEditorFormSections({
                             </option>
                           </NativeComboboxSelect>
                         </FormField>
-                        <FormField label={contactValueLabel(contact.contactKind)}>
+                        <FormField label={contactValueLabel(contact.contactKind)} className="sm:col-span-2 xl:col-span-1">
                           <Input
                             type={contact.contactKind === "email" ? "email" : "tel"}
                             value={contact.value}
@@ -663,7 +664,7 @@ function PatientProfileEditorFormSections({
                     : dictionary.patient_profile_editor_emergency_contact
                 }
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-xs text-muted-foreground">
                     {lang === "de"
                       ? "Mehrere Vertrauenskontakte können hinterlegt werden."
@@ -673,8 +674,9 @@ function PatientProfileEditorFormSections({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    className={cn(contactAddButtonClassName, "shrink-0 gap-1.5")}
                     onClick={addTrustedContact}
+                    disabled={trustedContactsLoading}
                   >
                     <Plus className="size-3.5" />
                     {lang === "de" ? "Kontakt hinzufügen" : "Добавить контакт"}
@@ -702,7 +704,7 @@ function PatientProfileEditorFormSections({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive"
+                            className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                             aria-label={lang === "de" ? "Kontakt entfernen" : "Удалить контакт"}
                             onClick={() => removeTrustedContact(contact.id)}
                           >
@@ -932,6 +934,7 @@ function PatientProfileEditorSheetContent({
   const [initialTrustedContactIds, setInitialTrustedContactIds] = useState<string[]>([]);
   const [trustedContactsLoading, setTrustedContactsLoading] = useState(Boolean(open && patientId));
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (!open || !patientId) {
@@ -993,6 +996,7 @@ function PatientProfileEditorSheetContent({
       event.preventDefault();
       if (!patientId || !form || !dirty || busy || trustedContactsLoading) return;
       setBusy(true);
+      setSaveError("");
       onError("");
       try {
         const normalizedTrustedContacts = trustedContacts.flatMap((contact) => {
@@ -1099,9 +1103,9 @@ function PatientProfileEditorSheetContent({
         onOpenChange(false);
         onSaved();
       } catch (error) {
-        onError(
-          error instanceof Error ? error.message : dictionary.common_failed_update
-        );
+        const message = error instanceof Error ? error.message : dictionary.common_failed_update;
+        setSaveError(message);
+        onError(message);
       } finally {
         setBusy(false);
       }
@@ -1130,6 +1134,15 @@ function PatientProfileEditorSheetContent({
       width="detail-wide"
       onSubmit={handleSubmit}
       title={dictionary.patient_profile_editor_edit_patient_profile}
+      description={detail ? (
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium text-foreground">{detail.first_name} {detail.last_name}</span>
+          <span className="font-mono text-xs">{detail.patient_id}</span>
+        </span>
+      ) : undefined}
+      headerClassName="border-b border-border"
+      bodyClassName="bg-muted/10"
+      footerError={saveError ? <div className="max-h-24 overflow-y-auto break-words">{saveError}</div> : undefined}
       footer={
         form ? (
           <>
@@ -1144,9 +1157,9 @@ function PatientProfileEditorSheetContent({
             <Button
               type="submit"
               className="h-9 rounded-lg gap-1.5 px-3.5"
-              disabled={busy || trustedContactsLoading}
+              disabled={busy || trustedContactsLoading || !dirty}
             >
-              {busy ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : null}
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
               {dictionary.patient_profile_editor_save_patient}
             </Button>
           </>
@@ -1154,6 +1167,7 @@ function PatientProfileEditorSheetContent({
       }
     >
       {form ? (
+        <fieldset disabled={busy} className="min-w-0">
         <PatientProfileEditorFormSections
           dictionary={dictionary}
           lang={lang}
@@ -1166,6 +1180,7 @@ function PatientProfileEditorSheetContent({
           updateTrustedContacts={setTrustedContacts}
           updateLegalStatusField={updateLegalStatusField}
         />
+        </fieldset>
       ) : null}
     </PatientSheetScaffold>
   );

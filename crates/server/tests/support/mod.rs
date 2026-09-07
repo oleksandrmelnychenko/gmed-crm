@@ -77,6 +77,11 @@ pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
     let backend = match get_or_create_test_backend().await {
         Ok(backend) => backend,
         Err(error) => {
+            if std::env::var_os("TEST_DATABASE_ADMIN_URL").is_some()
+                || std::env::var_os("CI").is_some()
+            {
+                panic!("required integration database backend is unavailable: {error}");
+            }
             eprintln!(
                 "skipping integration suite: failed to resolve test database backend: {error}"
             );
@@ -86,8 +91,7 @@ pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
     let suite_db = Arc::new(match create_suite_database(backend).await {
         Ok(suite_db) => suite_db,
         Err(error) => {
-            eprintln!("skipping integration suite: failed to provision test database: {error}");
-            return None;
+            panic!("failed to provision integration database: {error}");
         }
     });
     let app_state = AppState::new(

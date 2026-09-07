@@ -491,6 +491,7 @@ type PatientProfileTabProps = {
   notesSheetOpen: boolean;
   onLegalStatusSheetOpenChange: ToggleHandler;
   onOpenTab: (tab: "orders" | "documents" | "contracts" | "invoices") => void;
+  onCreateOrder: () => void;
   onNotesSheetOpenChange: ToggleHandler;
   openProfileEditor: () => void;
   patientDetailStatusLabel: StatusLabelFn;
@@ -518,6 +519,7 @@ function usePatientProfileTabContent({
   onLegalStatusSheetOpenChange,
   onNotesSheetOpenChange,
   onOpenTab,
+  onCreateOrder,
   openProfileEditor,
   patientDetailStatusLabel,
   reload,
@@ -1085,7 +1087,7 @@ function usePatientProfileTabContent({
             <ProfileActionCard
               title={t.orders_create_title}
               description={t.orders_create_description}
-              onClick={() => staffGo(`/orders?create=1&patient=${encodeURIComponent(id)}`)}
+              onClick={onCreateOrder}
             />
           ) : null}
           {canCreateTasks && id ? (

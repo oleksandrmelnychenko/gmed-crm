@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const patientId = "patient-medication-test";
 
-async function mount(page: Page, lang: "ru" | "de", empty = false) {
+async function mount(page: Page, lang: "ru" | "de", empty = false, view = "clinical") {
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_lang", value);
     localStorage.setItem("gmed_access_token", "lab-results-test-token");
@@ -29,7 +29,7 @@ async function mount(page: Page, lang: "ru" | "de", empty = false) {
     window.__vite_plugin_react_preamble_installed__ = true;
     import('/tests/e2e/fixtures/medication-plan-harness.tsx');
     </script></body></html>` }));
-  await page.goto("/medication-plan-harness?view=clinical");
+  await page.goto(`/medication-plan-harness?view=${view}`);
   return page.getByRole("button", {
     name: lang === "ru" ? "Лабораторные результаты (PDF)" : "Laborergebnisse (PDF)",
     exact: true,
@@ -37,9 +37,10 @@ async function mount(page: Page, lang: "ru" | "de", empty = false) {
 }
 
 for (const lang of ["ru", "de"] as const) {
-  test(`laboratory results PDF downloads from the laboratory section in ${lang}`, async ({ page }) => {
+ for (const view of ["clinical", "lab-header"]) {
+  test(`laboratory results PDF downloads from ${view} in ${lang}`, async ({ page }) => {
     const pdf = await readFile("public/demo/datev/demo-datev-001.pdf");
-    const button = await mount(page, lang);
+    const button = await mount(page, lang, false, view);
     await expect(button).toBeEnabled();
     let requests = 0;
     await page.route("**/lab-results.pdf?*", async route => {
@@ -61,9 +62,47 @@ for (const lang of ["ru", "de"] as const) {
     expect(await readFile((await file.path())!)).toEqual(pdf);
     expect(requests).toBe(1);
   });
+ }
 }
 
 test("empty laboratory history does not offer an empty PDF", async ({ page }) => {
   const button = await mount(page, "de", true);
   await expect(button).toHaveCount(0);
+});
+
+test("header export is disabled for an empty history and updates when results change", async ({ page }) => {
+  const button = await mount(page, "ru", true, "lab-header");
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("title", "У пациента пока нет сохранённых результатов анализов.");
+  let items: unknown[] = [{ id: "new-result" }];
+  await page.route("**/lab-results", route => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ items }),
+  }));
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(button).toBeEnabled();
+  items = [];
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(button).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("header export reports empty data as information and keeps server failures retryable", async ({ page }) => {
+  const button = await mount(page, "ru", false, "lab-header");
+  await expect(button).toBeEnabled();
+  await page.route("**/lab-results.pdf?*", route => route.fulfill({
+    status: 500, contentType: "application/json", body: '{"error":"Internal Server Error"}',
+  }));
+  await button.click();
+  const error = page.getByRole("alert").filter({ hasText: "Не удалось сформировать лабораторный отчёт." });
+  await expect(error).toBeVisible();
+  await expect(button).toBeEnabled();
+  await error.getByRole("button").click();
+
+  await page.route("**/lab-results.pdf?*", route => route.fulfill({
+    status: 422, contentType: "application/json", body: '{"message":"lab_results_empty","error":"Unprocessable Entity"}',
+  }));
+  await button.click();
+  await expect(page.getByRole("status").filter({ hasText: "У пациента пока нет сохранённых результатов анализов." })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(button).toBeDisabled();
 });

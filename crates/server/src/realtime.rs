@@ -366,7 +366,7 @@ pub async fn publish_invoice_event(
     invoice_id: Uuid,
     payload: Value,
 ) {
-    let row = sqlx::query("SELECT patient_id, created_by FROM invoices WHERE id = $1")
+    let row = sqlx::query("SELECT patient_id, created_by, order_id FROM invoices WHERE id = $1")
         .bind(invoice_id)
         .fetch_optional(&state.db)
         .await;
@@ -374,6 +374,14 @@ pub async fn publish_invoice_event(
     let Some(row) = row.ok().flatten() else {
         return;
     };
+
+    if let Ok(order_id) = row.try_get::<Uuid, _>("order_id") {
+        if let Err(error) =
+            crate::services::order_payment_tracking::sync_notifications(state, Some(order_id)).await
+        {
+            tracing::error!(%error, %order_id, "notify invoice payment change");
+        }
+    }
 
     let patient_id: Uuid = match row.try_get("patient_id") {
         Ok(value) => value,

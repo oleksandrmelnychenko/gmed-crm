@@ -26,6 +26,7 @@ function localIsoDate(date = new Date()) {
 }
 
 async function setDatePickerValue(input: Locator, value: string) {
+  const displayValue = value.split("-").reverse().join(".");
   await input.evaluate((node, nextValue) => {
     const nativeInput = node as HTMLInputElement;
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -35,8 +36,8 @@ async function setDatePickerValue(input: Locator, value: string) {
     valueSetter?.call(nativeInput, nextValue);
     nativeInput.dispatchEvent(new Event("input", { bubbles: true }));
     nativeInput.dispatchEvent(new Event("change", { bubbles: true }));
-  }, value);
-  await expect(input).toHaveValue(value);
+  }, displayValue);
+  await expect(input).toHaveValue(displayValue);
 }
 
 async function loginAsStaff(page: Page, email: string) {
@@ -2017,6 +2018,130 @@ test.describe("staff smoke flows", () => {
   });
 });
 
+test.describe("patient inline order creation", () => {
+  const patientId = "00000000-0000-0000-0000-000000000301";
+  test.beforeEach(async ({page}) => {
+    await page.addInitScript(() => localStorage.setItem("gmed_lang", "de"));
+    await installStaffApiMocks(page);
+    await loginAsStaff(page, "admin@gmed.de");
+  });
+
+  test("opens the global orders list from a patient sheet on the first click", async ({page}) => {
+    await page.setViewportSize({width:1100, height:900});
+    const requests: string[] = [];
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    await page.route(/\/api\/v1\/orders(?:\?.*)?$/, async route => {
+      const url = new URL(route.request().url());
+      requests.push(url.search);
+      await pending;
+      return json(route, url.searchParams.get("patient_id") === patientId ? [{
+        id:"patient-linked-order", order_number:"A-PATIENT-FIRST-001", patient_id:patientId,
+        patient_name:"Anna Muster", patient_pid:"PT-001", phase:"discovery", status:"active",
+        total_estimated:"100", total_actual:"100", currency:"EUR", created_at:"2026-09-07T09:00:00Z",
+      }] : []);
+    });
+    try {
+      await page.goto(`/patients?patient=${patientId}`);
+      const sheet = page.getByRole("dialog");
+      await sheet.getByRole("button", {name:"Aufträge", exact:true}).click();
+      await expect(page).toHaveURL(new RegExp(`/orders\\?patient=${patientId}$`));
+      await expect.poll(() => requests.length).toBeGreaterThan(0);
+    } finally {
+      release();
+    }
+    await expect(page.getByRole("row").filter({hasText:"A-PATIENT-FIRST-001"})).toBeVisible();
+    expect(requests.every(query => new URLSearchParams(query).get("patient_id") === patientId)).toBe(true);
+  });
+
+  for (const tab of ["profile", "orders"]) {
+    test(`creates an order from ${tab} without leaving the patient and refreshes the table`, async ({page}) => {
+      if (tab === "orders") await page.setViewportSize({width:390, height:844});
+      const orders: Record<string, unknown>[] = [];
+      const writes: unknown[] = [];
+      let release!: () => void;
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      await page.route(`**/api/v1/patients/${patientId}/orders`, route => json(route, orders));
+      await page.route(`**/api/v1/patients/${patientId}/recheck`, route => json(route, {requires_recheck:false, can_create_order:true}));
+      await page.route("**/api/v1/orders", async route => {
+        if (route.request().method() !== "POST") return json(route, orders);
+        writes.push(route.request().postDataJSON());
+        await pending;
+        orders.push({id:"new-inline-order", order_number:"A-INLINE-001", phase:"discovery", status:"active", created_at:"2026-09-07T09:00:00Z"});
+        return json(route, {id:"new-inline-order"});
+      });
+      const patientUrl = `/patients/${patientId}${tab === "orders" ? "?tab=orders" : ""}`;
+      await page.goto(patientUrl);
+      const open = page.getByRole("button", {name:/Auftrag anlegen/});
+      await open.click();
+      const sheet = page.getByRole("dialog");
+      await expect(sheet.getByText("Anna Muster")).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`${patientUrl.replace("?", "\\?")}$`));
+      await sheet.getByRole("button", {name:"Abbrechen", exact:true}).click();
+      await expect(sheet).toHaveCount(0);
+      await open.click();
+      await sheet.locator("textarea").fill("Neue Untersuchung");
+      expect(await sheet.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      await page.screenshot({path:`../artifacts/design-qa/patient-inline-order-${tab}.png`, animations:"disabled"});
+      const submit = sheet.getByRole("button", {name:/Auftrag anlegen/});
+      await submit.click();
+      const disabled = await submit.isDisabled();
+      release();
+      expect(disabled).toBe(true);
+      await expect(sheet).toHaveCount(0);
+      await expect(page).toHaveURL(new RegExp(`${patientUrl.replace("?", "\\?")}$`));
+      expect(writes).toEqual([{patient_id:patientId, contract_id:null, needs_description:"Neue Untersuchung"}]);
+      if (tab === "profile") await page.locator('a[href*="tab=orders"]').first().click();
+      await expect(page.getByText("A-INLINE-001", {exact:true}).filter({visible:true})).toBeVisible();
+    });
+  }
+
+  test("recheck blocks submission, retries and keeps a failed create error visible", async ({page}) => {
+    let allowed = false;
+    let attempts = 0;
+    await page.route(`**/api/v1/patients/${patientId}/recheck`, route => json(route, {
+      requires_recheck:true, can_create_order:allowed,
+      blocking_reasons:allowed ? [] : ["Primary contact is missing"],
+    }));
+    await page.route("**/api/v1/orders", route => {
+      attempts++;
+      return route.fulfill({status:409, json:{error:"Auftrag konnte nicht erstellt werden"}});
+    });
+    await page.goto(`/patients/${patientId}`);
+    await page.getByRole("button", {name:/Auftrag anlegen/}).click();
+    const sheet = page.getByRole("dialog");
+    const submit = sheet.getByRole("button", {name:/Auftrag anlegen/});
+    await expect(sheet.getByText("Blockiert", {exact:true})).toBeVisible();
+    await expect(submit).toBeDisabled();
+    expect(attempts).toBe(0);
+    allowed = true;
+    await sheet.getByRole("button", {name:"Erneut prüfen"}).click();
+    await expect(submit).toBeEnabled();
+    await sheet.locator("textarea").fill("Entwurf behalten");
+    await sheet.getByRole("button", {name:"Abbrechen", exact:true}).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await submit.click();
+    await expect(sheet.getByRole("alert")).toContainText("Auftrag konnte nicht erstellt werden");
+    await expect(sheet.locator("textarea")).toHaveValue("Entwurf behalten");
+    await expect(page).toHaveURL(new RegExp(`/patients/${patientId}$`));
+    await expect(submit).toBeEnabled();
+    expect(attempts).toBe(1);
+  });
+
+  test("patient orders tab sorts the complete list before pagination", async ({page}) => {
+    const orders = Array.from({length:60}, (_, index) => ({id:`order-${index}`, order_number:`A-${String(index + 1).padStart(3, "0")}`, phase:"discovery", status:"active", created_at:"2026-09-07T09:00:00Z"}));
+    await page.route(`**/api/v1/patients/${patientId}/orders`, route => json(route, orders));
+    await page.goto(`/patients/${patientId}?tab=orders`);
+    const header = page.getByRole("columnheader").filter({hasText:/^Auftrag/});
+    await header.click();
+    await header.click();
+    await expect(page.getByRole("row").filter({hasText:"A-060"})).toBeVisible();
+    await expect(page.getByRole("row").filter({hasText:"A-001"})).toHaveCount(0);
+  });
+});
+
 test.describe("patient-profile RBAC shell", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
@@ -2095,6 +2220,122 @@ test.describe("lead wizard UX", () => {
     });
     await installStaffApiMocks(page);
     await loginAsStaff(page, "admin@gmed.de");
+  });
+
+  for (const width of [390, 1440]) {
+    test(`prepayment deadline saves local time without editing received cash at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 960 });
+      const leadId = "00000000-0000-0000-0000-000000000901";
+      const orderId = "00000000-0000-0000-0000-000000000968";
+      let deadline: string | null = "2026-09-10T10:00:00Z";
+      let required = true;
+      const writes: Record<string, unknown>[] = [];
+      const order = () => ({
+        id: orderId, order_number: "A-DEADLINE-TEST", patient_id: null, lead_id: leadId,
+        phase: "discovery", status: "active", total_estimated: "100", currency: "EUR",
+        signed_patient: true, signed_agency: true, prepayment_required: required,
+        prepayment_amount: "100", prepayment_due_at: deadline,
+        date_from: "2026-09-10", date_to: "2026-09-17", leistungen: [],
+        payment_tracking: { status: "awaiting_invoice", required_amount: "100", received_amount: "0", remaining_amount: "100", currency: "EUR", due_at: deadline },
+      });
+      await page.route("**/api/v1/orders?*", (route) => json(route, [order()]));
+      await page.route(`**/api/v1/orders/${orderId}`, (route) => json(route, order()));
+      await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) => {
+        const payload = route.request().postDataJSON();
+        writes.push(payload);
+        if ("prepayment_due_at" in payload) deadline = payload.prepayment_due_at || null;
+        if ("prepayment_required" in payload) required = payload.prepayment_required;
+        if (!required) deadline = null;
+        return json(route, { ok: true, order_id: orderId, ...order() });
+      });
+      await page.goto(`/leads?lead=${leadId}&view=wizard`);
+      const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+      await wizard.locator('[data-step="commercial"]').click();
+      const field = wizard.getByText("Vorauszahlung fällig bis", { exact: true }).locator("..");
+      const input = wizard.locator("#lead-wizard-prepayment-deadline");
+      await expect(field).toBeVisible();
+      await field.getByRole("spinbutton", { name: "Day", exact: true }).fill("12");
+      await field.getByRole("spinbutton", { name: "Hours", exact: true }).fill("15");
+      await field.getByRole("spinbutton", { name: "Minutes", exact: true }).fill("30");
+      await field.getByRole("spinbutton", { name: "Minutes", exact: true }).press("Tab");
+      const expected = await page.evaluate(() => new Date("2026-09-12T15:30").toISOString());
+      await expect.poll(() => deadline).toBe(expected);
+      await expect(input).toHaveValue("12.09.2026 15:30");
+      await expect(wizard.getByText("Rechnung ausstehend", { exact: true })).toBeVisible();
+      await expect(wizard.getByRole("textbox", { name: "Erhaltene Vorauszahlung", exact: true })).toHaveAttribute("readonly", "");
+      expect(writes.every((payload) => !("paid_amount" in payload))).toBe(true);
+      await field.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath(`prepayment-deadline-${width}.png`) });
+      const day = field.getByRole("spinbutton", { name: "Day", exact: true });
+      await day.click();
+      await day.press("ControlOrMeta+A");
+      await page.keyboard.press("Backspace");
+      await page.keyboard.press("Tab");
+      await expect.poll(() => deadline).toBeNull();
+    });
+  }
+
+  test("catalog placeholders follow lead selections through the generated order request", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const contractId = "00000000-0000-0000-0000-000000000981";
+    const orderId = "00000000-0000-0000-0000-000000000982";
+    const template = "Individuelle Beratung bei den Fachärzten für [Fachrichtung 1], [Fachrichtung 2], [Fachrichtung 3], [Fachrichtung n], und [Fachrichtung n+1] im Zeitraum [Datum Beginn] bis [Datum Ende].";
+    const descriptionItems = [
+      { id: "consultation", text: template },
+      { id: "administration", text: "Administrative Unterstützung;\nWeitere Leistungen;" },
+    ];
+    const order = {
+      id: orderId, source_lead_id: leadId, contract_id: contractId,
+      order_number: "A-BINDING-TEST", prepayment_required: false,
+      leistungen: [{
+        id: "00000000-0000-0000-0000-000000000983", description: "Beratung",
+        agency_service_id: "00000000-0000-0000-0000-000000000951",
+        agency_service_description_items_snapshot: descriptionItems,
+        agency_service_description: "Changed catalog wording must not replace the saved scope.",
+        quantity: "1", unit_price: "100", vat_rate: "19",
+      }],
+    };
+    await page.route(`**/api/v1/framework-contracts?lead_id=${leadId}`, (route) => json(route, [{ id: contractId, status: "sent" }]));
+    await page.route(`**/api/v1/framework-contracts/${contractId}/status`, (route) => json(route, { id: contractId }));
+    await page.route(`**/api/v1/orders?lead_id=${leadId}`, (route) => json(route, [order]));
+    await page.route(`**/api/v1/orders/${orderId}`, (route) => json(route, order));
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) => json(route, { ok: true }));
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => json(route, { id: order.leistungen[0].id }));
+    await page.route(`**/api/v1/orders/${orderId}/leistungen/sync-lead-wizard`, (route) => json(route, { ok: true }));
+    await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => json(route, { id: "00000000-0000-0000-0000-000000000984" }));
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="order"]').click();
+    await chooseComboboxOption(page, wizard.getByRole("combobox", { name: "Fachrichtung hinzufügen" }), "Orthopädie");
+    await wizard.locator('[data-step="service"]').click();
+    await setDatePickerValue(wizard.locator("#lead-wizard-program-date-from"), "2026-09-10");
+    await setDatePickerValue(wizard.locator("#lead-wizard-program-date-to"), "2026-09-17");
+    await wizard.locator('[data-step="commercial"]').click();
+    const first = "Individuelle Beratung bei den Fachärzten für Orthopädie im Zeitraum 10.09.2026 bis 17.09.2026.";
+    await expect(wizard.getByRole("table").getByTitle(`${first}\n\n${descriptionItems[1].text}`, { exact: true })).toBeVisible();
+
+    await wizard.locator('[data-step="order"]').click();
+    await chooseComboboxOption(page, wizard.getByRole("combobox", { name: "Fachrichtung hinzufügen" }), "Kardiologie");
+    await wizard.locator('[data-step="service"]').click();
+    await setDatePickerValue(wizard.locator("#lead-wizard-program-date-to"), "2026-09-21");
+    await wizard.locator('[data-step="commercial"]').click();
+    const changed = "Individuelle Beratung bei den Fachärzten für Orthopädie und Kardiologie im Zeitraum 10.09.2026 bis 21.09.2026.";
+    await expect(wizard.getByRole("table").getByTitle(`${changed}\n\n${descriptionItems[1].text}`, { exact: true })).toBeVisible();
+    const generatedRequest = page.waitForRequest((request) => request.url().endsWith("/documents/generate") && request.method() === "POST");
+    await wizard.locator("#lead-wizard-order-document").getByRole("button", { name: "Erstellen", exact: true }).click();
+    const request = await generatedRequest;
+    expect(request.postDataJSON()).toMatchObject({
+      template_id: "single_order", lead_id: leadId, order_id: orderId,
+      bindings: {
+        specialties: "Orthopädie, Kardiologie", period_from: "2026-09-10", period_to: "2026-09-21",
+        service_lines: [{
+          description: "Beratung", note: `${changed}\n\n${descriptionItems[1].text}`,
+          description_items: [{ id: "consultation", text: changed }, descriptionItems[1]],
+        }],
+      },
+    });
+    expect((await request.response())?.ok()).toBe(true);
+    expect(descriptionItems[0].text).toBe(template);
   });
 
   test("document preview retries failed actions and confirms the displayed signature", async ({ page }) => {

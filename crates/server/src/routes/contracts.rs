@@ -2549,7 +2549,7 @@ async fn load_quote_detail(
 ) -> Result<Option<Value>, axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
-                  q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
+                  q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM (
@@ -2561,10 +2561,12 @@ async fn load_quote_detail(
                           GROUP BY allocation.quote_line_index
                       ) allocated
                   ), '{}'::jsonb) AS invoiced_quantities,
+                  ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
+                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
-                  o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
+                  o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
@@ -2619,6 +2621,7 @@ async fn load_quote_detail(
         ).trim().to_string(),
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
         "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
         "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
@@ -2626,6 +2629,7 @@ async fn load_quote_detail(
         "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
         "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+        "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
         "line_items": add_remaining_quote_quantities(
             row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
@@ -2657,7 +2661,7 @@ async fn list_quotes(
 
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
-                  q.status, q.valid_until, q.paid_amount, q.paid_at, q.line_items, q.notes,
+                  q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM (
@@ -2669,8 +2673,10 @@ async fn list_quotes(
                           GROUP BY allocation.quote_line_index
                       ) allocated
                   ), '{}'::jsonb) AS invoiced_quantities,
+                  ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
+                        WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
                   q.created_at, q.updated_at,
-                  o.patient_id, o.source_lead_id, o.order_number, o.contract_id,
+                  o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
@@ -2741,6 +2747,7 @@ async fn list_quotes(
                     ).trim().to_string(),
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
                     "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
+        "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
                     "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
                     "total_vat": decimal_to_string(row.try_get::<Decimal, _>("total_vat").unwrap_or(Decimal::ZERO)),
@@ -2748,6 +2755,7 @@ async fn list_quotes(
                     "valid_until": row.try_get::<Option<NaiveDate>, _>("valid_until").unwrap_or_default().map(|v| v.to_string()),
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
                     "line_items": add_remaining_quote_quantities(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
@@ -2859,36 +2867,21 @@ async fn create_quote(
     let line_items = persisted_line_items;
 
     let totals = compute_quote_totals(&line_items);
-    // A quote revision changes the commercial calculation, not the fact that
-    // an advance payment was already received for this order. Carry the most
-    // recent payment forward so recalculating a quote never asks staff to
-    // record the same money a second time.
+    // Cash is read from the journal, never carried from a mutable quote flag.
     let (carried_paid_amount, carried_paid_at) =
         match sqlx::query_as::<_, (Decimal, Option<DateTime<Utc>>)>(
-            r#"SELECT paid_amount, paid_at
-           FROM quotes
-           WHERE order_id = $1
-           ORDER BY created_at DESC, id DESC
-           LIMIT 1
-           FOR SHARE"#,
+            "SELECT order_recorded_cash_paid($1), order_recorded_cash_received_at($1)",
         )
         .bind(order_id)
-        .fetch_optional(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         {
-            Ok(Some(payment)) => payment,
-            Ok(None) => (Decimal::ZERO, None),
+            Ok(value) => value,
             Err(error) => {
-                tracing::error!(%error, %order_id, "load prior quote payment");
+                tracing::error!(%error, %order_id, "load recorded order cash");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
             }
         };
-    if carried_paid_amount > totals.total_gross {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Received prepayment exceeds the recalculated quote total",
-        );
-    }
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('quote_number_seq')")
         .fetch_one(&mut *tx)
         .await
@@ -3166,10 +3159,11 @@ async fn update_quote_status(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
 
-    if let Some(value) = body.paid_amount
-        && value < 0.0
-    {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount");
+    if body.paid_amount.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Record payments through the released invoice payment journal",
+        );
     }
 
     let subject = match load_quote_subject(&state, quote_id).await {
@@ -3181,18 +3175,6 @@ async fn update_quote_status(
     if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
         return resp;
     }
-
-    let paid_amount = match body.paid_amount {
-        Some(value) => match Decimal::try_from(value) {
-            Ok(value) => Some(value.round_dp(2)),
-            Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid paid_amount"),
-        },
-        None => None,
-    };
-    let paid_at = match paid_amount {
-        Some(value) if value > Decimal::ZERO => Some(Utc::now()),
-        _ => None,
-    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3226,16 +3208,6 @@ async fn update_quote_status(
     let quote_total = quote_context
         .try_get::<Decimal, _>("total_gross")
         .unwrap_or(Decimal::ZERO);
-    let current_paid_amount = quote_context
-        .try_get::<Decimal, _>("paid_amount")
-        .unwrap_or(Decimal::ZERO);
-    if paid_amount.unwrap_or(current_paid_amount) > quote_total {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "paid_amount cannot exceed the current quote total",
-        );
-    }
-
     if body.status == "accepted" {
         let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id)
             .await
@@ -3273,21 +3245,13 @@ async fn update_quote_status(
     let updated_row = match sqlx::query(
         r#"UPDATE quotes
            SET status = $2,
-               paid_amount = COALESCE($3, paid_amount),
-               paid_at = CASE
-                   WHEN $3::numeric IS NOT NULL AND $3 > 0 THEN COALESCE($4, paid_at, now())
-                   WHEN $3::numeric IS NOT NULL AND $3 = 0 THEN NULL
-                   ELSE paid_at
-               END,
-               notes = COALESCE($5, notes)
+               notes = COALESCE($3, notes)
            WHERE id = $1
            RETURNING order_id, quote_number, status, total_net, total_vat, total_gross,
-                     valid_until, paid_amount, paid_at, line_items, notes"#,
+                     valid_until, order_recorded_cash_paid(order_id) AS paid_amount, order_recorded_cash_received_at(order_id) AS paid_at, line_items, notes"#,
     )
     .bind(quote_id)
     .bind(body.status.clone())
-    .bind(paid_amount)
-    .bind(paid_at)
     .bind(body.notes.clone())
     .fetch_optional(&mut *tx)
     .await
@@ -3356,7 +3320,6 @@ async fn update_quote_status(
     .bind(quote_id)
     .bind(serde_json::json!({
         "status": body.status,
-        "paid_amount": paid_amount.map(decimal_to_string),
     }))
     .execute(&mut *tx)
     .await
@@ -3376,8 +3339,7 @@ async fn update_quote_status(
         "quote.status_changed",
         quote_id,
         serde_json::json!({
-            "status": body.status,
-            "paid_amount": paid_amount.map(decimal_to_string),
+        "status": body.status,
         }),
     )
     .await;

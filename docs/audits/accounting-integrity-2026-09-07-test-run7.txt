@@ -1,0 +1,50 @@
+ set_config 
+------------
+ 
+(1 row)
+
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 52s
+     Running tests/accounting_audit_api.rs (target/debug/deps/accounting_audit_api-9f2f455de0538b8f)
+
+running 18 tests
+test accounting_migrations_must_bootstrap_from_empty_database ... ok
+allocated=100.00, retained_cash=100.00, reversal_http=409 Conflict
+test audit_allocated_advance_payment_reversal_must_be_blocked ... ok
+test audit_company_position_must_include_invoice_cash_credit ... ok
+test audit_control_partial_payment_replay_and_overpayment ... ok
+test audit_draft_invoice_cannot_consume_an_advance ... ok
+test audit_draft_invoice_must_not_be_patient_debt ... ok
+test audit_invoice_must_expose_its_order_currency ... ok
+test audit_ledger_keeps_currencies_separate ... ok
+test audit_orderless_expense_appears_in_patient_statement_and_summary ... ok
+test audit_partial_payments_must_preserve_invoice_vat_total ... ok
+test audit_payment_deadline_notifies_once_without_blocking_work ... ok
+test audit_payment_reversal_must_not_precede_receipt ... ok
+test audit_payment_reversal_must_use_original_financial_account ... ok
+test audit_quote_manual_flag_is_not_a_payment ... ok
+test audit_refund_reversal_preserves_original_account ... ok
+test audit_refunded_invoice_must_reopen_after_credit_reversal ... ok
+test audit_released_advance_remains_in_historical_statement ... ok
+test audit_reversal_preserves_exact_vat_and_inactive_account ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.46s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 06s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 2 tests
+test routes::invoices::tests::invoice_footer_includes_current_and_total_pages ... ok
+test routes::invoices::tests::invoice_pdf_preserves_cyrillic_text ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.14s
+
+    Finished `test` profile [unoptimized] target(s) in 0.28s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 287 filtered out; finished in 0.00s
+

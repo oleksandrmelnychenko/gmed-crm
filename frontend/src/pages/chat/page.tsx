@@ -61,6 +61,7 @@ import {
 } from "./data/chat-api";
 import {
   canAccessChat,
+  canMarkLoadedMessagesRead,
   chatMessageDateKey,
   initials,
   isSameChatMessageGroup,
@@ -497,10 +498,17 @@ function useChatPageContent() {
         });
         setHasOlderMessages((current) => preserveHistory ? current || msgs.length === 100 : msgs.length === 100);
         if (markRead && document.visibilityState === "visible" &&
-            hydrated.every((message) => message.to_user !== myId || !message.decryption_failed) &&
-            msgs.some((message) => message.to_user === myId && !message.is_read)) {
+            canMarkLoadedMessagesRead(hydrated, myId)) {
           // A failed read receipt must not hide successfully loaded messages.
-          await markPeerMessagesRead(peerId).then(() => loadConversations()).catch(() => undefined);
+          await markPeerMessagesRead(peerId).then(() => {
+            // Do not let an older list request restore the badge, or keep it
+            // visible just because the follow-up list refresh fails.
+            conversationRequestIdRef.current++;
+            setConversations((current) => current.map((conversation) =>
+              conversation.user_id === peerId ? { ...conversation, unread: 0 } : conversation,
+            ));
+            return loadConversations();
+          }).catch(() => undefined);
         }
       } catch (error) {
         if (
@@ -903,7 +911,10 @@ function useChatPageContent() {
   }, [activePeer, loadConversations, loadMessagesForPeer]);
 
   const openConversation = (userId: string, name: string, role: string) => {
-    if (userId === activePeerRef.current) return;
+    if (userId === activePeerRef.current) {
+      void loadMessagesForPeer(userId, true).catch(() => undefined);
+      return;
+    }
     if (activePeer) draftRef.current.set(activePeer, { input, pendingFiles, messageTimerSeconds });
     ignoredRoutePeerRef.current = null;
     openPeerFromRoute(userId, name, role);

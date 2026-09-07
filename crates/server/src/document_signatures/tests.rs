@@ -137,6 +137,7 @@ fn no_account_signer_uses_invitation_email_without_accepting_conflicting_account
 #[derive(Clone, Default)]
 struct MockProvider {
     value: Arc<Mutex<Value>>,
+    payloads: Arc<Mutex<Vec<Value>>>,
     creates: Arc<AtomicUsize>,
     fail_report: Arc<AtomicBool>,
     reject: Arc<AtomicBool>,
@@ -144,6 +145,8 @@ struct MockProvider {
     auth_status: Arc<AtomicUsize>,
     logins: Arc<AtomicUsize>,
     requests: Arc<AtomicUsize>,
+    attachment_bytes: Arc<Mutex<Vec<u8>>>,
+    package_calls: Arc<Mutex<Vec<String>>>,
 }
 async fn mock(State(mock): State<MockProvider>, request: AxumRequest) -> Response {
     let path = request.uri().path().to_string();
@@ -180,6 +183,7 @@ async fn mock(State(mock): State<MockProvider>, request: AxumRequest) -> Respons
         let body = to_bytes(request.into_body(), 1024 * 1024).await.unwrap();
         let parsed: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(parsed["legislation"], "EIDAS");
+        mock.payloads.lock().unwrap().push(parsed.clone());
         assert_eq!(parsed["attach_on_success"], json!([]));
         assert!(parsed.get("callback_success_url").is_none());
         let custom = parsed["custom"]
@@ -193,11 +197,64 @@ async fn mock(State(mock): State<MockProvider>, request: AxumRequest) -> Respons
             parsed["quality"] == "DEMO",
         );
         value["status_overall"] = json!("OPEN");
+        if parsed["signatures"] == json!([]) {
+            value["signatures"] = json!([]);
+            mock.package_calls
+                .lock()
+                .unwrap()
+                .push("create-without-recipients".into());
+        }
         for recipient in value["signatures"].as_array_mut().unwrap() {
             recipient["status_code"] = json!("OPEN");
         }
         *mock.value.lock().unwrap() = value.clone();
         return Json(value).into_response();
+    }
+    if path.ends_with("/attachments") && method == Method::POST {
+        assert_eq!(
+            mock.value.lock().unwrap()["signatures"],
+            json!([]),
+            "attachment must precede invitations"
+        );
+        let parsed: Value =
+            serde_json::from_slice(&to_bytes(request.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        use base64::Engine;
+        *mock.attachment_bytes.lock().unwrap() = base64::engine::general_purpose::STANDARD
+            .decode(parsed["content"].as_str().unwrap())
+            .unwrap();
+        mock.value.lock().unwrap()["attachments"] =
+            json!([{"filename":parsed["filename"],"attachment_id":Uuid::new_v4()}]);
+        mock.package_calls.lock().unwrap().push("attach".into());
+        return Json(mock.value.lock().unwrap().clone()).into_response();
+    }
+    if path.contains("/attachments/") && path.ends_with("/content") {
+        mock.package_calls
+            .lock()
+            .unwrap()
+            .push("verify-attachment-bytes".into());
+        return mock
+            .attachment_bytes
+            .lock()
+            .unwrap()
+            .clone()
+            .into_response();
+    }
+    if path == "/v2/signature-requests" && method == Method::PUT {
+        let parsed: Value =
+            serde_json::from_slice(&to_bytes(request.into_body(), 10000).await.unwrap()).unwrap();
+        let mut current = mock.value.lock().unwrap();
+        assert!(
+            current["attachments"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+        );
+        current["signatures"] = parsed["signatures"].clone();
+        for signer in current["signatures"].as_array_mut().unwrap() {
+            signer["status_code"] = json!("OPEN");
+        }
+        mock.package_calls.lock().unwrap().push("invite".into());
+        return Json(current.clone()).into_response();
     }
     if path == "/v2/signature-requests" {
         return Json(json!([mock.value.lock().unwrap().clone()])).into_response();
@@ -237,20 +294,84 @@ async fn mock_server() -> (MockProvider, String, tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test]
+async fn package_attachment_is_uploaded_and_verified_before_guest_invitations() {
+    let (mock, endpoint, handle) = mock_server().await;
+    let p = provider(false).with_test_endpoint(endpoint);
+    let id = Uuid::new_v4();
+    let bytes = b"%PDF-1.7\nprimary\n%%EOF";
+    let hash = sha256(bytes);
+    let draft = p.create(id, "package", &hash, bytes, &[]).await.unwrap();
+    let remote = p.validate(&draft, id, &hash, None, &[]).unwrap().id;
+    let extra = b"%PDF-1.7\nfor review only\n%%EOF";
+    let attached = p
+        .add_attachment(remote, "information.pdf", extra)
+        .await
+        .unwrap();
+    let extra_id = Uuid::parse_str(
+        attached["attachments"][0]["attachment_id"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(p.attachment_content(remote, extra_id).await.unwrap(), extra);
+    let invited = p.invite(remote, &signers()).await.unwrap();
+    p.validate(&invited, id, &hash, Some(remote), &signers())
+        .unwrap();
+    assert_eq!(
+        *mock.package_calls.lock().unwrap(),
+        vec![
+            "create-without-recipients",
+            "attach",
+            "verify-attachment-bytes",
+            "invite"
+        ]
+    );
+    assert_eq!(mock.creates.load(Ordering::SeqCst), 1);
+    assert!(invited["signatures"][0].get("account_email").is_none());
+    handle.abort();
+}
+
+#[tokio::test]
 async fn provider_uses_german_protocol_and_classifies_definite_rejection() {
     let (mock, endpoint, handle) = mock_server().await;
     let p = provider(false).with_test_endpoint(endpoint);
     let id = Uuid::new_v4();
     let hash = sha256(b"%PDF-1.7 test");
     let created = p
-        .create(id, &hash, b"%PDF-1.7 test", &signers())
+        .create(
+            id,
+            "GMED – Rahmenvertrag · v2 · ab524070",
+            &hash,
+            b"%PDF-1.7 test",
+            &signers(),
+        )
         .await
         .unwrap();
     assert!(p.validate(&created, id, &hash, None, &signers()).is_ok());
+    let sent = mock.payloads.lock().unwrap()[0].clone();
+    assert_eq!(sent["title"], "GMED – Rahmenvertrag · v2 · ab524070");
+    assert_eq!(
+        sent["content"],
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"%PDF-1.7 test")
+    );
+    assert!(sent.get("document_id").is_none() && sent.get("file_url").is_none());
+    for (actual, expected) in sent["signatures"].as_array().unwrap().iter().zip(signers()) {
+        assert!(
+            actual.get("account_email").is_none(),
+            "Existing accounts must not override the selected GMED identity"
+        );
+        assert_eq!(actual["notify"], true);
+        assert_eq!(
+            actual["signer_identity_data"],
+            json!({"email_address":expected.email,"first_name":expected.first_name,"last_name":expected.last_name,"language":"de"})
+        );
+    }
     assert_eq!(p.find(id).await.unwrap().len(), 1);
     mock.reject.store(true, Ordering::SeqCst);
     assert_eq!(
-        p.create(id, &hash, b"pdf", &signers()).await.unwrap_err(),
+        p.create(id, "GMED – Dokument", &hash, b"pdf", &signers())
+            .await
+            .unwrap_err(),
         "provider_request_rejected"
     );
     assert_eq!(mock.creates.load(Ordering::SeqCst), 2);
@@ -269,7 +390,15 @@ async fn creation_rejections_allow_manual_retry_without_replaying_ambiguous_erro
         let (mock, endpoint, handle) = mock_server().await;
         let p = provider(false).with_test_endpoint(endpoint);
         mock.create_status.store(status, Ordering::SeqCst);
-        let result = p.create(Uuid::new_v4(), "hash", b"pdf", &signers()).await;
+        let result = p
+            .create(
+                Uuid::new_v4(),
+                "GMED – Dokument",
+                "hash",
+                b"pdf",
+                &signers(),
+            )
+            .await;
         assert_eq!(result.unwrap_err(), expected, "HTTP {status}");
         assert_eq!(
             mock.creates.load(Ordering::SeqCst),
@@ -279,9 +408,15 @@ async fn creation_rejections_allow_manual_retry_without_replaying_ambiguous_erro
         assert!(mock.value.lock().unwrap().is_null());
         if matches!(status, 406 | 429) {
             mock.create_status.store(0, Ordering::SeqCst);
-            p.create(Uuid::new_v4(), "hash", b"pdf", &signers())
-                .await
-                .unwrap();
+            p.create(
+                Uuid::new_v4(),
+                "GMED – Dokument",
+                "hash",
+                b"pdf",
+                &signers(),
+            )
+            .await
+            .unwrap();
             assert_eq!(mock.creates.load(Ordering::SeqCst), 2);
         }
         handle.abort();
@@ -297,7 +432,9 @@ async fn rejected_authentication_refreshes_the_token_without_replaying_creation(
         mock.auth_status.store(status, Ordering::SeqCst);
         let id = Uuid::new_v4();
         assert_eq!(
-            p.create(id, "hash", b"pdf", &signers()).await.unwrap_err(),
+            p.create(id, "GMED – Dokument", "hash", b"pdf", &signers())
+                .await
+                .unwrap_err(),
             "provider_request_rejected"
         );
         assert_eq!(mock.requests.load(Ordering::SeqCst), 1);
@@ -749,6 +886,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
     }
     // Connection configuration is encrypted, admin-only, and cannot strand active requests.
+    verify_review_package_and_manager_acknowledgement(&pool, &auth, &mut created_keys).await;
     let connection_state = AppState::new(
         pool.clone(),
         "test",
@@ -896,6 +1034,195 @@ async fn wait_for_status(pool: &sqlx::PgPool, id: Uuid, expected: &str) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     panic!("signature request {id} did not reach {expected}");
+}
+
+async fn verify_review_package_and_manager_acknowledgement(
+    pool: &sqlx::PgPool,
+    auth: &AuthUser,
+    keys: &mut Vec<String>,
+) {
+    let (mock, endpoint, handle) = mock_server().await;
+    let state = AppState::new(
+        pool.clone(),
+        "test",
+        crate::settings::SettingsCache::new(crate::settings::TokenSettings::default()),
+    )
+    .with_document_signatures(Some(provider(false).with_test_endpoint(endpoint)));
+    let patient: Uuid = sqlx::query_scalar("SELECT id FROM patients ORDER BY id LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let primary = Uuid::new_v4();
+    let info = Uuid::new_v4();
+    for (id, template) in [
+        (primary, "framework_contract"),
+        (info, "privacy_information"),
+    ] {
+        let bytes = format!("%PDF-1.7\n{id}\n%%EOF");
+        let (_, key, _) = documents::store_document_blob(bytes.as_bytes(), "package.pdf")
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO documents(id,patient_id,auto_name,art,generated_template_id,mime_type,storage_key,file_size,version_root_document_id,uploaded_by) VALUES ($1,$2,'Package fixture',$3,$3,'application/pdf',$4,$5,$1,$6)")
+            .bind(id).bind(patient).bind(template).bind(&key).bind(bytes.len() as i64).bind(auth.user_id).execute(pool).await.unwrap();
+        keys.push(key);
+    }
+    let app = router()
+        .with_state(state.clone())
+        .layer(Extension(auth.clone()));
+    let post = |path: String, body: Value| {
+        Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let path = format!("/documents/{primary}/signature-requests");
+    assert_eq!(
+        app.clone()
+            .oneshot(post(path.clone(), json!({"signers":signers()})))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(post(
+                path.clone(),
+                json!({"signers":signers(),"attachment_document_id":primary})
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(mock.creates.load(Ordering::SeqCst), 0);
+    let response = app
+        .clone()
+        .oneshot(post(
+            path,
+            json!({"signers":signers(),"attachment_document_id":info}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let response: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 10000).await.unwrap()).unwrap();
+    let request_id = Uuid::parse_str(response["id"].as_str().unwrap()).unwrap();
+    wait_for_status(pool, request_id, "submission_unknown").await;
+    poll_one(&state, Some(request_id)).await.unwrap();
+    wait_for_status(pool, request_id, "pending").await;
+    assert_eq!(
+        *mock.package_calls.lock().unwrap(),
+        vec![
+            "create-without-recipients",
+            "attach",
+            "verify-attachment-bytes",
+            "invite"
+        ]
+    );
+    let review_path = format!("/documents/{info}/review-status");
+    let read = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&review_path)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+    let status: Value =
+        serde_json::from_slice(&to_bytes(read.into_body(), 10000).await.unwrap()).unwrap();
+    assert!(status["sent"]["automatic"].as_bool().unwrap());
+    assert!(status["acknowledged"].is_null());
+    let sent = status["sent"]["id"].clone();
+    assert_eq!(
+        app.clone()
+            .oneshot(post(
+                review_path.clone(),
+                json!({"kind":"acknowledged","sent_event_id":Uuid::new_v4()})
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            app.clone()
+                .oneshot(post(
+                    review_path.clone(),
+                    json!({"kind":"acknowledged","sent_event_id":sent})
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+    assert_eq!(sqlx::query_scalar::<_,i64>("SELECT count(*) FROM document_review_events WHERE document_id=$1 AND kind='acknowledged'").bind(info).fetch_one(pool).await.unwrap(),1);
+    assert!(
+        sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+            "SELECT signed_at FROM documents WHERE id=$1"
+        )
+        .bind(info)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .is_none()
+    );
+    let mut denied = auth.clone();
+    denied.role = Role::Billing;
+    let denied_app = router().with_state(state.clone()).layer(Extension(denied));
+    assert_eq!(
+        denied_app
+            .oneshot(post(
+                review_path,
+                json!({"kind":"acknowledged","sent_event_id":sent})
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    // If PUT timed out without recipients, reconciliation must not invite twice.
+    sqlx::query("UPDATE document_signature_attachments SET stage='inviting' WHERE request_id=$1")
+        .bind(request_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    mock.value.lock().unwrap()["signatures"] = json!([]);
+    let stored = sqlx::query("SELECT * FROM document_signature_requests WHERE id=$1")
+        .bind(request_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let remote_value = mock.value.lock().unwrap().clone();
+    let provider = connection::current_provider(&state).await.unwrap().unwrap();
+    assert_eq!(
+        package::sync(&state, &stored, &provider, remote_value, &signers())
+            .await
+            .unwrap_err(),
+        "review_package_submission_unknown"
+    );
+    assert_eq!(
+        mock.package_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| *v == "invite")
+            .count(),
+        1
+    );
+    sqlx::query("UPDATE document_signature_requests SET status='withdrawn' WHERE id=$1")
+        .bind(request_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    handle.abort();
 }
 
 fn delete_file_request(id: Uuid) -> Request<Body> {

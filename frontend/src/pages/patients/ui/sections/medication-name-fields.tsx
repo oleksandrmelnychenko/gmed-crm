@@ -2,14 +2,17 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Autocomplete } from "@base-ui/react/autocomplete";
 
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard";
+import { cn } from "@/lib/utils";
 import {
   fetchMedicationNames,
   uniqueMedicationCounterpart,
   type MedicationNameField,
   type MedicationNameSuggestions,
+  type MedicationPairConfirmation,
 } from "../../data/medication-names";
+import { MedicationNameReview } from "./medication-name-review";
 
-type NameValues = { handelsname: string; wirkstoff: string | null };
+type NameValues = { handelsname: string; wirkstoff: string | null; name_pair_confirmation?: MedicationPairConfirmation | null };
 type Search = { field: MedicationNameField; query: string; related?: string };
 type Lookup = { key: string; result: MedicationNameSuggestions | null };
 const otherField = (field: MedicationNameField): MedicationNameField =>
@@ -63,6 +66,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
   }, [searchKey]);
 
   function patchValues(patch: Partial<NameValues>) {
+    if (patch.handelsname !== undefined || patch.wirkstoff !== undefined) patch.name_pair_confirmation = null;
     if (patch.handelsname !== undefined) dirtyBrand(patch.handelsname);
     if (patch.wirkstoff !== undefined) dirtySubstance(patch.wirkstoff ?? "");
     latest.current = { ...latest.current, ...patch };
@@ -178,7 +182,10 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
                 aria-label={label}
                 ref={(node) => { inputs.current[field] = node; }}
                 required={field === "wirkstoff"}
-                className={inputClassName}
+                className={cn(
+                  "w-full min-w-0 border border-input px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 aria-invalid:border-destructive md:text-sm",
+                  inputClassName,
+                )}
                 autoComplete="off"
                 onFocus={() => setSearch((current) => current?.field === field ? current : searchFor(field, latest.current[field] ?? ""))}
                 onBlur={() => { void commitName(field, latest.current[field] ?? ""); }}
@@ -215,6 +222,13 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
           </div>
         );
       })}
+      <MedicationNameReview
+        names={{ handelsname: value.handelsname, wirkstoff: value.wirkstoff ?? "" }}
+        confirmation={value.name_pair_confirmation}
+        onConfirm={(name_pair_confirmation) => onChange({ name_pair_confirmation })}
+        onChoose={(field, name) => { changeName(field, name); void commitName(field, name, true); }}
+        lang={lang}
+      />
     </div>
   );
 }

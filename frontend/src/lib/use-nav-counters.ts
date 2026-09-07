@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { CHAT_READ_REFRESH_EVENT } from "@/lib/chat-read-events";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 
 const LEAD_EVENTS = [
@@ -80,12 +81,16 @@ export function useNewLeadCounter(enabled: boolean): number {
  */
 export function useNavCounters(enabled: boolean): NavCounters {
   const [chatUnread, setChatUnread] = useState(0);
+  const chatRequestId = useRef(0);
   const newLeads = useNewLeadCounter(enabled);
 
   const refreshChat = useCallback(() => {
     if (!enabled) return;
+    const requestId = ++chatRequestId.current;
     apiFetch<{ count: number }>("/messages/unread-total", { forceFresh: true })
-      .then((payload) => setChatUnread(payload?.count ?? 0))
+      .then((payload) => {
+        if (requestId === chatRequestId.current) setChatUnread(payload?.count ?? 0);
+      })
       .catch(() => undefined);
   }, [enabled]);
 
@@ -94,9 +99,12 @@ export function useNavCounters(enabled: boolean): NavCounters {
     refreshChat();
     const timer = window.setInterval(refreshChat, REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refreshChat);
+    window.addEventListener(CHAT_READ_REFRESH_EVENT, refreshChat);
     return () => {
+      chatRequestId.current++;
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshChat);
+      window.removeEventListener(CHAT_READ_REFRESH_EVENT, refreshChat);
     };
   }, [enabled, refreshChat]);
 
@@ -110,5 +118,5 @@ export function useNavCounters(enabled: boolean): NavCounters {
     }
   });
 
-  return { chatUnread, newLeads };
+  return { chatUnread: enabled ? chatUnread : 0, newLeads };
 }

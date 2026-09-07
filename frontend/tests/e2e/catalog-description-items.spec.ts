@@ -42,7 +42,7 @@ test("catalog description items retain order and internal newlines after saving"
   await dialog.getByRole("button", { name: /Добавить пункт|Punkt hinzufügen/ }).click();
   await dialog.getByLabel(/^(Пункт|Punkt) 3$/).fill("Added point for [Fachrichtung 1]");
   await dialog.screenshot({ path: "../artifacts/design-qa/catalog-description-items.png" });
-  await dialog.getByRole("button", { name: /Сохранить|Speichern/, exact: true }).click();
+  await dialog.getByRole("button", { name: /Сохранить|speichern/i }).click();
   await expect(dialog).toHaveCount(0);
   expect(service.description_items?.map((item) => item.text)).toEqual([
     "Second point", "First point\n\nInternal paragraph", "Added point for [Fachrichtung 1]",

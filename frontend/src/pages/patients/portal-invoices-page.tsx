@@ -313,15 +313,16 @@ function usePatientInvoicesPageContent() {
     };
   }, [selectedInvoiceId, t.portal_invoices_failed_to_load_invoice_detail, version]);
 
-  const totalBalance = useMemo(
-    () =>
-      invoices.reduce(
-        (sum, item) =>
-          invoiceAmountsVisible(item) ? sum + Number(item.balance_due ?? 0) : sum,
-        0,
-      ),
-    [invoices],
-  );
+  const totalBalance = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const invoice of invoices) {
+      if (!invoiceAmountsVisible(invoice) || invoice.status === "cancelled") continue;
+      const currency = invoice.currency ?? "EUR";
+      totals.set(currency, (totals.get(currency) ?? 0) + Number(invoice.balance_due ?? 0));
+    }
+    return [...totals].sort(([a], [b]) => a.localeCompare(b))
+      .map(([currency, amount]) => formatPortalCurrency(amount, currency)).join(" · ") || formatPortalCurrency(0);
+  }, [invoices]);
   const hiddenAmountCount = useMemo(
     () => invoices.filter((item) => !invoiceAmountsVisible(item)).length,
     [invoices],
@@ -418,7 +419,7 @@ function usePatientInvoicesPageContent() {
 
       <section className="grid gap-4 md:grid-cols-3">
         <StatCard label={t.portal_invoices_visible_invoices} value={String(invoices.length)} />
-        <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : formatPortalCurrency(totalBalance)} />
+        <StatCard label={t.portal_invoices_outstanding_balance} value={hiddenAmountCount > 0 ? t.portal_invoices_partly_hidden : totalBalance} />
         <StatCard label={t.portal_invoices_missing_payment_proof} value={String(proofPendingCount)} description={formatPortalCountLabel(t.portal_invoices_overdue_count, overdueCount)} />
       </section>
 
@@ -679,8 +680,8 @@ function usePatientInvoicesPageContent() {
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDateTime(invoice.issued_at)}</td>
                       <td className="px-4 py-3"><StatusBadge status={invoice.status}>{portalStatusLabel(invoice.status)}</StatusBadge></td>
                       <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(invoice.total_gross) : t.portal_invoices_hidden}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue) : t.portal_invoices_hidden}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(invoice.total_gross, invoice.currency) : t.portal_invoices_hidden}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{invoice.last_payment_proof_at ? `${t.portal_invoices_uploaded} ${formatPortalDate(invoice.last_payment_proof_at)}` : t.portal_invoices_not_uploaded}</td>
                     </tr>
                   );
@@ -723,12 +724,12 @@ function usePatientInvoicesPageContent() {
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_total}
-                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross) : t.portal_invoices_hidden}
+                      value={amountsVisible ? formatPortalCurrency(invoice.total_gross, invoice.currency) : t.portal_invoices_hidden}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
                       label={t.portal_invoices_open}
-                      value={amountsVisible ? formatPortalCurrency(balanceDue) : t.portal_invoices_hidden}
+                      value={amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}
                     />
                     <InfoRow
                       className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
@@ -820,11 +821,11 @@ function usePatientInvoicesPageContent() {
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_due_date} value={formatPortalDate(detail.due_date)} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_order} value={detail.order_number} />
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_quote} value={detail.quote_number || t.portal_invoices_not_set} />
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_total_gross} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross) : t.portal_invoices_hidden} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_total_gross} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.total_gross, detail.currency) : t.portal_invoices_hidden} />
                     {invoiceAmountsVisible(detail) && Number(detail.credited_amount ?? 0) > 0 ? (
-                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Gutschriften" : "Кредит-ноты"} value={`−${formatPortalCurrency(detail.credited_amount)}`} />
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Gutschriften" : "Кредит-ноты"} value={`−${formatPortalCurrency(detail.credited_amount, detail.currency)}`} />
                     ) : null}
-                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due) : t.portal_invoices_hidden} />
+                    <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
@@ -852,7 +853,7 @@ function usePatientInvoicesPageContent() {
                               <div className="mt-1 text-xs text-muted-foreground">{formatPortalDate(credit.issued_on)} · {credit.reason}</div>
                             </div>
                             <div className="font-mono font-semibold tabular-nums text-emerald-700">
-                              {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross)}` : t.portal_invoices_hidden}
+                              {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross, detail.currency)}` : t.portal_invoices_hidden}
                             </div>
                           </div>
                         );
@@ -915,7 +916,7 @@ function usePatientInvoicesPageContent() {
                                 )}
                               >
                                 {isReversal ? "−" : "+"}
-                                {formatPortalCurrency(payment.amount_gross)}
+                                {formatPortalCurrency(payment.amount_gross, detail.currency)}
                               </div>
                             </div>
                           );
@@ -975,7 +976,7 @@ function usePatientInvoicesPageContent() {
                               )}
                             >
                               {isReversal ? "+" : "−"}
-                              {formatPortalCurrency(refund.amount_gross)}
+                              {formatPortalCurrency(refund.amount_gross, detail.currency)}
                             </div>
                           </div>
                         );
@@ -1038,6 +1039,7 @@ function usePatientInvoicesPageContent() {
                             line.line_gross,
                           ].join("|")}
                           line={line}
+                          currency={detail.currency}
                         />
                       ))
                     )}
@@ -1109,7 +1111,7 @@ export function PatientInvoicesPage(...args: Parameters<typeof usePatientInvoice
   return usePatientInvoicesPageContent(...args);
 }
 
-function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
+function InvoiceLineCard({ line, currency }: { line: PortalInvoiceLineItem; currency?: string }) {
   const { t } = useLang();
   const description = agencyServiceNameLabel(undefined, line.description, t);
   return (
@@ -1118,10 +1120,10 @@ function InvoiceLineCard({ line }: { line: PortalInvoiceLineItem }) {
         <div>
           <p className="text-sm font-semibold text-foreground">{description}</p>
           <p className={cn("mt-1", tokens.text.muted)}>
-            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price)} · {t.uiText.finance_catalog_vat_label} {line.vat_rate}%
+            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price, currency)} · {t.uiText.finance_catalog_vat_label} {line.vat_rate}%
           </p>
         </div>
-        <CountBadge>{formatPortalCurrency(line.line_gross)}</CountBadge>
+        <CountBadge>{formatPortalCurrency(line.line_gross, currency)}</CountBadge>
       </div>
       {line.notes ? <p className={cn("mt-3", tokens.text.muted)}>{line.notes}</p> : null}
     </article>

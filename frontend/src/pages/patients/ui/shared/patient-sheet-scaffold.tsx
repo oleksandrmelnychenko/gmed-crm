@@ -28,6 +28,7 @@ export function PatientSheetScaffold({
   onSubmit,
   children,
   footer,
+  footerError,
   headerClassName,
   bodyClassName,
   bodyWrapperClassName,
@@ -43,6 +44,7 @@ export function PatientSheetScaffold({
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
   children: ReactNode;
   footer?: ReactNode;
+  footerError?: ReactNode;
   headerClassName?: string;
   bodyClassName?: string;
   bodyWrapperClassName?: string;
@@ -58,7 +60,7 @@ export function PatientSheetScaffold({
         "space-y-4 px-5 py-4",
       )}
       bodyWrapperClassName={bodyWrapperClassName}
-      footer={footer ? <SheetActionsFooter>{footer}</SheetActionsFooter> : undefined}
+      footer={footer ? <SheetActionsFooter error={footerError}>{footer}</SheetActionsFooter> : undefined}
     >
       {children}
     </AdminSheetScaffold>

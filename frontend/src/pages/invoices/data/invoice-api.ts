@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchFile } from "@/lib/api";
-import { hasInvoiceBillingRelease } from "../model/billing-release";
+import { hasInvoiceBillingRelease, invoiceServiceApproval } from "../model/billing-release";
 
 import type {
   AccountingLedgerPayload,
@@ -74,30 +74,33 @@ export async function fetchInvoiceWorkspace(invoiceId: string) {
   };
 }
 
-export function fetchAccountingLedger(year: string) {
+export function fetchAccountingLedger(year: string, currency = "EUR") {
   return apiFetch<AccountingLedgerPayload>(
-    `/invoices/accounting-ledger?year=${encodeURIComponent(year)}`,
+    `/invoices/accounting-ledger?year=${encodeURIComponent(year)}&currency=${encodeURIComponent(currency)}`,
   );
 }
 
-export async function createInvoice(quoteId: string, payload: JsonPayload, orderId: string) {
+export async function createInvoice(quoteId: string, payload: JsonPayload, orderId: string, sourceIds: string[] = []) {
   // Use fresh order state so a revoked release cannot be submitted from a stale form.
   const release = await fetchInvoiceBillingRelease(orderId);
   if (!hasInvoiceBillingRelease(release)) {
     throw new Error("Order requires billing release before invoice creation");
   }
+  const approval = invoiceServiceApproval(sourceIds, String(payload.invoice_type), release);
+  if (approval === "unavailable") throw new Error("invoice_services_unavailable");
+  if (approval === "pending") throw new Error("All order services must be approved before invoice creation");
   return postJson<InvoiceItem>(`/quotes/${quoteId}/invoices`, payload);
 }
 
 export async function fetchInvoiceBillingRelease(orderId: string) {
-  const order = await apiFetch<{ process_gates?: InvoiceBillingRelease }>(
+  const order = await apiFetch<{ process_gates?: InvoiceBillingRelease; leistungen?: InvoiceBillingRelease["services"] }>(
     `/orders/${encodeURIComponent(orderId)}`, { forceFresh: true },
   );
   const release = order.process_gates;
   if (!release || !["pending", "granted", "denied"].includes(release.billing_release_status)) {
     throw new Error("invoice_billing_release_unavailable");
   }
-  return release;
+  return { ...release, services: Array.isArray(order.leistungen) ? order.leistungen : null };
 }
 
 export function grantInvoiceBillingRelease(orderId: string, existingNote: string | null) {
@@ -189,6 +192,6 @@ export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
 }
 
-export function fetchAccountingLedgerExportBlob(year: string) {
-  return fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${year}`);
+export function fetchAccountingLedgerExportBlob(year: string, currency = "EUR") {
+  return fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${encodeURIComponent(year)}&currency=${encodeURIComponent(currency)}`);
 }

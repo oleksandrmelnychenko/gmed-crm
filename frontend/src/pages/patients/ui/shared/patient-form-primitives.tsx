@@ -26,6 +26,21 @@ export function FormSection(props: ComponentProps<typeof ShellSection>) {
   return <ShellSection showMarker={false} {...props} />;
 }
 
+export function PatientFormSection({ title, accessory, children, className }: ComponentProps<typeof ShellSection>) {
+  return (
+    <section className={cn("min-w-0 rounded-xl border border-border bg-card", className)}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
+        <h3 className="flex min-w-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+          {title}
+        </h3>
+        {accessory}
+      </div>
+      <div className="space-y-3 p-4">{children}</div>
+    </section>
+  );
+}
+
 export const formInputClassName = inputClass;
 export const textareaClassName = textareaClass;
 
@@ -98,6 +113,7 @@ export function LanguageChips({
       placeholder={placeholder}
       disabled={disabled}
       className={cn("w-full", formInputClassName)}
+      chipClassName="border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-300 hover:bg-violet-100"
     />
   );
 }
@@ -197,8 +213,9 @@ export function FunctionalLabelChips({
             type="button"
             onClick={() => toggle(opt.value)}
             disabled={disabled}
+            aria-pressed={checked}
             className={cn(
-              "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
+              "h-7 rounded-full border px-2.5 font-mono text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/30",
               checked
                 ? functionalLabelChipClass(opt.value)
                 : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-foreground/30",

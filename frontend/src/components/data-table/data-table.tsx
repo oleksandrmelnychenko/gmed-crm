@@ -904,7 +904,7 @@ function buildGridTemplate<T>(
   if (opts.selection) parts.push("32px");
   for (const col of cols) {
     const width = columnWidth(col);
-    parts.push(width ? `${width}px` : "minmax(120px, 1fr)");
+    parts.push(width ? `${width}px` : `minmax(${col.minWidth ?? 120}px, 1fr)`);
   }
   if (opts.actions) parts.push(`${opts.actionsWidth}px`);
   return parts.join(" ");

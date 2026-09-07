@@ -43,6 +43,15 @@ export type ExternalInvoiceStatus =
   | "cancelled";
 export type ExternalInvoicePaidBy = "patient" | "agency" | "unpaid";
 
+export type OrderPaymentTracking = {
+  status: string;
+  required_amount: string;
+  received_amount: string;
+  remaining_amount: string;
+  currency: string;
+  due_at: string | null;
+};
+
 export type OrderSummary = {
   id: string;
   order_number: string;
@@ -58,7 +67,9 @@ export type OrderSummary = {
   signed_patient?: boolean;
   signed_agency?: boolean;
   prepayment_required?: boolean;
+  prepayment_due_at?: string | null;
   prepayment_amount?: unknown;
+  payment_tracking?: OrderPaymentTracking | null;
   date_from?: string | null;
   date_to?: string | null;
   created_at: string;
@@ -315,6 +326,7 @@ export type OrderProcessGates = {
   contract_gate_ready: boolean;
   signed_patient: boolean;
   signed_agency: boolean;
+  payment_tracking?: OrderPaymentTracking | null;
   payment_gate_required: boolean;
   payment_gate_ready: boolean;
   advance_invoice_count: number;
@@ -328,6 +340,7 @@ type OrderDebtManagement = {
   workflow_required: boolean;
   blocking: boolean;
   blocking_reason: string | null;
+  attention_reason?: string | null;
   note: string | null;
   owner_user_id: string | null;
   owner_name: string | null;

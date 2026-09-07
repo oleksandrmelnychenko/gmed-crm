@@ -3,11 +3,13 @@ import { FileDown, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { ApiRequestError, downloadApiFile } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
-export function MedicationPlanPdfAction({ patientId, lang, disabled = false }: {
+export function MedicationPlanPdfAction({ patientId, lang, disabled = false, className }: {
   patientId: string;
   lang: "ru" | "de";
   disabled?: boolean;
+  className?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -37,10 +39,11 @@ export function MedicationPlanPdfAction({ patientId, lang, disabled = false }: {
   }
 
   return <Button type="button" size="sm" variant="outline"
+    className={cn("h-8 gap-1.5 rounded-lg px-3", className)}
     disabled={disabled || busy} aria-busy={busy}
     title={tx("Скачать план актуальных препаратов", "Plan der aktuellen Medikamente herunterladen")}
     onClick={() => void download()}>
-    {busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : <FileDown className="size-4" aria-hidden />}
+    {busy ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : <FileDown className="size-3.5" aria-hidden />}
     {tx("Медикаментозный план (PDF)", "Medikationsplan (PDF)")}
   </Button>;
 }

@@ -9,6 +9,25 @@ const payload = { invoice_type: "final", line_items: [{ line_index: 0, quantity:
 beforeEach(() => { request.mockReset(); });
 
 describe("invoice billing preflight", () => {
+  it("blocks a newly unapproved selected service even when accounting has granted release", async () => {
+    request.mockResolvedValue({ process_gates: { billing_release_status: "granted" }, leistungen: [{ id: "service-1", status: "pending" }] });
+    await expect(createInvoice("quote-1", payload, "order-1", ["service-1"])).rejects.toThrow("must be approved");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks selected services only and allows advances before service approval", async () => {
+    const order = { process_gates: { billing_release_status: "granted" }, leistungen: [{ id: "approved", status: "approved" }, { id: "pending", status: "pending" }] };
+    request.mockResolvedValueOnce(order).mockResolvedValueOnce({ id: "invoice" });
+    await expect(createInvoice("quote-1", payload, "order-1", ["approved"])).resolves.toEqual({ id: "invoice" });
+    request.mockResolvedValueOnce(order).mockResolvedValueOnce({ id: "advance" });
+    await expect(createInvoice("quote-1", { ...payload, invoice_type: "advance" }, "order-1", ["pending"])).resolves.toEqual({ id: "advance" });
+  });
+
+  it.each([null, []])("does not claim service approval when selected services are missing: %j", async (leistungen) => {
+    request.mockResolvedValue({ process_gates: { billing_release_status: "granted" }, leistungen });
+    await expect(createInvoice("quote-1", payload, "order-1", ["service-1"])).rejects.toThrow("invoice_services_unavailable");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
   it.each(["pending", "denied"])("does not create an invoice when the current release is %s", async (status) => {
     request.mockResolvedValue({ process_gates: { billing_release_status: status, package_coverage_status: "covered" } });
     await expect(createInvoice("quote-1", payload, "order-1")).rejects.toThrow("billing release");

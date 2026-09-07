@@ -19,7 +19,6 @@ import {
   type PatientRecommendation,
 } from "../../data/patient-clinical";
 import { ClinicalRecordSource } from "./clinical-record-source";
-import { MedicationPlanPdfAction } from "./medication-plan-pdf-action";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -743,12 +742,9 @@ export function PatientOverviewCard({
           </div>
 
           <div>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <ColumnTitle count={profileMedications.length || undefined}>
-                {tx("Назначенные препараты", "Verordnete Medikamente")}
-              </ColumnTitle>
-              <MedicationPlanPdfAction patientId={patientId} lang={lang} disabled={!profileMedications.length} />
-            </div>
+            <ColumnTitle count={profileMedications.length || undefined}>
+              {tx("Назначенные препараты", "Verordnete Medikamente")}
+            </ColumnTitle>
             {profileMedications.length === 0 ? (
               dash
             ) : (

@@ -1,0 +1,85 @@
+ set_config 
+------------
+ 
+(1 row)
+
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+warning: constant `TEST_AUDIT_IP_SALT` is never used
+  --> crates/server/tests/support/mod.rs:16:7
+   |
+16 | const TEST_AUDIT_IP_SALT: &str = "test-audit-ip-salt";
+   |       ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `TEST_PEER_ADDR` is never used
+  --> crates/server/tests/support/mod.rs:17:7
+   |
+17 | const TEST_PEER_ADDR: std::net::SocketAddr = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+   |       ^^^^^^^^^^^^^^
+
+warning: fields `pool` and `admin_id` are never read
+  --> crates/server/tests/support/mod.rs:39:5
+   |
+36 | struct SuiteDatabase {
+   |        ------------- fields in this struct
+...
+39 |     pool: PgPool,
+   |     ^^^^
+40 |     admin_id: Uuid,
+   |     ^^^^^^^^
+
+warning: function `suite_context` is never used
+  --> crates/server/tests/support/mod.rs:76:14
+   |
+76 | pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
+   |              ^^^^^^^^^^^^^
+
+warning: function `create_suite_database` is never used
+   --> crates/server/tests/support/mod.rs:158:10
+    |
+158 | async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<SuiteDatabase, String> {
+    |          ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `test_database_max_connections` is never used
+   --> crates/server/tests/support/mod.rs:264:4
+    |
+264 | fn test_database_max_connections() -> u32 {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `gmed-server` (test "accounting_audit_api") generated 6 warnings
+    Finished `test` profile [unoptimized] target(s) in 1m 56s
+     Running tests/accounting_audit_api.rs (target/debug/deps/accounting_audit_api-9f2f455de0538b8f)
+
+running 16 tests
+test accounting_migrations_must_bootstrap_from_empty_database ... ok
+allocated=100.00, retained_cash=100.00, reversal_http=409 Conflict
+test audit_allocated_advance_payment_reversal_must_be_blocked ... ok
+test audit_company_position_must_include_invoice_cash_credit ... ok
+test audit_control_partial_payment_replay_and_overpayment ... ok
+test audit_draft_invoice_must_not_be_patient_debt ... ok
+test audit_invoice_must_expose_its_order_currency ... ok
+test audit_ledger_keeps_currencies_separate ... ok
+test audit_orderless_expense_appears_in_patient_statement_and_summary ... ok
+test audit_partial_payments_must_preserve_invoice_vat_total ... ok
+test audit_payment_reversal_must_not_precede_receipt ... ok
+test audit_payment_reversal_must_use_original_financial_account ... ok
+test audit_quote_cannot_invent_cash_and_reads_actual_receipts ... ok
+test audit_refund_reversal_preserves_original_account ... ok
+test audit_refunded_invoice_must_reopen_after_credit_reversal ... ok
+test audit_released_advance_remains_in_historical_statement ... ok
+test audit_reversal_preserves_exact_vat_and_inactive_account ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.58s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 03s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 2 tests
+test routes::invoices::tests::invoice_footer_includes_current_and_total_pages ... ok
+test routes::invoices::tests::invoice_pdf_preserves_cyrillic_text ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 284 filtered out; finished in 0.17s
+

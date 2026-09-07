@@ -1,7 +1,9 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod connection;
 mod defaults;
+mod package;
 pub mod provider;
+mod review;
 mod summary;
 
 #[cfg(test)]
@@ -34,6 +36,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(connection::router())
         .merge(defaults::router())
+        .merge(review::router())
         .route("/document-signatures/statuses", get(summary::list))
         .route("/documents/{id}/signature-requests", get(list).post(create))
         .route("/document-signature-requests/{id}/refresh", post(refresh))
@@ -88,8 +91,29 @@ fn public_request(row: &PgRow) -> Value {
         "test_mode":row.get::<bool,_>("test_mode"),"signers":row.get::<Value,_>("signers"),
         "evidence":row.get::<Value,_>("evidence"),"result_document_id":row.get::<Option<Uuid>,_>("result_document_id"),
         "has_report":row.get::<Option<String>,_>("report_storage_key").is_some(),
+        "can_withdraw":row.get::<String,_>("status") == "pending" || (row.get::<String,_>("status") == "submission_unknown" && row.get::<bool,_>("has_review_attachment") && row.get::<Option<Uuid>,_>("provider_request_id").is_some()),
         "last_error":row.get::<Option<String>,_>("last_error"),
-        "created_at":row.get::<DateTime<Utc>,_>("created_at").to_rfc3339()})
+        "created_at":row.get::<DateTime<Utc>,_>("created_at").to_rfc3339(),
+        "updated_at":row.get::<DateTime<Utc>,_>("updated_at").to_rfc3339()})
+}
+
+fn invitation_title(document_id: Uuid, art: &str, version: i32) -> String {
+    // Recognizable document type/version without patient data in email subjects.
+    let label = match art {
+        "framework_contract" => "Rahmenvertrag",
+        "single_order" => "Einzelauftrag",
+        "order_cost_estimate" => "Kostenvoranschlag",
+        "confidentiality_release" => "Schweigepflichtsentbindung",
+        "privacy_consent" => "Datenschutzeinwilligung",
+        "medication_plan" => "Medikationsplan",
+        "medical_summary" => "Medizinische Zusammenfassung",
+        "signature_evidence" => "Signaturnachweis",
+        _ => "Dokument",
+    };
+    format!(
+        "GMED – {label} · v{version} · {}",
+        &document_id.to_string()[..8]
+    )
 }
 
 async fn list(
@@ -102,7 +126,7 @@ async fn list(
         .await
         .is_ok();
     // A signed version displays the history of its source as well.
-    let rows = sqlx::query("SELECT * FROM document_signature_requests WHERE source_document_id=$1 OR result_document_id=$1 ORDER BY created_at DESC LIMIT 30")
+    let rows = sqlx::query("SELECT r.*, EXISTS(SELECT 1 FROM document_signature_attachments a WHERE a.request_id=r.id) AS has_review_attachment FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 ORDER BY created_at DESC LIMIT 30")
         .bind(id).fetch_all(&state.db).await.map_err(db_error)?;
     let provider = connection::current_provider(&state)
         .await
@@ -112,10 +136,16 @@ async fn list(
     } else {
         vec![]
     };
+    let review_package = if can_send {
+        package::options(&state, &auth, &source).await?
+    } else {
+        Value::Null
+    };
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
         "suggested_signers":suggested_signers,
+        "review_package":review_package,
         "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
 }
 
@@ -123,6 +153,7 @@ async fn list(
 #[serde(deny_unknown_fields)]
 struct CreateRequest {
     signers: Vec<Signer>,
+    attachment_document_id: Option<Uuid>,
 }
 
 async fn source_bytes(row: &PgRow) -> Result<Vec<u8>, &'static str> {
@@ -180,11 +211,22 @@ async fn create(
     let bytes = source_bytes(&source)
         .await
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
     scan_upload_bytes(Some("source.pdf"), &bytes)
         .await
         .map_err(|_| error(StatusCode::UNPROCESSABLE_ENTITY, "signature_scan_failed"))?;
     let request_id = Uuid::new_v4();
     let source_hash = sha256(&bytes);
+    let mut title = invitation_title(
+        id,
+        &source.get::<String, _>("art"),
+        source.get("version_number"),
+    );
+    if attachment.is_some() {
+        // Provider search only searches the title. Include the durable request
+        // ID so a timeout during package creation can be reconciled without POST.
+        title = format!("{title} · {request_id}");
+    }
     // Hold the source row while committing the outbox; confirm it did not change during reading/scanning.
     let mut tx = state.db.begin().await.map_err(db_error)?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
@@ -216,6 +258,9 @@ async fn create(
     if inserted.is_none() {
         return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
     }
+    if let Some(attachment) = &attachment {
+        package::persist(&mut tx, request_id, attachment).await?;
+    }
     tx.commit().await.map_err(db_error)?;
     state.audit_sender.try_send(audit::domain_event(
         "document_signature_requested",
@@ -226,12 +271,22 @@ async fn create(
     ));
     // Persist first and respond immediately; a browser disconnect cannot trigger a second invitation.
     tokio::spawn(async move {
+        let is_package = attachment.is_some();
+        let initial_signers = if is_package { &[][..] } else { &signers[..] };
         let result = provider
-            .create(request_id, &source_hash, &bytes, &signers)
+            .create(request_id, &title, &source_hash, &bytes, initial_signers)
             .await
-            .and_then(|v| provider.validate(&v, request_id, &source_hash, None, &signers));
+            .and_then(|v| provider.validate(&v, request_id, &source_hash, None, initial_signers));
         let (remote, status, reason) = match result {
-            Ok(v) => (Some(v.id), "pending", None),
+            Ok(v) => (
+                Some(v.id),
+                if is_package {
+                    "submission_unknown"
+                } else {
+                    "pending"
+                },
+                None,
+            ),
             Err(
                 reason @ ("provider_request_rejected"
                 | "provider_login_failed"
@@ -298,7 +353,13 @@ async fn withdraw(
     let remote = row
         .get::<Option<Uuid>, _>("provider_request_id")
         .ok_or_else(|| error(StatusCode::CONFLICT, "submission_unknown"))?;
-    if row.get::<String, _>("status") != "pending" {
+    if row.get::<String, _>("status") != "pending"
+        && !(row.get::<String, _>("status") == "submission_unknown"
+            && package::row(&state, id)
+                .await
+                .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?
+                .is_some())
+    {
         return Err(error(StatusCode::CONFLICT, "signature_not_pending"));
     }
     provider
@@ -402,7 +463,24 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
         }
         candidate
     };
-    let verified = provider.validate(&value, id, &hash, remote_id, &signers)?;
+    let value = package::sync(state, row, &provider, value, &signers).await?;
+    let empty_terminal_package = value["signatures"].as_array().is_some_and(|s| s.is_empty())
+        && matches!(
+            value["status_overall"].as_str(),
+            Some("WITHDRAWN" | "DECLINED" | "EXPIRED" | "ERROR")
+        )
+        && package::row(state, id).await?.is_some();
+    let verified = provider.validate(
+        &value,
+        id,
+        &hash,
+        remote_id,
+        if empty_terminal_package {
+            &[]
+        } else {
+            &signers
+        },
+    )?;
     sqlx::query("UPDATE document_signature_requests SET provider_request_id=$3,status='pending',evidence=$4 WHERE id=$1 AND lease_token=$2")
         .bind(id).bind(token).bind(verified.id).bind(&verified.evidence).execute(&state.db).await.map_err(|_|"signature_database_error")?;
     if verified.status == "SIGNED" {

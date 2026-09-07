@@ -224,16 +224,18 @@ impl Provider {
     pub async fn create(
         &self,
         id: Uuid,
+        title: &str,
         hash: &str,
         bytes: &[u8],
         signers: &[Signer],
     ) -> Result<Value, &'static str> {
         self.token().await.map_err(|_| "provider_login_failed")?;
-        // Opaque title: no patient name or diagnosis in email subjects. No email attachments.
-        let body = json!({"title":format!("GMED – Dokument {id}"),"content":STANDARD.encode(bytes),
+        // Use GMED's selected identity and a document-specific guest invitation.
+        // account_email would prefer an existing Skribble profile over these details.
+        let body = json!({"title":title,"content":STANDARD.encode(bytes),
             "content_type":"application/pdf","legislation":"EIDAS","quality":self.quality(),
             "custom":custom(id,hash),"attach_on_success":[],
-            "signatures":signers.iter().map(|s| json!({"account_email":s.email,"notify":true,
+            "signatures":signers.iter().map(|s| json!({"notify":true,
                 "language":"de","signer_identity_data":{"email_address":s.email,
                 "first_name":s.first_name,"last_name":s.last_name,"language":"de"}})).collect::<Vec<_>>()});
         // Never retry POST: an HTTP timeout may have occurred after invitations were sent.
@@ -252,6 +254,38 @@ impl Provider {
                 MAX_JSON,
             )
             .await?;
+        serde_json::from_slice(&bytes).map_err(|_| "provider_invalid_json")
+    }
+    pub async fn add_attachment(
+        &self,
+        id: Uuid,
+        filename: &str,
+        bytes: &[u8],
+    ) -> Result<Value, &'static str> {
+        let bytes = self.request(Method::POST, &format!("/signature-requests/{id}/attachments"),
+            Some(json!({"filename":filename,"content_type":"application/pdf","content":STANDARD.encode(bytes)})), MAX_JSON).await?;
+        serde_json::from_slice(&bytes).map_err(|_| "provider_invalid_json")
+    }
+    pub async fn attachment_content(
+        &self,
+        id: Uuid,
+        attachment: Uuid,
+    ) -> Result<Vec<u8>, &'static str> {
+        self.request(
+            Method::GET,
+            &format!("/signature-requests/{id}/attachments/{attachment}/content"),
+            None,
+            MAX_PDF,
+        )
+        .await
+    }
+    pub async fn invite(&self, id: Uuid, signers: &[Signer]) -> Result<Value, &'static str> {
+        // The package was created without recipients. PUT the complete set only
+        // after the informational attachment has been verified. Never retry PUT.
+        let bytes = self.request(Method::PUT, "/signature-requests", Some(json!({"id":id,
+            "signatures":signers.iter().map(|s| json!({"notify":true,"language":"de",
+                "signer_identity_data":{"email_address":s.email,"first_name":s.first_name,"last_name":s.last_name,"language":"de"}})).collect::<Vec<_>>()
+        })), MAX_JSON).await?;
         serde_json::from_slice(&bytes).map_err(|_| "provider_invalid_json")
     }
     pub async fn find(&self, id: Uuid) -> Result<Vec<Value>, &'static str> {

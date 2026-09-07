@@ -58,6 +58,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { paymentStatusLabel } from "@/lib/payment-status";
+import { clearApiCache } from "@/lib/api";
+import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Banner,
@@ -106,6 +109,8 @@ import {
   type DocumentComplianceKind,
 } from "@/pages/documents/data/document-api";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
+import { canSignWizardDocument } from "../model/wizard-document-signing";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import {
   createOrder,
@@ -331,6 +336,7 @@ type CommercialFlagsPatch = {
   signed_agency?: boolean;
   prepayment_required?: boolean;
   prepayment_amount?: string;
+  prepayment_due_at?: string;
 };
 
 type CommercialFlagKey = keyof CommercialFlagsPatch;
@@ -1545,6 +1551,7 @@ function intakeFlowLabel(value: string | null | undefined, tx: Tx) {
     contact: ["Контактная форма", "Kontaktformular"],
     standard: ["Стандартный", "Standard"],
     website_wizard: ["Опросник на сайте", "Website-Fragebogen"],
+    repeat_patient: ["Повторное обращение", "Erneute Anfrage"],
   };
   const label = normalized ? labels[normalized] : null;
   return label ? tx(label[0], label[1]) : value || tx("Не указано", "Nicht angegeben");
@@ -1650,11 +1657,11 @@ export function resolveServiceDescriptionTemplate(
 ) {
   const specialties = germanList(context.specialties);
   const resolved = template
-    .replace(/\[Datum\s+Beginn\]/giu, germanDateLabel(context.dateFrom))
-    .replace(/\[Datum\s+Ende\]/giu, germanDateLabel(context.dateTo))
+    .replace(/\[\s*Datum\s+Beginn\s*\]/giu, () => germanDateLabel(context.dateFrom))
+    .replace(/\[\s*Datum\s+Ende\s*\]/giu, () => germanDateLabel(context.dateTo))
     .replace(
-      /\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\](?:(?:\s*,\s*(?:und\s+)?|\s+und\s+)\[Fachrichtung\s+(?:\d+|n(?:\+1)?)\])*/giu,
-      specialties,
+      /\[\s*Fachrichtung(?:\s+(?:\d+|n(?:\s*\+\s*1)?))?\s*\](?:(?:\s*,\s*(?:und\s+)?|\s+und\s+)\[\s*Fachrichtung(?:\s+(?:\d+|n(?:\s*\+\s*1)?))?\s*\])*/giu,
+      () => specialties,
     );
   return resolved
     .split(/\r?\n/gu)
@@ -1847,7 +1854,7 @@ type SelectedWorkTypesSummaryProps = {
   compact?: boolean;
 };
 
-function SelectedWorkTypesSummary({
+export function SelectedWorkTypesSummary({
   workTypes,
   specializationLabels,
   lang,
@@ -1856,7 +1863,6 @@ function SelectedWorkTypesSummary({
 }: SelectedWorkTypesSummaryProps) {
   if (workTypes.length === 0) return null;
 
-  const totalRange = costEstimateTotalRange(workTypes);
   const totalDuration = workTypes.reduce(
     (sum, workType) => sum + Math.max(1, workType.duration_hours),
     0,
@@ -1911,7 +1917,7 @@ function SelectedWorkTypesSummary({
       label: tx("Вид работы", "Leistungsart"),
       accessor: workTypeName,
       sortable: false,
-      width: compact ? 320 : 420,
+      minWidth: 280,
       render: (workType) => (
         <span className="break-words font-medium text-foreground">
           {workTypeName(workType)}
@@ -1920,11 +1926,11 @@ function SelectedWorkTypesSummary({
     },
     {
       id: "duration",
-      label: tx("Объём", "Umfang"),
+      label: tx("Длительность", "Dauer"),
       accessor: (workType) => Math.max(1, workType.duration_hours),
       sortable: false,
       align: "right",
-      width: 110,
+      width: 130,
       render: (workType) => (
         <Badge
           variant="outline"
@@ -1935,33 +1941,17 @@ function SelectedWorkTypesSummary({
       ),
     },
     {
-      id: "rate",
-      label: tx("Ставка", "Satz"),
+      id: "range",
+      label: tx("Диапазон цены", "Preisspanne"),
       accessor: (workType) => workType.min_price_eur,
       sortable: false,
       align: "right",
       width: 230,
       render: (workType) => (
-        <span className="whitespace-nowrap font-mono tabular-nums text-foreground">
-          {formatMoneyValue(workType.min_price_eur, lang)} – {formatMoneyValue(workType.max_price_eur, lang)} EUR/{tx("час", "Std.")}
+        <span className="whitespace-nowrap font-mono font-semibold tabular-nums text-foreground">
+          {formatMoneyValue(workType.min_price_eur, lang)} – {formatMoneyValue(workType.max_price_eur, lang)} EUR
         </span>
       ),
-    },
-    {
-      id: "range",
-      label: tx("Диапазон", "Spanne"),
-      accessor: (workType) => workType.min_price_eur * Math.max(1, workType.duration_hours),
-      sortable: false,
-      align: "right",
-      width: 230,
-      render: (workType) => {
-        const duration = Math.max(1, workType.duration_hours);
-        return (
-          <span className="whitespace-nowrap font-mono font-semibold tabular-nums text-foreground">
-            {formatMoneyValue(workType.min_price_eur * duration, lang)} – {formatMoneyValue(workType.max_price_eur * duration, lang)} EUR
-          </span>
-        );
-      },
     },
   ];
 
@@ -1972,39 +1962,14 @@ function SelectedWorkTypesSummary({
       rowId={(workType) => workType.id}
       density="compact"
       rowHeightOverrides={{ compact: 44 }}
+      mobilePrimaryColumnId="work_type"
+      mobileDetailColumnIds={compact ? ["duration", "range"] : ["specialization", "duration", "range"]}
       disableRowHover
       footer={(
-        <div>
-          <div
-            className={cn(
-              "-mx-3 hidden items-center sm:grid",
-              compact
-                ? "grid-cols-[320px_110px_230px_230px]"
-                : "grid-cols-[230px_420px_110px_230px_230px]",
-            )}
-          >
-            {!compact ? <span aria-hidden="true" /> : null}
-            <span aria-hidden="true" />
-            <span className="whitespace-nowrap px-2 text-right">
-              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                {tx("Итого", "Gesamt")}: {workTypeDurationLabel(totalDuration, tx)}
-              </span>
-            </span>
-            <span aria-hidden="true" />
-            <span className="whitespace-nowrap px-2 text-right">
-              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                {tx("Итого", "Gesamt")}: {totalRange}
-              </span>
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:hidden">
-            <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-              {tx("Объём", "Umfang")}: {workTypeDurationLabel(totalDuration, tx)}
-            </span>
-            <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-              {tx("Итого", "Gesamt")}: {totalRange}
-            </span>
-          </div>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+            {tx("Длительность", "Dauer")}: {workTypeDurationLabel(totalDuration, tx)}
+          </span>
         </div>
       )}
       className="min-h-0 shadow-none"
@@ -2078,17 +2043,24 @@ export function quoteMatchesCurrentServices(
 export function mergeCommercialQuoteReadiness(
   clientReady: boolean,
   serverQuoteAccepted: boolean | undefined,
-  serverPrepaymentReady: boolean | undefined,
+  _serverPrepaymentReady: boolean | undefined,
 ) {
-  return clientReady
-    && serverQuoteAccepted !== false
-    && serverPrepaymentReady !== false;
+  // Payment readiness is informative and never gates commercial progress.
+  void _serverPrepaymentReady;
+  return clientReady && serverQuoteAccepted !== false;
 }
 
 function validMoneyInput(value: string) {
   if (!value.trim()) return true;
   const parsed = Number(value.replace(",", ".").trim());
   return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function localDeadline(value: string | null | undefined) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime())
+    ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    : "";
 }
 
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
@@ -2239,8 +2211,8 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Customer order signature is missing": tx("Получите подпись клиента на заказе", "Unterschrift des Kunden für den Auftrag einholen"),
     "Agency order signature is missing": tx("Подтвердите заказ со стороны агентства", "Auftrag durch die Agentur bestätigen"),
     "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
-    "Cost estimate document is missing": tx("Создайте предварительный расчёт расходов", "Vorläufige Kostenkalkulation erstellen"),
-    "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт расходов", "Vorläufige Kostenkalkulation erstellen"),
+    "Cost estimate document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
+    "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
   };
@@ -2668,9 +2640,12 @@ function WizardDocumentRows({
                   />
                 ) : null}
               </div>
+              {["privacy_information", "cost_estimate"].includes(document.generated_template_id ?? "") ? <DocumentReviewStatus key={document.id} documentId={document.id} disabled={disabled} /> : null}
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <DocumentSignatureAction documentId={document.id} title={wizardDocumentFilename(document)} iconOnly disabled={disabled} />
+              {canSignWizardDocument(document) ? (
+                <DocumentSignatureAction documentId={document.id} title={wizardDocumentFilename(document)} iconOnly disabled={disabled} />
+              ) : null}
               {wizardDocumentPreviewKind(document) ? (
                 <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть", "Vorschau")} aria-label={tx("Просмотреть", "Vorschau")} disabled={disabled} onClick={() => onOpen(document)}>
                   {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
@@ -2738,6 +2713,7 @@ export function LeadWizard({
   const [signedAgency, setSignedAgency] = useState(false);
   const [paidAmount, setPaidAmount] = useState("");
   const [prepaymentAmount, setPrepaymentAmount] = useState("");
+  const [prepaymentDeadline, setPrepaymentDeadline] = useState("");
   const [commercialFlagsBusyCount, setCommercialFlagsBusyCount] = useState(0);
   const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -2809,6 +2785,7 @@ export function LeadWizard({
     signed_agency: 0,
     prepayment_required: 0,
     prepayment_amount: 0,
+    prepayment_due_at: 0,
   });
 
   useEffect(() => {
@@ -3132,7 +3109,7 @@ export function LeadWizard({
           || (nextPrepayment && paymentQuote ? String(paymentQuote.total_gross) : "");
       const nextPaidAmount = paymentQuote
         ? String(paymentQuote.paid_amount ?? "")
-        : storedCommercialDraft?.paidAmount ?? "";
+        : "";
 
       setLead(nextLead);
       setCases(nextCase ? [nextCase] : nextCases as CaseListItem[]);
@@ -3160,6 +3137,7 @@ export function LeadWizard({
         setLines(nextLines);
         setPrepayment(nextPrepayment);
         setPrepaymentAmount(nextPrepaymentAmount);
+        setPrepaymentDeadline(localDeadline(nextOrder?.prepayment_due_at));
         setSignedPatient(Boolean(nextOrder?.signed_patient));
         setSignedAgency(Boolean(nextOrder?.signed_agency));
         setPaidAmount(nextPaidAmount);
@@ -3228,6 +3206,14 @@ export function LeadWizard({
     return nextDocuments;
   }, [leadId]);
 
+  useDebouncedRealtimeSubscription(["lead.payment_status_changed"], (_event, events) => {
+    if (!open || !leadId || !events.some((event) => event.entity_id === leadId)) return;
+    clearApiCache("/quotes");
+    clearApiCache("/orders");
+    clearApiCache(`/leads/${leadId}`);
+    void refreshCommercialState().catch(() => undefined);
+  }, 250);
+
   useEffect(() => {
     if (!open || !createMode || leadId || hydrated.current === "__new__") return;
 
@@ -3263,6 +3249,8 @@ export function LeadWizard({
     setCommercialLookupsLoading(false);
     setLines([]);
     setPrepayment(false);
+    setPrepaymentAmount("");
+    setPrepaymentDeadline("");
     setSignedPatient(false);
     setSignedAgency(false);
     setPaidAmount("");
@@ -3490,16 +3478,14 @@ export function LeadWizard({
   const quoteTotal = quote ? money(quote.total_gross) : 0;
   const persistedPrepayment = quote ? money(quote.paid_amount) : 0;
   const enteredPrepayment = money(paidAmount);
-  const requiredPrepayment = prepayment ? money(prepaymentAmount) : 0;
+  const requiredPrepayment = prepayment ? money(prepaymentAmount) || quoteTotal : 0;
   const requiredPrepaymentValid = !prepayment || (
     validMoneyInput(prepaymentAmount)
     && requiredPrepayment > 0
     && requiredPrepayment <= quoteTotal + 0.005
   );
   const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
-  const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote)
-    && requiredPrepaymentValid
-    && (!prepayment || persistedPrepayment + 0.005 >= requiredPrepayment);
+  const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote);
   const serverQuoteAccepted = readinessChecks.get("quote_accepted");
   const serverPrepaymentReady = readinessChecks.get("prepayment_ready");
   const quoteAndPrepaymentReady = mergeCommercialQuoteReadiness(
@@ -3527,7 +3513,7 @@ export function LeadWizard({
     framework_contract: tx("Рамочный договор", "Rahmenvertrag"),
     single_order: tx("Документ заказа", "Einzelauftrag"),
     order_cost_estimate: tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag"),
-    cost_estimate: tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation"),
+    cost_estimate: tx("Предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation"),
   })[templateId];
 
   const renderCommercialDocumentError = (templateId: CommercialDocumentKind) => {
@@ -4678,6 +4664,7 @@ ${serviceCommentLines.join("\n")}`
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
       prepayment_required: flags.prepayment_required ?? prepayment,
+      ...(flags.prepayment_due_at !== undefined ? { prepayment_due_at: flags.prepayment_due_at } : {}),
       ...(!syncOrderServiceLines
         && normalizedPrepaymentAmount
         && validMoneyInput(normalizedPrepaymentAmount)
@@ -4843,13 +4830,16 @@ ${serviceCommentLines.join("\n")}`
     setError("");
     try {
       if (existingOrderId) {
-        await updateOrderCommercialBasis(existingOrderId, patchValue);
+        const saved = await updateOrderCommercialBasis(existingOrderId, patchValue);
         setOrders((current) => current.map((item) => (
-          item.id === existingOrderId ? { ...item, ...patchValue } : item
+          item.id === existingOrderId ? { ...item, ...patchValue, prepayment_due_at: saved.prepayment_due_at } : item
         )));
+        if (hydrated.current === targetLeadId && patchValue.prepayment_required === false) {
+          setPrepaymentDeadline("");
+        }
 
         if (targetLeadId) {
-          void refreshLeadState().catch(() => undefined);
+          void refreshCommercialState().catch(() => undefined);
         }
       } else {
         await ensureCommercial(patchValue);
@@ -4874,6 +4864,9 @@ ${serviceCommentLines.join("\n")}`
           if (key === "prepayment_amount" && typeof rollback === "string") {
             setPrepaymentAmount(rollback);
           }
+          if (key === "prepayment_due_at" && typeof rollback === "string") {
+            setPrepaymentDeadline(localDeadline(rollback));
+          }
         });
       }
     } finally {
@@ -4891,14 +4884,6 @@ ${serviceCommentLines.join("\n")}`
       ));
       return;
     }
-    if (accept && prepayment && !validMoneyInput(paidAmount)) {
-      setError("");
-      setCommercialQuoteError(tx(
-        "Предоплата должна быть числом не меньше нуля",
-        "Die Vorauszahlung muss eine Zahl größer oder gleich null sein",
-      ));
-      return;
-    }
     if (
       prepayment
       && (
@@ -4911,14 +4896,6 @@ ${serviceCommentLines.join("\n")}`
       setCommercialQuoteError(tx(
         "Укажите необходимую предоплату больше нуля и не больше суммы сметы",
         "Geben Sie eine erforderliche Vorauszahlung größer als null und nicht höher als den Kostenvoranschlag an",
-      ));
-      return;
-    }
-    if (accept && prepayment && enteredPrepayment > quoteTotal + 0.005) {
-      setError("");
-      setCommercialQuoteError(tx(
-        "Предоплата не может превышать сумму сметы",
-        "Die Vorauszahlung darf den Betrag des Kostenvoranschlags nicht überschreiten",
       ));
       return;
     }
@@ -4979,7 +4956,6 @@ ${serviceCommentLines.join("\n")}`
       } else if (quote) {
         const accepted = await updateQuoteStatus(quote.id, {
           status: "accepted",
-          paid_amount: prepayment ? money(paidAmount) : undefined,
         });
         setPaidAmount(String(accepted.paid_amount ?? ""));
         setQuotes((current) => [accepted, ...current.filter((item) => item.id !== accepted.id)]);
@@ -5514,7 +5490,7 @@ ${serviceCommentLines.join("\n")}`
     {
       id: "description",
       label: tx("Описание", "Beschreibung"),
-      accessor: (line) => line.catalogDescription,
+      accessor: (line) => resolvedServiceCatalogDescription(line),
       sortable: false,
       searchable: true,
       render: (line) => {
@@ -7552,6 +7528,29 @@ ${serviceCommentLines.join("\n")}`
                       />
                     </Field>
                   ) : null}
+                  {prepayment ? (
+                    <Field className="w-full sm:w-64" label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}>
+                      <Input
+                        type="datetime-local"
+                        id="lead-wizard-prepayment-deadline"
+                        aria-label={tx("Внести предоплату до", "Vorauszahlung fällig bis")}
+                        value={prepaymentDeadline}
+                        className={inputClass}
+                        onChange={(event) => setPrepaymentDeadline(event.target.value)}
+                        onBlur={() => {
+                          const deadline = prepaymentDeadline ? new Date(prepaymentDeadline) : null;
+                          if (deadline && !Number.isFinite(deadline.getTime())) return;
+                          const nextDueAt = deadline?.toISOString() ?? "";
+                          if (localDeadline(order?.prepayment_due_at) === prepaymentDeadline) return;
+                          void saveFlags(
+                            { prepayment_due_at: nextDueAt },
+                            { prepayment_due_at: order?.prepayment_due_at ?? "" },
+                          );
+                        }}
+                        disabled={isBusy}
+                      />
+                    </Field>
+                  ) : null}
                   <Field className="w-full sm:w-64" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
                     <Input
                       className={cn(inputClass, "font-mono tabular-nums")}
@@ -7560,22 +7559,20 @@ ${serviceCommentLines.join("\n")}`
                       max={quote ? quoteTotal : undefined}
                       step="0.01"
                       value={paidAmount}
-                      onChange={(event) => setPaidAmount(event.target.value)}
+                      readOnly
                       disabled={!prepayment || isBusy}
                       placeholder="0.00"
                     />
                   </Field>
-                  {!acceptedQuote || prepayment ? (
+                  {!acceptedQuote ? (
                     <Button
                       type="button"
                       className="w-fit"
-                      disabled={isBusy || !quote || !quoteIsCurrent || !validMoneyInput(paidAmount)}
+                      disabled={isBusy || !quote || !quoteIsCurrent}
                       onClick={() => void createOrAcceptQuote(true)}
                     >
                       {busy === "accept" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                      {acceptedQuote
-                        ? tx("Учесть предоплату", "Vorauszahlung verbuchen")
-                        : tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
+                      {tx("Подтвердить смету", "Kostenvoranschlag annehmen")}
                     </Button>
                   ) : null}
                 </div>
@@ -7583,9 +7580,14 @@ ${serviceCommentLines.join("\n")}`
                   <div className="flex justify-end text-xs text-muted-foreground">
                     <span>{tx("Осталось получить", "Noch zu erhalten")}: </span>
                     <span className="ml-1 font-mono tabular-nums text-foreground">
-                      {formatMoneyValue(prepaymentRemaining, lang)} EUR
+                      {formatMoneyValue(prepaymentRemaining, lang)} {quote.currency ?? "EUR"}
                     </span>
                   </div>
+                ) : null}
+                {prepayment && order?.payment_tracking ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {paymentStatusLabel(order.payment_tracking.status, lang)}
+                  </p>
                 ) : null}
                 <StateMark done={quoteAndPrepaymentReady} label={quoteStateLabel} />
                 {commercialQuoteError ? (
@@ -7654,7 +7656,7 @@ ${serviceCommentLines.join("\n")}`
               <div id={COST_ESTIMATE_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={tx("Предварительный расчёт расходов", "Vorläufige Kostenkalkulation")}
+                  title={tx("Предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation")}
                   accessory={(
                     <Button
                       type="button"
@@ -7671,7 +7673,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                 <WizardDocumentRows
                   documents={commercialDocuments.cost_estimate}
-                  emptyLabel={tx("Предварительный расчёт ещё не создан", "Vorläufige Kostenkalkulation wurde noch nicht erstellt")}
+                  emptyLabel={tx("Предварительный расчёт медицинских расходов ещё не создан", "Vorläufige medizinische Kostenkalkulation wurde noch nicht erstellt")}
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -8517,7 +8519,7 @@ ${serviceCommentLines.join("\n")}`
             </div>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3">
-            {previewedDocument && documentPreview?.kind !== "image" ? (
+            {previewedDocument && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
               <div className="mb-3">
                 <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} onDone={() => { void refreshDocumentsState(); }} />
               </div>

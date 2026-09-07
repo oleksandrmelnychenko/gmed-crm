@@ -1,0 +1,31 @@
+{
+  "audited_at": "2026-09-07T22:09:29.6927066+03:00",
+  "git_head": "97ab2ec44b95e8a4c378a1a07063ad15e5968b53",
+  "note": "Working tree includes pre-existing user changes; production code was not modified by this audit.",
+  "files": [
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\src\\routes\\invoices.rs",
+      "Hash": "0F7AFC6344919DF56E8D7864CE67CF57AEAB1EA2B582F484D5B36617A72B2E7A"
+    },
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\src\\routes\\contracts.rs",
+      "Hash": "F3984B4500C65BDAAA8C2F33875069DA3453FB6B8B8003D8C1029527769246EA"
+    },
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\src\\routes\\orders.rs",
+      "Hash": "5F356FE46B64D59DC8F2D6E4E2A58CE880D3957F12B66E91A373EC5C06A0B64F"
+    },
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\src\\routes\\patient_financials.rs",
+      "Hash": "67ADED5D8A890B9EEFF242605D0BE8A2D3109286A253B3AF56BC1978B943627A"
+    },
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\src\\routes\\company_financials.rs",
+      "Hash": "88A69C386F59CC78F5AEC7D9EE737D97B3DE9CD011F1B47B9A260AF6809EB843"
+    },
+    {
+      "Path": "C:\\Users\\oleks\\Developer\\gmed\\crates\\server\\tests\\accounting_audit_api.rs",
+      "Hash": "A4FBA30E38B09C119E58550A844340CF77646D9F3BB8DFD14A7C108B6D906D93"
+    }
+  ]
+}

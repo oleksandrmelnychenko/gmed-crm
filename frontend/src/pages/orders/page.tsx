@@ -1,4 +1,5 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { OrderWorkspaceNav } from "@/components/order-workspace-nav";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   startTransition,
@@ -7,6 +8,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -18,7 +20,6 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
-  ChevronLeft,
   ChevronRight,
   Circle,
   ClipboardList,
@@ -63,6 +64,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { hasFormChanges } from "@/lib/form-changes";
+import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -109,6 +111,7 @@ import {
   isOrderReadinessGateApplicable,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
+import { mergeOrderDraft } from "./model/order-draft";
 import {
   approveOrderLeistung,
   completeWorkflowChecklistItem,
@@ -212,10 +215,13 @@ import {
 } from "./ui/order-service-group-panel";
 
 const ORDER_REALTIME_EVENTS = [
+  "realtime.connected",
+  "realtime.resync_required",
   "order.created",
   "order.phase_changed",
   "order.status_changed",
   "order.process_gates_updated",
+  "order.payment_status_changed",
   "order.debt_management_updated",
   "order.planning_preparation_updated",
   "order.execution_flow_updated",
@@ -276,20 +282,20 @@ function SectionCard({
   return (
     <section
       className={cn(
-        "rounded-lg border border-border/70 bg-card p-6",
+        "@container min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card",
         className,
       )}
     >
-      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-start 2xl:justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3">
+        <div className="min-w-0 flex-1">
           <h2 className={tokens.text.sectionTitle}>{titleWithDot(title)}</h2>
           {description ? (
-            <p className={cn(tokens.text.muted, "mt-1")}>{description}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
           ) : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {action ? <div className="flex max-w-full flex-wrap gap-2">{action}</div> : null}
       </div>
-      <div className="mt-5">{children}</div>
+      <div className="min-w-0 p-4">{children}</div>
     </section>
   );
 }
@@ -341,16 +347,27 @@ function MiniMetric({
   return (
     <div
       className={cn(
-        "flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2",
+        "flex min-w-0 flex-1 flex-col items-start justify-between gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-2.5",
         className,
       )}
     >
       <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="min-w-0 max-w-[55%] break-words text-right text-sm font-semibold leading-snug text-foreground">
+      <span className="min-w-0 max-w-full break-words text-sm font-semibold leading-snug text-foreground">
         {value}
       </span>
+    </div>
+  );
+}
+
+function OrderFinancialMetric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col justify-between gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-2.5">
+      <dt className="text-xs leading-5 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 font-mono text-sm font-semibold leading-5 tabular-nums text-foreground">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -395,67 +412,11 @@ function EmptyState({ title, description, action }: EmptyStateProps) {
   );
 }
 
-function OrdersPager({
-  pageIndex,
-  totalPages,
-  totalRows,
-  previousLabel,
-  nextLabel,
-  onPageChange,
-}: {
-  nextLabel: string;
-  onPageChange: (pageIndex: number) => void;
-  pageIndex: number;
-  previousLabel: string;
-  totalPages: number;
-  totalRows: number;
-}) {
-  const pageStart = pageIndex * ORDER_PAGE_SIZE;
-  return (
-    <div className="flex min-h-8 items-center justify-between gap-2 border-b border-border/60 bg-field px-4 py-0.5">
-      <span className="font-mono text-xs tabular-nums text-foreground">
-        {totalRows === 0
-          ? "0 / 0"
-          : `${pageStart + 1}-${Math.min(pageStart + ORDER_PAGE_SIZE, totalRows)} / ${totalRows}`}
-      </span>
-      <div className="flex items-center gap-1.5">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="size-7 rounded-md"
-          disabled={pageIndex === 0}
-          aria-label={previousLabel}
-          title={previousLabel}
-          onClick={() => onPageChange(Math.max(0, pageIndex - 1))}
-        >
-          <ChevronLeft className="size-3.5" />
-        </Button>
-        <span className="min-w-12 text-center font-mono text-xs font-medium tabular-nums text-foreground">
-          {pageIndex + 1} / {totalPages}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="size-7 rounded-md"
-          disabled={pageIndex >= totalPages - 1}
-          aria-label={nextLabel}
-          title={nextLabel}
-          onClick={() => onPageChange(Math.min(totalPages - 1, pageIndex + 1))}
-        >
-          <ChevronRight className="size-3.5" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function titleWithDot(title: ReactNode) {
   return (
-    <span className="inline-flex items-center gap-2">
-      <span aria-hidden className="size-2 rounded-full bg-amber-500" />
-      <span>{title}</span>
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
+      <span className="min-w-0 break-words">{title}</span>
     </span>
   );
 }
@@ -949,7 +910,13 @@ function useOrdersPageContent() {
     ordersPageReducer,
     undefined,
     (): OrdersPageState => ({
-      filters: DEFAULT_FILTERS,
+      filters: {
+        ...DEFAULT_FILTERS,
+        patientId: patientContextId,
+        providerId: searchParams.get("provider") ?? "",
+        doctorId: searchParams.get("doctor") ?? "",
+        providerTaxonomyNodeId: searchParams.get("taxonomy") ?? "",
+      },
       orders: [],
       loading: true,
       listError: null,
@@ -1102,8 +1069,10 @@ function useOrdersPageContent() {
     followupForm, orderFollowupToForm(orderDetail?.followup_flow),
   );
   const phaseDirty = Boolean(orderDetail) && phaseDraft !== orderDetail?.phase;
+  const phaseAdvancePending = useRef(false);
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [workflowCreateError, setWorkflowCreateError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
   const [externalInvoiceAllocationId, setExternalInvoiceAllocationId] = useState<string | null>(null);
   const [orderEconomics, setOrderEconomics] = useState<OrderEconomics | null>(null);
@@ -1130,27 +1099,6 @@ function useOrdersPageContent() {
     setOrdersPageField("filters", nextValue);
   const deferredSearch = useDeferredValue(filters.search);
   const orderPaginationResetKey = JSON.stringify(filters);
-  const [orderPaginationState, setOrderPaginationState] = useState(() => ({
-    pageIndex: 0,
-    resetKey: orderPaginationResetKey,
-  }));
-  const orderPageIndex =
-    orderPaginationState.resetKey === orderPaginationResetKey
-      ? orderPaginationState.pageIndex
-      : 0;
-  const orderTotalPages = Math.max(1, Math.ceil(orders.length / ORDER_PAGE_SIZE));
-  const safeOrderPageIndex = Math.min(orderPageIndex, orderTotalPages - 1);
-  const orderPageStart = safeOrderPageIndex * ORDER_PAGE_SIZE;
-  const pagedOrders = useMemo(
-    () => orders.slice(orderPageStart, orderPageStart + ORDER_PAGE_SIZE),
-    [orderPageStart, orders],
-  );
-  const handleOrderPageChange = (nextPageIndex: number) => {
-    setOrderPaginationState({
-      pageIndex: nextPageIndex,
-      resetKey: orderPaginationResetKey,
-    });
-  };
   const setOrders = (nextValue: SetStateAction<OrderSummary[]>) =>
     setOrdersPageField("orders", nextValue);
   const setLoading = (nextValue: SetStateAction<boolean>) =>
@@ -1593,7 +1541,7 @@ function useOrdersPageContent() {
     user?.role === "billing" ||
     user?.role === "ceo";
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
-    !isOrderRouteDetail || activeOrderSection === section;
+    !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
 
   function syncQuery(next: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams);
@@ -1767,6 +1715,13 @@ function useOrdersPageContent() {
 
   function resetCreateDialog(open: boolean) {
     updateCreateDialog(open, true);
+  }
+
+  function openCreateDialog() {
+    setCreateError(null);
+    setCreateRecheck(null);
+    setCreateForm({ ...blankCreateOrderForm(), patientId: filters.patientId });
+    setCreateOpen(true);
   }
 
   function resetLeistungDialog(open: boolean) {
@@ -1954,41 +1909,41 @@ function useOrdersPageContent() {
   }, []);
 
   const startOrderDetailLoad = useCallback(() => {
-    setDetailLoading(true);
-    setDetailError(null);
+    dispatchOrdersPageState(current => ({
+      detailLoading: current.orderDetail?.id !== current.selectedOrderId,
+      detailError: null,
+    }));
   }, []);
 
   const applyOrderWorkspace = useCallback((workspace: Awaited<ReturnType<typeof fetchOrderWorkspace>>) => {
-    setOrderDetail(workspace.detail);
-    setOrderDocuments(workspace.documents);
-    setWorkflowChecklist(workspace.workflow);
-    setWorkflowAssignments(workspace.assignments);
-    setPhaseDraft(workspace.detail.phase);
-    setProcessGateForm(orderProcessGatesToForm(workspace.detail.process_gates));
-    setProcessGateError(null);
-    setPlanningForm(orderPlanningToForm(workspace.detail.planning_preparation));
-    setPlanningError(null);
-    setExecutionForm(orderExecutionToForm(workspace.detail.execution_flow));
-    setExecutionError(null);
-    setFollowupForm(orderFollowupToForm(workspace.detail.followup_flow));
-    setFollowupError(null);
+    dispatchOrdersPageState(current => {
+      const previous = current.orderDetail;
+      const sameOrder = previous?.id === workspace.detail.id;
+      const merge = <T extends object>(draft: T, before: T, incoming: T) =>
+        sameOrder ? mergeOrderDraft(draft, before, incoming) : incoming;
+      return {
+        orderDetail: workspace.detail,
+        orderDocuments: workspace.documents,
+        workflowChecklist: workspace.workflow,
+        workflowAssignments: workspace.assignments,
+        phaseDraft: sameOrder && current.phaseDraft !== previous?.phase ? current.phaseDraft : workspace.detail.phase,
+        processGateForm: merge(current.processGateForm, orderProcessGatesToForm(previous?.process_gates), orderProcessGatesToForm(workspace.detail.process_gates)),
+        planningForm: merge(current.planningForm, orderPlanningToForm(previous?.planning_preparation), orderPlanningToForm(workspace.detail.planning_preparation)),
+        executionForm: merge(current.executionForm, orderExecutionToForm(previous?.execution_flow), orderExecutionToForm(workspace.detail.execution_flow)),
+        followupForm: merge(current.followupForm, orderFollowupToForm(previous?.followup_flow), orderFollowupToForm(workspace.detail.followup_flow)),
+        ...(!sameOrder ? {processGateError:null, planningError:null, executionError:null, followupError:null, phaseError:null} : {}),
+      };
+    });
+    window.dispatchEvent(new CustomEvent("gmed:order-phase-changed", {
+      detail: {orderId: workspace.detail.id, phase: workspace.detail.phase},
+    }));
   }, []);
 
   const failOrderWorkspaceLoad = useCallback((error: unknown) => {
-    setOrderDetail(null);
-    setOrderDocuments([]);
-    setWorkflowChecklist(null);
-    setWorkflowAssignments([]);
-    setProcessGateForm(blankOrderProcessGateForm());
-    setPlanningError(null);
-    setPlanningForm(blankOrderPlanningForm());
-    setExecutionForm(blankOrderExecutionForm());
-    setExecutionError(null);
-    setFollowupForm(blankOrderFollowupForm());
-    setFollowupError(null);
-    setDetailError(
-      error instanceof Error ? error.message : l("orders_error_load_order"),
-    );
+    dispatchOrdersPageState(current => ({
+      orderDetail: current.orderDetail?.id === current.selectedOrderId ? current.orderDetail : null,
+      detailError: error instanceof Error ? error.message : l("orders_error_load_order"),
+    }));
   }, [l]);
 
   const finishOrderDetailLoad = useCallback(() => {
@@ -2232,11 +2187,20 @@ function useOrdersPageContent() {
   ]);
 
   useEffect(() => {
-    if (!permissions.canViewPage) return;
+    if (!permissions.canViewPage || isOrderRouteDetail) return;
 
     let cancelled = false;
     startOrdersLoad();
 
+    // Wait for route hydration when React reuses the workspace for another patient.
+    if (
+      filters.patientId !== (searchParams.get("patient") ?? "") ||
+      filters.providerId !== (searchParams.get("provider") ?? "") ||
+      filters.doctorId !== (searchParams.get("doctor") ?? "") ||
+      filters.providerTaxonomyNodeId !== (searchParams.get("taxonomy") ?? "")
+    ) return;
+
+    const controller = new AbortController();
     async function loadOrders() {
       try {
         const params = new URLSearchParams();
@@ -2253,6 +2217,9 @@ function useOrdersPageContent() {
         const queryString = params.toString();
         const response = await fetchOrders(
           `/orders${queryString ? `?${queryString}` : ""}`,
+          // Lookup dropdowns share this endpoint and may cache an empty list.
+          // A workspace entry or refresh must fetch its own current snapshot.
+          { signal: controller.signal, forceFresh: true },
         );
         if (cancelled) return;
         applyOrders(response);
@@ -2269,6 +2236,7 @@ function useOrdersPageContent() {
     void loadOrders();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     deferredSearch,
@@ -2281,8 +2249,10 @@ function useOrdersPageContent() {
     filters.providerTaxonomyNodeId,
     filters.status,
     finishOrdersLoad,
+    isOrderRouteDetail,
     permissions.canViewPage,
     reloadNonce,
+    searchParams,
     startOrdersLoad,
   ]);
 
@@ -2391,6 +2361,7 @@ function useOrdersPageContent() {
     if (!selectedOrderId) return;
     const currentOrderId = selectedOrderId;
     let cancelled = false;
+    setOrderEconomics(current => current?.order_id === currentOrderId ? current : null);
     setOrderEconomicsLoading(true);
     setOrderEconomicsError(null);
     void fetchOrderEconomics(currentOrderId)
@@ -2546,7 +2517,7 @@ function useOrdersPageContent() {
   }
 
   async function handleSavePhase() {
-    if (!selectedOrderId || !phaseDraft || phaseDraft === orderDetail?.phase) {
+    if (!selectedOrderId || !phaseDraft || phaseDraft === orderDetail?.phase || phaseSaving || statusSaving) {
       return;
     }
     if (
@@ -2581,31 +2552,30 @@ function useOrdersPageContent() {
   }
 
   async function handleAdvancePhase() {
-    if (!orderDetail) return;
+    if (!orderDetail || phaseSaving || statusSaving || phaseAdvancePending.current || orderDetail.status !== "active") return;
     const phase =
       orderDetail.lifecycle?.next_stage ?? nextPhase(orderDetail.phase);
-    if (!phase) return;
-    setPhaseDraft(phase);
-    await updateOrderPhase(orderDetail.id, phase)
-      .then(() => {
-        window.dispatchEvent(
-          new CustomEvent("gmed:order-phase-changed", {
-            detail: { orderId: orderDetail.id, phase },
-          }),
-        );
-        setPhaseError(null);
-        triggerReload();
-      })
-      .catch((error: unknown) => {
-        setPhaseDraft(orderDetail.phase);
-        setPhaseError(
-          error instanceof Error ? error.message : l("orders_error_advance_phase"),
-        );
-      });
+    const transition = orderDetail.lifecycle?.allowed_transitions.find(item => item.phase === phase);
+    if (!phase || transition?.blocked) return;
+    phaseAdvancePending.current = true;
+    setPhaseSaving(true);
+    setPhaseError(null);
+    try {
+      await updateOrderPhase(orderDetail.id, phase);
+      window.dispatchEvent(new CustomEvent("gmed:order-phase-changed", {
+        detail: { orderId: orderDetail.id, phase },
+      }));
+      triggerReload();
+    } catch (error) {
+      setPhaseError(error instanceof Error ? error.message : l("orders_error_advance_phase"));
+    } finally {
+      phaseAdvancePending.current = false;
+      setPhaseSaving(false);
+    }
   }
 
   async function handleOrderStatusChange(status: OrderStatus) {
-    if (!orderDetail || status === orderDetail.status || statusSaving) return;
+    if (!orderDetail || status === orderDetail.status || statusSaving || phaseSaving) return;
     if (
       status === "cancelled" &&
       !window.confirm(
@@ -2669,7 +2639,16 @@ function useOrdersPageContent() {
   function openDebtManagementSheet() {
     if (!orderDetail?.process_gates) return;
 
-    setProcessGateForm(orderProcessGatesToForm(orderDetail.process_gates));
+    const saved = orderProcessGatesToForm(orderDetail.process_gates);
+    setProcessGateForm(current => ({
+      ...current,
+      debtStatus: saved.debtStatus,
+      debtNote: saved.debtNote,
+      debtOwnerUserId: saved.debtOwnerUserId,
+      debtNextReviewAt: saved.debtNextReviewAt,
+      debtLastContactAt: saved.debtLastContactAt,
+      debtResolutionNote: saved.debtResolutionNote,
+    }));
     setProcessGateError(null);
     setDebtManagementSheetOpen(true);
   }
@@ -2830,7 +2809,7 @@ function useOrdersPageContent() {
       setLeistungError(l("orders_error_quantity_positive"));
       return;
     }
-    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+    if (!leistungForm.unitPrice.trim() || !Number.isFinite(unitPrice) || unitPrice < 0) {
       setLeistungError(l("orders_error_unit_price_numeric"));
       return;
     }
@@ -3011,7 +2990,7 @@ function useOrdersPageContent() {
       externalInvoiceForm.amountGross.replace(",", "."),
     );
 
-    if (!Number.isFinite(amountGross) || amountGross < 0) {
+    if (!externalInvoiceForm.amountGross.trim() || !Number.isFinite(amountGross) || amountGross < 0) {
       setExternalInvoiceError(l("orders_error_gross_amount_numeric"));
       return;
     }
@@ -3124,14 +3103,14 @@ function useOrdersPageContent() {
   ) {
     if (!selectedOrderId) return;
     setExternalInvoiceUpdatingId(externalInvoiceId);
-    setExternalInvoiceError(null);
+    setDetailError(null);
     try {
       await updateExternalInvoice(selectedOrderId, externalInvoiceId, orderLeistungId
         ? { order_leistung_id: orderLeistungId }
         : { clear_order_leistung: true });
       triggerReload();
     } catch (error) {
-      setExternalInvoiceError(error instanceof Error ? error.message : String(error));
+      setDetailError(error instanceof Error ? error.message : String(error));
     } finally {
       setExternalInvoiceUpdatingId(null);
     }
@@ -3140,12 +3119,12 @@ function useOrdersPageContent() {
   async function handleAddWorkflowItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedOrderId || !workflowForm.itemText.trim()) {
-      setDetailError(l("orders_error_checklist_item_text_required"));
+      setWorkflowCreateError(l("orders_error_checklist_item_text_required"));
       return;
     }
 
     setWorkflowBusy(true);
-    setDetailError(null);
+    setWorkflowCreateError(null);
     try {
       await createWorkflowChecklistItem(selectedOrderId, {
         item_text: workflowForm.itemText.trim(),
@@ -3162,7 +3141,7 @@ function useOrdersPageContent() {
       setWorkflowCreateOpen(false);
       triggerReload();
     } catch (error) {
-      setDetailError(
+      setWorkflowCreateError(
         error instanceof Error
           ? error.message
           : l("orders_error_create_checklist_item"),
@@ -3294,6 +3273,7 @@ function useOrdersPageContent() {
 
   return (
     <div className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
+      {isOrderRouteDetail ? <OrderWorkspaceNav mobile /> : null}
       {!isOrderRouteDetail ? (
         <>
       <PageHeader
@@ -3305,7 +3285,7 @@ function useOrdersPageContent() {
               <Button
                 type="button"
                 className="h-9 rounded-lg px-3.5"
-                onClick={() => setCreateOpen(true)}
+                onClick={openCreateDialog}
               >
                 <Plus className="size-4" />
                 {t.orders_new_button}
@@ -3454,7 +3434,8 @@ function useOrdersPageContent() {
           </div>
         ) : null}
         <DataTableSurface
-          rows={pagedOrders}
+          rows={orders}
+          pagination={{pageSize: ORDER_PAGE_SIZE, resetKey: orderPaginationResetKey}}
           columns={orderTableColumns}
           rowId={(row) => row.id}
           defaultDensity="comfortable"
@@ -3651,16 +3632,6 @@ function useOrdersPageContent() {
               </ToolbarField>
             </div>
           }
-          toolbarAfter={
-            <OrdersPager
-              pageIndex={safeOrderPageIndex}
-              totalPages={orderTotalPages}
-              totalRows={orders.length}
-              previousLabel={t.pagination_previous}
-              nextLabel={t.pagination_next}
-              onPageChange={handleOrderPageChange}
-            />
-          }
           activeRowId={selectedOrderId}
           onRowClick={(row) => openOrder(row.id, row.patient_id)}
           rowAccent={(row) => {
@@ -3672,14 +3643,16 @@ function useOrdersPageContent() {
           }}
           emptyState={
             <EmptyState
-              title={tx.common_not_set}
-              description={tx.orders_subtitle}
+              title={lang === "de" ? "Keine Aufträge gefunden" : "Заказы не найдены"}
+              description={anyQuickFilterActive
+                ? (lang === "de" ? "Für die ausgewählten Filter gibt es keine Aufträge. Ändern Sie die Filter oder setzen Sie sie zurück." : "По выбранным фильтрам заказов нет. Измените или сбросьте фильтры.")
+                : tx.orders_subtitle}
               action={
                 permissions.canCreate ? (
                   <Button
                     type="button"
                     className="h-9 rounded-lg px-3.5"
-                    onClick={() => setCreateOpen(true)}
+                    onClick={openCreateDialog}
                   >
                     <Plus className="size-4" />
                     {t.orders_new_button}
@@ -3733,7 +3706,7 @@ function useOrdersPageContent() {
                 <LoaderCircle className="mx-auto mb-3 size-5 animate-spin" />
                 {t.common_loading}
               </div>
-            ) : detailError ? (
+            ) : detailError && !orderDetail ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {detailError}
               </div>
@@ -3743,16 +3716,17 @@ function useOrdersPageContent() {
                 description={tx.orders_subtitle}
               />
             ) : (
-              <div className="space-y-4 rounded-xl">
+              <div className="min-w-0 space-y-4 rounded-xl">
+                {detailError ? <Banner tone="error" withIcon>{detailError}</Banner> : null}
                 <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                  <div className="relative p-5">
+                  <div className="relative p-4">
                     <span
                       className={cn(
-                        "absolute bottom-5 left-0 top-5 w-1 rounded-r-full",
+                        "absolute bottom-4 left-0 top-4 w-1 rounded-r-full",
                         orderAccentClass(orderDetail.phase, orderDetail.status),
                       )}
                     />
-                    <div className="grid gap-5 pl-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+                    <div className="flex min-w-0 flex-col gap-3 pl-2">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
@@ -3765,7 +3739,7 @@ function useOrdersPageContent() {
                         <h1 className="mt-2 min-w-0 max-w-full break-words text-xl font-semibold leading-snug text-foreground">
                           {detailSubjectName}
                         </h1>
-                        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                        <p className="mt-1.5 break-words font-mono text-xs leading-5 text-muted-foreground">
                           {[orderDetail.order_number, detailSubjectReference]
                             .filter(Boolean)
                             .join(" - ")}
@@ -3782,7 +3756,7 @@ function useOrdersPageContent() {
                           </span>
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 xl:justify-end">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border/60 pt-3 [&_[data-slot=button]]:h-8 [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:rounded-md">
                           <Button
                             type="button"
                             variant="outline"
@@ -3862,7 +3836,7 @@ function useOrdersPageContent() {
                                       }
                                       className="justify-center rounded-lg"
                                       disabled={
-                                        statusSaving != null || transition.blocked
+                                        statusSaving != null || phaseSaving || transition.blocked
                                       }
                                       title={
                                         transition.reasons
@@ -3893,11 +3867,11 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
 
-                  <div className="border-t border-border/70 bg-slate-50/70 px-5 py-4">
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="@container border-t border-border/70 bg-muted/20 px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <ShieldCheck className="size-4 text-amber-600" />
+                          <ShieldCheck className="size-4 text-primary" />
                           <span className="text-sm font-semibold text-foreground">
                             {lang === "de" ? "Prozessstatus" : "Статус процесса"}
                           </span>
@@ -3936,10 +3910,10 @@ function useOrdersPageContent() {
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           type="button"
-                          className="h-9 shrink-0 rounded-lg"
+                          className="h-auto min-h-8 max-w-full rounded-md py-1.5 text-xs whitespace-normal"
                           onClick={() => void handleAdvancePhase()}
                           disabled={
-                            phaseSaving ||
+                            phaseSaving || statusSaving != null ||
                             orderDetail.status !== "active" ||
                             Boolean(nextLifecycleTransition?.blocked)
                           }
@@ -3951,7 +3925,9 @@ function useOrdersPageContent() {
                       ) : null}
                     </div>
 
-                    <div className="mt-4 grid gap-2 sm:grid-cols-5">
+                    {phaseError ? <div role="alert" className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{phaseError}</div> : null}
+
+                    <div className="mt-3 grid gap-1.5 @min-[32rem]:grid-cols-5">
                       {ORDER_PHASES.map((phase, index) => {
                         const currentIndex = ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number]);
                         const isCurrent = phase === orderDetail.phase;
@@ -3961,24 +3937,24 @@ function useOrdersPageContent() {
                           <div
                             key={phase}
                             className={cn(
-                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2",
+                              "flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2",
                               isCurrent
-                                ? "border-orange-200 bg-orange-50 text-orange-900"
+                                ? "border-primary bg-primary text-primary-foreground"
                                 : isCompleted
                                   ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
                                   : isNext
-                                    ? "border-border bg-white text-foreground"
-                                    : "border-transparent bg-white/50 text-muted-foreground",
+                                    ? "border-border bg-card text-foreground"
+                                    : "border-transparent text-muted-foreground",
                             )}
                           >
                             {isCompleted ? (
                               <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
                             ) : isCurrent ? (
-                              <CheckCircle2 className="size-4 shrink-0 text-orange-600" />
+                              <CheckCircle2 className="size-4 shrink-0" />
                             ) : (
                               <Circle className="size-4 shrink-0 text-muted-foreground/50" />
                             )}
-                            <span className="min-w-0 truncate text-xs font-medium">
+                            <span className="min-w-0 break-words text-xs font-medium leading-4">
                               {phaseLabel(phase)}
                             </span>
                           </div>
@@ -4038,7 +4014,7 @@ function useOrdersPageContent() {
                           : "План, фактическое выставление счетов, оплаты и затраты на партнёров в валюте заказа."
                       }
                     >
-                      {orderEconomicsLoading ? (
+                      {orderEconomicsLoading && !orderEconomics ? (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <LoaderCircle className="size-4 animate-spin" />
                           {t.common_loading}
@@ -4085,71 +4061,71 @@ function useOrdersPageContent() {
                             </Banner>
                           ) : null}
 
-                          <div className="grid gap-3 xl:grid-cols-2">
-                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                          <div className="space-y-4">
+                            <div className="min-w-0">
                               <h3 className="text-sm font-semibold text-foreground">
                                 {lang === "de" ? "Plan" : "План"}
                               </h3>
-                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                <MiniMetric
+                              <dl className="mt-2 grid gap-2 @min-[28rem]:grid-cols-2 @min-[44rem]:grid-cols-4">
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Geplanter Erlös ohne Mehrwertsteuer" : "Плановый доход без налога"}
                                   value={formatMoney(orderEconomics.planned.revenue_net, orderEconomics.currency)}
                                 />
-                                <MiniMetric
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Geplanter Erlös mit Mehrwertsteuer" : "Плановый доход с налогом"}
                                   value={formatMoney(orderEconomics.planned.revenue_gross, orderEconomics.currency)}
                                 />
                                 {orderEconomics.margin_visible ? (
                                   <>
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёров без налога"}
                                       value={formatOptionalMoney(orderEconomics.planned.partner_cost_net, orderEconomics.currency)}
                                     />
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "Geplante Marge ohne Mehrwertsteuer" : "Плановая маржа без налога"}
                                       value={formatOptionalMoney(orderEconomics.planned.margin_net, orderEconomics.currency)}
                                     />
                                   </>
                                 ) : null}
-                              </div>
+                              </dl>
                             </div>
 
-                            <div className="rounded-xl border border-border/70 bg-muted/15 p-4">
+                            <div className="min-w-0">
                               <h3 className="text-sm font-semibold text-foreground">
                                 {lang === "de" ? "Tatsächlicher Stand" : "Фактическое состояние"}
                               </h3>
-                              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                <MiniMetric
+                              <dl className="mt-2 grid gap-2 @min-[28rem]:grid-cols-2 @min-[44rem]:grid-cols-4">
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Abgerechneter Erlös ohne Mehrwertsteuer" : "Выставленный доход без налога"}
                                   value={formatMoney(orderEconomics.actual.recognized_revenue_net, orderEconomics.currency)}
                                 />
-                                <MiniMetric
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Vom Patienten tatsächlich erhalten" : "Фактически получено от пациента"}
                                   value={formatMoney(orderEconomics.actual.patient_cash_collected_gross, orderEconomics.currency)}
                                 />
-                                <MiniMetric
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Noch vom Patienten zu zahlen" : "Осталось оплатить пациенту"}
                                   value={formatMoney(orderEconomics.actual.invoice_outstanding_gross, orderEconomics.currency)}
                                 />
-                                <MiniMetric
+                                <OrderFinancialMetric
                                   label={lang === "de" ? "Direkt vom Patienten an Partner bezahlt" : "Оплачено пациентом напрямую партнёру"}
                                   value={formatMoney(orderEconomics.actual.paid_directly_by_patient_gross, orderEconomics.currency)}
                                 />
                                 {orderEconomics.margin_visible ? (
                                   <>
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "Tatsächliche Partnerkosten ohne Mehrwertsteuer" : "Фактические затраты на партнёров без налога"}
                                       value={formatOptionalMoney(orderEconomics.actual.partner_cost_net, orderEconomics.currency)}
                                     />
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "An Partner bezahlt" : "Оплачено партнёрам"}
                                       value={formatOptionalMoney(orderEconomics.actual.paid_to_partner_gross, orderEconomics.currency)}
                                     />
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
                                       value={formatOptionalMoney(orderEconomics.actual.unpaid_to_partner_gross, orderEconomics.currency)}
                                     />
-                                    <MiniMetric
+                                    <OrderFinancialMetric
                                       label={lang === "de" ? "Tatsächliche Marge ohne Mehrwertsteuer" : "Фактическая маржа без налога"}
                                       value={orderEconomics.economics_valid
                                         ? `${formatMoney(orderEconomics.actual.margin_net, orderEconomics.currency)} (${formatNumber(orderEconomics.actual.margin_percent, locale)}%)`
@@ -4157,13 +4133,13 @@ function useOrdersPageContent() {
                                     />
                                   </>
                                 ) : null}
-                              </div>
+                              </dl>
                             </div>
                           </div>
 
-                          <div className="overflow-x-auto rounded-xl border border-border/70">
-                            <table className="w-full min-w-[760px] text-left text-xs">
-                              <thead className="bg-muted/40 text-muted-foreground">
+                          <div className="overflow-x-auto rounded-lg border border-border/70">
+                            <table className="w-full min-w-[760px] text-left text-xs [&_td:not(:first-child)]:whitespace-nowrap [&_td:not(:first-child)]:font-mono [&_td:not(:first-child)]:tabular-nums">
+                              <thead className="border-b border-border/60 bg-muted/20 text-muted-foreground">
                                 <tr>
                                   <th className="px-3 py-2.5 font-medium">{lang === "de" ? "Leistung" : "Услуга"}</th>
                                   <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplanter Erlös" : "Плановый доход"}</th>
@@ -4179,7 +4155,7 @@ function useOrdersPageContent() {
                               </thead>
                               <tbody className="divide-y divide-border/70">
                                 {orderEconomics.services.map((service) => (
-                                  <tr key={service.order_leistung_id}>
+                                  <tr key={service.order_leistung_id} className="even:bg-muted/15 hover:bg-muted/30">
                                     <td className="max-w-[300px] px-3 py-2.5 font-medium text-foreground">{service.name}</td>
                                     <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_revenue_net, orderEconomics.currency)}</td>
                                     <td className="px-3 py-2.5 text-right">{formatMoney(service.actual_revenue_net, orderEconomics.currency)}</td>
@@ -4192,6 +4168,13 @@ function useOrdersPageContent() {
                                     ) : null}
                                   </tr>
                                 ))}
+                                {orderEconomics.services.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={orderEconomics.margin_visible ? 6 : 3} className="px-3 py-6 text-center text-xs text-muted-foreground">
+                                      {lang === "de" ? "Noch keine Leistungen hinzugefügt" : "Услуги ещё не добавлены"}
+                                    </td>
+                                  </tr>
+                                ) : null}
                               </tbody>
                             </table>
                           </div>
@@ -4199,86 +4182,67 @@ function useOrdersPageContent() {
                       ) : null}
                     </SectionCard>
 
-                    <section className="rounded-lg border border-border/70 bg-card p-6">
-                      <h2 className={tokens.text.sectionTitle}>
-                        {titleWithDot(lang === "de" ? "Auftrag" : "Заказ")}
-                      </h2>
-                      <div className="mt-5 grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                        <div className="space-y-1">
-                          <OrderSummaryLine
-                            label={detailSubjectLabel}
-                            value={
+                    <SectionCard title={lang === "de" ? "Auftrag" : "Заказ"}>
+                      <div className="grid min-w-0 gap-4 @min-[48rem]:grid-cols-2">
+                        <dl className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70">
+                          {[
+                            [detailSubjectLabel,
                               detailSubjectReference
                                 ? `${detailSubjectName} (${detailSubjectReference})`
-                                : detailSubjectName
-                            }
-                          />
-                          <OrderSummaryLine
-                            label={tx.patients_created}
-                            value={formatDateTimeLabel(orderDetail.created_at)}
-                          />
-                          <OrderSummaryLine
-                            label={tx.contracts_signed}
-                            value={`${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
+                                : detailSubjectName],
+                            [tx.patients_created, formatDateTimeLabel(orderDetail.created_at)],
+                            [tx.contracts_signed, `${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
                               orderDetail.signed_agency
                                 ? tx.contracts_signed
                                 : tx.mfa_pending
-                            }`}
-                          />
-                          <OrderSummaryLine
-                            label={tx.providers_services}
-                            value={l("orders_leistung_metrics_summary", {
+                            }`],
+                            [tx.providers_services, l("orders_leistung_metrics_summary", {
                               total: leistungMetrics.total,
                               delivered: leistungMetrics.delivered,
                               approved: leistungMetrics.approved,
-                            })}
-                          />
-                        </div>
-                        <div className="rounded-xl border border-border bg-slate-50/60 p-4">
-                          <h3 className="text-sm font-semibold text-foreground">
+                            })],
+                          ].map(([label, value]) => (
+                            <div key={label} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3 px-3 py-2.5 text-xs leading-5">
+                              <dt className="min-w-0 break-words text-muted-foreground">{label}</dt>
+                              <dd className="min-w-0 break-words font-medium text-foreground">{value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <div className="min-w-0 overflow-hidden rounded-lg border border-border/70">
+                          <h3 className="border-b border-border/60 bg-muted/20 px-3 py-2.5 text-xs font-semibold text-foreground">
                             {t.leads_needs}
                           </h3>
-                          <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                          <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-sm leading-6 text-muted-foreground">
                             {orderDetail.needs_description || tx.common_not_set}
                           </div>
                         </div>
                       </div>
-                    </section>
+                    </SectionCard>
 
-                    <section className="rounded-lg border border-border/70 bg-card p-6">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                          <h2 className={tokens.text.sectionTitle}>
-                            {titleWithDot(l("orders_bedarfsklarung"))}
-                          </h2>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
+                    <SectionCard title={l("orders_bedarfsklarung")}>
+                      <div className="grid gap-2 @min-[28rem]:grid-cols-2 @min-[56rem]:grid-cols-4">
                         {detailOverviewLinks.map((link) => (
                           <button
                             key={link.href}
                             type="button"
-                            className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                            className="group flex min-w-0 items-start justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-3 text-left hover:border-primary/40 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() =>
                               window.open(link.href, "_blank", "noopener,noreferrer")
                             }
                           >
-                            <div className="relative z-10">
+                            <div className="min-w-0">
                               <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
                                 {link.label}
                               </h3>
-                              <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                              <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
                                 {link.description}
                               </p>
                             </div>
-                            <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                              <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                            </span>
+                            <ArrowUpRight aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" />
                           </button>
                         ))}
                       </div>
-                    </section>
+                    </SectionCard>
                   </>
                 ) : null}
 
@@ -4336,17 +4300,24 @@ function useOrdersPageContent() {
                             orderDetail.process_gates.package_coverage_status,
                           )}
                         />
+                        {orderDetail.process_gates.payment_tracking ? (
+                          <OrderSummaryLine
+                            label={lang === "de" ? "Vorauszahlung" : "Предоплата"}
+                            className="md:col-span-2"
+                            value={`${paymentStatusLabel(orderDetail.process_gates.payment_tracking.status, lang)} · ${formatMoney(orderDetail.process_gates.payment_tracking.remaining_amount, orderDetail.process_gates.payment_tracking.currency)}${orderDetail.process_gates.payment_tracking.due_at ? ` · ${formatDateTimeLabel(orderDetail.process_gates.payment_tracking.due_at)}` : ""}`}
+                          />
+                        ) : null}
                         <OrderSummaryLine
-                          label={l("orders_debt_hold")}
+                          label={lang === "de" ? "Zahlungsnachverfolgung" : "Контроль оплат"}
                           className="md:col-span-2"
                           value={
-                            orderDetail.process_gates.debt_management
-                              ?.blocking_reason
+                              orderDetail.process_gates.debt_management
+                                ?.attention_reason
                               ? localizedBlockingReason(
-                                  orderDetail.process_gates.debt_management
-                                    .blocking_reason,
+                                    orderDetail.process_gates.debt_management
+                                      .attention_reason,
                                 )
-                              : orderDetail.process_gates.debt_hold
+                              : orderDetail.process_gates.overdue_invoice_count > 0
                                 ? `${orderDetail.process_gates.overdue_invoice_count} ${l("orders_uberfallige_rechnung_en")}`
                                 : l("orders_keine_uberfalligen_forderungen")
                           }
@@ -5722,10 +5693,11 @@ function useOrdersPageContent() {
                       !detailRequiresPatient &&
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
-                          variant="outline"
+                          variant="default"
                           className="h-8 rounded-lg"
                           onClick={() => void handleAdvancePhase()}
                           disabled={
+                            phaseSaving || statusSaving != null ||
                             orderDetail.status !== "active" ||
                             Boolean(nextLifecycleTransition?.blocked)
                           }
@@ -5902,12 +5874,6 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      {phaseError ? (
-                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                          {phaseError}
-                        </div>
-                      ) : null}
-
                       {orderDetail.lifecycle?.history?.length ? (
                         <div className="space-y-3">
                           <h3 className={tokens.text.sectionTitle}>
@@ -5982,7 +5948,7 @@ function useOrdersPageContent() {
                           <Button
                             type="button"
                             className="rounded-xl"
-                            onClick={() => setWorkflowCreateOpen(true)}
+                            onClick={() => { setWorkflowCreateError(null); setWorkflowCreateOpen(true); }}
                           >
                             <Plus className="size-4" />
                             {l("orders_punkt_hinzufugen")}
@@ -6368,7 +6334,7 @@ function useOrdersPageContent() {
                         lang === "de" ? "Betragsänderungen" : "Изменения суммы"
                       }
                     >
-                      <OrderAmendmentsPanel orderId={orderDetail.id} />
+                      <OrderAmendmentsPanel key={orderDetail.id} orderId={orderDetail.id} refreshKey={reloadNonce} onChanged={triggerReload} />
                     </SectionCard>
 
                     <SectionCard title={tx.providers_services}>
@@ -7452,11 +7418,12 @@ function useOrdersPageContent() {
 
               <OrderSheetSection title={l("orders_grunddaten")}>
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Field
+                  <Field htmlFor="order-external-invoice-externalInvoiceNumber"
                     label={t.orders_external_invoice_number}
                     className="md:col-span-2"
                   >
                     <Input
+                      id="order-external-invoice-externalInvoiceNumber"
                       value={externalInvoiceForm.externalInvoiceNumber}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7489,11 +7456,12 @@ function useOrdersPageContent() {
                       }
                     />
                   </div>
-                  <Field
+                  <Field htmlFor="order-external-invoice-orderLeistungId"
                     label={lang === "de" ? "Zugeordnete Leistung" : "Связанная услуга"}
                     className="md:col-span-2"
                   >
                     <NativeComboboxSelect
+                      id="order-external-invoice-orderLeistungId"
                       value={externalInvoiceForm.orderLeistungId}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7513,9 +7481,10 @@ function useOrdersPageContent() {
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={t.orders_external_invoice_date}>
+                  <Field htmlFor="order-external-invoice-invoiceDate" label={t.orders_external_invoice_date}>
                     <Input
                       type="date"
+                      id="order-external-invoice-invoiceDate"
                       value={externalInvoiceForm.invoiceDate}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7526,9 +7495,10 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.orders_external_invoice_due_date}>
+                  <Field htmlFor="order-external-invoice-dueDate" label={t.orders_external_invoice_due_date}>
                     <Input
                       type="date"
+                      id="order-external-invoice-dueDate"
                       value={externalInvoiceForm.dueDate}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7539,8 +7509,9 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.orders_external_invoice_status}>
+                  <Field htmlFor="order-external-invoice-status" label={t.orders_external_invoice_status}>
                     <NativeComboboxSelect
+                      id="order-external-invoice-status"
                       value={externalInvoiceForm.status}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7563,8 +7534,9 @@ function useOrdersPageContent() {
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={lang === "de" ? "Bezahlt durch" : "Кто оплатил"}>
+                  <Field htmlFor="order-external-invoice-paidBy" label={lang === "de" ? "Bezahlt durch" : "Кто оплатил"}>
                     <NativeComboboxSelect
+                      id="order-external-invoice-paidBy"
                       value={externalInvoiceForm.paidBy}
                       disabled={externalInvoiceForm.status !== "paid"}
                       onChange={(event) =>
@@ -7606,8 +7578,9 @@ function useOrdersPageContent() {
 
               <OrderSheetSection title={l("orders_kosten")}>
                 <div className="grid gap-3 md:grid-cols-4">
-                  <Field label={t.orders_external_invoice_net}>
+                  <Field htmlFor="order-external-invoice-amountNet" label={t.orders_external_invoice_net}>
                     <Input
+                      id="order-external-invoice-amountNet"
                       value={externalInvoiceForm.amountNet}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7618,8 +7591,9 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.orders_external_invoice_vat}>
+                  <Field htmlFor="order-external-invoice-amountVat" label={t.orders_external_invoice_vat}>
                     <Input
+                      id="order-external-invoice-amountVat"
                       value={externalInvoiceForm.amountVat}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7630,8 +7604,9 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.orders_external_invoice_gross}>
+                  <Field htmlFor="order-external-invoice-amountGross" label={t.orders_external_invoice_gross}>
                     <Input
+                      id="order-external-invoice-amountGross"
                       value={externalInvoiceForm.amountGross}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7642,8 +7617,9 @@ function useOrdersPageContent() {
                       className={inputClassName}
                     />
                   </Field>
-                  <Field label={t.orders_service_group_currency}>
+                  <Field htmlFor="order-external-invoice-currency" label={t.orders_service_group_currency}>
                     <Input
+                      id="order-external-invoice-currency"
                       value={externalInvoiceForm.currency}
                       onChange={(event) =>
                         setExternalInvoiceForm((current) => ({
@@ -7658,8 +7634,9 @@ function useOrdersPageContent() {
               </OrderSheetSection>
 
               <OrderSheetSection title={t.patients_notes}>
-                <Field label={t.patients_notes}>
+                <Field htmlFor="order-external-invoice-notes" label={t.patients_notes}>
                   <textarea
+                    id="order-external-invoice-notes"
                     value={externalInvoiceForm.notes}
                     onChange={(event) =>
                       setExternalInvoiceForm((current) => ({
@@ -7722,6 +7699,7 @@ function useOrdersPageContent() {
                   submittingLabel={l("orders_wird_hinzugefugt")}
                   submitting={workflowBusy}
                   submitDisabled={!workflowForm.itemText.trim()}
+                  error={workflowCreateError}
                   onCancel={() => setWorkflowCreateOpen(false)}
                 />
               }
@@ -8231,11 +8209,12 @@ function useOrdersPageContent() {
 
             <OrderSheetSection title={l("orders_basis")}>
               <div className="grid gap-3 md:grid-cols-4">
-                <Field
+                <Field htmlFor="order-service-agencyServiceId"
                   label={t.revenue_agency_service_catalog_items}
                   className="md:col-span-4"
                 >
                   <NativeComboboxSelect
+                    id="order-service-agencyServiceId"
                     value={leistungForm.agencyServiceId}
                     onChange={(event) => {
                       const agencyServiceId = event.target.value;
@@ -8345,11 +8324,12 @@ function useOrdersPageContent() {
                   ) : null}
                 </Field>
                 {selectedLeistungAgencyService ? (
-                  <Field
+                  <Field htmlFor="order-service-agencyServicePriceVersionId"
                     label={lang === "de" ? "Katalogpreis" : "Цена каталога"}
                     className="md:col-span-4"
                   >
                     <NativeComboboxSelect
+                      id="order-service-agencyServicePriceVersionId"
                       value={leistungForm.agencyServicePriceVersionId}
                       onChange={(event) => {
                         const agencyServicePriceVersionId = event.target.value;
@@ -8402,9 +8382,10 @@ function useOrdersPageContent() {
                     </NativeComboboxSelect>
                   </Field>
                 ) : null}
-                <Field label={t.orders_service_description} className="md:col-span-2">
+                <Field htmlFor="order-service-description" label={t.orders_service_description} className="md:col-span-2">
                   <Input
                     required
+                    id="order-service-description"
                     value={leistungForm.description}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8415,8 +8396,9 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label={t.orders_service_notes} className="md:col-span-2">
+                <Field htmlFor="order-service-notes" label={t.orders_service_notes} className="md:col-span-2">
                   <Input
+                    id="order-service-notes"
                     value={leistungForm.notes}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8432,8 +8414,9 @@ function useOrdersPageContent() {
 
             <OrderSheetSection title={l("orders_kosten")}>
               <div className="grid gap-3 md:grid-cols-3">
-                <Field label={t.orders_service_quantity}>
+                <Field htmlFor="order-service-quantity" label={t.orders_service_quantity}>
                   <Input
+                    id="order-service-quantity"
                     value={leistungForm.quantity}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8444,10 +8427,11 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field
+                <Field htmlFor="order-service-unitPrice"
                   label={`${t.orders_service_unit_price} (${leistungForm.currency})`}
                 >
                   <Input
+                    id="order-service-unitPrice"
                     value={leistungForm.unitPrice}
                     readOnly={Boolean(leistungForm.agencyServiceId)}
                     disabled={Boolean(leistungForm.agencyServiceId)}
@@ -8460,8 +8444,9 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label={t.orders_service_vat_percent}>
+                <Field htmlFor="order-service-vatRate" label={t.orders_service_vat_percent}>
                   <Input
+                    id="order-service-vatRate"
                     value={leistungForm.vatRate}
                     readOnly={Boolean(leistungForm.agencyServiceId)}
                     disabled={Boolean(leistungForm.agencyServiceId)}
@@ -8475,8 +8460,9 @@ function useOrdersPageContent() {
                   />
                 </Field>
                 {permissions.canManageEconomics ? <>
-                <Field label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
+                <Field htmlFor="order-service-plannedPartnerCostNet" label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
                   <Input
+                    id="order-service-plannedPartnerCostNet"
                     value={leistungForm.plannedPartnerCostNet}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8487,8 +8473,9 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label={lang === "de" ? "Mehrwertsteuer auf geplante Partnerkosten" : "Налог на плановые затраты партнёра"}>
+                <Field htmlFor="order-service-plannedPartnerCostVat" label={lang === "de" ? "Mehrwertsteuer auf geplante Partnerkosten" : "Налог на плановые затраты партнёра"}>
                   <Input
+                    id="order-service-plannedPartnerCostVat"
                     value={leistungForm.plannedPartnerCostVat}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8499,8 +8486,9 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                <Field label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}>
+                <Field htmlFor="order-service-plannedPartnerCostGross" label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}>
                   <Input
+                    id="order-service-plannedPartnerCostGross"
                     value={leistungForm.plannedPartnerCostGross}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8542,8 +8530,9 @@ function useOrdersPageContent() {
                     }}
                   />
                 </Field>
-                <Field label={t.orders_service_doctor}>
+                <Field htmlFor="order-service-doctorId" label={t.orders_service_doctor}>
                   <NativeComboboxSelect
+                    id="order-service-doctorId"
                     value={leistungForm.doctorId}
                     onChange={(event) =>
                       setLeistungForm((current) => ({
@@ -8600,8 +8589,9 @@ function useOrdersPageContent() {
             </div>
 
             {leistungForm.isCostPassthrough ? (
-              <Field label={t.orders_supporting_document}>
+              <Field htmlFor="order-service-externalDocumentId" label={t.orders_supporting_document}>
                 <NativeComboboxSelect
+                  id="order-service-externalDocumentId"
                   value={leistungForm.externalDocumentId}
                   onChange={(event) =>
                     setLeistungForm((current) => ({

@@ -8,8 +8,9 @@ import dayjs, { type Dayjs } from "dayjs"
 import { cn } from "@/lib/utils"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 
-const DATE_FORMAT = "YYYY-MM-DD"
-const DATETIME_LOCAL_FORMAT = "YYYY-MM-DD HH:mm"
+const DATE_FORMAT = "DD.MM.YYYY"
+const DATE_VALUE_FORMAT = "YYYY-MM-DD"
+const DATETIME_LOCAL_FORMAT = "DD.MM.YYYY HH:mm"
 const DATETIME_LOCAL_VALUE_FORMAT = "YYYY-MM-DDTHH:mm"
 const TIME_FORMAT = "HH:mm"
 const TIME_PICKER_REFERENCE_DATE = "2000-01-01T00:00:00"
@@ -306,7 +307,7 @@ function Input({
           if (context.validationError) {
             return
           }
-          commitPickerValue(formatPickerValue(nextDate, DATE_FORMAT))
+          commitPickerValue(formatPickerValue(nextDate, DATE_VALUE_FORMAT))
         }}
         minDate={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
         maxDate={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}

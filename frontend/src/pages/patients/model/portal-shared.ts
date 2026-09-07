@@ -107,6 +107,7 @@ type InvoicePortalVisibility = {
 };
 
 export type PortalInvoiceItem = {
+  currency?: string;
   id: string;
   quote_id: string | null;
   quote_number: string | null;
@@ -731,6 +732,7 @@ const PORTAL_DOCUMENT_VALUE_LABEL_KEYS = {
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const PORTAL_DOCUMENT_SOURCE_LABEL_KEYS = {
+  clinical_document_import: "documents_source_clinical_import",
   patient_portal: "portal_document_source_patient_portal",
   portal_release: "portal_document_source_portal_release",
   provider: "portal_document_source_provider",

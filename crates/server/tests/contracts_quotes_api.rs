@@ -598,8 +598,7 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         &format!("/api/v1/quotes/{quote_id}/status"),
         &pm_bearer,
         Some(json!({
-            "status": "accepted",
-            "paid_amount": 297.5
+            "status": "accepted"
         })),
     )
     .await;
@@ -917,7 +916,7 @@ async fn quote_creation_from_order_services_computes_totals_and_updates_order() 
 }
 
 #[tokio::test]
-async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_access_quote() {
+async fn billing_can_accept_an_unpaid_quote_but_interpreter_cannot_access_quote() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -984,15 +983,14 @@ async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_acce
         &billing_bearer,
         Some(json!({
             "status": "accepted",
-            "paid_amount": 119.0,
-            "notes": "Advance payment received"
+            "notes": "Signed; awaiting advance payment"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "accepted");
-    assert_eq!(body["paid_amount"], "119");
-    assert!(body["paid_at"].as_str().is_some());
+    assert_eq!(body["paid_amount"], "0");
+    assert!(body["paid_at"].is_null());
 
     sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE order_id = $1")
         .bind(Uuid::parse_str(&order_id).unwrap())
@@ -1010,8 +1008,8 @@ async fn billing_can_update_quote_status_and_payment_but_interpreter_cannot_acce
     assert_eq!(status, StatusCode::CREATED, "response: {recalculated}");
     assert_eq!(recalculated["status"], "draft");
     assert_eq!(recalculated["total_gross"], "130.9");
-    assert_eq!(recalculated["paid_amount"], "119");
-    assert!(recalculated["paid_at"].as_str().is_some());
+    assert_eq!(recalculated["paid_amount"], "0");
+    assert!(recalculated["paid_at"].is_null());
 
     let (status, body) = json_request(
         &app,
@@ -1162,8 +1160,7 @@ async fn quote_commercial_invariants_use_persisted_order_lines() {
         &format!("/api/v1/quotes/{quote_id}/status"),
         &pm_bearer,
         Some(json!({
-            "status": "accepted",
-            "paid_amount": 100.0
+            "status": "accepted"
         })),
     )
     .await;
@@ -1256,7 +1253,6 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
         &billing_bearer,
         Some(json!({
             "status": "accepted",
-            "paid_amount": 119.0,
             "notes": "Snapshot moved to accepted"
         })),
     )
@@ -1279,7 +1275,7 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
     assert_eq!(versions[0]["version_number"], 2);
     assert_eq!(versions[0]["change_reason"], "status_update");
     assert_eq!(versions[0]["status"], "accepted");
-    assert_eq!(versions[0]["paid_amount"], "119");
+    assert_eq!(versions[0]["paid_amount"], "0");
     assert_eq!(versions[1]["version_number"], 1);
 
     let stored_version_count: i64 =

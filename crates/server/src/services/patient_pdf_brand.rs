@@ -173,17 +173,43 @@ pub fn append_company_chrome(
     footer_rule_y_mm: f32,
     footer_content_top_mm: f32,
 ) {
-    let width_mm = right_mm - left_mm;
-    let accent = rgb(1.0, 0.43, 0.06);
     rect(
         ops,
         left_mm,
         header_rule_y_mm,
-        width_mm,
+        right_mm - left_mm,
         0.25,
-        accent.clone(),
+        rgb(1.0, 0.43, 0.06),
     );
-    rect(ops, left_mm, footer_rule_y_mm, width_mm, 0.25, accent);
+    append_company_footer(
+        ops,
+        brand,
+        font,
+        left_mm,
+        right_mm,
+        footer_rule_y_mm,
+        footer_content_top_mm,
+    );
+}
+
+/// Continuation pages retain the company footer without repeating the letterhead.
+pub fn append_company_footer(
+    ops: &mut Vec<Op>,
+    brand: &PatientPdfBrand,
+    font: &PdfFontHandle,
+    left_mm: f32,
+    right_mm: f32,
+    footer_rule_y_mm: f32,
+    footer_content_top_mm: f32,
+) {
+    rect(
+        ops,
+        left_mm,
+        footer_rule_y_mm,
+        right_mm - left_mm,
+        0.25,
+        rgb(1.0, 0.43, 0.06),
+    );
 
     let logo_height_mm = 8.5;
     ops.extend(crate::pdf_logo::gmed_logo_ops(

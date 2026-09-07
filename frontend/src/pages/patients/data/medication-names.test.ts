@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchMedicationNames, uniqueMedicationCounterpart } from "./medication-names";
+import { checkMedicationPair, fetchMedicationNames, uniqueMedicationCounterpart } from "./medication-names";
 import { apiFetch } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({ apiFetch: vi.fn() }));
 
 describe("saved medication names", () => {
+  it("does not treat a malformed dictionary review as permission to learn names", async () => {
+    for (const result of [[], {}, { known_pair: false }, { known_pair: false, handelsname: { exact: null, similar: [5] }, wirkstoff: { exact: null, similar: [] } }]) {
+      vi.mocked(apiFetch).mockResolvedValue(result);
+      await expect(checkMedicationPair({ handelsname: "Brand", wirkstoff: "Substance" })).rejects.toThrow("Invalid medication pair review");
+    }
+  });
   it("only auto-fills a complete, unambiguous result", () => {
     expect(uniqueMedicationCounterpart({ items: ["Name A"], has_more: false })).toBe("Name A");
     expect(uniqueMedicationCounterpart({ items: [], has_more: false })).toBeNull();

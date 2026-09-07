@@ -12,6 +12,10 @@ export function hasInvoiceBillingRelease(release?: InvoiceBillingRelease | null)
 export function invoiceCreationErrorMessage(error: unknown, lang: string, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   const de = lang === "de";
+  if (message === "invoice_services_unavailable") {
+    return de ? "Die Auftragsleistungen konnten nicht geprüft werden. Aktualisieren Sie die Prüfung."
+      : "Не удалось проверить услуги заказа. Повторите проверку.";
+  }
   if (message === "invoice_billing_release_unavailable") {
     return de ? "Die Abrechnungsfreigabe konnte nicht geprüft werden. Versuchen Sie es erneut."
       : "Не удалось проверить разрешение бухгалтерии. Повторите проверку.";
@@ -34,5 +38,31 @@ export function invoiceCreationErrorMessage(error: unknown, lang: string, fallba
     return de ? "Für diesen Angebotsumfang besteht bereits eine aktive Rechnung. Prüfen Sie die vorhandenen Rechnungen."
       : "Для этих позиций предложения уже существует действующий счёт. Проверьте список счетов.";
   }
+  if (message === "This quote has no remaining quantities to invoice") {
+    return de ? "Dieses Angebot ist bereits vollständig abgerechnet. Aktualisieren Sie die Auswahl."
+      : "По этому предложению уже выставлен весь объём. Обновите список предложений.";
+  }
+  if (message === "Selected quantity exceeds the remaining quote line quantity") {
+    return de ? "Die verfügbare Menge hat sich geändert. Aktualisieren Sie das Angebot und prüfen Sie die Mengen."
+      : "Доступный остаток изменился. Обновите предложение и проверьте количество.";
+  }
+  if (message === "A final invoice must include every remaining quote line quantity") {
+    return de ? "Die Schlussrechnung muss alle verbleibenden Mengen enthalten. Verwenden Sie für eine Teilauswahl eine Zwischenrechnung."
+      : "Финальный счёт должен включать весь остаток. Для части позиций выберите промежуточный счёт.";
+  }
+  if (message === "Quote has no invoiceable line items") {
+    return de ? "Dieses Angebot enthält keine abrechenbaren Positionen. Prüfen Sie die Leistungen im Auftrag."
+      : "В предложении нет позиций для выставления счёта. Проверьте услуги в заказе.";
+  }
   return message;
+}
+
+export function invoiceServiceApproval(
+  sourceIds: string[], invoiceType: string, release?: InvoiceBillingRelease | null,
+): "approved" | "pending" | "unavailable" {
+  if (invoiceType === "advance" || !sourceIds.length) return "approved";
+  if (!release?.services) return "unavailable";
+  const services = new Map(release.services.map((service) => [service.id, service.status]));
+  if (sourceIds.some((id) => !services.has(id))) return "unavailable";
+  return sourceIds.some((id) => services.get(id) !== "approved") ? "pending" : "approved";
 }

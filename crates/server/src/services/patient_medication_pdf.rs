@@ -9,7 +9,9 @@ use printpdf::{
 use crate::pdf_text::{
     add_unicode_pdf_fonts, pdf_text_save_options, unicode_pdf_font_face, unicode_show_text_op,
 };
-use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
+use crate::services::patient_pdf_brand::{
+    PatientPdfBrand, append_company_chrome, append_company_footer,
+};
 
 const LEFT: f32 = 14.0;
 const RIGHT: f32 = 283.0;
@@ -170,6 +172,21 @@ impl<'a> Layout<'a> {
     }
 
     fn page_header(&mut self) {
+        if !self.pages.is_empty() {
+            append_company_footer(
+                &mut self.ops,
+                &self.context.brand,
+                &self.regular,
+                LEFT,
+                RIGHT,
+                17.0,
+                14.0,
+            );
+            self.y = TOP;
+            self.table_header();
+            self.table_top = self.y;
+            return;
+        }
         append_company_chrome(
             &mut self.ops,
             &self.context.brand,
@@ -576,7 +593,29 @@ mod tests {
         for russian in [false, true] {
             ctx.russian = russian;
             let bytes = build_medication_plan_pdf(&ctx).unwrap();
-            let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+            let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap();
+            assert!(pages.len() > 1);
+            for (index, page) in pages.iter().enumerate() {
+                for label in [
+                    ctx.tx("Медикаментозный план", "Medikationsplan"),
+                    "TEST-001",
+                    "Олена Приклад",
+                    ctx.tx("Сформировал:", "Erstellt von:"),
+                    ctx.tx("Сводная информация", "Zusammenstellung aus"),
+                ] {
+                    assert_eq!(page.contains(label), index == 0, "page {}: {label}", index + 1);
+                }
+                // Table labels, footer and numbering still belong on every page.
+                assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));
+                assert!(page.contains("contact@gmed-health.com"));
+                assert!(page.contains(&format!(
+                    "{} {} / {}",
+                    ctx.tx("Страница", "Seite"),
+                    index + 1,
+                    pages.len()
+                )));
+            }
+            let text = pages.join("\n");
             for index in 0..45 {
                 assert!(
                     text.contains(&format!("Arzneimittel-{index:02}")),
@@ -608,6 +647,15 @@ mod tests {
             assert!(!text.contains("nicht dargestellt"));
             if let Ok(dir) = std::env::var("GMED_MEDICATION_PDF_QA_DIR") {
                 std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join(if russian {
+                        "medication-multipage-ru.pdf"
+                    } else {
+                        "medication-multipage-de.pdf"
+                    }),
+                    &bytes,
+                )
+                .unwrap();
                 let sample = MedicationPlanContext {
                     russian,
                     entries: ctx

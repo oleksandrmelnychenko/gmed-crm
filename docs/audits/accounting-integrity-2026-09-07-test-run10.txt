@@ -1,0 +1,82 @@
+ set_config 
+------------
+ 
+(1 row)
+
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 53s
+     Running tests/accounting_audit_api.rs (target/debug/deps/accounting_audit_api-9f2f455de0538b8f)
+
+running 19 tests
+test accounting_migrations_must_bootstrap_from_empty_database ... ok
+allocated=100.00, retained_cash=100.00, reversal_http=409 Conflict
+test audit_allocated_advance_payment_reversal_must_be_blocked ... ok
+test audit_company_position_must_include_invoice_cash_credit ... ok
+test audit_control_partial_payment_replay_and_overpayment ... ok
+test audit_draft_invoice_cannot_consume_an_advance ... ok
+test audit_draft_invoice_must_not_be_patient_debt ... ok
+test audit_invoice_must_expose_its_order_currency ... ok
+test audit_ledger_keeps_currencies_separate ... ok
+test audit_orderless_expense_appears_in_patient_statement_and_summary ... ok
+test audit_partial_payments_must_preserve_invoice_vat_total ... ok
+test audit_payment_deadline_notifies_once_without_blocking_work ... ok
+test audit_payment_reversal_must_not_precede_receipt ... ok
+test audit_payment_reversal_must_use_original_financial_account ... ok
+test audit_quote_manual_flag_is_not_a_payment ... ok
+test audit_refund_reversal_preserves_original_account ... ok
+test audit_refunded_invoice_must_reopen_after_credit_reversal ... ok
+test audit_released_advance_remains_in_historical_statement ... ok
+test audit_reversal_preserves_exact_vat_and_inactive_account ... ok
+test audit_reversal_to_zero_still_notifies_for_an_unsigned_order ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.22s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 3.89s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 1 test
+test lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 7.09s
+
+    Finished `test` profile [unoptimized] target(s) in 0.27s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 1 test
+test lead_order_draft_is_idempotent_before_patient_conversion ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 6.41s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 2.67s
+     Running tests/process_gates_api.rs (target/debug/deps/process_gates_api-d0b66331953db354)
+
+running 23 tests
+test appointment_creation_rejects_arbitrary_cross_patient_order_id ... ok
+test create_order_is_blocked_until_existing_customer_recheck_passes ... ok
+test debt_management_queue_and_order_detail_reflect_workflow_updates ... ok
+test deleting_failed_lead_anonymizes_payload_and_removes_attachments ... ok
+test execution_flow_blocks_closure_until_arrival_scope_and_checklists_are_closed ... ok
+test existing_customer_recheck_reports_missing_data_without_a_debt_hold ... ok
+test failed_lead_resolution_requires_controlled_flow_and_records_history ... ok
+test followup_flow_recognizes_localized_and_completed_reminders ... ok
+test followup_flow_requires_explicit_milestones_before_order_enters_followup ... ok
+test head_order_groups_subs_rolls_up_and_ungroups ... ok
+test main_order_accepts_related_patient_appointment ... ok
+test merge_orders_folds_groups_flattens_and_is_reversible ... ok
+test new_order_endpoints_require_access_to_target_and_sources ... ok
+test new_patient_recheck_does_not_require_existing_customer_history ... ok
+test order_amendment_requires_separate_approval_and_updates_total ... ok
+test order_lifecycle_blocks_closure_and_followup_until_evidence_exists ... ok
+test order_lifecycle_only_allows_next_phase_and_tracks_history ... ok
+test order_status_machine_blocks_phase_changes_and_terminal_reopen ... ok
+test overdue_debt_remains_visible_without_blocking_execution ... ok
+test package_coverage_can_unblock_execution_for_repeat_order ... ok
+test planning_preparation_blocks_execution_until_plan_slots_and_handoffs_are_ready ... ok
+test qualifying_lead_requires_readiness_gates ... ok
+test updating_lead_gates_allows_qualification_but_conversion_requires_onboarding ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 158.49s
+

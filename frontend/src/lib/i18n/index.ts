@@ -36,6 +36,7 @@ export interface Translations
   nav_documents: string;
   nav_files: string;
   nav_specializations: string;
+  nav_medications: string;
   nav_contracts: string;
   nav_invoices: string;
   nav_company_finance: string;
@@ -535,6 +536,7 @@ export interface Translations
   nav_overview: string;
   nav_crm: string;
   nav_medicine: string;
+  nav_accounting: string;
   nav_providers: string;
 
   dash_pipeline: string;
@@ -1171,6 +1173,14 @@ export interface Translations
   invoices_workspace_dunning_responsible: string;
   invoices_workspace_dunning_balance_due: string;
   invoices_workspace_create_dunning: string;
+  invoices_workspace_record_collections: string;
+  invoices_workspace_dunning_unavailable: string;
+  invoices_workspace_dunning_ineligible: string;
+  invoices_workspace_dunning_not_sent: string;
+  invoices_workspace_dunning_missing_due_date: string;
+  invoices_workspace_dunning_not_overdue: string;
+  invoices_workspace_dunning_changed: string;
+  invoices_workspace_dunning_save_error: string;
   invoices_workspace_no_dunning_events: string;
   invoices_workspace_no_dunning_events_description: string;
   invoices_workspace_next_escalation: string;
@@ -1246,6 +1256,7 @@ export interface Translations
   documents_date_from: string;
   documents_date_to: string;
   documents_source: string;
+  documents_source_clinical_import: string;
   documents_share_channel: string;
   documents_share_provider_channel_unavailable: string;
   documents_share_provider_context_hint: string;

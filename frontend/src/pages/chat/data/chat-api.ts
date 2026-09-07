@@ -7,6 +7,7 @@ import {
 } from "@/lib/api";
 
 import type { Conversation, Message, UserItem } from "../model/types";
+import { notifyChatRead } from "@/lib/chat-read-events";
 
 type JsonPayload = Record<string, unknown>;
 
@@ -61,14 +62,17 @@ export function fetchPeerMessages(
   return apiFetch<Message[]>(`/messages/${peerId}?${params.toString()}`, { cache: "no-store" });
 }
 
-export function markPeerMessagesRead(peerId: string) {
-  return apiFetch(`/messages/${peerId}/read`, { method: "POST" });
+export async function markPeerMessagesRead(peerId: string) {
+  const receipt = await apiFetch(`/messages/${peerId}/read`, { method: "POST" });
+  notifyChatRead();
+  return receipt;
 }
 
 export async function markAllMessagesRead() {
   await apiFetch("/messages/read-all", { method: "POST" });
   clearApiCache("/messages/unread-total");
   clearApiCache("/messages/conversations");
+  notifyChatRead();
 }
 
 export function fetchAllowedPeers(searchTerm: string) {

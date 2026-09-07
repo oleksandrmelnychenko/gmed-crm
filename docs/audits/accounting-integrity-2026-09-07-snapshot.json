@@ -1,0 +1,95 @@
+{
+  "head": "97ab2ec44b95e8a4c378a1a07063ad15e5968b53",
+  "generated_at_utc": "2026-09-07T20:06:19.1404803Z",
+  "source_archive_sha256": "2AC276480C332869B0117BE1455B5EC66FD2AC3CB47F3BBCBE65109CCFD9C384",
+  "files": [
+    {
+      "path": "crates/server/src/routes/invoices.rs",
+      "sha256": "D3D2A84EDAEBCBA91437B8C4B740F67E8E21BDEE40A9EF4C443E13F385E0F97A"
+    },
+    {
+      "path": "crates/server/src/routes/contracts.rs",
+      "sha256": "7FF7D869F816F9317EAAB495345C991C8609819C717B8F76F627C91C9144D7E1"
+    },
+    {
+      "path": "crates/server/src/routes/orders.rs",
+      "sha256": "37FF1B29635A435750D5DA534037803E7EAF25F7B3DF167C23EF092811362837"
+    },
+    {
+      "path": "crates/server/src/routes/leads.rs",
+      "sha256": "C874C04E365BDDEB0677F44E552D7D6791321B788E45AB35C9287A996313BA99"
+    },
+    {
+      "path": "crates/server/src/routes/debt_management.rs",
+      "sha256": "61B70896E13B4C5D5A11A479EFE6DDAC27B0A205720E337586AB2A2505941286"
+    },
+    {
+      "path": "crates/server/src/routes/patient_financials.rs",
+      "sha256": "04E8CD4E4B88011EBF4FBDBED091F08D5E563C01885AA031564FC306107A27E6"
+    },
+    {
+      "path": "crates/server/src/routes/company_financials.rs",
+      "sha256": "10750234A75EC4E6EFCE2A7C32CE11420FFDF8AB0CE95EDA82846AB4819F43FA"
+    },
+    {
+      "path": "crates/server/src/routes/company_financial_accounts.rs",
+      "sha256": "2A4FE2FB0E8934D65AE29B72B5E4B41EDC9AD074C0D0346F7E4B7118531FDFAC"
+    },
+    {
+      "path": "crates/server/src/services/order_payment_tracking.rs",
+      "sha256": "71AB4A23680D56A960B4D7178C0F24224346B86444D1153CF5063C9DC69D2375"
+    },
+    {
+      "path": "crates/server/src/realtime.rs",
+      "sha256": "18A2EFFE77F169C537DFDDD0F80DE5B4FD3D39FB11ED750541C5EF42B480C91F"
+    },
+    {
+      "path": "crates/server/tests/accounting_audit_api.rs",
+      "sha256": "2E760963C6695457D907A9699804E6EADD249A3B668714893D24841D95984159"
+    },
+    {
+      "path": "crates/server/tests/leads_api.rs",
+      "sha256": "8A192EB2675479F42B4D4956DD9329FC4D4397A31636B03C46AA27A8B6B22B7F"
+    },
+    {
+      "path": "crates/server/tests/contracts_quotes_api.rs",
+      "sha256": "085D528E164709E6F20B91C6E345A80126165652EC4ACDB3B64A44D15EC35D3B"
+    },
+    {
+      "path": "crates/server/tests/process_gates_api.rs",
+      "sha256": "53F680498E69B5BF77D9D5DCEF68A376B379B4EAA49C44AA380CE20EDF65E2F1"
+    },
+    {
+      "path": "migrations/20260819112500_normalize_legacy_demo_quote_quantities.sql",
+      "sha256": "6CBA3F67B8CC5E75564AD6D2D38BF5824D588B2ACEF67A67602CD0D6F9B881B0"
+    },
+    {
+      "path": "migrations/20260907203000_invoice_cash_integrity.sql",
+      "sha256": "05BDA4CF9D680FAA8A153E887B06886DC625F75D6CCB2D11F5984FCBF2619948"
+    },
+    {
+      "path": "migrations/20260907204000_quote_recorded_cash.sql",
+      "sha256": "90223D11F5F24CF9434BE3D77C7C9A32D7D79F295E430434A9DB01B363194709"
+    },
+    {
+      "path": "migrations/20260907205000_order_payment_tracking.sql",
+      "sha256": "3A0E48139340FD72643D3CEA49DB6180DA1B0A22FD051BDAD97CD3F22219093E"
+    },
+    {
+      "path": "frontend/src/pages/leads/ui/lead-wizard.tsx",
+      "sha256": "E96841E13CF27AB653F0D101F7B43364948D4D6840947987C76F6A27D022F799"
+    },
+    {
+      "path": "frontend/src/pages/orders/page.tsx",
+      "sha256": "1C6C13D99E0BA31B1BDF49EA17675DDF6AC1D946509FDCBE52AD749916F59CA2"
+    },
+    {
+      "path": "frontend/src/lib/payment-status.ts",
+      "sha256": "D8DC8556EE19835998B85B2D4BFBF219B27CFFC591269F766685141EC84818BA"
+    },
+    {
+      "path": "frontend/src/components/topbar-data.ts",
+      "sha256": "9B7EB4483C91121E28DF367B9BE50119402EE7D0ADCCE3B2B9531FA9E2965F73"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import type {
   InvoiceType,
   InvoicesPermissions,
   PayerForm,
+  QuoteOption,
   StatusForm,
   VisibilityForm,
 } from "./types";
@@ -171,6 +172,15 @@ export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateFo
   );
 }
 
+// Paid advances still need a settlement invoice. Availability is determined by
+// the unbilled scope and active invoice types, not the quote's payment total.
+export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: InvoiceType) {
+  if (!quote.patient_id || ["rejected", "expired"].includes(quote.status ?? "")) return false;
+  if (quote.active_invoice_types?.includes("final")) return false;
+  if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) return false;
+  return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0);
+}
+
 export function calculateInvoiceSelectionTotals(
   lines: InvoiceLineItem[],
   selectedLineIndexes: number[],
@@ -270,9 +280,9 @@ export function formatDateTime(
   }
 }
 
-export function formatCurrency(value: unknown, _locale = "de-DE") {
+export function formatCurrency(value: unknown, _locale = "de-DE", currency = "EUR") {
   void _locale;
-  return formatMoneyAmount(value);
+  return formatMoneyAmount(value, currency);
 }
 
 export function nextDunningLevel(events: DunningEvent[]) {

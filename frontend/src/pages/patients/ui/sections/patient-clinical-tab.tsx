@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
-import { MedicationNameFields } from "./medication-name-fields";
+import { MedicationEditorFields, MEDICATION_EDITOR_CLASS_NAME } from "./medication-editor-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
@@ -40,8 +40,6 @@ import type {
 } from "../../model/detail-resource-types";
 
 import {
-  DARREICHUNGSFORM_OPTIONS,
-  EINNAHMEFORM_OPTIONS,
   darreichungsformLabel,
 } from "../../data/medication-options";
 
@@ -106,7 +104,6 @@ import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
 import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
-import { MedicationPlanPdfAction } from "./medication-plan-pdf-action";
 import { LabResultsPdfAction } from "./lab-results-pdf-action";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
@@ -900,6 +897,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   sectionClassName,
   rowClassName,
   headerAction,
+  editorClassName,
 }: {
   title: string;
   count?: ReactNode;
@@ -920,6 +918,7 @@ function ClinicalSection<T extends { id?: string | null }>({
   sectionClassName?: string;
   rowClassName?: string;
   headerAction?: ReactNode;
+  editorClassName?: string;
 }) {
   const [list, setList] = useState<T[]>(items);
   const [editing, setEditing] = useState<{ index: number | null; draft: T } | null>(null);
@@ -1061,6 +1060,8 @@ function ClinicalSection<T extends { id?: string | null }>({
             if (!open) setEditing(null);
           }}
           width="form-heavy"
+          maxWidthClassName={editorClassName}
+          headerClassName={editorClassName ? "border-b border-border/70" : undefined}
           title={
             editing?.index === null
               ? `${tx("Добавить", "Hinzufügen")}: ${title}`
@@ -1094,10 +1095,6 @@ function ClinicalSection<T extends { id?: string | null }>({
       </div>
     </section>
   );
-}
-
-function FieldLabel({ children }: { children: ReactNode }) {
-  return <label className="mb-1 block text-[11px] font-medium text-muted-foreground">{children}</label>;
 }
 
 // A label that wraps its control, so the visible caption is also the control's
@@ -3586,13 +3583,13 @@ export function PatientClinicalTab({
       {/* ---- Medications (Medikationsplan) ---- */}
       <ClinicalSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
-        headerAction={<div className="flex flex-wrap items-center gap-2">
-          <MedicationPlanPdfAction patientId={patientId} lang={lang} disabled={!medications.length} />
-          {canManage ? <MedicationBmpImportAction
+        editorClassName={MEDICATION_EDITOR_CLASS_NAME}
+        headerAction={canManage ? (
+          <MedicationBmpImportAction
             patientId={patientId}
             onImported={() => setVersion((current) => current + 1)}
-          /> : null}
-        </div>}
+          />
+        ) : null}
         sectionClassName="bg-slate-50/60"
         rowClassName="border-border/40 bg-white"
         items={medications}
@@ -3657,230 +3654,13 @@ export function PatientClinicalTab({
           />
         )}
         form={(draft, set) => (
-          <div className="space-y-2">
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Категория", "Kategorie")}>
-                <NativeComboboxSelect
-                  value={draft.category}
-                  aria-label={tx("Категория", "Kategorie")}
-                  className={inputClass}
-                  onChange={(e) => set({ category: e.target.value as ClinicalMedication["category"] })}
-                >
-                  <option value="dauer">{tx("Постоянная", "Dauermedikation")}</option>
-                  <option value="besondere">{tx("По особым показаниям", "Zu besonderen Zeiten")}</option>
-                  <option value="selbst">{tx("Самолечение", "Selbstmedikation")}</option>
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={tx("Форма выпуска", "Darreichungsform")}>
-                <NativeComboboxSelect
-                  value={draft.form ?? ""}
-                  required
-                  aria-label={tx("Форма выпуска", "Darreichungsform")}
-                  className={inputClass}
-                  onChange={(e) => set({ form: e.target.value || null })}
-                >
-                  <option value="">—</option>
-                  {DARREICHUNGSFORM_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                  {draft.form &&
-                  !DARREICHUNGSFORM_OPTIONS.some((option) => option.value === draft.form) ? (
-                    <option value={draft.form}>{draft.form}</option>
-                  ) : null}
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Способ применения", "Einnahmeform")}>
-                <NativeComboboxSelect
-                  value={draft.einnahmeform ?? ""}
-                  required
-                  aria-label={tx("Способ применения", "Einnahmeform")}
-                  className={inputClass}
-                  onChange={(e) => set({ einnahmeform: e.target.value || null })}
-                >
-                  <option value="">—</option>
-                  {EINNAHMEFORM_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </Field>
-              <Field label={tx("Статус", "Status")}>
-                <NativeComboboxSelect
-                  value={draft.status}
-                  aria-label={tx("Статус", "Status")}
-                  className={inputClass}
-                  onChange={(e) => set(updateClinicalMedicationLifecycle(draft, {
-                    status: e.target.value as ClinicalMedication["status"],
-                  }))}
-                >
-                  <option value="aktiv">{tx("Активный", "Aktiv")}</option>
-                  <option value="pausiert">{tx("Приостановлен", "Pausiert")}</option>
-                  <option value="abgesetzt">{tx("Отменён", "Abgesetzt")}</option>
-                  <option value="geplant">{tx("Запланирован", "Geplant")}</option>
-                </NativeComboboxSelect>
-              </Field>
-            </div>
-            <MedicationNameFields value={draft} onChange={set} lang={lang} inputClassName={inputClass} />
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Дозировка", "Stärke")}>
-                <Input
-                  value={draft.staerke ?? ""}
-                  onChange={(e) => set({ staerke: blankToNull(e.target.value) })}
-                  className={inputClass}
-                  placeholder="5 mg"
-                />
-              </Field>
-              <Field label={tx("Единица", "Einheit")}>
-                <Input
-                  value={draft.einheit ?? ""}
-                  onChange={(e) => set({ einheit: blankToNull(e.target.value) })}
-                  className={inputClass}
-                  placeholder="Stück"
-                />
-              </Field>
-            </div>
-            <div>
-              <FieldLabel>{tx("Приём: Утро · День · Вечер · Ночь", "Einnahme: Morgens · Mittags · Abends · zur Nacht")}</FieldLabel>
-              <div className="grid grid-cols-4 gap-2">
-                {(["dose_morgens", "dose_mittags", "dose_abends", "dose_nachts"] as const).map((key, idx) => (
-                  <Input
-                    key={key}
-                    value={draft[key] ?? ""}
-                    onChange={(e) => set({ [key]: blankToNull(e.target.value) } as Partial<ClinicalMedication>)}
-                    className={cn(inputClass, "text-center")}
-                    aria-label={
-                      [
-                        tx("Доза утром", "Dosis morgens"),
-                        tx("Доза в обед", "Dosis mittags"),
-                        tx("Доза вечером", "Dosis abends"),
-                        tx("Доза на ночь", "Dosis zur Nacht"),
-                      ][idx]
-                    }
-                    placeholder={["M", "Mi", "A", "N"][idx]}
-                  />
-                ))}
-              </div>
-            </div>
-            <Field label={tx("Причина", "Grund")}>
-              <Input
-                value={draft.grund ?? ""}
-                onChange={(e) => set({ grund: blankToNull(e.target.value) })}
-                className={inputClass}
-                placeholder="Bluthochdruck"
-              />
-            </Field>
-            <Field label={tx("Указания", "Hinweise")}>
-              <Input
-                value={draft.hinweis ?? ""}
-                onChange={(e) => set({ hinweis: blankToNull(e.target.value) })}
-                className={inputClass}
-                placeholder="Während oder nach den Mahlzeiten"
-              />
-            </Field>
-            <div className="grid gap-2 md:grid-cols-3">
-              <Field label={tx("Дата назначения", "Verordnet am")}>
-                <Input
-                  type="date"
-                  value={draft.verordnet_am ?? ""}
-                  onChange={(e) => set({ verordnet_am: blankToNull(e.target.value) })}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={tx("Приём с", "Einnahme von")}>
-                <Input
-                  type="date"
-                  value={draft.einnahme_von ?? ""}
-                  onChange={(e) => set({ einnahme_von: blankToNull(e.target.value) })}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label={tx("Приём до", "Einnahme bis")}>
-                <Input
-                  type="date"
-                  min={draft.einnahme_von ?? undefined}
-                  aria-invalid={!medicationDateRangeValid(draft)}
-                  value={draft.einnahme_bis ?? ""}
-                  onChange={(e) => set({ einnahme_bis: blankToNull(e.target.value) })}
-                  className={cn(
-                    inputClass,
-                    !medicationDateRangeValid(draft) && "border-destructive",
-                  )}
-                />
-              </Field>
-            </div>
-            {!medicationDateRangeValid(draft) ? (
-              <p role="alert" className="text-xs text-destructive">
-                {tx(
-                  "Дата окончания не может быть раньше даты начала.",
-                  "Das Enddatum darf nicht vor dem Startdatum liegen.",
-                )}
-              </p>
-            ) : null}
-            <fieldset className="rounded-lg border border-border/60 p-2">
-              <legend className="px-1 text-[11px] font-medium text-muted-foreground">
-                {tx("Правовой статус", "Rechtlicher Status")}
-              </legend>
-              <div className="grid gap-1.5 sm:grid-cols-3">
-                <CheckboxField
-                  label={tx("Аптечный", "Apothekenpflichtig")}
-                  checked={draft.apothekenpflichtig}
-                  onChange={(checked) => set({ apothekenpflichtig: checked })}
-                />
-                <CheckboxField
-                  label={tx("Рецептурный", "Rezeptpflichtig")}
-                  checked={draft.rezeptpflichtig}
-                  onChange={(checked) => set({ rezeptpflichtig: checked })}
-                />
-                <CheckboxField
-                  label={tx("Наркотическое (BTM)", "Betäubungsmittel (BTM)")}
-                  checked={draft.btm}
-                  onChange={(checked) => set({ btm: checked })}
-                />
-              </div>
-            </fieldset>
-            <fieldset className="rounded-lg border border-border/60 p-2">
-              <legend className="px-1 text-[11px] font-medium text-muted-foreground">
-                {tx("Предупреждения", "Warnhinweise")}
-              </legend>
-              <div className="grid gap-1.5 sm:grid-cols-3">
-                <CheckboxField
-                  label={tx("Aut-Idem-блок", "Aut-Idem-Sperre")}
-                  checked={draft.aut_idem_sperre}
-                  onChange={(checked) => set({ aut_idem_sperre: checked })}
-                />
-                <CheckboxField
-                  label={tx("Огранич. отпуска", "Abgabebeschränkung")}
-                  checked={draft.abgabebeschraenkung}
-                  onChange={(checked) => set({ abgabebeschraenkung: checked })}
-                />
-                <CheckboxField
-                  label={tx("Прочие пометки", "Sonstige Vermerke")}
-                  checked={draft.sonstige_vermerke !== null}
-                  onChange={(checked) => set({ sonstige_vermerke: checked ? (draft.sonstige_vermerke ?? "") : null })}
-                />
-              </div>
-              {draft.sonstige_vermerke !== null ? (
-                <Input
-                  value={draft.sonstige_vermerke}
-                  onChange={(e) => set({ sonstige_vermerke: e.target.value })}
-                  className={cn(inputClass, "mt-2")}
-                  aria-label={tx("Прочие пометки", "Sonstige Vermerke")}
-                  placeholder={tx("Прочие пометки", "Sonstige Vermerke")}
-                />
-              ) : null}
-            </fieldset>
-            <ProviderDoctorFields
-              value={draft}
-              providers={providers}
-              tx={tx}
-              onChange={(attr) => set(attr as Partial<ClinicalMedication>)}
-            />
-          </div>
+          <MedicationEditorFields
+            draft={draft}
+            onChange={set}
+            lang={lang}
+            dateRangeValid={medicationDateRangeValid(draft)}
+            attribution={<ProviderDoctorFields value={draft} providers={providers} tx={tx} onChange={(attribution) => set(attribution as Partial<ClinicalMedication>)} />}
+          />
         )}
       />
       <MedicationHoldDialog
@@ -4180,7 +3960,7 @@ export function PatientClinicalTab({
               <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <LabResultsPdfAction patientId={patientId} disabled={labResults.length === 0} />
+              <LabResultsPdfAction patientId={patientId} hasResults={labResults.length > 0} />
               <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
                 {filteredLabResults.length}
                 {labPeriodIsApplied ? ` / ${labResults.length}` : ""} {tx("результатов", "Ergebnisse")}

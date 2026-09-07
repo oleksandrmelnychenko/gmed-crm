@@ -33,6 +33,7 @@ import {
   localizeRequiredDocumentLabel,
 } from "@/lib/required-document-labels";
 import { useLang, type Lang } from "@/lib/i18n";
+import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { cn } from "@/lib/utils";
 import {
   formatBusinessDocumentNumber,
@@ -336,7 +337,10 @@ export function PatientDocumentsTab({
     {
       label: metaLabel("source", lang),
       value:
-        compactParty(doc.source_person, doc.source_institution) || commonNotSet,
+        compactParty(
+          doc.source_person?.trim() ? formatDocumentSourceLabel(doc.source_person, t) : null,
+          doc.source_institution,
+        ) || commonNotSet,
     },
     {
       label: metaLabel("addressee", lang),

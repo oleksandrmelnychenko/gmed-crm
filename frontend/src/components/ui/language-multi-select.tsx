@@ -107,12 +107,14 @@ export function LanguageMultiSelect({
   placeholder,
   disabled = false,
   className,
+  chipClassName,
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder: string;
   disabled?: boolean;
   className?: string;
+  chipClassName?: string;
 }) {
   const { t, lang } = useLang();
   const selected = splitLanguageValue(value);
@@ -184,6 +186,7 @@ export function LanguageMultiSelect({
               disabled={disabled}
               className={cn(
                 "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40",
+                chipClassName,
                 disabled && "cursor-default opacity-80 hover:border-border hover:bg-card",
               )}
               title={languageLabel(item, lang)}

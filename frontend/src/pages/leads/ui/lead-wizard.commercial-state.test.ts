@@ -98,7 +98,7 @@ describe("lead wizard commercial source of truth", () => {
 
   it("does not show a green commercial status when server readiness rejects the quote", () => {
     expect(mergeCommercialQuoteReadiness(true, false, true)).toBe(false);
-    expect(mergeCommercialQuoteReadiness(true, true, false)).toBe(false);
+    expect(mergeCommercialQuoteReadiness(true, true, false)).toBe(true);
     expect(mergeCommercialQuoteReadiness(true, true, true)).toBe(true);
     expect(mergeCommercialQuoteReadiness(true, undefined, undefined)).toBe(true);
   });

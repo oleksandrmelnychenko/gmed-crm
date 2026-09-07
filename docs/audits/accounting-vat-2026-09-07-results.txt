@@ -1,0 +1,9 @@
+    Finished `test` profile [unoptimized] target(s) in 0.47s
+     Running tests\accounting_audit_api.rs (target\debug\deps\accounting_audit_api-199c9e24347eafd2.exe)
+error: test failed, to rerun pass `-p gmed-server --test accounting_audit_api`
+
+Caused by:
+  could not execute process `C:\Users\oleks\Developer\gmed\target\debug\deps\accounting_audit_api-199c9e24347eafd2.exe audit_partial_payments_must_preserve_invoice_vat_total --ignored --nocapture --test-threads=1` (never executed)
+
+Caused by:
+  An Application Control policy has blocked this file. (os error 4551)

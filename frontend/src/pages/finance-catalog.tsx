@@ -2747,7 +2747,7 @@ function useFinanceCatalogPageContent() {
         }}
       >
         <DialogContent
-          className="z-[70] max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          className="z-[70] max-h-[calc(100dvh-20px)] gap-0 overflow-hidden p-0 sm:max-w-2xl sm:pb-0"
           overlayClassName="z-[69]"
         >
           <DialogHeader className="border-b border-border px-5 py-4">
@@ -3570,6 +3570,25 @@ function useFinanceCatalogPageContent() {
                 </Section>
 
                 <Section title={t.revenue_agency_service_description_status}>
+                  <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                    <p className="text-muted-foreground">
+                      {lang === "de"
+                        ? "Diese Platzhalter werden im Lead-Assistenten und in den daraus erstellten Dokumenten mit den ausgewählten Fachrichtungen und dem Programmzeitraum ausgefüllt."
+                        : "Эти поля автоматически заполняются в визарде лида и создаваемых из него документах: из выбранных специализаций и дат программы."}
+                    </p>
+                    <dl className="grid gap-2 sm:grid-cols-3">
+                      {[
+                        ["[Fachrichtung 1]", lang === "de" ? "Ausgewählte Fachrichtungen (auch 2, 3, n, n+1)" : "Выбранные специализации (также 2, 3, n, n+1)"],
+                        ["[Datum Beginn]", lang === "de" ? "Programmbeginn" : "Начало программы"],
+                        ["[Datum Ende]", lang === "de" ? "Programmende" : "Окончание программы"],
+                      ].map(([token, meaning]) => (
+                        <div key={token} className="space-y-1">
+                          <dt className="font-mono text-[var(--brand)]">{token}</dt>
+                          <dd className="text-muted-foreground">{meaning}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
                   <ServiceDescriptionEditor
                     items={serviceDescriptionItems(agencyServiceForm.descriptionItems, agencyServiceForm.description)}
                     onChange={(descriptionItems) => setAgencyServiceForm((current) => ({

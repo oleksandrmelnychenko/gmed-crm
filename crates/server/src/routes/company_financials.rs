@@ -246,6 +246,10 @@ async fn get_company_financial_position(
                               ELSE 0
                           END
                       ), 0) AS available_prepayment,
+                      COALESCE(SUM(CASE WHEN invoice.status NOT IN ('draft', 'cancelled')
+                          THEN GREATEST(invoice.paid_amount + invoice.prepayment_applied_amount
+                              - (invoice.total_gross - invoice.credited_amount), 0)
+                          ELSE 0 END), 0) AS invoice_cash_credit,
                       COUNT(*) FILTER (
                           WHERE invoice.invoice_type <> 'advance'
                             AND invoice.status NOT IN ('draft', 'cancelled')
@@ -299,6 +303,7 @@ async fn get_company_financial_position(
                   patient.first_name, patient.last_name, patient.is_active,
                   COALESCE(invoice.invoice_due, 0) AS invoice_due,
                   COALESCE(invoice.available_prepayment, 0) AS available_prepayment,
+                  COALESCE(invoice.invoice_cash_credit, 0) AS invoice_cash_credit,
                   COALESCE(invoice.released_invoice_count, 0) AS released_invoice_count,
                   COALESCE(external.external_receivable, 0) AS external_receivable,
                   COALESCE(manual.manual_balance, 0) AS manual_balance
@@ -341,8 +346,13 @@ async fn get_company_financial_position(
             .try_get::<Decimal, _>("manual_balance")
             .unwrap_or(Decimal::ZERO);
         let released_invoice_count = row.try_get::<i64, _>("released_invoice_count").unwrap_or(0);
-        let calculated_balance =
-            (invoice_due + external_receivable + manual_balance - available_prepayment).round_dp(2);
+        let invoice_cash_credit = row
+            .try_get::<Decimal, _>("invoice_cash_credit")
+            .unwrap_or(Decimal::ZERO);
+        let calculated_balance = (invoice_due + external_receivable + manual_balance
+            - available_prepayment
+            - invoice_cash_credit)
+            .round_dp(2);
         let reconciliation_required =
             external_receivable > Decimal::ZERO && released_invoice_count > 0;
         if calculated_balance > Decimal::ZERO {
@@ -376,6 +386,7 @@ async fn get_company_financial_position(
             "external_receivable": decimal_to_string(external_receivable),
             "manual_balance": decimal_to_string(manual_balance),
             "available_prepayment": decimal_to_string(available_prepayment),
+            "invoice_cash_credit": decimal_to_string(invoice_cash_credit),
             "calculated_balance": decimal_to_string(calculated_balance),
             "balance_side": if calculated_balance > Decimal::ZERO {
                 "debit"

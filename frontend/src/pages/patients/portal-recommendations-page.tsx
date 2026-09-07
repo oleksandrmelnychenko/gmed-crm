@@ -2,6 +2,7 @@ import { startTransition, useEffect, useMemo, useReducer, type FormEvent, type R
 import { CalendarPlus, CheckCircle2, LoaderCircle, MessageCircle, RefreshCw, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import {
   Banner,
@@ -824,7 +825,7 @@ function useStaffRecommendationsWorkspaceContent() {
                 />
               </Field>
               <Field label={t.patient_recommendations_staff_field_due_date}>
-                <input
+                <Input
                   type="date"
                   value={form.due_at}
                   onChange={(event) => setForm((current) => ({ ...current, due_at: event.target.value }))}

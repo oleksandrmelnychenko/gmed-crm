@@ -3,6 +3,7 @@ import { Download, Eye, FileSignature, LoaderCircle, Pencil, Plus, Send, ShieldC
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ApiRequestError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
@@ -41,7 +42,7 @@ function requestStatusClassName(status: SignatureStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; expanded?: boolean; previewReady?: boolean }) {
+export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewAttachment, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewAttachment?: (id: string) => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -52,12 +53,15 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [excludedSigners, setExcludedSigners] = useState<number[]>([]);
   const [composeNew, setComposeNew] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [selectedAttachment, setSelectedAttachment] = useState("");
+  const previousAttachments = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [revision, setRevision] = useState(0);
   const [awaitingState, setAwaitingState] = useState(false);
+  const [refreshCheck, setRefreshCheck] = useState<{ id: string; before?: string } | null>(null);
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
   const onStateChangeRef = useRef(onStateChange);
@@ -79,6 +83,10 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         const next = await fetchSignatureState(documentId);
         if (cancelled) return;
         const pending = next.requests.some(r => isSignaturePending(r.status));
+        const attachmentSnapshot = JSON.stringify(next.review_package);
+        if (attachmentSnapshot !== previousAttachments.current) {
+          setConfirmed(false); setSelectedAttachment(""); previousAttachments.current = attachmentSnapshot;
+        }
         setState(next); setError(false); setAwaitingState(false);
         onStateChangeRef.current?.(next);
         if (!initialized.current || pending) {
@@ -110,7 +118,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
     try { await action(); }
     catch (reason) {
       const code = reason instanceof ApiRequestError ? reason.body?.error : null;
-      setActionError(code === "both_contract_parties_required"
+      setActionError(code === "review_attachment_required" || code === "review_attachment_changed"
+        ? tx("Выберите актуальное приложение для ознакомления и проверьте его PDF.", "Wählen und prüfen Sie die aktuelle Anlage zur Kenntnisnahme.")
+        : code === "both_contract_parties_required"
         ? tx("Для договора нужны клиент и представитель агентства.", "Verträge benötigen Kunde und Agenturvertretung.")
         : tx("Действие не выполнено. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status."));
     }
@@ -124,6 +134,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const pending = state?.requests.some(r => isSignaturePending(r.status));
   const mutationDisabled = busy || awaitingState || error;
   const completed = state?.requests.some(r => r.status === "completed");
+  const attachmentId = selectedAttachment || (state?.review_package?.documents.length === 1 ? state.review_package.documents[0].id : "");
+  const attachmentReady = !state?.review_package || (!!attachmentId && state.review_package.documents.some(d => d.id === attachmentId) && previewedDocumentIds.includes(attachmentId));
   const updateSigner = (index: number, patch: Partial<Signer>) => {
     setConfirmed(false);
     setEditingSigners(current => current.includes(index) ? current : [...current, index]);
@@ -154,7 +166,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         {error ? <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{tx("Не удалось выполнить действие. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status.")}</p> : null}
         {actionError ? <p role="alert" className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{actionError}</p> : null}
         {state ? <>
-          <section className="rounded-xl border border-border/70 bg-card shadow-xs">
+          {!state.enabled ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <AdminSectionTitle>{tx("Сервис подписи", "Signaturdienst")}</AdminSectionTitle>
               <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
@@ -169,8 +181,10 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               <SignatureConnectionDialog canConfigure={state.can_configure} onChanged={() => { setAwaitingState(true); setRevision(value => value + 1); }} />
             </div>
             {!state.enabled ? <p className="border-t border-border/60 px-4 py-3 text-xs leading-5 text-muted-foreground">{tx("Для подписания нужно настроить немецкий аккаунт Skribble. Обратитесь к администратору.", "Zum Signieren muss das deutsche Skribble-Konto eingerichtet werden. Bitte wenden Sie sich an die Administration.")}</p> : null}
-            {!state.can_send ? <p className="border-t border-border/60 px-4 py-3 text-xs leading-5 text-muted-foreground">{tx("Доступен просмотр статуса. Для отправки документа на подпись нужны права редактирования и скачивания.", "Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.")}</p> : null}
-          </section>
+          </section> : <div className="flex justify-end">
+            <Badge variant="outline" className="rounded-full text-[10px]">{state.test_mode ? "DEMO · Skribble" : "QES / eIDAS · Skribble"}</Badge>
+          </div>}
+          {!state.can_send ? <p className="text-xs leading-5 text-muted-foreground">{tx("Доступен просмотр статуса. Для отправки документа на подпись нужны права редактирования и скачивания.", "Der Status ist sichtbar. Zum Versand werden Bearbeitungs- und Downloadrechte benötigt.")}</p> : null}
 
           {state.requests.map((request, index) => <section key={request.id} aria-label={index === 0 ? tx("Текущий запрос подписи", "Aktuelle Signaturanfrage") : tx("Предыдущий запрос подписи", "Frühere Signaturanfrage")} className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
@@ -183,6 +197,15 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               </Badge>
             </div>
             <div className="space-y-2 p-4">
+              {refreshCheck?.id === request.id ? <p role="status" className="text-xs leading-5 text-muted-foreground">
+                {request.updated_at && request.updated_at !== refreshCheck.before
+                  ? request.last_error
+                    ? tx("Проверка не завершена: не удалось получить результат от Skribble. Повторная попытка выполнится автоматически.", "Prüfung nicht abgeschlossen: Das Ergebnis konnte nicht von Skribble abgerufen werden. Ein neuer Versuch erfolgt automatisch.")
+                    : request.status === "pending"
+                      ? tx(`Проверено: получено подписей ${request.evidence.signatures?.filter(s => s.status === "SIGNED").length ?? 0} из ${request.signers.length}. Ожидаем остальных подписантов.`, `Geprüft: ${request.evidence.signatures?.filter(s => s.status === "SIGNED").length ?? 0} von ${request.signers.length} Unterschriften erhalten. Weitere Unterschriften stehen aus.`)
+                      : tx("Статус обновлён.", "Status aktualisiert.")
+                  : tx("Проверка запрошена. Ожидаем ответ Skribble…", "Prüfung angefordert. Antwort von Skribble wird erwartet…")}
+              </p> : null}
               {request.signers.map(signer => {
                 const signed = request.evidence.signatures?.some(s => s.email.toLowerCase() === signer.email.toLowerCase() && s.status === "SIGNED");
                 return <div key={signer.email} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="break-words font-medium text-foreground">{signer.first_name} {signer.last_name} · {signer.email}</span><span className={signed ? "shrink-0 text-emerald-700" : "shrink-0 text-muted-foreground"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</span></div>;
@@ -192,11 +215,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               {request.status === "error" && request.last_error === "provider_rate_limited" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Skribble временно ограничил число запросов. Приглашения не отправлены. Повторите отправку позже.", "Skribble hat die Anzahl der Anfragen vorübergehend begrenzt. Es wurden keine Einladungen versendet. Versuchen Sie den Versand später erneut.")}</p> : null}
               {request.last_error && request.status === "pending" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Синхронизация повторится автоматически. Подписывать заново не нужно.", "Die Synchronisierung wird automatisch wiederholt. Erneutes Signieren ist nicht nötig.")}</p> : null}
               <div className="flex flex-wrap justify-end gap-2 pt-1">
+                {request.last_error?.startsWith("review_") ? <p role="alert" className="w-full text-xs text-destructive">{tx("Комплект требует проверки: приложение изменилось или результат отправки не подтверждён. Не отправляйте повторно; проверьте статус или отзовите запрос.", "Das Paket muss geprüft werden: Die Anlage wurde geändert oder der Versand ist unbestätigt. Nicht erneut senden; Status prüfen oder Anfrage zurückziehen.")}</p> : null}
                 {request.result_document_id && onPreviewResult ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onPreviewResult(request)}><Eye className="size-4" />{tx("Открыть PDF", "PDF öffnen")}</Button> : null}
                 {request.result_document_id ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadDocumentFile(request.result_document_id!, request.test_mode ? "TEST-signed.pdf" : "signed.pdf"), false)}><Download className="size-4" />{tx("Скачать PDF", "PDF herunterladen")}</Button> : null}
                 {request.has_report ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadSignatureReport(request.id), false)}>{tx("Отчёт о подписях", "Signaturprotokoll")}</Button> : null}
-                {isSignaturePending(request.status) && state.enabled && state.can_send ? <Button type="button" variant="outline" size="sm" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "refresh"))}>{tx("Проверить статус", "Status prüfen")}</Button> : null}
-                {request.status === "pending" && state.enabled && state.can_send ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "withdraw"))}>{tx("Отозвать запрос", "Anfrage zurückziehen")}</Button> : null}
+                {isSignaturePending(request.status) && state.enabled && state.can_send ? <Button type="button" variant="outline" size="sm" disabled={mutationDisabled} onClick={() => void run(async () => { await signatureAction(request.id, "refresh"); setRefreshCheck({ id: request.id, before: request.updated_at }); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Проверить статус", "Status prüfen")}</Button> : null}
+                {(request.can_withdraw ?? request.status === "pending") && state.enabled && state.can_send ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "withdraw"))}>{tx("Отозвать запрос", "Anfrage zurückziehen")}</Button> : null}
               </div>
             </div>
           </section>)}
@@ -210,6 +234,17 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
+              {state.review_package ? <div className="space-y-2 rounded-lg border border-border p-3">
+                <AdminSectionTitle>{tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme")}</AdminSectionTitle>
+                <p className="text-xs text-muted-foreground">{state.review_package.template === "privacy_information" ? tx("Информационный документ — вместе с рамочным договором, без отдельной подписи.", "Datenschutzinformation – zusammen mit dem Rahmenvertrag, ohne separate Unterschrift.") : tx("Предварительный расчёт медицинских расходов — вместе со сметой, без отдельной подписи.", "Vorläufige medizinische Kostenkalkulation – zusammen mit dem Kostenvoranschlag, ohne separate Unterschrift.")}</p>
+                {state.review_package.documents.length ? <>
+                  <NativeComboboxSelect aria-label={tx("Документ для ознакомления", "Dokument zur Kenntnisnahme")} value={attachmentId} disabled={busy || awaitingState} onChange={event => { setSelectedAttachment(event.target.value); setConfirmed(false); }}>
+                    <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
+                    {state.review_package.documents.map(doc => <option key={doc.id} value={doc.id}>{doc.title} · v{doc.version}</option>)}
+                  </NativeComboboxSelect>
+                  <Button type="button" variant="outline" size="sm" disabled={!attachmentId || busy || !onPreviewAttachment} onClick={() => onPreviewAttachment?.(attachmentId)}><Eye className="size-4" />{tx("Проверить приложение", "Anlage prüfen")}</Button>
+                </> : <p role="alert" className="text-xs text-destructive">{tx("Сначала создайте информационный документ в этой карточке. Отправка без приложения недоступна.", "Erstellen Sie zuerst das Informationsdokument in dieser Karte. Versand ohne Anlage ist nicht möglich.")}</p>}
+              </div> : null}
               {signers.map((signer, index) => {
                 const selected = !excludedSigners.includes(index);
                 const editing = selected && (!validSigners([signer]) || editingSigners.includes(index));
@@ -238,9 +273,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               {signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
             </div>
             <div className="border-t border-border/60 bg-muted/10 p-4">
-              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
+              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{state.review_package ? tx("Я проверил основной PDF, приложение для ознакомления и адреса. Отправить комплект выбранным подписантам через Skribble.", "Ich habe Haupt-PDF, Anlage zur Kenntnisnahme und Adressen geprüft. Dieses Paket über Skribble an die ausgewählten Personen senden.") : tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
               <div className="mt-3 flex justify-end">
-                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !confirmed || !validSigners(selectedSigners)} onClick={() => void run(async () => { await createSignatureRequest(documentId, selectedSigners); previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
+                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !attachmentReady || !confirmed || !validSigners(selectedSigners)} onClick={() => void run(async () => { await createSignatureRequest(documentId, selectedSigners, state.review_package ? attachmentId : undefined); previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
               </div>
             </div>
           </section> : null}

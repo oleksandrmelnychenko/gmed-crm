@@ -25,6 +25,7 @@ import {
   MessagesSquare,
   NotebookPen,
   PackageCheck,
+  Pill,
   Plug,
   ReceiptText,
   Scale,
@@ -56,12 +57,13 @@ interface NavItem {
   labelKey: string;
 }
 
-const STAFF_NAV_SECTIONS: StaffNavSection[] = ["main", "crm", "medicine", "admin"];
+const STAFF_NAV_SECTIONS: StaffNavSection[] = ["main", "crm", "medicine", "accounting", "admin"];
 
 const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
   main: "nav_main",
   crm: "nav_crm",
   medicine: "nav_medicine",
+  accounting: "nav_accounting",
   admin: "nav_admin",
 };
 
@@ -87,6 +89,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   documents: FolderOpen,
   files: Files,
   specializations: Stethoscope,
+  medications: Pill,
   recommendations: ClipboardList,
   services: ConciergeBell,
   subscriptions: PackageCheck,

@@ -249,7 +249,7 @@ async fn load_patient_settlement_ledger(
                SELECT external.*, orders.order_number,
                       COALESCE(expense.vendor_name, provider.name) AS provider_name
                FROM external_invoices external
-               JOIN orders ON orders.id = external.order_id
+               LEFT JOIN orders ON orders.id = external.order_id
                LEFT JOIN providers provider ON provider.id = external.provider_id
                LEFT JOIN concierge_expense_review_events expense_review
                  ON expense_review.external_invoice_id = external.id
@@ -750,17 +750,19 @@ async fn load_patient_account_statement(
                   END AS paid_amount,
                   CASE WHEN $3::date IS NULL THEN invoice.prepayment_applied_amount ELSE COALESCE((
                       SELECT SUM(allocation.amount_gross)
-                      FROM invoice_prepayment_allocations allocation
+                      FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.target_invoice_id = invoice.id
                         AND allocation.created_at::date <= $3
+                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
                   ), 0) END AS prepayment_applied_amount,
                   invoice.portal_visible,
                   invoice.hide_amounts_from_patient, orders.order_number,
                   COALESCE((
                       SELECT SUM(allocation.amount_gross)
-                      FROM invoice_prepayment_allocations allocation
+                      FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.advance_invoice_id = invoice.id
                         AND ($3::date IS NULL OR allocation.created_at::date <= $3)
+                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
                   ), 0) AS allocated_from_advance
            FROM invoices invoice
            JOIN orders ON orders.id = invoice.order_id
@@ -1019,7 +1021,7 @@ async fn load_patient_account_statement(
                FROM external_invoices external
                JOIN external_invoice_receivable_balances balance
                  ON balance.external_invoice_id = external.id
-               JOIN orders ON orders.id = external.order_id
+               LEFT JOIN orders ON orders.id = external.order_id
                LEFT JOIN providers provider ON provider.id = external.provider_id
                WHERE external.patient_id = $1
                  AND external.status <> 'cancelled'
@@ -1395,9 +1397,10 @@ async fn get_patient_financial_summary(
                   ), 0) AS credited_vat,
                   CASE WHEN $3::date IS NULL THEN prepayment_applied_amount ELSE COALESCE((
                       SELECT SUM(allocation.amount_gross)
-                      FROM invoice_prepayment_allocations allocation
+                      FROM invoice_prepayment_allocation_history allocation
                       WHERE allocation.target_invoice_id = invoices.id
                         AND allocation.created_at::date <= $3
+                        AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
                   ), 0) END AS prepayment_applied_amount,
                   line_items
            FROM invoices
@@ -1455,7 +1458,7 @@ async fn get_patient_financial_summary(
     let external_receivable_row = match sqlx::query(
         r#"SELECT COALESCE(SUM(
                   CASE WHEN UPPER(external.currency) = $6
-                             AND UPPER(receivable_order.currency) = $6
+                             AND (receivable_order.id IS NULL OR UPPER(receivable_order.currency) = $6)
                        THEN CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
                        external.patient_receivable_gross - COALESCE((
                           SELECT SUM(allocation.amount_gross)
@@ -1473,7 +1476,7 @@ async fn get_patient_financial_summary(
                    WHERE UPPER(external.currency) <> UPPER(receivable_order.currency)
                ) AS currency_mismatch_count
            FROM external_invoices external
-           JOIN orders receivable_order ON receivable_order.id = external.order_id
+           LEFT JOIN orders receivable_order ON receivable_order.id = external.order_id
            JOIN external_invoice_receivable_balances balance
              ON balance.external_invoice_id = external.id
            WHERE external.patient_id = $1
@@ -1515,7 +1518,7 @@ async fn get_patient_financial_summary(
     let expense_row = match sqlx::query(
         r#"SELECT COALESCE(SUM(external.amount_net) FILTER (
                       WHERE UPPER(external.currency) = $6
-                        AND UPPER(patient_order.currency) = $6
+                        AND (patient_order.id IS NULL OR UPPER(patient_order.currency) = $6)
                         AND external.amount_net >= 0
                         AND external.amount_vat >= 0
                         AND external.amount_gross >= 0
@@ -1523,7 +1526,7 @@ async fn get_patient_financial_summary(
                   ), 0) AS expenses_net,
                   COALESCE(SUM(external.amount_vat) FILTER (
                       WHERE UPPER(external.currency) = $6
-                        AND UPPER(patient_order.currency) = $6
+                        AND (patient_order.id IS NULL OR UPPER(patient_order.currency) = $6)
                         AND external.amount_net >= 0
                         AND external.amount_vat >= 0
                         AND external.amount_gross >= 0
@@ -1531,7 +1534,7 @@ async fn get_patient_financial_summary(
                   ), 0) AS expenses_vat,
                   COALESCE(SUM(external.amount_gross) FILTER (
                       WHERE UPPER(external.currency) = $6
-                        AND UPPER(patient_order.currency) = $6
+                        AND (patient_order.id IS NULL OR UPPER(patient_order.currency) = $6)
                         AND external.amount_net >= 0
                         AND external.amount_vat >= 0
                         AND external.amount_gross >= 0
@@ -1547,7 +1550,7 @@ async fn get_patient_financial_summary(
                        WHERE UPPER(external.currency) <> UPPER(patient_order.currency)
                    ) AS currency_mismatch_count
            FROM external_invoices external
-           JOIN orders patient_order ON patient_order.id = external.order_id
+           LEFT JOIN orders patient_order ON patient_order.id = external.order_id
            WHERE external.patient_id = $1
              AND external.status <> 'cancelled'
              AND external.paid_by <> 'patient'

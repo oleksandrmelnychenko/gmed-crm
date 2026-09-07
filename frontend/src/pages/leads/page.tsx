@@ -172,6 +172,7 @@ const LEAD_REALTIME_EVENTS = [
   "lead.created",
   "lead.updated",
   "lead.status_changed",
+  "lead.payment_status_changed",
   "lead.promoted_to_console",
   "lead.converted",
   "lead.failed_resolved",

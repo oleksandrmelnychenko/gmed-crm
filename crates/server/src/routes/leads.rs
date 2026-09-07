@@ -987,8 +987,7 @@ fn evaluate_lead_conversion_readiness(
         && input.order_signed_patient
         && input.order_signed_agency
         && input.quote_accepted
-        && input.cost_estimate_document_generated
-        && input.prepayment_ready;
+        && input.cost_estimate_document_generated;
 
     let checks = vec![
         json!({
@@ -1179,7 +1178,7 @@ fn evaluate_lead_conversion_readiness(
             "key": "prepayment_ready",
             "label": "Required prepayment received",
             "passed": input.prepayment_ready,
-            "blocking_for": "conversion",
+            "blocking_for": null,
             "stage": "commercial",
         }),
     ];
@@ -1262,9 +1261,6 @@ fn evaluate_lead_conversion_readiness(
     }
     if !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
-    }
-    if !input.prepayment_ready {
-        conversion_reasons.push("Required prepayment is not complete".to_string());
     }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
@@ -1538,7 +1534,7 @@ async fn load_lead_conversion_readiness(
                       SELECT CASE
                           WHEN NOT o.prepayment_required THEN true
                           ELSE COALESCE((
-                              SELECT q.paid_amount >= COALESCE(
+                              SELECT order_recorded_cash_paid(o.id) >= COALESCE(
                                          NULLIF(o.prepayment_amount, 0),
                                          q.total_gross
                                      )
@@ -6167,6 +6163,23 @@ mod lead_conversion_readiness_tests {
         assert!(readiness.conversion_ready);
         assert!(readiness.qualification_reasons.is_empty());
         assert!(readiness.conversion_reasons.is_empty());
+    }
+
+    #[test]
+    fn signed_lead_can_convert_while_awaiting_prepayment() {
+        let mut input = ready_input();
+        input.prepayment_ready = false;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(readiness.conversion_ready);
+        assert!(readiness.conversion_reasons.is_empty());
+        let payment_check = readiness.payload["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "prepayment_ready")
+            .unwrap();
+        assert_eq!(payment_check["passed"], false);
+        assert!(payment_check["blocking_for"].is_null());
     }
 
     #[test]

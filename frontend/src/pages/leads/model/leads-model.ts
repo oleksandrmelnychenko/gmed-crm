@@ -48,10 +48,12 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "requested_specialties must be a json array": ["Не удалось сохранить специализации", "Fachrichtungen konnten nicht gespeichert werden"],
   "wizard_state must be a json object": ["Не удалось сохранить данные мастера", "Wizard-Daten konnten nicht gespeichert werden"],
   "date_to cannot be earlier than date_from": ["Дата окончания программы не может быть раньше даты начала", "Das Programmende darf nicht vor dem Programmbeginn liegen"],
+  "prepayment_due_at must be an ISO date and time with timezone": ["Укажите корректную дату и время передоплаты", "Gültiges Datum und Uhrzeit für die Vorauszahlung angeben"],
 };
 
 const VALIDATION_FIELD_LABELS: Record<string, LeadErrorTranslation> = {
   prepayment_amount: ["Сумма необходимой предоплаты", "Erforderlicher Vorauszahlungsbetrag"],
+  prepayment_due_at: ["Срок передоплаты", "Vorauszahlungsfrist"],
   paid_amount: ["Полученная предоплата", "Erhaltener Vorauszahlungsbetrag"],
   total_estimated: ["Итоговая сумма заказа", "Geschätzter Gesamtbetrag des Auftrags"],
   unit_price: ["Цена за единицу", "Einzelpreis"],

@@ -1203,7 +1203,7 @@ async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
 }
 
 #[tokio::test]
-async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
+async fn lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");
     let billing = app.auth_header("billing");
@@ -1238,6 +1238,15 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
     .await;
     assert_eq!(status, StatusCode::OK, "{qualified}");
 
+    let (status, prospect) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({"hauptanfragegrund":"Chronic knee pain","zuweiser":"Self referral"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
     let readiness_check_passed = |lead: &Value, key: &str| {
         lead["readiness"]["checks"]
@@ -1259,7 +1268,10 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
         "{initially_ready}"
     );
     assert!(readiness_check_passed(&initially_ready, "quote_accepted"));
-    assert!(readiness_check_passed(&initially_ready, "prepayment_ready"));
+    assert!(!readiness_check_passed(
+        &initially_ready,
+        "prepayment_ready"
+    ));
 
     let newest_quote_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO quotes (
@@ -1288,50 +1300,44 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
         "prepayment_ready"
     ));
 
-    let (status, partially_paid_quote) = json_request(
+    let (status, manual_payment) = json_request(
         &app,
         "POST",
         &format!("/api/v1/quotes/{newest_quote_id}/status"),
         &billing,
-        Some(json!({
-            "status": "accepted",
-            "paid_amount": 50.0
-        })),
+        Some(json!({"status":"accepted", "paid_amount":50})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{partially_paid_quote}");
-
-    let (status, partial_readiness) =
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{manual_payment}");
+    let (status, accepted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{newest_quote_id}/status"),
+        &billing,
+        Some(json!({"status":"accepted"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(accepted["paid_amount"], "0");
+    let (status, unpaid_readiness) =
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
-    assert_eq!(status, StatusCode::OK, "{partial_readiness}");
-    assert!(readiness_check_passed(&partial_readiness, "quote_accepted"));
+    assert_eq!(status, StatusCode::OK, "{unpaid_readiness}");
+    assert!(readiness_check_passed(&unpaid_readiness, "quote_accepted"));
     assert!(!readiness_check_passed(
-        &partial_readiness,
+        &unpaid_readiness,
         "prepayment_ready"
     ));
-
-    let (status, fully_paid_quote) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/quotes/{newest_quote_id}/status"),
-        &billing,
-        Some(json!({
-            "status": "accepted",
-            "paid_amount": 119.0
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{fully_paid_quote}");
-
-    let (status, full_readiness) =
-        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
-    assert_eq!(status, StatusCode::OK, "{full_readiness}");
-    assert!(readiness_check_passed(&full_readiness, "quote_accepted"));
-    assert!(readiness_check_passed(&full_readiness, "prepayment_ready"));
     assert_eq!(
-        full_readiness["readiness"]["conversion_ready"], true,
-        "{full_readiness}"
+        unpaid_readiness["readiness"]["conversion_ready"], true,
+        "{unpaid_readiness}"
     );
+    let payment_check = unpaid_readiness["readiness"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["key"] == "prepayment_ready")
+        .unwrap();
+    assert!(payment_check["blocking_for"].is_null());
 
     sqlx::query("UPDATE order_leistungen SET unit_price = 110 WHERE id = $1")
         .bind(artifacts.service_id)
@@ -1351,9 +1357,33 @@ async fn lead_readiness_uses_the_newest_quote_for_acceptance_and_prepayment() {
         &drifted_readiness,
         "quote_accepted"
     ));
+    assert!(!readiness_check_passed(
+        &drifted_readiness,
+        "prepayment_ready"
+    ));
+    assert_eq!(drifted_readiness["readiness"]["conversion_ready"], false);
+    // Restore the signed commercial scope, then actually convert with zero cash.
+    sqlx::query("UPDATE order_leistungen SET unit_price=100 WHERE id=$1")
+        .bind(artifacts.service_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET total_estimated=119,prepayment_due_at=now()+interval '3 days' WHERE id=$1")
+        .bind(artifacts.order_id).execute(&app.suite.pool).await.unwrap();
+    let (status, converted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let preserved: bool = sqlx::query_scalar("SELECT patient_id IS NOT NULL AND prepayment_required AND prepayment_due_at IS NOT NULL AND order_recorded_cash_paid(id)=0 FROM orders WHERE id=$1")
+        .bind(artifacts.order_id).fetch_one(&app.suite.pool).await.unwrap();
     assert!(
-        readiness_check_passed(&drifted_readiness, "prepayment_ready"),
-        "a changed quote must not erase an already received prepayment: {drifted_readiness}"
+        preserved,
+        "conversion must preserve the pending payment and deadline"
     );
 }
 
@@ -1402,7 +1432,6 @@ async fn lead_readiness_normalizes_cost_passthrough_vat() {
         r#"UPDATE quotes
            SET total_vat = 0,
                total_gross = 100,
-               paid_amount = 100,
                line_items = '[{"description":"Initial orthopedic coordination","quantity":1,"unit_price":100,"vat_rate":0,"is_cost_passthrough":true}]'::jsonb
            WHERE id = $1"#,
     )
@@ -1437,7 +1466,8 @@ async fn lead_readiness_normalizes_cost_passthrough_vat() {
             .unwrap_or(false)
     };
     assert!(check_passed("quote_accepted"), "{lead}");
-    assert!(check_passed("prepayment_ready"), "{lead}");
+    assert!(!check_passed("prepayment_ready"), "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], true, "{lead}");
 }
 
 #[tokio::test]
@@ -2619,8 +2649,10 @@ async fn lead_order_draft_is_idempotent_before_patient_conversion() {
         "Updated specialist consultation"
     );
     assert_eq!(matching_lines[0]["quantity"], "2");
-    assert_eq!(matching_lines[0]["unit_price"], "175");
-    assert_eq!(matching_lines[0]["vat_rate"], "7");
+    // Catalog-backed lines retain their resolved price/VAT on retry. Editable
+    // description, quantity and notes update without accepting a client price override.
+    assert_eq!(matching_lines[0]["unit_price"], "100");
+    assert_eq!(matching_lines[0]["vat_rate"], "19");
     assert_eq!(matching_lines[0]["notes"], "Latest wizard values");
     assert_eq!(
         matching_lines[0]["agency_service_id"],

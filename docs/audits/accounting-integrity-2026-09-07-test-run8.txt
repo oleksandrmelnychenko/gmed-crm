@@ -1,0 +1,30 @@
+ set_config 
+------------
+ 
+(1 row)
+
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+error[E0425]: cannot find type `Value` in this scope
+   --> crates/server/src/routes/orders.rs:584:60
+    |
+584 |                     "payment_tracking": r.try_get::<Option<Value>, _>("payment_tracking").unwrap_or_default(),
+    |                                                            ^^^^^ not found in this scope
+    |
+help: there is an enum variant `crate::routes::clinical_document_imports::NullableField::Value` and 3 others; try using the variant's enum
+    |
+584 -                     "payment_tracking": r.try_get::<Option<Value>, _>("payment_tracking").unwrap_or_default(),
+584 +                     "payment_tracking": r.try_get::<Option<crate::routes::clinical_document_imports::NullableField>, _>("payment_tracking").unwrap_or_default(),
+    |
+584 |                     "payment_tracking": r.try_get::<Option<crate::routes::concierge_services::NullablePatchValue>, _>("payment_tracking").unwrap_or_default(),
+    |                                                            ++++++++++++++++++++++++++++++++++++++++++++++++
+584 -                     "payment_tracking": r.try_get::<Option<Value>, _>("payment_tracking").unwrap_or_default(),
+584 +                     "payment_tracking": r.try_get::<Option<crate::routes::documents::NullableJsonField>, _>("payment_tracking").unwrap_or_default(),
+    |
+help: you might be missing a type parameter
+    |
+434 | async fn list_orders<Value>(
+    |                     +++++++
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `gmed-server` (lib) due to 1 previous error

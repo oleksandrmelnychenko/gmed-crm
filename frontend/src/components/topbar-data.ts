@@ -1,4 +1,7 @@
 import { apiFetch } from "@/lib/api";
+import { notifyChatRead } from "@/lib/chat-read-events";
+import { formatMoneyAmount } from "@/lib/money";
+import { paymentStatusLabel } from "@/lib/payment-status";
 
 export interface Notification {
   id: string;
@@ -15,6 +18,20 @@ export function localizedNotificationCopy(
   item: Notification,
   lang: "ru" | "de",
 ): Pick<Notification, "title" | "body"> {
+  if (item.kind === "order_payment_status") {
+    try {
+      const data = JSON.parse(item.body ?? "{}");
+      const due = data.due_at ? new Date(data.due_at) : null;
+      const deadline = due && Number.isFinite(due.getTime())
+        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${due.toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}` : "";
+      return {
+        title: `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`,
+        body: `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)} · ${lang === "de" ? "Offen" : "Остаток"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
+      };
+    } catch {
+      return { title: lang === "de" ? "Zahlungsstatus aktualisiert" : "Статус оплаты обновлён", body: null };
+    }
+  }
   if (item.kind === "medication_ai_ready") {
     return lang === "de"
       ? {
@@ -233,8 +250,10 @@ export function fetchTopbarChatMessages(userId: string) {
   return apiFetch<ChatMessage[]>(`/messages/${userId}`);
 }
 
-export function markTopbarChatRead(userId: string) {
-  return apiFetch(`/messages/${userId}/read`, { method: "POST" });
+export async function markTopbarChatRead(userId: string) {
+  const receipt = await apiFetch(`/messages/${userId}/read`, { method: "POST" });
+  notifyChatRead();
+  return receipt;
 }
 
 export function sendTopbarChatMessage(userId: string, message: string) {

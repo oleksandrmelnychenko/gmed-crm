@@ -3,6 +3,7 @@ import { Mail, Phone, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { checkboxClass } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,7 @@ import {
 import {
   CountrySelect,
   Field,
-  FormSection,
+  PatientFormSection as FormSection,
   FunctionalLabelChips,
   LanguageChips,
   NationalitySelect,
@@ -273,7 +274,7 @@ export function PatientFormFields({
             : l("patients_emergency_contact")
         }
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             {lang === "de"
               ? "Mehrere Vertrauenskontakte können hinterlegt werden."
@@ -284,7 +285,7 @@ export function PatientFormFields({
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 shrink-0 gap-1.5 rounded-lg"
+              className={cn(contactAddButtonClassName, "shrink-0 gap-1.5")}
               onClick={addTrustedContact}
             >
               <Plus className="size-3.5" />
@@ -319,7 +320,7 @@ export function PatientFormFields({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="size-7 text-muted-foreground hover:text-destructive"
+                        className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         aria-label={lang === "de" ? "Kontakt entfernen" : "Удалить контакт"}
                         onClick={() => removeTrustedContact(contact.id)}
                       >
@@ -560,11 +561,11 @@ function PatientContactSection({
           {form.contacts.map((contact) => (
             <div
               key={contact.id}
-              className="rounded-xl border border-border/70 bg-card/50 p-3"
+              className="min-w-0 rounded-lg border border-border/70 bg-muted/15 p-3"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/25 text-muted-foreground">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--brand)]/10 text-[var(--brand)]">
                     {contact.contactKind === "email" ? (
                       <Mail className="size-4" />
                     ) : (
@@ -588,7 +589,7 @@ function PatientContactSection({
                       onChange={(event) =>
                         onUpdateContact(contact.id, { isPrimary: event.target.checked })
                       }
-                      className="size-4 rounded border-border text-[var(--brand)] focus:ring-[var(--brand)]"
+                      className={checkboxClass}
                       disabled={readOnly}
                     />
                     {l("providers_contact_primary")}
@@ -597,6 +598,7 @@ function PatientContactSection({
                     type="button"
                     variant="outline"
                     size="icon-sm"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     title={t.common_remove}
                     aria-label={t.common_remove}
                     onClick={() => onRemoveContact(contact.id)}
@@ -607,7 +609,7 @@ function PatientContactSection({
                 </div>
               </div>
 
-              <div className="mt-2.5 grid gap-3 md:grid-cols-2 xl:grid-cols-[150px_150px_minmax(220px,1fr)]">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(170px,1fr)_minmax(150px,1fr)_minmax(240px,2fr)]">
                 <Field label={l("providers_contact_kind")}>
                   <NativeComboboxSelect
                     value={contact.contactKind}
@@ -643,7 +645,7 @@ function PatientContactSection({
                     <option value="other">{l("providers_contact_type_other")}</option>
                   </NativeComboboxSelect>
                 </Field>
-                <Field label={contactValueLabel(contact.contactKind)}>
+                <Field label={contactValueLabel(contact.contactKind)} className="sm:col-span-2 xl:col-span-1">
                   <Input
                     type={contact.contactKind === "email" ? "email" : "tel"}
                     value={contact.value}

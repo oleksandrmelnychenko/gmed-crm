@@ -114,6 +114,8 @@ export type ClinicalDiagnosis = ClinicalAttribution & {
 };
 
 export type ClinicalMedication = ClinicalAttribution & {
+  /** Explicit dictionary review, tied to the exact names in the current draft. */
+  name_pair_confirmation?: { handelsname: string; wirkstoff: string } | null;
   id?: string;
   medication_series_id?: string | null;
   supersedes_medication_id?: string | null;

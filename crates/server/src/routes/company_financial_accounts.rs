@@ -1054,10 +1054,29 @@ async fn assign_accounting_entry_financial_account(
             );
         }
     };
+    // Serialize account reassignment with cash reversals before locking ledger
+    // rows, in the same invoice-first lock order used by the payment routes.
+    if let Err(error) = sqlx::query(
+        "SELECT invoice.id FROM invoices invoice JOIN accounting_entries entry ON entry.source_invoice_id = invoice.id WHERE entry.id = $1 FOR UPDATE OF invoice",
+    ).bind(entry_id).fetch_optional(&mut *transaction).await {
+        tracing::error!(%error, "lock invoice for account assignment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign financial account");
+    }
     let entry = match sqlx::query(
         r#"SELECT currency, financial_account_id,
                   source_invoice_payment_transaction_id,
-                  source_invoice_refund_transaction_id
+                  source_invoice_refund_transaction_id,
+                  source_external_provider_payment_transaction_id,
+                  EXISTS (SELECT 1 FROM invoice_payment_transactions payment
+                          WHERE payment.id = accounting_entries.source_invoice_payment_transaction_id
+                            AND (payment.transaction_type = 'reversal' OR EXISTS (
+                                SELECT 1 FROM invoice_payment_transactions reversal WHERE reversal.reverses_transaction_id = payment.id
+                            ))) OR EXISTS (
+                          SELECT 1 FROM invoice_refund_transactions refund
+                          WHERE refund.id = accounting_entries.source_invoice_refund_transaction_id
+                            AND (refund.transaction_type = 'reversal' OR EXISTS (
+                                SELECT 1 FROM invoice_refund_transactions reversal WHERE reversal.reverses_transaction_id = refund.id
+                            ))) AS cash_reversed
            FROM accounting_entries
            WHERE id = $1
            FOR UPDATE"#,
@@ -1111,6 +1130,17 @@ async fn assign_accounting_entry_financial_account(
         == Some(body.financial_account_id)
     {
         return Json(json!({ "updated_count": 0, "idempotent_replay": true })).into_response();
+    }
+    if entry.try_get::<bool, _>("cash_reversed").unwrap_or(false)
+        || entry
+            .try_get::<Option<Uuid>, _>("source_external_provider_payment_transaction_id")
+            .unwrap_or_default()
+            .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Reverse and rebook the payment to correct its financial account",
+        );
     }
     let payment_transaction_id = entry
         .try_get::<Option<Uuid>, _>("source_invoice_payment_transaction_id")
