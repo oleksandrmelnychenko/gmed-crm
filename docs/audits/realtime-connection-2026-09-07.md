@@ -45,24 +45,20 @@ The account and process quota values are unchanged.
   test now starts directly in an authenticated chat page and verifies the
   successive 1/2/4-second delays for both transports.
 - Rust websocket registry unit tests: 4 passed.
-- New real-transport integration suite compiled. Its three cases cover idle
-  close/EOF releasing the shared quota, rejection without a readiness frame,
-  and periodic idle pings. Execution was skipped by the existing test harness
-  because local Docker's Linux engine is unavailable; these are **not verified
-  integration-test passes**. Attempting to start Docker did not make its engine
-  available.
-- Clippy was blocked before linting by Windows Application Control when starting
-  a `gmed-db` build-script executable (OS error 4551).
+- All 3 real-transport integration cases passed on DEV: idle close/EOF releases
+  the shared quota, rejection sends no readiness frame, and idle sockets receive
+  periodic pings. Tests used a disposable PostgreSQL instance with DEV schema
+  and migration metadata only; no application records were copied.
+- Server Clippy passed with warnings denied on DEV. Windows Application Control
+  had prevented the earlier local run.
 
 ## Deployment and remaining checks
 
-These changes have not been deployed to DEV by this task. Source transfer to DEV
-requires the user's explicit approval following an earlier automatic approval
-review rejection in this conversation.
-
-Before deployment, run `cargo test -p gmed-server --test websocket_lifecycle_api
--- --nocapture` against a disposable PostgreSQL database and confirm that no
-suite is skipped. Run server Clippy in the same supported build environment.
+The user authorized commit, push and remote DEV deployment on 2026-09-07, then
+requested direct application deployment without Docker image builds. Source
+transfer and the server checks above are complete. Fresh-database setup still
+fails in historical migration `20260819113000`; the passing suites exercise an
+upgrade from current DEV schema with no skipped tests.
 
 Deploy the backend before the frontend: the new chat client requires the new
 readiness frame. Existing clients tolerate the extra frame. A backend replacement

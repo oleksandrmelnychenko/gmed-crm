@@ -31,12 +31,14 @@ Validation:
   many-to-many choices, saving/reopening a new pair, stale-result protection,
   lookup failure, keyboard selection and mobile layout. Escape closes the
   suggestion list without opening the medication form's discard confirmation.
-- The server integration test binary compiled. Windows Application Control
-  blocked execution (OS error 4551), so the database assertions have not yet run.
+- All 3 server integration cases passed on DEV using a disposable PostgreSQL
+  instance populated with the current DEV schema and migration metadata only.
   The tests cover atomic remembering/rollback, normalization, optional trade
-  names, bounded results, literal wildcard searches and access control.
+  names, bounded results, literal wildcard searches and access control. Test
+  patients now provide the required birth date and gender.
+- Server Clippy passed with warnings denied.
 
-DEV has not been updated by this task. Apply the migration with the backend,
-then deploy the frontend. The database integration suite must run in a supported
-environment before deployment: `cargo test -p gmed-server --test medication_names_api
--- --nocapture`; verify that the test database is available and no suite is skipped.
+Fresh-database test setup remains blocked by historical seed data in migration
+`20260819113000` (invalid quote-line quantity). The passing run instead exercises
+the actual DEV schema upgrade, with no copied application records or skipped
+suites. Apply the new migration with the backend before updating the frontend.
