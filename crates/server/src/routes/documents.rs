@@ -989,7 +989,6 @@ struct GeneratedCostEstimateContext {
 
 struct GeneratedAppointmentConfirmationContext {
     language: String,
-    auto_name: String,
     title_override: Option<String>,
     doc_id: Option<String>,
     patient: DocPartyBlock,
@@ -3366,7 +3365,8 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
 }
 
 fn is_structured_generated_document_template(template_id: &str) -> bool {
-    template_id != "free_text_document" && document_template_by_id(template_id).is_some()
+    is_fixed_legal_document_template(template_id)
+        || (template_id != "free_text_document" && document_template_by_id(template_id).is_some())
 }
 
 fn is_lead_allowed_document_template(template_id: &str) -> bool {
@@ -13502,7 +13502,6 @@ async fn generate_document(
             };
             let context = GeneratedAppointmentConfirmationContext {
                 language: language.to_string(),
-                auto_name: auto_name.clone(),
                 title_override: title_override.clone(),
                 doc_id: bindings
                     .doc_id
