@@ -250,7 +250,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
 
     let (partial_status, partial) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(partial_status, StatusCode::OK, "{partial}");
-    assert_eq!(partial["allocated_receivable_gross"], "60");
+    assert_eq!(
+        partial["allocated_receivable_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(60, 0)
+    );
     assert_eq!(
         partial["remaining_receivable_gross"]
             .as_str()
@@ -346,7 +353,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     assert_eq!(reverse_status, StatusCode::OK, "{reverse}");
     let (reopened_status, reopened) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(reopened_status, StatusCode::OK, "{reopened}");
-    assert_eq!(reopened["allocated_receivable_gross"], "40");
+    assert_eq!(
+        reopened["allocated_receivable_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(40, 0)
+    );
     assert_eq!(
         reopened["remaining_receivable_gross"]
             .as_str()

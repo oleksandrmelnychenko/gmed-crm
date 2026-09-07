@@ -436,7 +436,14 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "prepayment replay: {replayed:?}");
-    assert_eq!(replayed["prepayment_applied_amount"], "59.50");
+    assert_eq!(
+        replayed["prepayment_applied_amount"]
+            .as_str()
+            .unwrap()
+            .parse::<rust_decimal::Decimal>()
+            .unwrap(),
+        rust_decimal::Decimal::new(5950, 2)
+    );
     let (status, drift) = json_request(
         &app,
         "POST",
@@ -554,6 +561,14 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
     let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
     let manager = auth_header_for(manager_id, "patient_manager");
 
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     let cases = [
         ("PATIENT-PAID", "paid", "patient", true, 100),
         ("AGENCY-PAID", "paid", "agency", true, 200),
@@ -571,14 +586,32 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
                 "amount_net": amount,
                 "amount_vat": 0,
                 "amount_gross": amount,
-                "status": status_value,
-                "paid_by": paid_by,
+                "status": if paid_by == "agency" { "approved" } else { status_value },
+                "paid_by": if paid_by == "agency" { "unpaid" } else { paid_by },
                 "service_delivered": delivered
             })),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED, "expense response: {body:?}");
-        ids.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+        let external_invoice_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        if paid_by == "agency" {
+            let (status, payment) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/company-provider-liabilities/{external_invoice_id}/settlements"),
+                &billing,
+                Some(json!({
+                    "request_id": Uuid::new_v4(),
+                    "financial_account_id": account_id,
+                    "amount_gross": amount.to_string(),
+                    "paid_on": chrono::Utc::now().date_naive(),
+                    "payment_method": "bank_transfer"
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "provider payment: {payment:?}");
+        }
+        ids.push(external_invoice_id);
     }
 
     let rows = sqlx::query(

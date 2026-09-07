@@ -1146,6 +1146,8 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
             .await
             .unwrap();
             assert_eq!(order_ids, vec![None, None]);
+            // The orderless lifecycle is already reversed; do not reverse its payment twice.
+            continue;
         }
 
         if paid_by == "unpaid" && !delivered {
@@ -1577,7 +1579,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{statement}");
-    assert_eq!(statement["settlement"]["closing_balance"], "0");
+    assert_eq!(statement["summary"]["closing_balance"], "0");
 
     let (status, reversal_replay) = json_request(
         &context.app,

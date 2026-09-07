@@ -1319,6 +1319,17 @@ async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_rele
     assert_eq!(queued_item["status"], "draft");
     assert_eq!(queued_item["ursprung"], "interpreter_upload");
 
+    let unassigned_teamlead_id =
+        seed_user(&pool, &format!("{tag}-other"), "teamlead_interpreter").await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &auth_header_for(unassigned_teamlead_id, "teamlead_interpreter"),
+        Some(json!({ "art": "medical_report", "category": "medical", "is_medical": true, "status": "active" })),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
     let (status, body) = json_request(
         &app,
         "POST",
@@ -1330,7 +1341,10 @@ async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_rele
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["message"], "Insufficient permissions");
+    assert_eq!(
+        body["message"],
+        "Teamlead review may update only document classification fields"
+    );
 
     let (status, _) = json_request(
         &app,
@@ -5881,11 +5895,11 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
                 assert!(!pdf_text.contains("Informationsblatt zum Datenschutz"));
                 assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
                 assert!(pdf_text.contains("GMED-EDV-System"));
-                assert!(!pdf_text.contains("[x]"));
+                assert!(pdf_text.contains("[x]"));
                 assert!(pdf_text.contains("[ ]"));
-                assert!(pdf_text.contains("[ ] Threema-Messenger"));
+                assert!(pdf_text.contains("[x] Threema-Messenger"));
                 assert!(pdf_text.contains("[ ] WhatsApp-Messenger"));
-                assert!(pdf_text.contains("[ ] Telegram-Messenger"));
+                assert!(pdf_text.contains("[x] Telegram-Messenger"));
             }
             _ => unreachable!(),
         }

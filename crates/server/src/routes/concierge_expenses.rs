@@ -1049,7 +1049,7 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
             Ok(None) => break,
             Err(error) => {
                 tracing::warn!(error = %error, "read concierge expense multipart field");
-                return Err(err(StatusCode::BAD_REQUEST, "Invalid multipart request"));
+                return Err(err(error.status(), "Invalid multipart request"));
             }
         };
         let name = field.name().unwrap_or_default().to_string();
@@ -1064,7 +1064,7 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
             input.declared_mime = field.content_type().map(ToOwned::to_owned);
             let bytes = field.bytes().await.map_err(|error| {
                 tracing::warn!(error = %error, "read concierge receipt file");
-                err(StatusCode::BAD_REQUEST, "Failed to read receipt file")
+                err(error.status(), "Failed to read receipt file")
             })?;
             if bytes.len() > MAX_FILE_SIZE {
                 return Err(err(
@@ -1076,9 +1076,9 @@ async fn parse_expense_multipart(mut multipart: Multipart) -> Result<ExpenseMult
             continue;
         }
 
-        let value = field.text().await.map_err(|_| {
+        let value = field.text().await.map_err(|error| {
             err(
-                StatusCode::BAD_REQUEST,
+                error.status(),
                 &format!("Failed to read multipart field {name}"),
             )
         })?;

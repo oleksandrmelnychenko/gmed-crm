@@ -107,10 +107,10 @@ async fn seed_invoice(
         r#"INSERT INTO invoices (
                order_id, patient_id, invoice_number, invoice_type, status,
                issued_at, due_date, total_net, total_vat, total_gross,
-               paid_amount, line_items, portal_visible, created_by
+               paid_amount, line_items, portal_visible, created_by, currency
            ) VALUES (
                $1, $2, $3, $4, $5, now(), CURRENT_DATE + 14,
-               $6, 0, $6, $7, '[]', true, $8
+               $6, 0, $6, $7, '[]', true, $8, 'GBP'
            ) RETURNING id"#,
     )
     .bind(order_id)
@@ -142,7 +142,8 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     let sales_id = seed_user(&ctx.pool, &tag, "sales").await;
     let patient_a = seed_patient(&ctx.pool, ctx.admin_id, &tag, "A").await;
     let patient_b = seed_patient(&ctx.pool, ctx.admin_id, &tag, "B").await;
-    let order_id = seed_order(&ctx.pool, patient_a, ctx.admin_id, &tag, "EUR").await;
+    // Keep aggregate assertions independent of the migrated EUR demo ledger.
+    let order_id = seed_order(&ctx.pool, patient_a, ctx.admin_id, &tag, "GBP").await;
 
     let invoice_id = seed_invoice(
         &ctx.pool,
@@ -186,7 +187,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
                amount_net, amount_vat, amount_gross, currency, status,
                paid_by, service_delivered, created_by
            ) VALUES (
-               $1, $2, $3, CURRENT_DATE, 30, 0, 30, 'EUR', 'paid',
+               $1, $2, $3, CURRENT_DATE, 30, 0, 30, 'GBP', 'paid',
                'agency', true, $4
            ) RETURNING id"#,
     )
@@ -222,7 +223,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
                    created_by
                ) VALUES (
                    $1, 'adjustment', $2, $3, 'correction', $4,
-                   'EUR', CURRENT_DATE, $5, $6
+                   'GBP', CURRENT_DATE, $5, $6
                )"#,
         )
         .bind(patient_id)
@@ -263,7 +264,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
                    status, paid_by, service_delivered, created_by, source_document_id
                ) VALUES (
                    $1, $2, $3, CURRENT_DATE, CURRENT_DATE + 7,
-                   $4, 0, $4, 'EUR', $5, 'unpaid', false, $6, $7
+                   $4, 0, $4, 'GBP', $5, 'unpaid', false, $6, $7
                )"#,
         )
         .bind(order_id)
@@ -288,7 +289,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
             "income",
             "service_revenue",
             100_i64,
-            "EUR",
+            "GBP",
             "Company position receipt",
         ),
         (
@@ -296,7 +297,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
             "expense",
             "provider_expense",
             40_i64,
-            "EUR",
+            "GBP",
             "Company position provider payment",
         ),
         (
@@ -304,7 +305,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
             "income",
             "service_revenue",
             -10_i64,
-            "EUR",
+            "GBP",
             "Company position refund",
         ),
         (
@@ -343,7 +344,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     let billing = auth_header_for(billing_id, "billing");
     let (status, result) = request_json(
         &ctx.app,
-        "/api/v1/company-financial-position?currency=EUR&from=2020-01-01&to=2099-12-31",
+        "/api/v1/company-financial-position?currency=GBP&from=2020-01-01&to=2099-12-31",
         &billing,
     )
     .await;
@@ -399,7 +400,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
         .unwrap();
     let (deleted_source_status, deleted_source) = request_json(
         &ctx.app,
-        "/api/v1/company-financial-position?currency=EUR",
+        "/api/v1/company-financial-position?currency=GBP",
         &billing,
     )
     .await;
@@ -409,7 +410,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
 
     let (outflow_status, outflows) = request_json(
         &ctx.app,
-        "/api/v1/company-financial-position?currency=EUR&from=2020-01-01&to=2099-12-31&movement=outflow",
+        "/api/v1/company-financial-position?currency=GBP&from=2020-01-01&to=2099-12-31&movement=outflow",
         &billing,
     )
     .await;
@@ -425,7 +426,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
 
     let (search_status, search) = request_json(
         &ctx.app,
-        "/api/v1/company-financial-position?currency=EUR&from=2020-01-01&to=2099-12-31&search=refund",
+        "/api/v1/company-financial-position?currency=GBP&from=2020-01-01&to=2099-12-31&search=refund",
         &billing,
     )
     .await;
@@ -435,7 +436,7 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     let sales = auth_header_for(sales_id, "sales");
     let (forbidden, _) = request_json(
         &ctx.app,
-        "/api/v1/company-financial-position?currency=EUR",
+        "/api/v1/company-financial-position?currency=GBP",
         &sales,
     )
     .await;

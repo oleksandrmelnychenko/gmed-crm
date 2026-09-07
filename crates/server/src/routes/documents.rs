@@ -21446,7 +21446,12 @@ async fn update_document(
     };
 
     let is_medical = current.try_get::<bool, _>("is_medical").unwrap_or(false);
-    let baseline_view = can_view_document_row(&auth, &current, &assignment_set);
+    // Draft interpreter uploads must be reviewable before they are released.
+    // Keep this exception scoped to the assigned teamlead's intake workflow;
+    // explicit ACL denies and the classification-only update guard still apply.
+    let teamlead_review = auth.role == Role::TeamleadInterpreter
+        && can_review_document_intake_row(&auth, &current, &assignment_set);
+    let baseline_view = can_view_document_row(&auth, &current, &assignment_set) || teamlead_review;
     let view_access = match resolve_document_explicit_access(
         &state,
         &auth,
@@ -21465,9 +21470,7 @@ async fn update_document(
 
     let baseline_edit = match auth.role {
         Role::Ceo | Role::PatientManager | Role::ItAdmin => true,
-        Role::TeamleadInterpreter => {
-            can_review_document_intake_row(&auth, &current, &assignment_set)
-        }
+        Role::TeamleadInterpreter => teamlead_review,
         _ => false,
     };
     let edit_access = match resolve_document_explicit_access(

@@ -717,7 +717,7 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     );
 
     let accounting = sqlx::query(
-        r#"SELECT COALESCE(SUM(amount), 0) AS amount,
+        r#"SELECT COALESCE(SUM(amount_gross), 0) AS amount,
                   COUNT(*)::BIGINT AS entry_count,
                   COUNT(source_invoice_refund_transaction_id)::BIGINT AS refund_entry_count
            FROM accounting_entries

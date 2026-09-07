@@ -301,7 +301,14 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     assert_eq!(status, StatusCode::OK, "{other_list}");
     assert!(other_list.as_array().expect("other list").is_empty());
 
-    let (status, manager_list) = json_request(&ctx.app, "GET", path, &billing_bearer, None).await;
+    let (status, manager_list) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}?assigned_to={concierge_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{manager_list}");
     assert_eq!(manager_list.as_array().map(Vec::len), Some(2));
 
@@ -2396,7 +2403,7 @@ async fn assigned_concierge_task_grants_non_clinical_patient_access_only() {
             .any(|item| item["id"] == medical_document_id.to_string())
     );
 
-    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
+    sqlx::query("UPDATE tasks SET status = 'completed', archived_at = now(), archived_by = $2 WHERE id = $1")
         .bind(task_id)
         .bind(ctx.admin_id)
         .execute(&ctx.pool)
