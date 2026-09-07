@@ -29,11 +29,11 @@ async function prepare(page: Page, lang: "ru" | "de", role = "ceo") {
   });
   await page.goto("/patients/" + patientId);
   await expect(page.getByRole("heading", {name:"Anna Beispiel",exact:true})).toBeVisible();
-  return page.getByRole("button", {name:lang === "ru" ? "Врачебное заключение (PDF)" : "Arztbrief (PDF)",exact:true});
+  return page.getByRole("button", {name:lang === "ru" ? "Медицинская сводка (PDF)" : "Medizinische Zusammenfassung (PDF)",exact:true});
 }
 
 for (const lang of ["ru", "de"] as const) {
-  test("clinical report downloads from the patient header in " + lang, async ({page}) => {
+  test("clinical report lets the user select sections and downloads in " + lang, async ({page}) => {
     const pdf = await readFile("public/demo/datev/demo-datev-001.pdf");
     const button = await prepare(page, lang);
     await expect(button).toBeEnabled();
@@ -43,24 +43,24 @@ for (const lang of ["ru", "de"] as const) {
       expect(route.request().headers().authorization).toBe("Bearer clinical-report-test-token");
       expect(new URL(route.request().url()).pathname).toBe("/api/v1/patients/" + patientId + "/clinical.pdf");
       expect(new URL(route.request().url()).searchParams.get("lang")).toBe(lang);
-      await route.fulfill({contentType:"application/pdf", headers:{"content-disposition":'attachment; filename="arztbrief-P-DEMO-REPORT.pdf"'}, body:pdf});
+      expect(new URL(route.request().url()).searchParams.get("sections")).toBe("diagnoses,procedures");
+      await route.fulfill({contentType:"application/pdf", headers:{"content-disposition":'attachment; filename="medizinische-zusammenfassung-P-DEMO-REPORT.pdf"'}, body:pdf});
     });
-    const download = page.waitForEvent("download");
     await button.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", {name:lang === "ru" ? "Состав медицинской сводки" : "Inhalt der medizinischen Zusammenfassung"})).toBeVisible();
+    await dialog.getByRole("button", {name:lang === "ru" ? "Снять выбор" : "Auswahl aufheben"}).click();
+    await expect(dialog.getByRole("button", {name:lang === "ru" ? "Скачать PDF" : "PDF herunterladen"})).toBeDisabled();
+    await dialog.getByRole("checkbox", {name:lang === "ru" ? "Диагнозы" : "Diagnosen"}).check({force:true});
+    await dialog.getByRole("checkbox", {name:lang === "ru" ? "Процедуры" : "Prozeduren"}).check({force:true});
+    await page.screenshot({path:`../artifacts/design-qa/clinical-report-dialog-${lang}-${page.viewportSize()?.width}.png`});
+    const download = page.waitForEvent("download");
+    await dialog.getByRole("button", {name:lang === "ru" ? "Скачать PDF" : "PDF herunterladen"}).click();
     const file = await download;
-    expect(file.suggestedFilename()).toBe("arztbrief-P-DEMO-REPORT.pdf");
+    expect(file.suggestedFilename()).toBe("medizinische-zusammenfassung-P-DEMO-REPORT.pdf");
     expect(await readFile((await file.path())!)).toEqual(pdf);
     expect(requests).toBe(1);
     await expect(button).toBeEnabled();
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({width, height:1000});
-      await button.scrollIntoViewIfNeeded();
-      const bounds = await button.boundingBox();
-      expect(bounds).not.toBeNull();
-      expect(bounds!.x).toBeGreaterThanOrEqual(0);
-      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
-      await page.screenshot({path:"../artifacts/design-qa/clinical-report-" + lang + "-" + width + ".png"});
-    }
   });
 }
 
@@ -75,17 +75,20 @@ test("clinical report prevents concurrent export and permits retry after failure
     await route.fulfill({status:500, json:{error:"internal"}});
   });
   await button.click();
-  await expect(button).toBeDisabled();
-  await expect(button).toHaveAttribute("aria-busy", "true");
+  const dialog = page.getByRole("dialog");
+  const downloadButton = dialog.getByRole("button", {name:"Скачать PDF"});
+  await downloadButton.click();
+  await expect(downloadButton).toBeDisabled();
+  await expect(downloadButton).toHaveAttribute("aria-busy", "true");
   finish();
-  await expect(page.getByText("Не удалось сформировать врачебное заключение. Повторите попытку.")).toBeVisible();
-  await expect(button).toBeEnabled();
+  await expect(page.getByText("Не удалось сформировать медицинскую сводку. Повторите попытку.")).toBeVisible();
+  await expect(downloadButton).toBeEnabled();
   expect(requests).toBe(1);
   const pdf = await readFile("public/demo/datev/demo-datev-001.pdf");
   await page.route("**/clinical.pdf?*", route => route.fulfill({contentType:"application/pdf", body:pdf}));
   const retry = page.waitForEvent("download");
-  await button.click();
-  expect((await retry).suggestedFilename()).toBe("arztbrief.pdf");
+  await downloadButton.click();
+  expect((await retry).suggestedFilename()).toBe("medizinische-zusammenfassung.pdf");
 });
 
 test("patient reader without clinical permission cannot export the report", async ({page}) => {

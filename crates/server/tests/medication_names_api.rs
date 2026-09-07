@@ -22,8 +22,8 @@ async fn context() -> Option<(support::TestSuiteContext, Uuid, String)> {
     .await
     .unwrap();
     let patient_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO patients (patient_id, first_name, last_name, birth_date, created_by)
-         VALUES ($1, 'Name', 'Test', '1980-01-01', $2) RETURNING id",
+        "INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+         VALUES ($1, 'Name', 'Test', '1980-01-01', 'female', $2) RETURNING id",
     )
     .bind(format!("NAME-{}", Uuid::new_v4()))
     .bind(user_id)

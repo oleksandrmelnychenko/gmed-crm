@@ -4973,10 +4973,33 @@ async fn patient_clinical_pdf_export_returns_pdf() {
     }
     sqlx::query("INSERT INTO patient_clinical_warnings (patient_id, kind, label, severity, reaction) VALUES ($1, 'allergie', 'Penicillin - DEMO', 'severe', 'Ausschlag - DEMO')")
         .bind(patient_id).execute(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO patient_examinations (patient_id, title, performed_on, status, result)
+         VALUES ($1, 'Abgeschlossene Untersuchung - DEMO', '2026-09-02', 'final', 'Finaler Befund - DEMO'),
+                ($1, 'Geplante Untersuchung - NICHT EXPORTIEREN', '2026-10-01', 'pending', 'Noch kein Befund')",
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_lab_results
+            (patient_id, measured_at, measured_at_precision, panel, laboratory_name,
+             analyte_name, result_text, numeric_result, comparator, unit, reference_text,
+             reference_low, reference_high, interpretation_note, abnormal_flag, source_page, recorded_by)
+         VALUES ($1, '2026-09-01 10:30:00+00', 'datetime', 'Blutbild', 'Labor München',
+                 'CRP-LAB-DEMO', '<0,5', 0.5, '<', 'mg/L', '0–5', 0, 5,
+                 'Unauffälliger Laborbefund - DEMO', 'normal', 2, $2)",
+    )
+    .bind(patient_id)
+    .bind(ceo_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     for (suffix, title) in [
-        ("", "Arztbrief"),
-        ("?lang=ru", "Врачебное заключение"),
-        ("?lang=de", "Arztbrief"),
+        ("", "Medizinische Zusammenfassung"),
+        ("?lang=ru", "Медицинская сводка"),
+        ("?lang=de", "Medizinische Zusammenfassung"),
     ] {
         let request = Request::builder()
             .uri(format!(
@@ -4993,7 +5016,7 @@ async fn patient_clinical_pdf_export_returns_pdf() {
             response.headers()["content-disposition"]
                 .to_str()
                 .unwrap()
-                .starts_with("attachment; filename=\"arztbrief-")
+                .starts_with("attachment; filename=\"medizinische-zusammenfassung-")
         );
         let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
             .await
@@ -5011,11 +5034,70 @@ async fn patient_clinical_pdf_export_returns_pdf() {
             "Fachärztliche Beurteilung - DEMO",
             "Penicillin - DEMO",
             "Ausschlag - DEMO",
+            "Abgeschlossene Untersuchung - DEMO",
+            "Finaler Befund - DEMO",
         ] {
             assert!(
                 normalized.contains(expected),
                 "missing {expected}: {normalized}"
             );
+        }
+        assert!(!normalized.contains("Geplante Untersuchung - NICHT EXPORTIEREN"));
+        assert!(!normalized.contains("CRP-LAB-DEMO"));
+    }
+    let request = Request::builder()
+        .uri(format!(
+            "/api/v1/patients/{patient_id}/clinical.pdf?lang=de&sections=diagnoses,procedures"
+        ))
+        .header("Authorization", &bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let selected_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(selected_text.contains("Ambulant erworbene Pneumonie"));
+    assert!(!selected_text.contains("Penicillin - DEMO"));
+    assert!(!selected_text.contains("Abgeschlossene Untersuchung - DEMO"));
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical.pdf?sections=diagnoses,unknown"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    for (suffix, title) in [
+        ("", "Laborergebnisse"),
+        ("?lang=ru", "Лабораторные результаты"),
+    ] {
+        let request = Request::builder()
+            .uri(format!(
+                "/api/v1/patients/{patient_id}/lab-results.pdf{suffix}"
+            ))
+            .header("Authorization", &bearer)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "application/pdf");
+        assert!(
+            response.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment; filename=\"laborergebnisse-")
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        for expected in [title, "CRP-LAB-DEMO", "<0,5", "Labor München", "0–5"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
         }
     }
     let (status, _) = json_request(
@@ -5102,7 +5184,7 @@ async fn patient_medication_pdf_exports_only_current_prescriptions() {
 
     for (endpoint, title) in [
         ("medikationsplan.pdf", "Медикаментозный план"),
-        ("clinical.pdf", "Врачебное заключение"),
+        ("clinical.pdf", "Медицинская сводка"),
     ] {
         let request = Request::builder()
             .method("GET")

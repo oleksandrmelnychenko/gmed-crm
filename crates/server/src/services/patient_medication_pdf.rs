@@ -255,7 +255,31 @@ impl<'a> Layout<'a> {
             false,
             muted(),
         );
-        self.y -= 5.0;
+        self.y -= 4.0;
+        let provenance_note = self.context.tx(
+            "Сводная информация на основании имеющихся у нас данных и документов других лечащих врачей. Не является самостоятельным назначением. Необходимо проверить актуальность и полноту сведений.",
+            "Zusammenstellung aus den uns vorliegenden Angaben und Unterlagen anderer behandelnder Ärztinnen und Ärzte. Keine eigene Verordnung; Aktualität und Vollständigkeit bitte prüfen.",
+        );
+        let note_lines = self.wrap(provenance_note, 7.5, WIDTH - 8.0, false);
+        let note_height = note_lines.len() as f32 * 3.5 + 5.0;
+        self.rect(
+            LEFT,
+            self.y - note_height,
+            WIDTH,
+            note_height,
+            rgb(0.965, 0.966, 0.97),
+        );
+        for (index, line) in note_lines.iter().enumerate() {
+            self.text(
+                LEFT + 4.0,
+                self.y - 3.5 - index as f32 * 3.5,
+                line,
+                7.5,
+                false,
+                muted(),
+            );
+        }
+        self.y -= note_height + 4.0;
         self.table_header();
         self.table_top = self.y;
     }
@@ -330,10 +354,9 @@ impl<'a> Layout<'a> {
         self.y -= 7.0;
     }
 
-    fn entry(&mut self, entry: &MedicationPlanEntry, number: usize, section: &str) {
-        let mut cells = entry.cells.clone();
-        cells[0] = format!("{number}. {}", cells[0]);
-        let wrapped: Vec<_> = cells
+    fn entry(&mut self, entry: &MedicationPlanEntry, row_index: usize, section: &str) {
+        let wrapped: Vec<_> = entry
+            .cells
             .iter()
             .enumerate()
             .map(|(i, s)| self.wrap(s, FONT_SIZE, COLS[i] - PAD * 2.0, false))
@@ -356,7 +379,7 @@ impl<'a> Layout<'a> {
             }
             let take = available.min(total - offset);
             let height = take as f32 * LINE_HEIGHT + 2.0 * PAD;
-            if number.is_multiple_of(2) {
+            if row_index.is_multiple_of(2) {
                 self.rect(
                     LEFT,
                     self.y - height,
@@ -399,7 +422,7 @@ impl<'a> Layout<'a> {
                 // Never leave a continued instruction detached from its entry.
                 let name: String = entry.cells[1].chars().take(80).collect();
                 let label = format!(
-                    "{} {number}: {name}",
+                    "{}: {name}",
                     self.context
                         .tx("Продолжение препарата", "Fortsetzung Eintrag")
                 );
@@ -469,7 +492,7 @@ pub fn build_medication_plan_pdf(context: &MedicationPlanContext) -> Result<Vec<
             context.tx("Другие препараты", "Weitere Medikamente"),
         ),
     ];
-    let mut number = 0;
+    let mut row_index = 0;
     for (key, title) in sections {
         let entries: Vec<_> = context
             .entries
@@ -490,8 +513,8 @@ pub fn build_medication_plan_pdf(context: &MedicationPlanContext) -> Result<Vec<
         }
         layout.section(title);
         for entry in entries {
-            number += 1;
-            layout.entry(entry, number, title);
+            row_index += 1;
+            layout.entry(entry, row_index, title);
         }
     }
     Ok(document
@@ -540,7 +563,7 @@ mod tests {
                     "Stück".into(),
                     if index == 0 {
                         format!(
-                            "{}\nEND-OF-LONG-NOTE",
+                            "{}\nVerordnender Arzt: Dr. Erika Beispiel\nEND-OF-LONG-NOTE",
                             "Записана в картці інструкція. ".repeat(160)
                         )
                     } else {
@@ -561,6 +584,9 @@ mod tests {
                 );
             }
             assert!(text.contains("END-OF-LONG-NOTE"));
+            let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(normalized.contains("Verordnender Arzt: Dr. Erika Beispiel"));
+            assert!(!text.contains("1. Wirkstoff-00"));
             assert!(text.contains("Олена Приклад"));
             assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
             assert!(text.contains("contact@gmed-health.com"));
@@ -568,6 +594,11 @@ mod tests {
                 "ID пациента: TEST-001"
             } else {
                 "Patienten-ID: TEST-001"
+            }));
+            assert!(text.contains(if russian {
+                "Сводная информация на основании имеющихся у нас данных и документов других лечащих врачей. Не является самостоятельным назначением. Необходимо проверить актуальность и полноту сведений."
+            } else {
+                "Zusammenstellung aus den uns vorliegenden Angaben und Unterlagen anderer behandelnder Ärztinnen und Ärzte. Keine eigene Verordnung; Aktualität und Vollständigkeit bitte prüfen."
             }));
             assert!(text.contains(if russian {
                 "Страница 2 /"
@@ -588,6 +619,9 @@ mod tests {
                         .enumerate()
                         .map(|(i, mut entry)| {
                             entry.category = ["dauer", "besondere", "selbst"][i].into();
+                            if i == 0 {
+                                entry.cells[9].push_str("\nVerordnender Arzt: Dr. Erika Beispiel");
+                            }
                             entry
                         })
                         .collect(),

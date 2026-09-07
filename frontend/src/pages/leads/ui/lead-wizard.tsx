@@ -5674,7 +5674,7 @@ ${serviceCommentLines.join("\n")}`
       <DialogContent
         showOverlay={!documentPreview}
         showCloseButton={!saveInProgress}
-        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]"
+        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
@@ -6615,7 +6615,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
                   accessory={amlRequired ? (
-                    <Button type="button" variant={wizardDocuments.enhanced_due_diligence.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
                       <ShieldCheck className="size-3.5" />
                       {wizardDocuments.enhanced_due_diligence.length > 0
                         ? tx("Создать новую версию", "Neue Version erstellen")
@@ -6676,7 +6676,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
-                    <Button type="button" variant={wizardDocuments.privacy_consents.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                       {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.privacy_consents.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
@@ -6771,7 +6771,7 @@ ${serviceCommentLines.join("\n")}`
                 className={WIZARD_DOCUMENT_SECTION_CLASS}
                 title={tx("Информационный лист о защите персональных данных", "Informationsblatt zum Datenschutz")}
                 accessory={(
-                  <Button type="button" variant={wizardDocuments.privacy_information.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
+                  <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_information")}>
                     {busy === "generate-privacy_information" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                     {wizardDocuments.privacy_information.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                   </Button>
@@ -6812,7 +6812,7 @@ ${serviceCommentLines.join("\n")}`
                     <label
                       htmlFor="lead-file-identity"
                       className={cn(
-                        buttonVariants({ variant: wizardDocuments.identity.length > 0 ? "outline" : "default", size: "sm" }),
+                        buttonVariants({ variant: "default", size: "sm" }),
                         "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
                         isBusy && "pointer-events-none opacity-50",
                       )}
@@ -7144,7 +7144,7 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   )}
                   accessory={(
-                    <Button type="button" variant={commercialDocuments.framework_contract.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
                       {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -7327,12 +7327,6 @@ ${serviceCommentLines.join("\n")}`
                       );
                     })}
                   </NativeComboboxSelect>
-                  <p className="text-[11px] text-muted-foreground">
-                    {tx(
-                      "Рекомендуемая цена определяется по дате начала программы; при необходимости можно выбрать другую версию.",
-                      "Der empfohlene Preis richtet sich nach dem Programmbeginn; bei Bedarf kann eine andere Version gewählt werden.",
-                    )}
-                  </p>
                 </div>
                 {lines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>
@@ -7344,6 +7338,7 @@ ${serviceCommentLines.join("\n")}`
                     density="comfortable"
                     rowHeightOverrides={{ comfortable: 46 }}
                     storageKey="lead-wizard-order-lines-v2"
+                    disableRowHover
                     rowActionsAlwaysVisible
                     rowActionsWidth={36}
                     rowActionsLabel={(
@@ -7396,7 +7391,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Документ заказа", "Einzelauftrag")}
                   accessory={(
-                    <Button type="button" variant={commercialDocuments.single_order.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("single_order")}>
                       {busy === "generate-single_order" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.single_order.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -7450,7 +7445,7 @@ ${serviceCommentLines.join("\n")}`
                 accessory={(
                   <Button
                     type="button"
-                    variant={quote ? "outline" : "default"}
+                    variant="default"
                     size="sm"
                     className="h-8 rounded-lg"
                     disabled={isBusy || !lines.some(validLine)}
@@ -7635,7 +7630,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Смета к заказу", "Kostenvoranschlag zum Einzelauftrag")}
                   accessory={(
-                    <Button type="button" variant={commercialDocuments.order_cost_estimate.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("order_cost_estimate")}>
                       {busy === "generate-order_cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.order_cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -7666,7 +7661,7 @@ ${serviceCommentLines.join("\n")}`
                       className="h-8 rounded-lg"
                       disabled={isBusy}
                       onClick={() => void generateCommercialDocument("cost_estimate")}
-                      variant={commercialDocuments.cost_estimate.length > 0 ? "outline" : "default"}
+                      variant="default"
                     >
                       {busy === "generate-cost_estimate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.cost_estimate.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
@@ -7685,16 +7680,6 @@ ${serviceCommentLines.join("\n")}`
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
                 {renderCommercialDocumentError("cost_estimate")}
-                {!commercialDocumentErrors.cost_estimate
-                  && selectedCostEstimateWorkTypes.length === 0
-                  && lines.some(validLine) ? (
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      {tx(
-                        "Расчёт будет создан на основании позиций заказа, поскольку для выбранных специализаций нет активных видов работ.",
-                        "Die Kalkulation wird anhand der Auftragspositionen erstellt, da für die ausgewählten Fachrichtungen keine aktiven Leistungsarten vorhanden sind.",
-                      )}
-                    </p>
-                  ) : null}
                 </Section>
               </div>
             </section>
@@ -7778,7 +7763,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </main>
         {draft ? (
-          <footer className="shrink-0 border-t border-border bg-background px-4 py-3 sm:px-5">
+          <footer className="shrink-0 border-t border-border bg-muted/50 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             {error || autosaveStatus === "error" ? (
               <div role="alert" className="mb-3 flex max-h-28 items-start gap-2 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />

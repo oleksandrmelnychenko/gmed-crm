@@ -559,6 +559,7 @@ function useDataTableContent<T>({
                   aria-rowindex={vRow.index + 2}
                   aria-selected={isActive}
                   data-state={isSelected ? "selected" : undefined}
+                  data-row-hover={disableRowHover ? "disabled" : undefined}
                   onClick={() => onRowClick?.(row)}
                   onDoubleClick={() => onRowDoubleClick?.(row)}
                   onKeyDown={(event) => {

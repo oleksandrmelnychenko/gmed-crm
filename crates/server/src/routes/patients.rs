@@ -48,6 +48,10 @@ pub fn router() -> Router<AppState> {
             get(list_patient_lab_results).post(create_patient_lab_result),
         )
         .route(
+            "/patients/{patient_id}/lab-results.pdf",
+            get(get_patient_lab_results_pdf),
+        )
+        .route(
             "/patients/{patient_id}/lab-results/{lab_result_id}",
             patch(update_patient_lab_result).delete(delete_patient_lab_result),
         )
@@ -14413,7 +14417,7 @@ async fn save_patient_impfstatus(
 }
 
 // ---------------------------------------------------------------------------
-// Arztbrief: a consistent, read-only snapshot of saved clinical records.
+// Medical summary: a consistent, read-only snapshot of saved clinical records.
 // ---------------------------------------------------------------------------
 
 async fn load_clinical_report_data(
@@ -14507,10 +14511,6 @@ async fn load_clinical_report_data(
              FROM patient_vital_measurements v
              LEFT JOIN documents d ON d.id = v.source_document_id
              WHERE v.patient_id = $1 ORDER BY v.measured_at DESC, v.created_at DESC, v.id LIMIT 1"),
-        ("labs", "SELECT to_jsonb(l) || jsonb_build_object('source_document_name', COALESCE(d.original_filename, d.auto_name))
-             FROM patient_lab_results l
-             LEFT JOIN documents d ON d.id = l.source_document_id
-             WHERE l.patient_id = $1 AND l.deleted_at IS NULL ORDER BY l.measured_at DESC, l.created_at, l.id"),
     ] {
         let rows = sqlx::query_scalar::<_, Value>(query).bind(patient_uuid).fetch_all(&mut *transaction).await?;
         data.insert(key.into(), json!(rows));
@@ -14556,6 +14556,40 @@ async fn get_patient_clinical_pdf(
         "ru" => true,
         "de" => false,
         _ => return err(StatusCode::BAD_REQUEST, "Unsupported PDF language"),
+    };
+    const CLINICAL_PDF_SECTIONS: [&str; 11] = [
+        "warnings",
+        "diagnoses",
+        "procedures",
+        "anamnesis",
+        "examinations",
+        "follow_up",
+        "assessment",
+        "recommendations",
+        "medications",
+        "vitals",
+        "vaccination",
+    ];
+    let included_sections = match query.sections.as_deref() {
+        None => None,
+        Some(raw) => {
+            let sections = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|section| !section.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let unique = sections.iter().collect::<HashSet<_>>();
+            if sections.is_empty()
+                || unique.len() != sections.len()
+                || sections
+                    .iter()
+                    .any(|section| !CLINICAL_PDF_SECTIONS.contains(&section.as_str()))
+            {
+                return err(StatusCode::BAD_REQUEST, "Unsupported clinical PDF section");
+            }
+            Some(sections)
+        }
     };
     let now = chrono::Utc::now().with_timezone(&chrono_tz::Europe::Berlin);
     let data = match load_clinical_report_data(
@@ -14606,9 +14640,9 @@ async fn get_patient_clinical_pdf(
         .collect();
     let slug = slug.trim_matches('-');
     let filename = if slug.is_empty() {
-        "arztbrief.pdf".into()
+        "medizinische-zusammenfassung.pdf".into()
     } else {
-        format!("arztbrief-{slug}.pdf")
+        format!("medizinische-zusammenfassung-{slug}.pdf")
     };
     let brand = match load_patient_label_agency_settings(&state).await {
         Ok(agency) => patient_pdf_brand(agency),
@@ -14620,6 +14654,7 @@ async fn get_patient_clinical_pdf(
         printed_by,
         printed_on: now.format("%d.%m.%Y %H:%M").to_string(),
         brand,
+        included_sections,
     };
     let bytes = match crate::services::patient_clinical_pdf::build_clinical_report_pdf(&context) {
         Ok(bytes) => bytes,
@@ -14665,6 +14700,256 @@ async fn get_patient_clinical_pdf(
 #[derive(Deserialize, Default)]
 struct PatientPdfQuery {
     lang: Option<String>,
+    sections: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Laboratory results: a branded table kept separate from the medical summary.
+// ---------------------------------------------------------------------------
+
+async fn get_patient_lab_results_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientPdfQuery>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+        return response;
+    }
+    match has_patient_access(&state, &auth, patient_uuid).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let russian = match query.lang.as_deref().unwrap_or("de") {
+        "ru" => true,
+        "de" => false,
+        _ => return err(StatusCode::BAD_REQUEST, "Unsupported document language"),
+    };
+    let tx = |ru, de| if russian { ru } else { de };
+    let fail = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build laboratory results PDF",
+        )
+    };
+
+    let patient = match sqlx::query(
+        "SELECT first_name, last_name, birth_date, patient_id FROM patients WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, "load patient for laboratory results PDF");
+            return fail();
+        }
+    };
+    let rows = match sqlx::query(
+        r#"SELECT lr.measured_at, lr.measured_at_precision, lr.panel, lr.laboratory_name,
+                  lr.analyte_name, lr.result_text, lr.numeric_result, lr.comparator, lr.unit,
+                  lr.reference_text, lr.reference_low, lr.reference_high,
+                  lr.interpretation_note, lr.abnormal_flag, lr.source_page,
+                  COALESCE(d.original_filename, d.auto_name) AS source_document_name
+           FROM patient_lab_results lr
+           LEFT JOIN documents d ON d.id = lr.source_document_id
+           WHERE lr.patient_id = $1 AND lr.deleted_at IS NULL
+           ORDER BY lr.measured_at DESC, lr.panel NULLS LAST, lr.created_at, lr.analyte_name"#,
+    )
+    .bind(patient_uuid)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, patient_id = %patient_uuid, "load laboratory results PDF rows");
+            return fail();
+        }
+    };
+    if rows.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "lab_results_empty");
+    }
+
+    let issuer = sqlx::query_scalar::<_, Option<String>>("SELECT name FROM users WHERE id = $1")
+        .bind(auth.user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "GMED".into());
+    let first_name = patient
+        .try_get::<Option<String>, _>("first_name")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let last_name = patient
+        .try_get::<Option<String>, _>("last_name")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let patient_identifier = patient
+        .try_get::<Option<String>, _>("patient_id")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let birth_date = patient
+        .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+        .ok()
+        .flatten()
+        .map(|date| date.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "-".into());
+
+    let text = |row: &PgRow, key: &str| {
+        row.try_get::<Option<String>, _>(key)
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    };
+    let number = |row: &PgRow, key: &str| {
+        row.try_get::<Option<f64>, _>(key)
+            .ok()
+            .flatten()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    };
+    let entries = rows
+        .iter()
+        .map(|row| {
+            let measured_at = row.get::<chrono::DateTime<chrono::Utc>, _>("measured_at");
+            let measured_at = measured_at.with_timezone(&chrono_tz::Europe::Berlin);
+            let measured_at_precision = text(row, "measured_at_precision");
+            let measured = if measured_at_precision == "date" {
+                measured_at.format("%d.%m.%Y").to_string()
+            } else {
+                measured_at.format("%d.%m.%Y %H:%M").to_string()
+            };
+            let result_text = text(row, "result_text");
+            let result = if result_text.trim().is_empty() {
+                format!(
+                    "{} {}",
+                    text(row, "comparator"),
+                    number(row, "numeric_result")
+                )
+                .trim()
+                .to_owned()
+            } else {
+                result_text
+            };
+            let reference_text = text(row, "reference_text");
+            let reference = if reference_text.trim().is_empty() {
+                [number(row, "reference_low"), number(row, "reference_high")]
+                    .into_iter()
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" - ")
+            } else {
+                reference_text
+            };
+            let flag = text(row, "abnormal_flag");
+            let localized_flag = match flag.as_str() {
+                "normal" => tx("Норма", "Normal"),
+                "low" => tx("Ниже нормы", "Erniedrigt"),
+                "high" => tx("Выше нормы", "Erhöht"),
+                "abnormal" => tx("Отклонение", "Auffällig"),
+                _ => tx("Не определено", "Nicht bestimmt"),
+            };
+            let mut notes = Vec::new();
+            let interpretation = text(row, "interpretation_note");
+            if !interpretation.trim().is_empty() {
+                notes.push(format!(
+                    "{}: {interpretation}",
+                    tx("Комментарий", "Kommentar")
+                ));
+            }
+            let source = text(row, "source_document_name");
+            if !source.trim().is_empty() {
+                notes.push(format!("{}: {source}", tx("Документ", "Dokument")));
+            }
+            if let Some(page) = row.try_get::<Option<i32>, _>("source_page").ok().flatten() {
+                notes.push(format!("{}: {page}", tx("Страница", "Seite")));
+            }
+            crate::services::patient_lab_results_pdf::LabResultEntry {
+                cells: [
+                    measured,
+                    text(row, "panel"),
+                    text(row, "laboratory_name"),
+                    text(row, "analyte_name"),
+                    result,
+                    text(row, "unit"),
+                    reference,
+                    localized_flag.into(),
+                    notes.join("\n"),
+                ],
+                abnormal: !matches!(flag.as_str(), "normal" | "unknown" | ""),
+            }
+        })
+        .collect();
+
+    let brand = match load_patient_label_agency_settings(&state).await {
+        Ok(agency) => patient_pdf_brand(agency),
+        Err(response) => return response,
+    };
+    let now = chrono::Utc::now().with_timezone(&chrono_tz::Europe::Berlin);
+    let context = crate::services::patient_lab_results_pdf::LabResultsContext {
+        russian,
+        patient_name: format!("{first_name} {last_name}").trim().into(),
+        patient_identifier: patient_identifier.clone(),
+        birth_date,
+        printed_by: issuer,
+        printed_on: now.format("%d.%m.%Y %H:%M").to_string(),
+        entries,
+        brand,
+    };
+    let bytes = match crate::services::patient_lab_results_pdf::build_lab_results_pdf(&context) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::error!(error, patient_id = %patient_uuid, "render laboratory results PDF");
+            return fail();
+        }
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        "export_patient_lab_results_pdf",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({ "bytes": bytes.len(), "result_count": rows.len(), "language": if russian { "ru" } else { "de" } }),
+    ));
+    let slug = patient_identifier
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let slug = slug.trim_matches('-');
+    let filename = if slug.is_empty() {
+        "laborergebnisse.pdf".to_string()
+    } else {
+        format!("laborergebnisse-{slug}.pdf")
+    };
+    (
+        [
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, no-store".into(),
+            ),
+            (axum::http::header::CONTENT_TYPE, "application/pdf".into()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 async fn get_patient_medikationsplan_pdf(
@@ -14717,15 +15002,18 @@ async fn get_patient_medikationsplan_pdf(
     };
 
     let med_rows = match sqlx::query(
-        r#"SELECT category, wirkstoff, handelsname, staerke, form,
-                  dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund,
-                  einnahmeform, einnahme_von, einnahme_bis, sonstige_vermerke
-           FROM patient_medications
-           WHERE patient_id = $1 AND superseded_at IS NULL
-             AND status = 'aktiv' AND NOT COALESCE(on_hold, false)
-             AND (NULLIF(BTRIM(einnahme_von), '') IS NULL OR BTRIM(einnahme_von) <= $2)
-             AND (NULLIF(BTRIM(einnahme_bis), '') IS NULL OR BTRIM(einnahme_bis) >= $2)
-           ORDER BY sort_order, created_at"#,
+        r#"SELECT m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
+                  m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts,
+                  m.einheit, m.hinweis, m.grund, m.einnahmeform, m.einnahme_von,
+                  m.einnahme_bis, m.sonstige_vermerke,
+                  d.name AS prescribed_by_name, d.title AS prescribed_by_title
+           FROM patient_medications m
+           LEFT JOIN provider_doctors d ON d.id = m.doctor_id
+           WHERE m.patient_id = $1 AND m.superseded_at IS NULL
+             AND m.status = 'aktiv' AND NOT COALESCE(m.on_hold, false)
+             AND (NULLIF(BTRIM(m.einnahme_von), '') IS NULL OR BTRIM(m.einnahme_von) <= $2)
+             AND (NULLIF(BTRIM(m.einnahme_bis), '') IS NULL OR BTRIM(m.einnahme_bis) >= $2)
+           ORDER BY m.sort_order, m.created_at"#,
     )
     .bind(patient_uuid)
     .bind(today.format("%Y-%m-%d").to_string())
@@ -14789,6 +15077,17 @@ async fn get_patient_medikationsplan_pdf(
                 if !text.trim().is_empty() {
                     notes.push(text);
                 }
+            }
+            let prescribed_by = [value("prescribed_by_title"), value("prescribed_by_name")]
+                .into_iter()
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if !prescribed_by.is_empty() {
+                notes.push(format!(
+                    "{}: {prescribed_by}",
+                    tx("Назначивший врач", "Verordnender Arzt")
+                ));
             }
             for (key, label) in [
                 ("einnahme_von", tx("Приём с", "Einnahme ab")),

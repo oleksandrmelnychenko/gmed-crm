@@ -107,6 +107,7 @@ import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
 import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
 import { MedicationPlanPdfAction } from "./medication-plan-pdf-action";
+import { LabResultsPdfAction } from "./lab-results-pdf-action";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
   collectAttachedClinicalSpecializations,
@@ -4178,10 +4179,13 @@ export function PatientClinicalTab({
               <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
               <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
             </div>
-            <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
-              {filteredLabResults.length}
-              {labPeriodIsApplied ? ` / ${labResults.length}` : ""} {tx("результатов", "Ergebnisse")}
-            </Badge>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <LabResultsPdfAction patientId={patientId} disabled={labResults.length === 0} />
+              <Badge variant="outline" className="rounded-full border-cyan-200 bg-cyan-50 text-cyan-800">
+                {filteredLabResults.length}
+                {labPeriodIsApplied ? ` / ${labResults.length}` : ""} {tx("результатов", "Ergebnisse")}
+              </Badge>
+            </div>
           </header>
 
           <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto]">

@@ -22,11 +22,19 @@ pub struct ClinicalReportContext {
     pub printed_on: String,
     pub printed_by: String,
     pub brand: PatientPdfBrand,
+    /// Stable section keys selected in the download dialog. `None` means all sections.
+    pub included_sections: Option<Vec<String>>,
 }
 
 impl ClinicalReportContext {
     fn tx<'a>(&self, ru: &'a str, de: &'a str) -> &'a str {
         if self.russian { ru } else { de }
+    }
+
+    fn includes(&self, key: &str) -> bool {
+        self.included_sections
+            .as_ref()
+            .is_none_or(|sections| sections.iter().any(|section| section == key))
     }
 }
 
@@ -35,6 +43,7 @@ struct Entry {
     title: String,
     lines: Vec<String>,
     source: Vec<String>,
+    indent: f32,
 }
 struct Section {
     title: String,
@@ -196,11 +205,12 @@ fn source(context: &ClinicalReportContext, row: &Value) -> Vec<String> {
 fn section(
     context: &ClinicalReportContext,
     sections: &mut Vec<Section>,
+    key: &str,
     ru: &str,
     de: &str,
     entries: Vec<Entry>,
 ) {
-    if !entries.is_empty() {
+    if context.includes(key) && !entries.is_empty() {
         sections.push(Section {
             title: context.tx(ru, de).to_owned(),
             entries,
@@ -265,6 +275,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "warnings",
         "Аллергии и CAVE",
         "Allergien und CAVE",
         warnings,
@@ -274,17 +285,18 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
-        "Диагнозы и связанные процедуры",
-        "Diagnosen und zugehörige Prozeduren",
+        "diagnoses",
+        "Диагнозы",
+        "Diagnosen",
         diagnoses
             .iter()
+            .filter(|row| value(row, "kind") != "prozedur")
             .map(|row| {
                 let mut lines = fields(
                     context,
                     row,
                     &[
                         ("icd_code", "ICD", "ICD"),
-                        ("ops_code", "OPS", "OPS"),
                         ("grade", "Степень / стадия", "Grad / Stadium"),
                         ("note", "Примечание", "Hinweis"),
                         ("red_flags", "Важные признаки", "Warnhinweise"),
@@ -292,10 +304,11 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 );
                 for (key, ru, de) in [
                     ("certainty", "Достоверность", "Diagnosesicherheit"),
-                    ("status", "Статус", "Status"),
-                    ("chronifizierung", "Течение", "Verlaufstyp"),
                     ("laterality", "Сторона", "Seite"),
                 ] {
+                    if key == "certainty" && value(row, key) == "zustand_nach" {
+                        continue;
+                    }
                     field(
                         &mut lines,
                         context.tx(ru, de),
@@ -307,28 +320,97 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     context.tx("Дата установления", "Diagnosedatum"),
                     date(&value(row, "diagnosed_on")),
                 );
-                let parent = value(row, "parent_id");
-                if !parent.is_empty()
-                    && let Some(parent_row) =
-                        diagnoses.iter().find(|item| value(item, "id") == parent)
-                {
-                    field(
-                        &mut lines,
-                        context.tx("Связано с", "Zugeordnet zu"),
-                        value(parent_row, "label"),
-                    );
-                }
                 Entry {
                     title: format!(
-                        "{}: {}",
-                        code(context, &value(row, "kind")),
+                        "{}{}",
+                        if value(row, "certainty") == "zustand_nach" {
+                            "Z.n. "
+                        } else {
+                            ""
+                        },
                         value(row, "label")
                     ),
                     lines,
                     source: source(context, row),
+                    indent: if value(row, "kind") == "secondary" {
+                        6.0
+                    } else {
+                        0.0
+                    },
                 }
             })
             .collect(),
+    );
+
+    let mut procedures = diagnoses
+        .iter()
+        .filter(|row| value(row, "kind") == "prozedur")
+        .map(|row| {
+            let mut lines = fields(
+                context,
+                row,
+                &[
+                    ("ops_code", "OPS", "OPS"),
+                    ("note", "Примечание", "Hinweis"),
+                    ("red_flags", "Важные признаки", "Warnhinweise"),
+                ],
+            );
+            field(
+                &mut lines,
+                context.tx("Статус", "Status"),
+                code(context, &value(row, "status")),
+            );
+            field(
+                &mut lines,
+                context.tx("Дата", "Datum"),
+                date(&value(row, "diagnosed_on")),
+            );
+            let parent = value(row, "parent_id");
+            if !parent.is_empty()
+                && let Some(parent_row) = diagnoses.iter().find(|item| value(item, "id") == parent)
+            {
+                field(
+                    &mut lines,
+                    context.tx("Связано с диагнозом", "Zugeordnet zu Diagnose"),
+                    value(parent_row, "label"),
+                );
+            }
+            Entry {
+                title: value(row, "label"),
+                lines,
+                source: source(context, row),
+                indent: 0.0,
+            }
+        })
+        .collect::<Vec<_>>();
+    procedures.extend(records(data, "procedures").iter().map(|row| {
+        let mut lines = fields(
+            context,
+            row,
+            &[
+                ("ops_code", "OPS", "OPS"),
+                ("note", "Примечание", "Hinweis"),
+            ],
+        );
+        field(
+            &mut lines,
+            context.tx("Дата", "Datum"),
+            date(&value(row, "performed_on")),
+        );
+        Entry {
+            title: value(row, "label"),
+            lines,
+            source: source(context, row),
+            indent: 0.0,
+        }
+    }));
+    section(
+        context,
+        &mut sections,
+        "procedures",
+        "Процедуры",
+        "Prozeduren",
+        procedures,
     );
 
     let narrative = &data["narrative"];
@@ -363,6 +445,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 title: context.tx(ru, de).into(),
                 lines: vec![text],
                 source: source(context, narrative),
+                indent: 0.0,
             });
         }
     }
@@ -373,12 +456,14 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 title: specialization_name(context, row),
                 lines: vec![text],
                 source: source(context, narrative),
+                indent: 0.0,
             });
         }
     }
     section(
         context,
         &mut sections,
+        "anamnesis",
         "Анамнез и осмотр",
         "Anamnese und Untersuchung",
         history,
@@ -387,10 +472,12 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "examinations",
         "Обследования и результаты",
         "Untersuchungen und Befunde",
         records(data, "examinations")
             .iter()
+            .filter(|row| value(row, "status") == "final")
             .map(|row| {
                 let mut lines = fields(
                     context,
@@ -406,45 +493,11 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     context.tx("Дата", "Datum"),
                     date(&value(row, "performed_on")),
                 );
-                field(
-                    &mut lines,
-                    context.tx("Статус", "Status"),
-                    code(context, &value(row, "status")),
-                );
                 Entry {
                     title: value(row, "title"),
                     lines,
                     source: source(context, row),
-                }
-            })
-            .collect(),
-    );
-
-    section(
-        context,
-        &mut sections,
-        "Проведённое лечение",
-        "Durchgeführte Behandlung",
-        records(data, "procedures")
-            .iter()
-            .map(|row| {
-                let mut lines = fields(
-                    context,
-                    row,
-                    &[
-                        ("ops_code", "OPS", "OPS"),
-                        ("note", "Примечание", "Hinweis"),
-                    ],
-                );
-                field(
-                    &mut lines,
-                    context.tx("Дата", "Datum"),
-                    date(&value(row, "performed_on")),
-                );
-                Entry {
-                    title: value(row, "label"),
-                    lines,
-                    source: source(context, row),
+                    indent: 0.0,
                 }
             })
             .collect(),
@@ -456,6 +509,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
             title: date(&value(row, "occurred_on")),
             lines: vec![clean_note(&value(row, "note"))],
             source: source(context, row),
+            indent: 0.0,
         })
         .collect();
     let legacy_follow_up = clean_note(&value(narrative, "verlauf"));
@@ -473,6 +527,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "follow_up",
         "Динамика и наблюдение",
         "Verlauf",
         follow_up,
@@ -494,6 +549,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 title: specialization_name(context, row),
                 lines: vec![text],
                 source: source(context, narrative),
+                indent: 0.0,
             });
         }
     }
@@ -513,6 +569,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "assessment",
         "Оценка и заключение врача",
         "Ärztliche Beurteilung",
         assessment,
@@ -521,10 +578,14 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "recommendations",
         "Рекомендации",
         "Empfehlungen",
         records(data, "recommendations")
             .iter()
+            .filter(|row| {
+                value(row, "lifecycle_status") != "erfolg" && value(row, "status") != "completed"
+            })
             .map(|row| {
                 let mut lines = fields(
                     context,
@@ -561,6 +622,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     title: value(row, "title"),
                     lines,
                     source: source(context, row),
+                    indent: 0.0,
                 }
             })
             .collect(),
@@ -621,6 +683,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 },
                 lines,
                 source: source(context, row),
+                indent: 0.0,
             }
         })
         .collect::<Vec<_>>();
@@ -640,6 +703,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "medications",
         "Актуальная медикация",
         "Aktuelle Medikation",
         medications,
@@ -648,6 +712,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
     section(
         context,
         &mut sections,
+        "vitals",
         "Последние витальные показатели",
         "Letzte Vitalparameter",
         records(data, "vitals")
@@ -683,77 +748,17 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     ],
                 ),
                 source: source(context, row),
+                indent: 0.0,
             })
             .collect(),
     );
 
-    section(
-        context,
-        &mut sections,
-        "Лабораторные результаты",
-        "Laborbefunde",
-        records(data, "labs")
-            .iter()
-            .map(|row| {
-                let mut lines = fields(
-                    context,
-                    row,
-                    &[
-                        ("result_text", "Результат", "Ergebnis"),
-                        ("unit", "Единица", "Einheit"),
-                        ("reference_text", "Референсный интервал", "Referenzbereich"),
-                        ("panel", "Панель", "Panel"),
-                        ("laboratory_name", "Лаборатория", "Labor"),
-                        ("interpretation_note", "Комментарий", "Kommentar"),
-                    ],
-                );
-                if value(row, "result_text").is_empty() {
-                    field(
-                        &mut lines,
-                        context.tx("Результат", "Ergebnis"),
-                        format!(
-                            "{} {}",
-                            value(row, "comparator"),
-                            value(row, "numeric_result")
-                        )
-                        .trim(),
-                    );
-                }
-                if value(row, "reference_text").is_empty() {
-                    field(
-                        &mut lines,
-                        context.tx("Нижняя граница", "Untere Grenze"),
-                        value(row, "reference_low"),
-                    );
-                    field(
-                        &mut lines,
-                        context.tx("Верхняя граница", "Obere Grenze"),
-                        value(row, "reference_high"),
-                    );
-                }
-                field(
-                    &mut lines,
-                    context.tx("Дата", "Datum"),
-                    recorded_time(row, "measured_at", "measured_at_precision"),
-                );
-                field(
-                    &mut lines,
-                    context.tx("Отметка лаборатории", "Laborkennzeichnung"),
-                    code(context, &value(row, "abnormal_flag")),
-                );
-                Entry {
-                    title: value(row, "analyte_name"),
-                    lines,
-                    source: source(context, row),
-                }
-            })
-            .collect(),
-    );
     let vaccination = value(&data["impfstatus"], "status_text");
     if !vaccination.is_empty() {
         section(
             context,
             &mut sections,
+            "vaccination",
             "Прививочный статус",
             "Impfstatus",
             vec![Entry {
@@ -906,7 +911,9 @@ impl Layout<'_> {
                 false,
             );
         }
-        let title = self.context.tx("Врачебное заключение", "Arztbrief");
+        let title = self
+            .context
+            .tx("Медицинская сводка", "Medizinische Zusammenfassung");
         self.text(
             (210.0 - self.width(title, 17.0, true)) / 2.0,
             258.5,
@@ -989,16 +996,17 @@ impl Layout<'_> {
         self.text(LEFT + 3.0, self.y - 3.0, title, 10.5, true, false);
         self.y -= 12.0;
     }
-    fn paragraph(
+    fn indented_paragraph(
         &mut self,
         text: &str,
         size: f32,
         bold: bool,
         muted: bool,
+        indent: f32,
     ) -> Result<(), &'static str> {
-        for line in self.wrap(text, size, WIDTH - 6.0, bold) {
+        for line in self.wrap(text, size, WIDTH - 6.0 - indent, bold) {
             self.ensure(5.0)?;
-            self.text(LEFT + 3.0, self.y, &line, size, bold, muted);
+            self.text(LEFT + 3.0 + indent, self.y, &line, size, bold, muted);
             self.y -= if muted { 4.1 } else { 4.8 };
         }
         Ok(())
@@ -1009,16 +1017,19 @@ impl Layout<'_> {
         self.current_section = section.title.clone();
         self.section_heading(&section.title);
         for entry in section.entries {
-            let title_height = self.wrap(&entry.title, 10.5, WIDTH - 6.0, true).len() as f32 * 4.8;
+            let title_height = self
+                .wrap(&entry.title, 10.5, WIDTH - 6.0 - entry.indent, true)
+                .len() as f32
+                * 4.8;
             self.ensure((title_height + 5.0).clamp(14.0, 50.0))?;
             if !entry.title.is_empty() {
-                self.paragraph(&entry.title, 10.5, true, false)?;
+                self.indented_paragraph(&entry.title, 10.5, true, false, entry.indent)?;
             }
             for line in entry.lines {
-                self.paragraph(&line, 10.0, false, false)?;
+                self.indented_paragraph(&line, 10.0, false, false, entry.indent)?;
             }
             for line in entry.source {
-                self.paragraph(&line, 8.3, false, true)?;
+                self.indented_paragraph(&line, 8.3, false, true, entry.indent)?;
             }
             self.y -= 3.0;
         }
@@ -1053,7 +1064,8 @@ impl Layout<'_> {
 }
 
 pub fn build_clinical_report_pdf(context: &ClinicalReportContext) -> Result<Vec<u8>, &'static str> {
-    let mut document = PdfDocument::new(context.tx("Врачебное заключение", "Arztbrief"));
+    let mut document =
+        PdfDocument::new(context.tx("Медицинская сводка", "Medizinische Zusammenfassung"));
     let (regular, bold) = add_unicode_pdf_fonts(&mut document)?;
     let mut layout = Layout {
         context,
@@ -1084,6 +1096,7 @@ mod tests {
             russian,
             printed_on: "06.09.2026 15:00".into(),
             printed_by: "GMED DEMO".into(),
+            included_sections: None,
             brand: PatientPdfBrand {
                 name: "GMED - Agentur für Patientenbetreuung".into(),
                 responsible_person: "Heorhii Hudiiev".into(),
@@ -1098,15 +1111,21 @@ mod tests {
                 "diagnoses":[
                     {"id":"main-1", "kind":"main", "label":"Klinischer Befund - DEMO", "certainty":"verdacht", "status":"active", "diagnosed_on":"2026-09-01", "note":"Опис збережений лікарем.\nДругий абзац.", "source_document_name":"Befund-DEMO.pdf", "doctor_name":"Erika Beispiel", "doctor_title":"Dr. med."},
                     {"id":"child-1", "parent_id":"main-1", "kind":"prozedur", "label":"Kontrolluntersuchung - DEMO", "ops_code":"DEMO-OPS", "status":"completed"},
-                    {"id":"unknown-1", "kind":"custom", "label":"Zusätzlicher Eintrag", "status":"resolved"}
+                    {"id":"secondary-1", "parent_id":"main-1", "kind":"secondary", "label":"Zusätzlicher Eintrag", "certainty":"zustand_nach", "status":"resolved", "chronifizierung":"chronisch"}
                 ],
                 "narrative":{"anamnese_aktuelle":"Gespeicherte Angaben zum aktuellen Anlass.\nЗбережений опис скарг.", "specializations":[{"name_ru":"Кардиология", "name_de":"Kardiologie", "narrative_text":"Fachspezifische Anamnese - DEMO", "assessment_text":"Fachspezifische Beurteilung - DEMO"}], "source_document_name":"Anamnese-DEMO.pdf"},
-                "examinations":[{"title":"Befundbesprechung - DEMO", "performed_on":"2026-09", "status":"pending", "result":"Ergebnistext aus der Akte."}],
+                "examinations":[
+                    {"title":"Geplante Untersuchung - NICHT EXPORTIEREN", "performed_on":"2026-09", "status":"pending", "result":"Geplanter Inhalt."},
+                    {"title":"Abgeschlossene Untersuchung - DEMO", "performed_on":"2026-09-02", "status":"final", "result":"Ergebnistext aus der Akte."}
+                ],
                 "procedures":[{"label":"Dokumentierte Behandlung - DEMO", "performed_on":"2026", "note":"Vollständige gespeicherte Therapienotiz."}],
-                "recommendations":[{"title":"Gespeicherte Empfehlung - DEMO", "description":"Beschreibung aus der Akte.", "lifecycle_status":"erfolg", "status":"completed", "note_intern":"PRIVATE_INTERNAL_NOTE_NEVER_EXPORT"}],
+                "recommendations":[
+                    {"title":"Erledigte Empfehlung - NICHT EXPORTIEREN", "description":"Bereits umgesetzt.", "lifecycle_status":"erfolg", "status":"completed", "note_intern":"PRIVATE_INTERNAL_NOTE_NEVER_EXPORT"},
+                    {"title":"Offene Empfehlung - DEMO", "description":"Noch durchzuführen.", "lifecycle_status":"aktiv", "status":"active"}
+                ],
                 "medications":[{"category":"besondere", "handelsname":"Präparat - DEMO", "wirkstoff":"Wirkstoff - DEMO", "staerke":"5 mg", "dose_morgens":"1/2", "einheit":"Tablette", "hinweis":"Nur die gespeicherte Einnahmeanweisung.", "grund":"Dokumentierter Grund"}],
                 "vitals":[{"measured_at":"2026-09-05T22:00:00Z", "measured_at_precision":"date", "heart_rate":72}],
-                "labs":[{"analyte_name":"Laborwert - DEMO", "result_text":"<0,5", "unit":"mg/l", "reference_text":"0-5", "abnormal_flag":"normal", "measured_at":"2026-09-01T10:30:00Z", "source_document_name":"Labor-DEMO.pdf"}],
+                "labs":[{"analyte_name":"Laborwert - NICHT IN DER ZUSAMMENFASSUNG", "result_text":"<0,5", "unit":"mg/l", "reference_text":"0-5", "abnormal_flag":"normal", "measured_at":"2026-09-01T10:30:00Z", "source_document_name":"Labor-DEMO.pdf"}],
                 "impfstatus":{"status_text":"Impfstatus gemäß Akte - DEMO"}
             }),
         }
@@ -1125,18 +1144,22 @@ mod tests {
                 "Другий абзац.",
                 "DEMO-OPS",
                 "Zusätzlicher Eintrag",
+                "Z.n. Zusätzlicher Eintrag",
                 "Fachspezifische Anamnese - DEMO",
                 "Fachspezifische Beurteilung - DEMO",
                 "Vollständige gespeicherte Therapienotiz.",
                 "Befund-DEMO.pdf",
                 "Erika Beispiel",
                 "Nur die gespeicherte Einnahmeanweisung.",
-                "<0,5",
+                "Offene Empfehlung - DEMO",
+                "Abgeschlossene Untersuchung - DEMO",
                 "Impfstatus gemäß Akte - DEMO",
             ] {
                 assert!(text.contains(expected), "Missing {expected}");
             }
-            assert!(text.contains(context.tx("Врачебное заключение", "Arztbrief")));
+            assert!(
+                text.contains(context.tx("Медицинская сводка", "Medizinische Zusammenfassung"))
+            );
             assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
             assert!(text.contains("contact@gmed-health.com"));
             assert!(
@@ -1145,6 +1168,13 @@ mod tests {
             assert!(text.contains(context.tx("Подозрение", "Verdacht")));
             assert!(text.contains(context.tx("День: -", "Mittags: -")));
             assert!(!text.contains("PRIVATE_INTERNAL_NOTE_NEVER_EXPORT"));
+            assert!(!text.contains("Erledigte Empfehlung - NICHT EXPORTIEREN"));
+            assert!(!text.contains(context.tx("Основной диагноз:", "Hauptdiagnose:")));
+            assert!(!text.contains(context.tx("Сопутствующий диагноз:", "Nebendiagnose:")));
+            assert!(!text.contains(context.tx("Состояние после", "Zustand nach")));
+            assert!(!text.contains(context.tx("Течение:", "Verlaufstyp:")));
+            assert!(!text.contains("Geplante Untersuchung - NICHT EXPORTIEREN"));
+            assert!(!text.contains("Laborwert - NICHT IN DER ZUSAMMENFASSUNG"));
             assert!(!text.contains("1/2-0-0-0"));
             if let Ok(dir) = std::env::var("GMED_CLINICAL_PDF_QA_DIR") {
                 std::fs::create_dir_all(&dir).unwrap();
@@ -1210,10 +1240,26 @@ mod tests {
         }
         assert_eq!(text.chars().filter(|ch| *ch == 'Ж').count(), 700);
         assert!(text.contains("END_OF_LONG_ASSESSMENT"));
-        assert!(text.contains("Laborwert - DEMO"));
+        assert!(!text.contains("Laborwert - NICHT IN DER ZUSAMMENFASSUNG"));
         if let Ok(path) = std::env::var("GMED_CLINICAL_PDF_STRESS_PATH") {
             std::fs::write(path, bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn clinical_report_exports_only_selected_sections() {
+        let mut context = example(false);
+        context.included_sections = Some(vec!["diagnoses".into(), "procedures".into()]);
+        let bytes = build_clinical_report_pdf(&context).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(text.contains("Diagnosen"));
+        assert!(text.contains("Klinischer Befund - DEMO"));
+        assert!(text.contains("Prozeduren"));
+        assert!(text.contains("Kontrolluntersuchung - DEMO"));
+        assert!(text.contains("Dokumentierte Behandlung - DEMO"));
+        assert!(!text.contains("Anamnese und Untersuchung"));
+        assert!(!text.contains("Abgeschlossene Untersuchung - DEMO"));
+        assert!(!text.contains("Aktuelle Medikation"));
     }
 
     #[test]

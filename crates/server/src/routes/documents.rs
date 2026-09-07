@@ -17141,16 +17141,6 @@ fn build_adult_privacy_consents_pdf(
                 0.8,
             );
         }
-    } else {
-        layout.text_block(
-            consent_blank_long(),
-            10.5,
-            false,
-            12.0,
-            TreatmentPlanPdfColor::Body,
-            0.0,
-            0.8,
-        );
     }
     adult_legal_checkbox(
         &mut layout,
@@ -24186,6 +24176,41 @@ mod tests {
         assert!(!privacy_information_text.contains("Heorhii Hudiiev, geb. am 12.12.1994"));
         assert!(!privacy_information_text.contains("Anna Beispiel"));
         assert!(!privacy_information_text.contains('?'));
+    }
+
+    #[test]
+    fn adult_privacy_consent_omits_recipient_placeholder_when_no_recipients_exist() {
+        let party = legal_test_party("Germany");
+        let agency = legal_test_agency();
+        let bindings = DocumentBindingOverrides {
+            party_sign_place: Some("Berlin".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 9, 4),
+            extra_release_recipients: None,
+            ..Default::default()
+        };
+
+        let bytes = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20260904-NO-RECIPIENTS",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&bytes);
+
+        assert!(text.contains(
+            "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:"
+        ));
+        assert!(!text.contains("______________________________"));
+
+        if let Ok(dir) = std::env::var("GMED_SAMPLE_PDF_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                std::path::Path::new(&dir).join("gmed-sample-data-consent-empty-recipients.pdf"),
+                &bytes,
+            )
+            .unwrap();
+        }
     }
 
     #[test]
