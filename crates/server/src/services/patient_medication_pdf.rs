@@ -603,7 +603,12 @@ mod tests {
                     ctx.tx("Сформировал:", "Erstellt von:"),
                     ctx.tx("Сводная информация", "Zusammenstellung aus"),
                 ] {
-                    assert_eq!(page.contains(label), index == 0, "page {}: {label}", index + 1);
+                    assert_eq!(
+                        page.contains(label),
+                        index == 0,
+                        "page {}: {label}",
+                        index + 1
+                    );
                 }
                 // Table labels, footer and numbering still belong on every page.
                 assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));

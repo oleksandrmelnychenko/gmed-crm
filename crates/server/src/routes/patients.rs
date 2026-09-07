@@ -14866,7 +14866,10 @@ async fn get_patient_lab_results_pdf(
             };
             crate::services::patient_lab_results_pdf::LabResultEntry {
                 measured_date: measured_at.date_naive(),
-                source_document_id: row.try_get::<Option<Uuid>, _>("source_document_id").ok().flatten(),
+                source_document_id: row
+                    .try_get::<Option<Uuid>, _>("source_document_id")
+                    .ok()
+                    .flatten(),
                 source_document_name: text(row, "source_document_name"),
                 cells: [
                     measured,

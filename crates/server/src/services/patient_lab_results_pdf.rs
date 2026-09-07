@@ -1065,9 +1065,17 @@ mod tests {
                     "TEST-001",
                     "Олена Приклад",
                     report.tx("Сформировал:", "Erstellt von:"),
-                    report.tx("Сводная таблица сохранённых", "Zusammenstellung der gespeicherten"),
+                    report.tx(
+                        "Сводная таблица сохранённых",
+                        "Zusammenstellung der gespeicherten",
+                    ),
                 ] {
-                    assert_eq!(page.contains(label), index == 0, "page {}: {label}", index + 1);
+                    assert_eq!(
+                        page.contains(label),
+                        index == 0,
+                        "page {}: {label}",
+                        index + 1
+                    );
                 }
                 assert!(page.contains("contact@gmed-health.com"));
                 assert!(page.contains(&format!(

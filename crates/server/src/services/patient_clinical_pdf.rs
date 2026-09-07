@@ -1233,7 +1233,12 @@ mod tests {
                     context.tx("Дата рождения:", "Geburtsdatum:"),
                     context.tx("Сформировал:", "Erstellt von:"),
                 ] {
-                    assert_eq!(page.contains(label), index == 0, "page {}: {label}", index + 1);
+                    assert_eq!(
+                        page.contains(label),
+                        index == 0,
+                        "page {}: {label}",
+                        index + 1
+                    );
                 }
                 assert!(page.contains("contact@gmed-health.com"));
                 assert!(page.contains(&format!(
