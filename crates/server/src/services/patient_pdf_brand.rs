@@ -31,11 +31,15 @@ fn normalized_responsible_person(value: &str) -> &str {
 
 fn normalize_single_line(value: &str) -> String {
     value
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace('\r', "\n")
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(" — ")
 }
 
 fn website_display(value: &str) -> &str {
@@ -217,21 +221,28 @@ mod tests {
 
     #[test]
     fn footer_uses_the_same_company_contact_labels_as_lead_pdfs() {
-        let brand = PatientPdfBrand {
-            name: "GMED".into(),
-            responsible_person: "Heorhii Hudiiev".into(),
-            address: Some("Street 1\nMünchen".into()),
-            phone: Some("+49 1".into()),
-            email: Some("mail@example.test".into()),
-            website: Some("https://gmed-health.com/".into()),
-        };
-        assert_eq!(
-            brand.footer_lines(),
-            [
-                "GMED Heorhii Hudiiev",
-                "Street 1 · München",
-                "Tel.: +49 1 · E-Mail: mail@example.test · Web: gmed-health.com",
-            ]
-        );
+        for address in [
+            "Albert-Schweitzer-Straße 56\n81735 München\nDeutschland",
+            r"Albert-Schweitzer-Straße 56\n81735 München\nDeutschland",
+            r"Albert-Schweitzer-Straße 56\r\n81735 München\r\nDeutschland",
+            " Albert-Schweitzer-Straße 56 \r\n\r\n81735 München\rDeutschland\n",
+        ] {
+            let brand = PatientPdfBrand {
+                name: "GMED".into(),
+                responsible_person: "Heorhii Hudiiev".into(),
+                address: Some(address.into()),
+                phone: Some("+49 1".into()),
+                email: Some("mail@example.test".into()),
+                website: Some("https://gmed-health.com/".into()),
+            };
+            assert_eq!(
+                brand.footer_lines(),
+                [
+                    "GMED Heorhii Hudiiev",
+                    "Albert-Schweitzer-Straße 56 — 81735 München — Deutschland",
+                    "Tel.: +49 1 · E-Mail: mail@example.test · Web: gmed-health.com",
+                ]
+            );
+        }
     }
 }
