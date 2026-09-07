@@ -131,12 +131,20 @@ async fn create_provider_with_payload(app: &axum::Router, bearer: &str, payload:
 
 #[tokio::test]
 async fn concierge_can_create_only_non_medical_providers() {
-    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+    let Some((app, pool, _admin_id, bearer)) = test_context().await else {
         return;
     };
 
     let tag = unique_tag("concierge-non-medical-provider");
-    let concierge_bearer = auth_header_for(admin_id, "concierge");
+    let concierge_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, name, role)
+         VALUES ($1, 'test-hash', 'Provider taxonomy concierge', 'concierge') RETURNING id",
+    )
+    .bind(format!("{tag}@example.test"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
     let chauffeur_leaf_id = taxonomy_leaf_id(&app, &bearer, CHAUFFEUR_LEAF_CODE).await;
     let (status, created) = json_request(
         &app,

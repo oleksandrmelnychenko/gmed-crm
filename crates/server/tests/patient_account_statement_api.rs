@@ -438,7 +438,8 @@ async fn staff_statement_explains_invoices_advances_services_and_external_payers
         "EUR summary: {eur_summary:?}"
     );
     assert_eq!(eur_summary["currency"], "EUR");
-    assert_eq!(eur_summary["revenue_gross"], "199");
+    // The EUR 50 advance is not revenue and must not be counted twice.
+    assert_eq!(eur_summary["revenue_gross"], "149");
     assert_eq!(eur_summary["open_balance"], "89");
     assert_eq!(eur_summary["external_receivable_gross"], "500");
     assert_eq!(eur_summary["reconciliation_required"], true);

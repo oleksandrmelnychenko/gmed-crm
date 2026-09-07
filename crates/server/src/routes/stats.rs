@@ -1932,6 +1932,8 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     i.created_at,
                     i.total_gross,
                     i.paid_amount,
+                    i.credited_amount,
+                    i.prepayment_applied_amount,
                     i.paid_at
                 FROM invoices i
                 WHERE i.status <> 'cancelled'

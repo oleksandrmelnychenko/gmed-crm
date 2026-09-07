@@ -578,6 +578,8 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
             "provider_id": provider_id,
             "external_invoice_number": format!("EXT-DUE-{tag}"),
             "due_date": due_date,
+            "amount_net": 480.0,
+            "amount_vat": 0,
             "amount_gross": 480.0,
             "status": "approved"
         })),

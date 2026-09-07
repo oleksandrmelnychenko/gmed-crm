@@ -318,7 +318,7 @@ async fn operations_workspaces_enforce_the_release_role_matrix() {
     let manager = auth_header_for(manager_id, "patient_manager");
     let patient = auth_header_for(patient_id, "patient");
 
-    for bearer in [&ceo, &billing, &concierge] {
+    for bearer in [&ceo, &billing, &concierge, &manager] {
         let (status, body) = json_request(
             &ctx.app,
             "GET",
@@ -329,7 +329,7 @@ async fn operations_workspaces_enforce_the_release_role_matrix() {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
     }
-    for bearer in [&manager, &patient] {
+    for bearer in [&patient] {
         let (status, body) = json_request(
             &ctx.app,
             "GET",

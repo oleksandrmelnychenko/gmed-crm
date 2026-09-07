@@ -125,7 +125,7 @@ pub async fn has_active_concierge_task_patient_access(
             FROM tasks task
             LEFT JOIN concierge_services service
               ON service.id = task.concierge_service_id
-            WHERE task.task_scope = 'concierge_operational'
+            WHERE task.task_scope IN ('general', 'concierge_operational')
               AND task.assigned_to = $2
               AND COALESCE(task.patient_id, service.patient_id) = $1
               AND task.deleted_at IS NULL
@@ -149,7 +149,7 @@ pub async fn load_active_concierge_task_patient_access_set(
            FROM tasks task
            LEFT JOIN concierge_services service
              ON service.id = task.concierge_service_id
-           WHERE task.task_scope = 'concierge_operational'
+           WHERE task.task_scope IN ('general', 'concierge_operational')
              AND task.assigned_to = $1
              AND COALESCE(task.patient_id, service.patient_id) IS NOT NULL
              AND task.deleted_at IS NULL

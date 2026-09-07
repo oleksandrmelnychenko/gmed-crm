@@ -238,7 +238,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     .await;
     assert_eq!(status, StatusCode::OK, "{statement:?}");
     assert_eq!(statement["summary"]["invoice_due"], "60");
-    assert_eq!(statement["settlement"]["closing_balance"], "60");
+    assert_eq!(statement["summary"]["closing_balance"], "60");
     let (status, summary) = request_json(
         &ctx.app,
         "GET",
@@ -264,7 +264,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     .await;
     assert_eq!(status, StatusCode::OK, "{before_credit:?}");
     assert_eq!(before_credit["summary"]["invoice_due"], "100");
-    assert_eq!(before_credit["settlement"]["closing_balance"], "100");
+    assert_eq!(before_credit["summary"]["closing_balance"], "100");
 
     let (status, reversed) = request_json(
         &ctx.app,
@@ -303,7 +303,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
     .await;
     assert_eq!(status, StatusCode::OK, "{before_payment:?}");
     assert_eq!(before_payment["summary"]["invoice_due"], "100");
-    assert_eq!(before_payment["settlement"]["closing_balance"], "100");
+    assert_eq!(before_payment["summary"]["closing_balance"], "100");
 
     let update_error =
         sqlx::query("UPDATE invoice_credit_note_transactions SET reason = 'mutated' WHERE id = $1")
@@ -707,13 +707,13 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
     .await;
     assert_eq!(status, StatusCode::OK, "{statement:?}");
     assert_eq!(statement["summary"]["invoice_due"], "0");
-    assert_eq!(statement["settlement"]["closing_balance"], "0");
+    assert_eq!(statement["summary"]["closing_balance"], "0");
     assert!(
-        statement["items"]
+        statement["movements"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["movement_type"] == "refund" && item["debit"] == "40")
+            .any(|item| item["kind"] == "refund" && item["debit"] == "40")
     );
 
     let accounting = sqlx::query(

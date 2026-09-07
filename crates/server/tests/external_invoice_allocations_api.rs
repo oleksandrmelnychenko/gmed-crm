@@ -2,6 +2,7 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
@@ -172,7 +173,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
         format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/allocations");
     let (initial_status, initial) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(initial_status, StatusCode::OK, "{initial}");
-    assert_eq!(initial["remaining_receivable_gross"], "100");
+    assert_eq!(
+        initial["remaining_receivable_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(100, 0)
+    );
     assert!(
         initial["candidate_invoices"]
             .as_array()
@@ -243,7 +251,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     let (partial_status, partial) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(partial_status, StatusCode::OK, "{partial}");
     assert_eq!(partial["allocated_receivable_gross"], "60");
-    assert_eq!(partial["remaining_receivable_gross"], "40");
+    assert_eq!(
+        partial["remaining_receivable_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(40, 0)
+    );
 
     let update_path =
         format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update");
@@ -332,7 +347,14 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     let (reopened_status, reopened) = request_json(&ctx.app, "GET", &base, &bearer, None).await;
     assert_eq!(reopened_status, StatusCode::OK, "{reopened}");
     assert_eq!(reopened["allocated_receivable_gross"], "40");
-    assert_eq!(reopened["remaining_receivable_gross"], "60");
+    assert_eq!(
+        reopened["remaining_receivable_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(60, 0)
+    );
 
     let (reopened_statement_status, reopened_statement) =
         request_json(&ctx.app, "GET", &statement_path, &bearer, None).await;

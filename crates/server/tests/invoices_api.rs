@@ -313,7 +313,7 @@ async fn create_quote(app: &axum::Router, bearer: &str, order_id: Uuid) -> Value
     body
 }
 
-async fn create_invoice(
+async fn create_sent_invoice(
     app: &axum::Router,
     bearer: &str,
     quote_id: &str,
@@ -332,7 +332,21 @@ async fn create_invoice(
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
-    body
+    let invoice_id = body["id"].as_str().unwrap();
+    release_invoice(app, bearer, invoice_id).await
+}
+
+async fn release_invoice(app: &axum::Router, bearer: &str, invoice_id: &str) -> Value {
+    let (status, released) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release invoice: {released:?}");
+    released
 }
 
 async fn seed_sent_invoice_direct(
@@ -535,7 +549,7 @@ async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
     // Invoice off the SUB order: the free-text payer flows through, but the
     // head's relation belongs to the father, not the child, so it is not carried.
     let sub_quote = create_quote(&app, &pm_bearer, sub).await;
-    let sub_invoice = create_invoice(
+    let sub_invoice = create_sent_invoice(
         &app,
         &billing_bearer,
         sub_quote["id"].as_str().unwrap(),
@@ -559,7 +573,7 @@ async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
     // Invoice off the HEAD order itself: now the relation belongs to the invoice
     // patient (the father), so it is carried through.
     let head_quote = create_quote(&app, &pm_bearer, head).await;
-    let head_invoice = create_invoice(
+    let head_invoice = create_sent_invoice(
         &app,
         &billing_bearer,
         head_quote["id"].as_str().unwrap(),
@@ -885,7 +899,7 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     assert_eq!(pending_consumption["approval_status"], "pending");
 
     let quote = create_quote(&app, &billing_bearer, order_id).await;
-    let invoice = create_invoice(
+    let invoice = create_sent_invoice(
         &app,
         &billing_bearer,
         quote["id"].as_str().unwrap(),
@@ -1382,7 +1396,7 @@ async fn invoice_detail_explains_mixed_vat_sources() {
     .unwrap();
 
     let quote = create_quote(&app, &billing_bearer, order_id).await;
-    let invoice = create_invoice(
+    let invoice = create_sent_invoice(
         &app,
         &billing_bearer,
         quote["id"].as_str().unwrap(),
@@ -1495,7 +1509,7 @@ async fn invoice_list_returns_page_metadata_and_slices_results() {
         .await;
         let quote = create_quote(&app, &billing_bearer, order_id).await;
         let quote_id = quote["id"].as_str().unwrap();
-        let _invoice = create_invoice(
+        let _invoice = create_sent_invoice(
             &app,
             &billing_bearer,
             quote_id,
@@ -1564,7 +1578,7 @@ async fn second_active_non_advance_invoice_for_same_quote_is_rejected() {
         body["message"]
             .as_str()
             .unwrap()
-            .contains("active invoice already exists")
+            .contains("no remaining quantities to invoice")
     );
 }
 
@@ -1655,7 +1669,7 @@ async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -1735,7 +1749,7 @@ async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
@@ -1910,6 +1924,17 @@ async fn billing_can_update_invoice_payment_state_and_interpreter_cannot_access_
     let invoice_id = body["id"].as_str().unwrap();
     let total_gross: f64 = body["total_gross"].as_str().unwrap().parse().unwrap();
 
+    let (unreleased_status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "paid", "paid_amount": total_gross })),
+    )
+    .await;
+    assert_eq!(unreleased_status, StatusCode::CONFLICT);
+    release_invoice(&app, &billing_bearer, invoice_id).await;
+
     let (status, body) = json_request(
         &app,
         "POST",
@@ -2010,6 +2035,7 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
+    release_invoice(&app, &billing_bearer, invoice_id).await;
     let (status, body) = json_request(
         &app,
         "POST",
@@ -2190,7 +2216,8 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
 
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", &invoice_due_date).await;
+    let invoice =
+        create_sent_invoice(&app, &billing_bearer, quote_id, "final", &invoice_due_date).await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
@@ -2285,7 +2312,7 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -2370,7 +2397,7 @@ async fn dunning_sequence_requires_previous_step_and_billing_role() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, _) = json_request(
@@ -2429,7 +2456,7 @@ async fn dunning_is_blocked_for_paid_invoice() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross = invoice["total_gross"]
         .as_str()
@@ -2482,7 +2509,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     let order_first = seed_order(&pool, patient_id, admin_id, &format!("{tag}-first")).await;
     seed_order_leistung(&pool, order_first, "Auto first block", 110.0, "approved").await;
     let quote_first = create_quote(&app, &pm_bearer, order_first).await;
-    let invoice_first = create_invoice(
+    let invoice_first = create_sent_invoice(
         &app,
         &billing_bearer,
         quote_first["id"].as_str().unwrap(),
@@ -2500,7 +2527,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     let order_second = seed_order(&pool, patient_id, admin_id, &format!("{tag}-second")).await;
     seed_order_leistung(&pool, order_second, "Auto second block", 120.0, "approved").await;
     let quote_second = create_quote(&app, &pm_bearer, order_second).await;
-    let invoice_second = create_invoice(
+    let invoice_second = create_sent_invoice(
         &app,
         &billing_bearer,
         quote_second["id"].as_str().unwrap(),
@@ -2541,7 +2568,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     )
     .await;
     let quote_collections = create_quote(&app, &pm_bearer, order_collections).await;
-    let invoice_collections = create_invoice(
+    let invoice_collections = create_sent_invoice(
         &app,
         &billing_bearer,
         quote_collections["id"].as_str().unwrap(),
@@ -2700,7 +2727,7 @@ async fn staff_can_download_invoice_pdf_document() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
 
@@ -2761,7 +2788,7 @@ async fn patient_can_download_own_invoice_pdf() {
     let patient_bearer = auth_header_for(patient_user_id, "patient");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let (status, body) = json_request(
         &app,
@@ -2821,7 +2848,7 @@ async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
     .await;
     let quote = create_quote(&app, &billing_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(

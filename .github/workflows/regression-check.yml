@@ -1,0 +1,44 @@
+name: Release regression checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: finance
+            suites: >-
+              --test company_financial_accounts_api --test company_financial_position_api
+              --test external_invoice_allocations_api --test external_invoices_api
+              --test financial_phase2_api --test invoice_credit_notes_api
+              --test invoices_api --test patient_account_statement_api --test stats_api
+          - group: documents
+            suites: >-
+              --test documents_api --test patient_clinical_api --test staff_access_api
+          - group: operations
+            suites: >-
+              --test admin_mfa_api --test concierge_expense_receipts_api
+              --test concierge_operational_items_api --test me_api --test operations_p0_api
+              --test provider_people_api --test provider_taxonomy_api
+          - group: medication-chat
+            suites: >-
+              --test medication_intelligence_api --test medication_names_api
+              --test messages_portal_api
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run focused integration suites
+        env:
+          REGRESSION_SUITES: ${{ matrix.suites }}
+        run: cargo test -p gmed-server --locked --no-fail-fast $REGRESSION_SUITES

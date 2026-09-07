@@ -177,7 +177,7 @@ async fn seed_financial_fixture(
         r#"INSERT INTO concierge_services (
                patient_id, provider_id, assigned_concierge_id, service_kind,
                title, currency, created_by
-           ) VALUES ($1, $2, $3, 'transport', 'Airport transfer', 'EUR', $4)
+           ) VALUES ($1, $2, $3, 'transfer', 'Airport transfer', 'EUR', $4)
            RETURNING id"#,
     )
     .bind(patient_id)

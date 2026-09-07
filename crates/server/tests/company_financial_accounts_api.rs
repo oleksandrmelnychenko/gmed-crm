@@ -2,6 +2,7 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
@@ -70,6 +71,26 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     let tag = Uuid::new_v4().simple().to_string();
     let billing_id = seed_user(&ctx.pool, &tag, "billing").await;
     let sales_id = seed_user(&ctx.pool, &tag, "sales").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let sales = auth_header_for(sales_id, "sales");
+    let list_path = "/api/v1/company-financial-accounts?currency=EUR&include_inactive=true";
+    let (baseline_status, baseline) =
+        request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
+    assert_eq!(
+        baseline_status,
+        StatusCode::OK,
+        "baseline accounts: {baseline:?}"
+    );
+    let baseline_movement = baseline["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|account| account["is_default"] == true)
+        .unwrap()["movement_balance"]
+        .as_str()
+        .unwrap()
+        .parse::<Decimal>()
+        .unwrap();
     let patient_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO patients (
                patient_id, first_name, last_name, birth_date, gender, created_by
@@ -152,9 +173,6 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         entry_ids.push(entry_id);
     }
 
-    let billing = auth_header_for(billing_id, "billing");
-    let sales = auth_header_for(sales_id, "sales");
-    let list_path = "/api/v1/company-financial-accounts?currency=EUR&include_inactive=true";
     let (initial_status, initial) =
         request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
     assert_eq!(
@@ -168,7 +186,14 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         .iter()
         .find(|account| account["is_default"] == true)
         .unwrap();
-    assert_eq!(default_account["movement_balance"], "30");
+    assert_eq!(
+        default_account["movement_balance"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        baseline_movement + Decimal::new(30, 0)
+    );
 
     let (forbidden_status, _) = request_json(&ctx.app, Method::GET, list_path, &sales, None).await;
     assert_eq!(forbidden_status, StatusCode::FORBIDDEN);

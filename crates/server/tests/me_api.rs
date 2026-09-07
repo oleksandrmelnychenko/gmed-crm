@@ -1059,7 +1059,7 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
     assert_eq!(staff_items[0]["request_source"], "patient_portal");
     assert_eq!(staff_items[0]["status"], "planned");
 
-    let (status, updated) = json_request(
+    let (status, rejected) = json_request(
         &app,
         "POST",
         &format!("/api/v1/concierge-services/{service_id}/update"),
@@ -1068,6 +1068,46 @@ async fn patient_sees_staff_processing_updates_for_portal_service_and_loses_canc
             "status": "booked",
             "booking_reference": "HTL-7788",
             "vendor_contact": "booking@hilton.example",
+            "service_notes": "Booked by concierge and confirmed with the patient."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{rejected}");
+
+    let provider_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO providers (name, provider_type) VALUES ($1, 'non_medical') RETURNING id",
+    )
+    .bind(format!("Airport Hilton {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, booked) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/book-provider"),
+        &concierge_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "provider_id": provider_id,
+            "booking_state": "requested",
+            "channel": "email",
+            "booking_reference": "HTL-7788",
+            "vendor_contact": "booking@hilton.example",
+            "starts_at": "2026-04-24T12:00:00Z",
+            "ends_at": "2026-04-26T10:00:00Z",
+            "service_address": "Airport hotel, Munich",
+            "note": "Booking requested by concierge."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{booked}");
+    assert_eq!(booked["service"]["status"], "booked");
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &concierge_bearer,
+        Some(json!({
             "service_notes": "Booked by concierge and confirmed with the patient."
         })),
     )

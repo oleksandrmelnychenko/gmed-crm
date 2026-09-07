@@ -56,8 +56,13 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
     .unwrap()
 }
 
-fn auth_header(role: &str) -> String {
-    auth_header_for(role, Uuid::new_v4())
+async fn auth_header(app: &TestContext, role: &str) -> String {
+    let user_id = if role == "it_admin" {
+        app.it_admin_id
+    } else {
+        seed_user(&app.suite.pool, "admin_mfa_api", role).await
+    };
+    auth_header_for(role, user_id)
 }
 
 fn auth_header_for(role: &str, user_id: Uuid) -> String {
@@ -99,7 +104,7 @@ async fn settings_list_requires_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/settings",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         None,
     )
     .await;
@@ -113,7 +118,7 @@ async fn settings_list_ok_for_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/settings",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -138,7 +143,7 @@ async fn settings_update_requires_it_admin() {
         &app,
         "POST",
         "/api/v1/admin/settings/access_token_minutes",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         Some(json!({"value": "30"})),
     )
     .await;
@@ -148,7 +153,7 @@ async fn settings_update_requires_it_admin() {
 #[tokio::test]
 async fn settings_update_validates_bounds() {
     let Some(app) = test_app().await else { return };
-    let admin = auth_header("it_admin");
+    let admin = auth_header(&app, "it_admin").await;
 
     let (status, _) = json_request(
         &app,
@@ -299,7 +304,7 @@ async fn settings_update_rejects_invalid_agency_email() {
         &app,
         "POST",
         "/api/v1/admin/settings/agency_email",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         Some(json!({"value": "invalid-email"})),
     )
     .await;
@@ -313,7 +318,7 @@ async fn settings_update_rejects_invalid_required_patient_documents_json() {
         &app,
         "POST",
         "/api/v1/admin/settings/required_patient_documents",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         Some(json!({"value": r#"{"key":"passport"}"#})),
     )
     .await;
@@ -327,7 +332,7 @@ async fn settings_update_nonexistent_key() {
         &app,
         "POST",
         "/api/v1/admin/settings/nonexistent_key",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         Some(json!({"value": "10"})),
     )
     .await;
@@ -341,7 +346,7 @@ async fn sessions_list_requires_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/sessions",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         None,
     )
     .await;
@@ -355,7 +360,7 @@ async fn sessions_list_ok_for_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/sessions",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -370,7 +375,7 @@ async fn revoke_all_sessions_requires_it_admin() {
         &app,
         "POST",
         "/api/v1/admin/sessions/revoke-all",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         None,
     )
     .await;
@@ -384,7 +389,7 @@ async fn activity_list_requires_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/activity",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         None,
     )
     .await;
@@ -398,7 +403,7 @@ async fn activity_list_ok_for_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/activity",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -419,7 +424,7 @@ async fn activity_filter_by_action() {
         &app,
         "GET",
         "/api/v1/admin/activity?action=login&limit=25&offset=0&date_from=2026-01-01&date_to=2026-12-31",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -437,7 +442,7 @@ async fn activity_rejects_invalid_date_range() {
         &app,
         "GET",
         "/api/v1/admin/activity?date_from=2026-12-31&date_to=2026-01-01",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -451,7 +456,7 @@ async fn mfa_pending_list_requires_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/mfa/pending",
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         None,
     )
     .await;
@@ -465,7 +470,7 @@ async fn mfa_pending_list_ok_for_it_admin() {
         &app,
         "GET",
         "/api/v1/admin/mfa/pending",
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -481,7 +486,7 @@ async fn mfa_toggle_requires_it_admin() {
         &app,
         "POST",
         &format!("/api/v1/admin/mfa/user/{fake}/toggle"),
-        &auth_header("sales"),
+        &auth_header(&app, "sales").await,
         Some(json!({"enabled": true})),
     )
     .await;
@@ -496,7 +501,7 @@ async fn mfa_approve_nonexistent_returns_not_found() {
         &app,
         "POST",
         &format!("/api/v1/admin/mfa/pending/{fake}/approve"),
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;
@@ -511,7 +516,7 @@ async fn mfa_reject_nonexistent_returns_not_found() {
         &app,
         "POST",
         &format!("/api/v1/admin/mfa/pending/{fake}/reject"),
-        &auth_header("it_admin"),
+        &auth_header(&app, "it_admin").await,
         None,
     )
     .await;

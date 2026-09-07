@@ -18,6 +18,12 @@ fn reviewed_pair(handelsname: &str, wirkstoff: &str) -> Value {
 
 async fn context() -> Option<(support::TestSuiteContext, Uuid, String)> {
     let suite = support::suite_context(SECRET).await?;
+    // Each suite owns a disposable database. Dictionary behavior is tested
+    // independently of medication pairs backfilled by demo-data migrations.
+    sqlx::query("DELETE FROM medication_name_pairs")
+        .execute(&suite.pool)
+        .await
+        .unwrap();
     let user_id: Uuid = sqlx::query_scalar(
         "INSERT INTO users (email, password_hash, name, role)
          VALUES ($1, 'test-hash', 'Name dictionary test', 'ceo') RETURNING id",

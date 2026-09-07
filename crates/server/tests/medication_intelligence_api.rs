@@ -460,7 +460,11 @@ async fn bfarm_snapshot_is_atomic_idempotent_and_matches_only_exact_active_subst
         Uuid::new_v4().simple()
     );
     let payload = bfarm_sample(&item_link);
-    let old_fetched_at = Utc::now() - Duration::hours(10);
+    // PostgreSQL timestamps persist microseconds, not chrono's nanoseconds.
+    let old_fetched_at = chrono::DateTime::from_timestamp_micros(
+        (Utc::now() - Duration::hours(10)).timestamp_micros(),
+    )
+    .unwrap();
     let first = enqueue_source_ingestion(
         &ctx.pool,
         "bfarm_rote_hand",

@@ -1888,7 +1888,10 @@ async fn upload_file(
     let mut client_message_id: Option<Uuid> = None;
     let mut expires_in_seconds: Option<i64> = None;
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Some(field) = match multipart.next_field().await {
+        Ok(field) => field,
+        Err(error) => return err(error.status(), "Failed to read multipart upload"),
+    } {
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "file" => {
@@ -1905,7 +1908,7 @@ async fn upload_file(
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "read file field");
-                        return err(StatusCode::BAD_REQUEST, "Failed to read file");
+                        return err(e.status(), "Failed to read file");
                     }
                 }
             }

@@ -4982,17 +4982,32 @@ async fn patient_clinical_pdf_export_returns_pdf() {
     .execute(&pool)
     .await
     .unwrap();
+    let lab_document_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO documents (id, patient_id, auto_name, original_filename, art, category,
+             status, visibility, is_medical, mime_type, uploaded_by, version_root_document_id)
+         VALUES ($1, $2, 'Laborbericht-DEMO.pdf', 'Laborbericht-DEMO.pdf', 'medical_report',
+             'report', 'active', 'internal', true, 'application/pdf', $3, $1)",
+    )
+    .bind(lab_document_id)
+    .bind(patient_id)
+    .bind(ceo_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO patient_lab_results
             (patient_id, measured_at, measured_at_precision, panel, laboratory_name,
              analyte_name, result_text, numeric_result, comparator, unit, reference_text,
-             reference_low, reference_high, interpretation_note, abnormal_flag, source_page, recorded_by)
+             reference_low, reference_high, interpretation_note, abnormal_flag, source_page, recorded_by,
+             source_document_id)
          VALUES ($1, '2026-09-01 10:30:00+00', 'datetime', 'Blutbild', 'Labor München',
                  'CRP-LAB-DEMO', '<0,5', 0.5, '<', 'mg/L', '0–5', 0, 5,
-                 'Unauffälliger Laborbefund - DEMO', 'normal', 2, $2)",
+                 'Unauffälliger Laborbefund - DEMO', 'normal', 2, $2, $3)",
     )
     .bind(patient_id)
     .bind(ceo_id)
+    .bind(lab_document_id)
     .execute(&pool)
     .await
     .unwrap();
@@ -5096,9 +5111,19 @@ async fn patient_clinical_pdf_export_returns_pdf() {
             .await
             .unwrap();
         let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
-        for expected in [title, "CRP-LAB-DEMO", "<0,5", "Labor München", "0–5"] {
+        for expected in [
+            title,
+            "CRP-LAB-DEMO",
+            "<0,5",
+            "Laborbericht-DEMO.pdf",
+            "0–5",
+        ] {
             assert!(text.contains(expected), "missing {expected}: {text}");
         }
+        assert!(
+            !text.contains("Labor München"),
+            "Sources refer to documents, not laboratories"
+        );
     }
     let (status, _) = json_request(
         &app,

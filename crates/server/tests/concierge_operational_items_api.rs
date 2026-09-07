@@ -232,7 +232,7 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     assert_eq!(task["assigned_to"], concierge_id.to_string());
     assert_eq!(task["note"], "Call before pickup");
     assert_eq!(task["concierge_service_id"], service_id.to_string());
-    assert!(task.get("patient_id").is_none());
+    assert!(task["patient_id"].is_null());
     assert!(task.get("order_id").is_none());
     assert!(task.get("appointment_id").is_none());
     assert!(task.get("description").is_none());
@@ -664,7 +664,14 @@ async fn ceo_can_assign_operational_items_to_ceo_and_billing() {
     assert_eq!(status, StatusCode::CREATED, "{ceo_task}");
     assert_eq!(ceo_task["assigned_to"], ctx.admin_id.to_string());
 
-    let (status, billing_items) = json_request(&ctx.app, "GET", path, &billing_bearer, None).await;
+    let (status, billing_items) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}?assigned_to={billing_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{billing_items}");
     let billing_items = billing_items.as_array().expect("billing operational list");
     assert_eq!(billing_items.len(), 1);
@@ -757,6 +764,19 @@ async fn operational_item_create_is_idempotent_for_replay_drift_and_concurrency(
         .await
         .unwrap();
     sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(concierge_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (mutable_replay_status, mutable_replay) =
+        json_request(&ctx.app, "POST", path, &bearer, Some(body.clone())).await;
+    // A disabled account must not bypass authentication, even for a replay.
+    assert_eq!(
+        mutable_replay_status,
+        StatusCode::UNAUTHORIZED,
+        "{mutable_replay}"
+    );
+    sqlx::query("UPDATE users SET is_active = true WHERE id = $1")
         .bind(concierge_id)
         .execute(&ctx.pool)
         .await

@@ -533,6 +533,20 @@ async fn concierge_provider_people_is_scoped_to_non_medical_providers() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let providers = providers_body.as_array().expect("providers array");
+    assert!(
+        providers.is_empty(),
+        "medical providers must stay inaccessible"
+    );
+    let (status, providers_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers?provider_type=non_medical&search={tag}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let providers = providers_body.as_array().expect("providers array");
     assert!(!providers.is_empty());
     assert!(
         providers

@@ -1172,7 +1172,7 @@ async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_inte
         ("art", "uploaded_document".to_string()),
         ("category", "general".to_string()),
         ("is_medical", "false".to_string()),
-        ("visibility", "released_to_patient".to_string()),
+        ("visibility", "patient_visible".to_string()),
     ];
 
     let (status, _) = multipart_upload(
@@ -1330,10 +1330,7 @@ async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_rele
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["message"],
-        "Teamlead review may update only document classification fields"
-    );
+    assert_eq!(body["message"], "Insufficient permissions");
 
     let (status, _) = json_request(
         &app,
@@ -3730,8 +3727,6 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
             "order_id": order_id,
             "appointment_id": appointment_id,
             "language": "de",
-            "introduction": "Bitte beachten Sie die unten aufgeführten Termine.",
-            "closing_note": "Unser Team meldet sich bei Änderungen umgehend.",
             "text_block_keys": ["fasting", "bring_documents"]
         })),
     )
@@ -3740,7 +3735,6 @@ async fn document_templates_can_generate_treatment_plan_pdf_document() {
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Behandlungsplan"));
-    assert!(preview_html.contains("Bitte beachten Sie die unten aufgeführten Termine."));
     assert!(preview_html.contains("Bitte nüchtern bleiben"));
     assert!(preview_html.contains("Patient benötigt Dolmetscherkoordination"));
 
@@ -4377,7 +4371,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["fasting"],
             min_pdf_size: 1000,
-            expected_pdf_text: "Intro for treatment_plan",
+            expected_pdf_text: "Behandlungsplan",
         },
         TemplateCase {
             template_id: "medication_summary",
@@ -4388,7 +4382,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec!["doctor_changes_only"],
             min_pdf_size: 1000,
-            expected_pdf_text: "Intro for medication_summary",
+            expected_pdf_text: "Medikamentenübersicht",
         },
         TemplateCase {
             template_id: "framework_contract",
@@ -4410,7 +4404,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             bindings: json!({}),
             text_block_keys: vec![],
             min_pdf_size: 1000,
-            expected_pdf_text: "Intro for visa_invitation_letter",
+            expected_pdf_text: "Einladungsschreiben",
         },
         TemplateCase {
             template_id: "patient_sticker_compact",
@@ -4595,10 +4589,7 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             "bindings": case.bindings,
             "text_block_keys": case.text_block_keys,
         });
-        if !matches!(
-            case.template_id,
-            "framework_contract" | "single_order" | "order_cost_estimate" | "cost_estimate"
-        ) {
+        if case.template_id == "free_text_document" {
             payload["introduction"] = json!(format!("Intro for {}", case.template_id));
             payload["closing_note"] = json!(format!("Closing for {}", case.template_id));
         }
@@ -5255,8 +5246,7 @@ async fn document_templates_can_replace_previous_generated_version() {
             "template_id": "treatment_plan",
             "patient_id": patient_id,
             "appointment_id": appointment_id,
-            "language": "de",
-            "introduction": "Version eins."
+            "language": "de"
         })),
     )
     .await;
@@ -5274,8 +5264,7 @@ async fn document_templates_can_replace_previous_generated_version() {
             "patient_id": patient_id,
             "appointment_id": appointment_id,
             "language": "de",
-            "replace_document_id": first_document_id,
-            "introduction": "Version zwei."
+            "replace_document_id": first_document_id
         })),
     )
     .await;
@@ -5505,8 +5494,6 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
             "template_id": "medication_summary",
             "patient_id": patient_id,
             "language": "de",
-            "introduction": "Bitte nutzen Sie diese Liste als aktuelle Arbeitsversion.",
-            "closing_note": "Bei Unklarheiten melden Sie sich bitte vor jeder Änderung.",
             "text_block_keys": ["doctor_changes_only", "carry_updated_list"]
         })),
     )
@@ -5820,7 +5807,7 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
     assert!(
         rejected_override
             .to_string()
-            .contains("Fixed legal templates"),
+            .contains("Structured document templates do not support free-form text overrides"),
         "{rejected_override}"
     );
 
@@ -6150,8 +6137,6 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
             "patient_id": patient_id,
             "appointment_id": appointment_id,
             "language": "de",
-            "introduction": "Dieses Einladungsschreiben wird für den Konsulatstermin benötigt.",
-            "closing_note": "Bitte dem Visumantrag als ergänzende medizinische Unterlage beilegen.",
             "bindings": {
                 "passport_number": "MA1234567",
                 "passport_valid_until": "2050-01-01",

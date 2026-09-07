@@ -353,6 +353,15 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
     assert_eq!(status, StatusCode::CREATED);
     let advance_id = advance["id"].as_str().unwrap();
     let advance_gross = advance["total_gross"].as_str().unwrap();
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release advance: {released:?}");
     let (status, paid_advance) = json_request(
         &app,
         "POST",
@@ -559,6 +568,8 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
             &manager,
             Some(json!({
                 "external_invoice_number": format!("{tag}-{number}"),
+                "amount_net": amount,
+                "amount_vat": 0,
                 "amount_gross": amount,
                 "status": status_value,
                 "paid_by": paid_by,

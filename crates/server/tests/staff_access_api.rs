@@ -75,13 +75,14 @@ async fn seed_provider(pool: &PgPool) -> Uuid {
 
 async fn seed_document(pool: &PgPool, uploaded_by: Uuid, is_medical: bool) -> Uuid {
     sqlx::query_scalar(
-        r#"INSERT INTO documents (auto_name, art, is_medical, uploaded_by)
-           VALUES ($1, 'staff_access_test', $2, $3)
+        r#"INSERT INTO documents (auto_name, art, is_medical, uploaded_by, id, version_root_document_id)
+           VALUES ($1, 'staff_access_test', $2, $3, $4, $4)
            RETURNING id"#,
     )
     .bind(format!("staff-access-{}", Uuid::new_v4().simple()))
     .bind(is_medical)
     .bind(uploaded_by)
+    .bind(Uuid::new_v4())
     .fetch_one(pool)
     .await
     .unwrap()
