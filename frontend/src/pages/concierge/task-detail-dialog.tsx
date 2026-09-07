@@ -375,6 +375,7 @@ export function ConciergeTaskDetailDialog({
   const checklistRequestRef = useRef<{ label: string; requestId: string } | null>(null);
   const toggleRequestRef = useRef<{ payloadKey: string; requestId: string } | null>(null);
   const expenseLoadSequenceRef = useRef(0);
+  const detailLoadSequenceRef = useRef(0);
   const autoExpenseOpenedRef = useRef(false);
   const canReadTaskExpenses = Boolean(
     detail
@@ -390,19 +391,23 @@ export function ConciergeTaskDetailDialog({
   const statusDirty = Boolean(detail && pendingStatus && pendingStatus !== detail.item.status);
 
   const load = useCallback(async () => {
-    if (!taskId) return;
+    if (!open || !taskId) return;
+    const sequence = ++detailLoadSequenceRef.current;
     setLoading(true);
     setError("");
     try {
       const payload = await apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${taskId}`, { forceFresh: true });
+      if (sequence !== detailLoadSequenceRef.current) return;
       setDetail(payload);
       setPendingStatus(payload.item.status);
     } catch (loadError) {
-      setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
+      if (sequence === detailLoadSequenceRef.current) {
+        setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
+      }
     } finally {
-      setLoading(false);
+      if (sequence === detailLoadSequenceRef.current) setLoading(false);
     }
-  }, [labels.loading, lang, taskId]);
+  }, [labels.loading, lang, open, taskId]);
 
   const refreshFromRealtime = useCallback((event: { entity_id: string }) => {
     if (open && taskId && event.entity_id === taskId) void load();
@@ -420,12 +425,16 @@ export function ConciergeTaskDetailDialog({
     setEditingCommentId(null);
     setCommentDraft("");
     setPendingStatus("");
+    setDeleteConfirmOpen(false);
     setPendingChildDelete(null);
     autoExpenseOpenedRef.current = false;
     commentRequestRef.current = null;
     checklistRequestRef.current = null;
     toggleRequestRef.current = null;
     void load();
+    return () => {
+      detailLoadSequenceRef.current += 1;
+    };
   }, [load, open]);
 
   useEffect(() => {
@@ -683,6 +692,7 @@ export function ConciergeTaskDetailDialog({
       clearApiCache("/concierge-operational-items");
       onChanged();
     } catch (mutationError) {
+      setPendingChildDelete(null);
       setError(conciergeTaskErrorMessage(mutationError, lang, labels.delete));
     } finally {
       setBusy(false);
@@ -700,6 +710,7 @@ export function ConciergeTaskDetailDialog({
       onOpenChange(false);
       onChanged();
     } catch (deleteError) {
+      setDeleteConfirmOpen(false);
       setError(conciergeTaskErrorMessage(deleteError, lang, labels.delete));
     } finally {
       setBusy(false);
@@ -1054,7 +1065,7 @@ export function ConciergeTaskDetailDialog({
         ) : null}
       </DialogContent>
       <DirtyDismissConfirmDialog
-        open={deleteConfirmOpen}
+        open={open && deleteConfirmOpen}
         title={labels.deleteTitle}
         message={labels.deleteMessage}
         cancelLabel={labels.cancel}
@@ -1065,7 +1076,7 @@ export function ConciergeTaskDetailDialog({
         onConfirm={() => void deleteTask()}
       />
       <DirtyDismissConfirmDialog
-        open={Boolean(pendingChildDelete)}
+        open={open && Boolean(pendingChildDelete)}
         title={pendingChildDelete?.kind === "comment" ? labels.deleteCommentTitle : labels.deleteChecklistTitle}
         message={pendingChildDelete?.kind === "comment" ? labels.deleteCommentMessage : labels.deleteChecklistMessage}
         cancelLabel={labels.cancel}

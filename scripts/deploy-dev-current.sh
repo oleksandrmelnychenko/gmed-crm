@@ -6,12 +6,15 @@
 # release tree only after a successful build, and rolls back automatically if
 # startup or the external health check fails. This path is intentionally DEV
 # only; production continues to use signed, digest-pinned release images.
+# An optional second argument supplies four signed DEV image pins instead of
+# building on the host. This mode rehearses migrations on a backup clone first.
 # The publisher runs this entire script under /home/gmed/deploy/deploy.lock.
 # Direct callers must acquire that same lock before building shared image tags.
 
 set -euo pipefail
 
 ARCHIVE="${1:-/home/gmed/deploy/gmed-crm-current.tgz}"
+IMAGE_PINS_FILE="${2:-}"
 REPO_DIR="${REPO_DIR:-/home/gmed/gmed-crm}"
 DEPLOY_DIR="${DEPLOY_DIR:-/home/gmed/deploy}"
 BACKUP_DIR="${BACKUP_DIR:-$DEPLOY_DIR/backups}"
@@ -34,6 +37,10 @@ SWAPPED=0
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 compose() {
+  local image_options=()
+  if [[ -f "$1/.release-images.pins" ]]; then
+    image_options=(--env-file "$1/.release-images.pins" -f "$1/docker-compose.ghcr.yml")
+  fi
   docker compose \
     --project-name gmed-crm \
     --env-file "$1/release.env" \
@@ -41,7 +48,47 @@ compose() {
     -f "$1/docker-compose.release.yml" \
     -f "$1/docker-compose.hetzner.yml" \
     -f "$1/docker-compose.dev-hetzner.yml" \
+    "${image_options[@]}" \
     "${@:2}"
+}
+
+verify_dev_image_pins() {
+  local file="$1" line key ref expected count=0
+  local -A seen=()
+  command -v "${COSIGN_BIN:-cosign}" >/dev/null || {
+    echo "ERROR: cosign is required to deploy registry images." >&2
+    return 1
+  }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    key="${line%%=*}"
+    ref="${line#*=}"
+    case "$key" in
+      GMED_BACKEND_IMAGE) expected=gmed-crm-server ;;
+      GMED_FRONTEND_IMAGE) expected=gmed-crm-frontend ;;
+      GMED_PARSER_IMAGE) expected=gmed-crm-clinical-document-parser ;;
+      GMED_INVOICE_PARSER_IMAGE) expected=gmed-crm-invoice-parser ;;
+      *) echo "ERROR: unexpected image pin key." >&2; return 1 ;;
+    esac
+    if [[ -n "${seen[$key]:-}" ||
+          ! "$ref" =~ ^ghcr\.io/oleksandrmelnychenko/${expected}@sha256:[a-f0-9]{64}$ ]]; then
+      echo "ERROR: invalid or duplicate image pin for $key." >&2
+      return 1
+    fi
+    seen[$key]="$ref"
+    count=$((count + 1))
+  done < "$file"
+  if [[ "$count" -ne 4 ]]; then
+    echo "ERROR: all four DEV image digests are required." >&2
+    return 1
+  fi
+  for key in GMED_BACKEND_IMAGE GMED_FRONTEND_IMAGE GMED_PARSER_IMAGE GMED_INVOICE_PARSER_IMAGE; do
+    "${COSIGN_BIN:-cosign}" verify \
+      --certificate-identity https://github.com/oleksandrmelnychenko/gmed-crm/.github/workflows/dev.yml@refs/heads/main \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      "${seen[$key]}" >/dev/null || return 1
+  done
 }
 
 prepare_upload_volume() {
@@ -221,6 +268,16 @@ done
 cp "$RELEASE_ENV" "$STAGING_DIR/release.env"
 chmod 600 "$STAGING_DIR/release.env"
 
+if [[ -n "$IMAGE_PINS_FILE" ]]; then
+  pins_real="$(realpath -m "$IMAGE_PINS_FILE")"
+  case "$pins_real" in
+    /home/gmed/deploy/*.pins) ;;
+    *) echo "ERROR: refusing unexpected image pins path." >&2; exit 1 ;;
+  esac
+  verify_dev_image_pins "$pins_real"
+  cp "$pins_real" "$STAGING_DIR/.release-images.pins"
+fi
+
 # Keep the optional public model archive across source-only releases. The image
 # build verifies its pinned checksum before using it, so an unavailable model
 # download host does not block subsequent DEV deployments.
@@ -298,18 +355,32 @@ tag_running_image gmed-crm-clinical-document-parser-1 "gmed-dev-rollback-parser:
 tag_running_image gmed-crm-invoice-parser-1 "gmed-dev-rollback-invoice-parser:$STAMP" gmed-crm-invoice-parser
 {
   printf 'services:\n'
-  printf '  backend:\n    image: gmed-dev-rollback-backend:%s\n' "$STAMP"
-  printf '  frontend:\n    image: gmed-dev-rollback-frontend:%s\n' "$STAMP"
-  printf '  clinical-document-parser:\n    image: gmed-dev-rollback-parser:%s\n' "$STAMP"
-  printf '  invoice-parser:\n    image: gmed-dev-rollback-invoice-parser:%s\n' "$STAMP"
+  printf '  backend:\n    image: gmed-dev-rollback-backend:%s\n    pull_policy: never\n' "$STAMP"
+  printf '  frontend:\n    image: gmed-dev-rollback-frontend:%s\n    pull_policy: never\n' "$STAMP"
+  printf '  clinical-document-parser:\n    image: gmed-dev-rollback-parser:%s\n    pull_policy: never\n' "$STAMP"
+  printf '  invoice-parser:\n    image: gmed-dev-rollback-invoice-parser:%s\n    pull_policy: never\n' "$STAMP"
 } > "$ROLLBACK_OVERRIDE"
 
-echo "Building DEV images with the host Docker cache..."
-export COMPOSE_BAKE=true
-# Do not overlap Vite/OCR image builds with Rust's peak release/LTO memory use.
-build_with_memory_guard "$STAGING_DIR" backend
-build_with_memory_guard "$STAGING_DIR" frontend clinical-document-parser invoice-parser
-unset COMPOSE_BAKE
+if [[ -n "$IMAGE_PINS_FILE" ]]; then
+  echo "Pulling four verified DEV images; no server-side build..."
+  compose "$STAGING_DIR" pull backend frontend clinical-document-parser invoice-parser
+  (
+    export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+    POSTGRES_USER="$(docker exec gmed-postgres printenv POSTGRES_USER)"
+    POSTGRES_PASSWORD="$(docker exec gmed-postgres printenv POSTGRES_PASSWORD)"
+    POSTGRES_DB="$(docker exec gmed-postgres printenv POSTGRES_DB)"
+    python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py" \
+      --migrations "$STAGING_DIR/migrations" \
+      --backup-dir "$BACKUP_DIR/database-$STAMP"
+  )
+else
+  echo "Building DEV images with the host Docker cache..."
+  export COMPOSE_BAKE=true
+  # Do not overlap Vite/OCR image builds with Rust's peak release/LTO memory use.
+  build_with_memory_guard "$STAGING_DIR" backend
+  build_with_memory_guard "$STAGING_DIR" frontend clinical-document-parser invoice-parser
+  unset COMPOSE_BAKE
+fi
 prepare_upload_volume "$STAGING_DIR"
 
 BACKUP_PATH="$BACKUP_DIR/gmed-crm.before-$STAMP"

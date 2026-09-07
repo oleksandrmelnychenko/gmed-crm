@@ -1457,6 +1457,8 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
             "provider_id": provider_id,
             "external_invoice_number": format!("EXT-DUE-{tag}"),
             "due_date": due_date,
+            "amount_net": 480.0,
+            "amount_vat": 0.0,
             "amount_gross": 480.0,
             "status": "approved"
         })),
@@ -8388,13 +8390,31 @@ async fn concierge_service_update_and_completion_flow_sets_ready_for_billing() {
     assert_eq!(status, StatusCode::OK);
     let service_id = body[0]["id"].as_str().unwrap().to_string();
 
+    let (status, booking) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/book-provider"),
+        &concierge_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "provider_id": provider_id,
+            "booking_state": "requested",
+            "channel": "phone",
+            "booking_reference": "VIP-REF-42",
+            "starts_at": "2026-05-04T12:00:00Z",
+            "ends_at": "2026-05-04T14:00:00Z",
+            "service_address": "Airport arrivals"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{booking}");
+
     let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/concierge-services/{service_id}/update"),
         &concierge_bearer,
         Some(json!({
-            "status": "booked",
             "booking_reference": "VIP-REF-42",
             "vendor_name": "Elite Drives",
             "actual_cost": 189.50,

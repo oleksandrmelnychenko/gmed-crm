@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 
 FORBIDDEN_TRACKED_PATHS = (
@@ -116,6 +116,18 @@ def main() -> int:
         for path in forbidden:
             print(f" - {path}", file=sys.stderr)
         return 1
+
+    versions: dict[str, str] = {}
+    for migration in sorted(Path("migrations").glob("*.sql")):
+        version = migration.name.split("_", 1)[0]
+        if not version.isdigit():
+            print(f"Invalid migration version: {migration.name}", file=sys.stderr)
+            return 1
+        if version in versions:
+            print(f"Duplicate migration version {version}: {versions[version]} and {migration.name}",
+                  file=sys.stderr)
+            return 1
+        versions[version] = migration.name
 
     ratchet_status = check_audit_ratchet()
     if ratchet_status != 0:

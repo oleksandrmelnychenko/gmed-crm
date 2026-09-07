@@ -259,8 +259,11 @@ export function ConciergeTaskManagerPage() {
 
   useEffect(() => {
     if (loading || searchParams.get("create") !== "1" || taskDialogOpen) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("create");
+    setSearchParams(next, { replace: true });
     openCreateTask();
-  }, [loading, searchParams, taskDialogOpen]);
+  }, [loading, searchParams, setSearchParams, taskDialogOpen]);
 
   function openTaskDetail(task: ConciergeTask) {
     setDetailExpenseRequested(false);
@@ -347,6 +350,7 @@ export function ConciergeTaskManagerPage() {
         setSearchParams(next, { replace: true });
       }
     } catch (deleteError) {
+      setPendingDeleteTask(null);
       setError(conciergeTaskErrorMessage(deleteError, lang, labels.deleteFailed));
     } finally {
       setDeletingTaskId(null);
@@ -453,6 +457,7 @@ export function ConciergeTaskManagerPage() {
         onOpenChange={(open) => {
           setTaskDialogOpen(open);
           if (!open) {
+            setTaskError("");
             setEditingTask(null);
             setInitialTaskDate(null);
             createTaskRequestIdRef.current = null;

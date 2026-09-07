@@ -102,6 +102,15 @@ class DevDeploymentMemoryTests(unittest.TestCase):
         docker = self.root / "docker"
         docker.write_text(f"#!{sys.executable}\n" + MOCK_DOCKER)
         docker.chmod(0o755)
+        cosign = self.root / "cosign"
+        cosign.write_text(f"#!{sys.executable}\n" + '''
+import json, os, sys
+from pathlib import Path
+with (Path(os.environ["MOCK_ROOT"]) / "signatures.jsonl").open("a") as output:
+    output.write(json.dumps(sys.argv[1:]) + "\\n")
+sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
+''')
+        cosign.chmod(0o755)
         source = RUNNER.read_text()
         # Source the production functions and EXIT/INT/TERM traps, before the
         # main path can transfer files or modify a release. Only the RAM source
@@ -133,6 +142,42 @@ class DevDeploymentMemoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.events(), [["build", "backend"], ["build-ended"]])
         self.assert_running()
+
+    def valid_pins(self):
+        names = {
+            "GMED_BACKEND_IMAGE": "server", "GMED_FRONTEND_IMAGE": "frontend",
+            "GMED_PARSER_IMAGE": "clinical-document-parser", "GMED_INVOICE_PARSER_IMAGE": "invoice-parser",
+        }
+        return "\n".join(f"{key}=ghcr.io/oleksandrmelnychenko/gmed-crm-{name}@sha256:{'a' * 64}"
+                         for key, name in names.items()) + "\n"
+
+    def verify_pins(self, content, **env):
+        (self.root / "images.pins").write_text(content)
+        return self.run_guard('verify_dev_image_pins "$MOCK_ROOT/images.pins"', **env)
+
+    def test_registry_mode_verifies_all_four_dev_signatures(self):
+        result = self.verify_pins(self.valid_pins())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in (self.root / "signatures.jsonl").read_text().splitlines()]
+        self.assertEqual(len(calls), 4)
+        for call in calls:
+            self.assertIn("https://github.com/oleksandrmelnychenko/gmed-crm/.github/workflows/dev.yml@refs/heads/main", call)
+        self.assertEqual(self.events(), [], "Pin verification must not change containers")
+
+    def test_registry_mode_rejects_missing_duplicate_or_unpinned_images(self):
+        valid = self.valid_pins()
+        for invalid in ["", "\n".join(valid.splitlines()[:3]), valid + valid.splitlines()[0],
+                        valid.replace("@sha256:" + "a" * 64, ":latest"),
+                        valid.replace("gmed-crm-server", "unrelated-server")]:
+            with self.subTest(pins=invalid):
+                self.assertNotEqual(self.verify_pins(invalid).returncode, 0)
+        self.assertFalse((self.root / "signatures.jsonl").exists())
+        self.assertEqual(self.events(), [])
+
+    def test_registry_mode_stops_when_signature_verification_fails(self):
+        result = self.verify_pins(self.valid_pins(), MOCK_COSIGN_EXIT="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.events(), [])
 
     def test_low_memory_stops_ocr_and_restores_it_after_success(self):
         self.memory(4000)

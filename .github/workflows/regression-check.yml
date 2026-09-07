@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   regression:
+    name: Regression — ${{ matrix.group }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -27,7 +28,9 @@ jobs:
             suites: >-
               --test admin_mfa_api --test concierge_expense_receipts_api
               --test concierge_operational_items_api --test me_api --test operations_p0_api
-              --test provider_people_api --test provider_taxonomy_api
+              --test provider_people_api --test provider_taxonomy_api --test concierge_partner_interactions_api
+          - group: workspace
+            suites: --test workspace_filters_api
           - group: medication-chat
             suites: >-
               --test medication_intelligence_api --test medication_names_api
@@ -38,6 +41,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       - name: Run focused integration suites
         env:
           REGRESSION_SUITES: ${{ matrix.suites }}

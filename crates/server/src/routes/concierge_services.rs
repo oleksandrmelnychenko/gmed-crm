@@ -862,7 +862,7 @@ async fn list_concierge_services(
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   ku.name AS key_responsible_user_name,
-                  a.title AS appointment_title,
+                  a.title AS appointment_title, a.appointment_type AS linked_appointment_type,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
                       AS task_eligible,
@@ -4351,7 +4351,7 @@ async fn load_service_row(
                   ptn.name_ru AS taxonomy_node_name_ru,
                   u.name AS assigned_concierge_name,
                   ku.name AS key_responsible_user_name,
-                  a.title AS appointment_title,
+                  a.title AS appointment_title, a.appointment_type AS linked_appointment_type,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
                       AS task_eligible,
@@ -5491,7 +5491,12 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
         .try_get::<Option<Uuid>, _>("appointment_id")
         .unwrap_or_default()
         .is_some();
-    if has_appointment {
+    let appointment_is_non_medical = row
+        .try_get::<Option<String>, _>("linked_appointment_type")
+        .unwrap_or_default()
+        .as_deref()
+        == Some("non_medical");
+    if has_appointment && !appointment_is_non_medical {
         service.insert(
             "title".to_string(),
             serde_json::Value::String("Service request".to_string()),
