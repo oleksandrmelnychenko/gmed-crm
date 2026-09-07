@@ -37,7 +37,8 @@ describe("customer release notes", () => {
     expect(development.channel).toBe("development");
     expect(development.build).toBe("dev-42");
     expect(development.builtAt).toBe("2026-08-10T10:15:00Z");
-    expect(development.title.ru).toBe("Обновления за 5 сентября 2026");
+    expect(development.title.ru).toBe("Обновления за 10 августа 2026");
+    expect(development.title.de).toBe("Aktualisierungen vom 10. August 2026");
     expect(development.notes[0]).toMatchObject({
       commit: "e3f7a96",
       title: { ru: "Распознавание и проверка инвойсов" },
@@ -45,10 +46,18 @@ describe("customer release notes", () => {
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
     expect(production.builtAt).toBe("2026-08-11T11:30:00Z");
-    expect(production.title.ru).toBe("Релиз от 5 сентября 2026");
+    expect(production.title.ru).toBe("Релиз от 11 августа 2026");
+    expect(production.title.de).toBe("Release vom 11. August 2026");
     expect(production.notes[0]).toMatchObject({
       commit: "e3f7a96",
       title: { ru: "Распознавание и проверка инвойсов" },
     });
+  });
+
+  it("uses a stable UTC build date and avoids invalid-date labels", () => {
+    expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "2026-09-08T01:00:00+03:00" }).title.ru)
+      .toBe("Релиз от 7 сентября 2026");
+    expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "invalid" }).title)
+      .toEqual({ ru: "Релиз", de: "Release" });
   });
 });

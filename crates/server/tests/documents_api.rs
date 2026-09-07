@@ -1351,6 +1351,19 @@ async fn interpreter_uploads_land_in_teamlead_review_queue_and_teamlead_can_rele
         "POST",
         &format!("/api/v1/documents/{document_id}/update"),
         &teamlead_bearer,
+        Some(json!({ "art": "invoice_document", "category": "finance", "is_medical": false, "status": "active" })),
+    ).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "Intake review must not grant financial access"
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &teamlead_bearer,
         Some(json!({
             "art": "medical_report",
             "category": "medical",

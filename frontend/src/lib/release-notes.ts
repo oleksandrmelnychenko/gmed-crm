@@ -107,20 +107,26 @@ const RELEASE_NOTES: CustomerReleaseNote[] = [
 
 export function resolveCustomerRelease(environment: ReleaseEnvironment): CustomerRelease {
   const isDevelopment = environment.mode === "development";
+  const builtAt = environment.buildTimestamp?.trim() || "2026-09-05T20:00:00+03:00";
+  const buildDate = new Date(builtAt);
+  const title: LocalizedText = isDevelopment
+    ? { ru: "Обновления", de: "Aktualisierungen" }
+    : { ru: "Релиз", de: "Release" };
+  if (!Number.isNaN(buildDate.getTime())) {
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+    };
+    const ruDate = new Intl.DateTimeFormat("ru-RU", dateOptions).format(buildDate).replace(/\s*г\.$/, "");
+    const deDate = new Intl.DateTimeFormat("de-DE", dateOptions).format(buildDate);
+    title.ru += `${isDevelopment ? " за" : " от"} ${ruDate}`;
+    title.de += ` vom ${deDate}`;
+  }
 
   return {
     channel: environment.mode,
     build: environment.buildNumber?.trim() || "2026.09.05.1",
-    builtAt: environment.buildTimestamp?.trim() || "2026-09-05T20:00:00+03:00",
-    title: isDevelopment
-      ? {
-          ru: "Обновления за 5 сентября 2026",
-          de: "Aktualisierungen vom 5. September 2026",
-        }
-      : {
-          ru: "Релиз от 5 сентября 2026",
-          de: "Release vom 5. September 2026",
-        },
+    builtAt,
+    title,
     notes: RELEASE_NOTES,
   };
 }

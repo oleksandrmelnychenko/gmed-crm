@@ -21752,15 +21752,19 @@ async fn update_document(
         category.clone(),
         resulting_share_status,
     );
+    let intake_medical_classification = teamlead_review
+        && resulting_sensitivity == DataSensitivity::Medical
+        && resulting_share_status == ShareStatus::InternalOnly;
     if !passes_absolute_resource_boundary(auth.role, &resulting_request)
-        || !policy::check_access(&AccessContext {
-            role: auth.role,
-            user_id: auth.user_id,
-            is_assigned: true,
-            data_sensitivity: resulting_sensitivity,
-            share_status: Some(resulting_share_status),
-        })
-        .allowed
+        || (!intake_medical_classification
+            && !policy::check_access(&AccessContext {
+                role: auth.role,
+                user_id: auth.user_id,
+                is_assigned: true,
+                data_sensitivity: resulting_sensitivity,
+                share_status: Some(resulting_share_status),
+            })
+            .allowed)
     {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }

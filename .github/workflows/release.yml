@@ -292,6 +292,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}
           tags: |
             type=raw,value=release
+            type=raw,value=release-sha-${{ steps.source.outputs.short_sha }}
             type=ref,event=tag
             type=sha,prefix=release-sha-,format=short
           # SPDX provenance + OCI labels for traceability from a
@@ -299,6 +300,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_type == 'tag' && github.ref_name || format('release-sha-{0}', steps.source.outputs.short_sha) }}
             org.opencontainers.image.licenses=UNLICENSED
 
       - name: Download and verify the pinned translation model

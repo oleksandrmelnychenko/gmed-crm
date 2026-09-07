@@ -323,7 +323,7 @@ async fn partial_interims_allocate_quantities_and_final_consumes_only_remaining(
 }
 
 #[tokio::test]
-async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it() {
+async fn paid_advance_can_be_applied_in_parts_and_cancellation_requires_releasing_it() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -523,6 +523,43 @@ async fn paid_advance_can_be_applied_in_parts_and_settlement_cancel_releases_it(
             .unwrap();
     assert_eq!(service_status, "invoiced");
 
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{settlement_id}/status"),
+        &billing,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "cancel must preserve active prepayments: {cancelled:?}"
+    );
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{settlement_id}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail:?}");
+    assert_eq!(detail["status"], "paid");
+    let allocations = detail["prepayment_allocations"].as_array().unwrap();
+    assert_eq!(allocations.len(), 1);
+    for allocation in allocations {
+        let allocation_id = allocation["id"].as_str().unwrap();
+        let (status, released) = json_request(
+            &app,
+            "DELETE",
+            &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations/{allocation_id}"),
+            &billing,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{released:?}");
+    }
     let (status, cancelled) = json_request(
         &app,
         "POST",

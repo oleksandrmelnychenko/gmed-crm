@@ -107,10 +107,10 @@ async fn seed_invoice(
         r#"INSERT INTO invoices (
                order_id, patient_id, invoice_number, invoice_type, status,
                issued_at, due_date, total_net, total_vat, total_gross,
-               paid_amount, line_items, portal_visible, created_by, currency
+               paid_amount, line_items, portal_visible, created_by
            ) VALUES (
                $1, $2, $3, $4, $5, now(), CURRENT_DATE + 14,
-               $6, 0, $6, $7, '[]', true, $8, 'GBP'
+               $6, 0, $6, $7, '[]', true, $8
            ) RETURNING id"#,
     )
     .bind(order_id)

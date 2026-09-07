@@ -36,6 +36,15 @@ class ReleaseImageCoverageTests(unittest.TestCase):
                     r"    pull_policy: always",
                 )
 
+    def test_image_tags_match_the_frontend_build_number(self):
+        for name, prefix in (("dev.yml", "dev-sha-"), ("release.yml", "release-sha-")):
+            with self.subTest(workflow=name):
+                workflow = (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
+                version = prefix + "${{ steps.source.outputs.short_sha }}"
+                self.assertIn("type=raw,value=" + version, workflow)
+                self.assertIn("VITE_BUILD_NUMBER=" + version, workflow)
+                self.assertIn("org.opencontainers.image.version=", workflow)
+
     def test_dev_pull_includes_all_application_services(self):
         script = (ROOT / "scripts/deploy-dev.sh").read_text(encoding="utf-8")
         pull = re.search(r"(?m)^  docker compose .+ pull (.+)$", script)

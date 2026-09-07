@@ -274,7 +274,7 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
         "POST",
         &update_path,
         &bearer,
-        Some(json!({ "amount_gross": 50 })),
+        Some(json!({ "amount_net": 50, "amount_vat": 0, "amount_gross": 50 })),
     )
     .await;
     assert_eq!(shrink_status, StatusCode::CONFLICT, "{shrink}");
