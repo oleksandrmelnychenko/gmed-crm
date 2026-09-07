@@ -307,7 +307,18 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     .await;
     assert_eq!(over_status, StatusCode::CONFLICT, "{over}");
 
-    let statement_path = format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR");
+    let (all_status, all_orders) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(all_status, StatusCode::OK, "{all_orders}");
+    assert_eq!(all_orders["summary"]["total_due"], "250");
+    let statement_path =
+        format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR&order_id={order_id}");
     let (statement_status, statement) =
         request_json(&ctx.app, "GET", &statement_path, &bearer, None).await;
     assert_eq!(statement_status, StatusCode::OK, "{statement}");
