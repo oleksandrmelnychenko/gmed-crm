@@ -51,6 +51,7 @@ import {
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
+  isFixedLegalDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
@@ -1469,6 +1470,9 @@ function StaffDocumentsPage({
   const selectedTemplateUsesDesignedRenderer = Boolean(
     selectedTemplate && isDesignedAgencyDocumentTemplate(selectedTemplate.id),
   );
+  const selectedTemplateIsFixedLegal = Boolean(
+    selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
+  );
   const selectedTemplateIsFreeText = isFreeTextDocumentTemplate(
     selectedTemplate?.id,
   );
@@ -1480,10 +1484,11 @@ function StaffDocumentsPage({
   const selectedTemplateRequiresOrder = documentTemplateRequiresOrder(
     selectedTemplate?.id,
   );
-  const selectedTemplateSupportsOrder = documentTemplateSupportsOrderContext(
-    selectedTemplate?.id,
-  );
+  const selectedTemplateSupportsOrder =
+    !selectedTemplateIsFixedLegal &&
+    documentTemplateSupportsOrderContext(selectedTemplate?.id);
   const selectedTemplateSupportsAppointment =
+    !selectedTemplateIsFixedLegal &&
     documentTemplateSupportsAppointmentContext(selectedTemplate?.id);
   const orderContextRequiredMessage =
     lang === "ru"
