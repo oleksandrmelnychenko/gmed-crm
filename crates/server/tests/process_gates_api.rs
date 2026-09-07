@@ -967,7 +967,7 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
             "languages": ["de"],
             "legal_status": {
                 "dsgvo_signed": true,
-                "confidentiality_release_signed": true,
+                "confidentiality_release_signed": false,
                 "identity_verified": true,
                 "document_pack_complete": true,
                 "compliance_completed": true,
@@ -992,7 +992,78 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(recheck["can_create_order"], false);
+    assert_eq!(recheck["confidentiality_release_ready"], false);
+    assert_eq!(
+        recheck["legal_status"]["confidentiality_release_signed"],
+        false
+    );
+    assert!(
+        recheck["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| { check["key"] == "confidentiality_release" && check["passed"] == false })
+    );
+    assert!(
+        recheck["blocking_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason
+                .as_str()
+                .unwrap_or_default()
+                .contains("confidentiality release"))
+    );
+
+    let (status, blocked) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Repeat execution without confidentiality release"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        blocked["message"],
+        "Existing customer re-check is incomplete"
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "legal_status": {
+                "dsgvo_signed": true,
+                "confidentiality_release_signed": true,
+                "identity_verified": true,
+                "document_pack_complete": true,
+                "compliance_completed": true,
+                "contract_status": "signed",
+                "notes": "Existing customer re-check complete"
+            }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, recheck) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/recheck"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(recheck["can_create_order"], true);
+    assert_eq!(recheck["confidentiality_release_ready"], true);
     assert_eq!(recheck["document_pack_ready"], true);
     assert_eq!(recheck["contract_ready"], true);
 

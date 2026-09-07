@@ -63,6 +63,8 @@ export type DataTableProps<T> = {
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
   rowHeightOverrides?: Partial<Record<DensityLevel, number>>;
+  mobilePrimaryColumnId?: string;
+  mobileDetailColumnIds?: readonly string[];
   disableRowHover?: boolean;
   loading?: boolean;
   emptyState?: ReactNode;
@@ -135,6 +137,8 @@ function useDataTableContent<T>({
   rowActionsLabel,
   rowActionsWidth = 44,
   rowHeightOverrides,
+  mobilePrimaryColumnId,
+  mobileDetailColumnIds,
   disableRowHover = false,
   loading = false,
   emptyState,
@@ -339,6 +343,8 @@ function useDataTableContent<T>({
   const showEmpty = !loading && rows.length === 0;
   const showLoading = loading;
   const mobilePrimaryColumn = useMemo(() => {
+    const configured = visibleCols.find((column) => column.id === mobilePrimaryColumnId);
+    if (configured) return configured;
     const preferredIds = [
       "filename",
       "patient",
@@ -352,10 +358,15 @@ function useDataTableContent<T>({
     return preferredIds
       .map((id) => visibleCols.find((column) => column.id === id))
       .find(Boolean) ?? visibleCols[0];
-  }, [visibleCols]);
+  }, [mobilePrimaryColumnId, visibleCols]);
   const mobileDetailColumns = useMemo(
-    () => visibleCols.filter((column) => column.id !== mobilePrimaryColumn?.id).slice(0, 4),
-    [mobilePrimaryColumn?.id, visibleCols],
+    () => {
+      const details = visibleCols.filter((column) => column.id !== mobilePrimaryColumn?.id);
+      return mobileDetailColumnIds
+        ? mobileDetailColumnIds.flatMap((id) => details.filter((column) => column.id === id))
+        : details.slice(0, 4);
+    },
+    [mobileDetailColumnIds, mobilePrimaryColumn?.id, visibleCols],
   );
 
   useOutsideClose(columnMenuRef, closeColumnMenu, { enabled: Boolean(columnMenu) });

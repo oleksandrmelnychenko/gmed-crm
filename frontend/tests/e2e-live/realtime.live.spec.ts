@@ -123,6 +123,7 @@ test.describe("realtime live propagation", () => {
       const firstName = `RealtimeFirst-${tag}`;
       const lastName = `RealtimeLast-${tag}`;
       const appointmentTitle = `Realtime appointment ${tag}`;
+      const appointmentDate = futureDate(1);
       const taskTitle = `Realtime dashboard task ${tag}`;
 
       await page.goto(`/patients?q=${encodeURIComponent(tag)}`);
@@ -165,6 +166,12 @@ test.describe("realtime live propagation", () => {
       // Keep appointment observation on the already connected CEO page. A
       // concierge without a current patient assignment intentionally receives
       // a privacy-safe blocked slot even when named as appointment owner.
+      // Open the week containing the new appointment. On Sundays, tomorrow
+      // is outside the default current-week query and cannot appear in it.
+      await page.evaluate((date) => {
+        window.localStorage.setItem("gmed_appointments_calendar_date", date);
+        window.localStorage.setItem("gmed_appointments_calendar_view", "timeGridWeek");
+      }, appointmentDate);
       const initialAppointmentsResponsePromise = waitForApiGet(
         page,
         "/appointments",
@@ -198,7 +205,7 @@ test.describe("realtime live propagation", () => {
         skip_medical_provider_binding: true,
         care_path_kind: "regular",
         title: appointmentTitle,
-        date: futureDate(1),
+        date: appointmentDate,
         time_start: "06:00",
         time_end: "06:30",
         location: "Realtime test room",

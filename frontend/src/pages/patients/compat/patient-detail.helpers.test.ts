@@ -5,6 +5,7 @@ import { t as translateCatalog } from "@/lib/i18n";
 import {
   buildPatientLabelPrintHtml,
   buildPatientTimelineSummary,
+  canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
   canViewPatientCareHistorySurface,
   canViewPatientContractsSurface,
@@ -18,6 +19,18 @@ import {
   formatRelatedPatientOption,
   resolvePatientTimelineRoute,
 } from "./patient-detail.helpers";
+
+describe("canManagePatientProfile", () => {
+  it.each([
+    ["ceo", true],
+    ["patient_manager", true],
+    ["it_admin", false],
+    ["billing", false],
+    [undefined, false],
+  ])("matches the backend patient update and compliance policy for %s", (role, expected) => {
+    expect(canManagePatientProfile(role)).toBe(expected);
+  });
+});
 
 describe("filterPatientTimelineItems", () => {
   const items = [

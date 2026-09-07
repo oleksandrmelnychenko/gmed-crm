@@ -236,6 +236,22 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
         .unwrap();
     }
 
+    let source_document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, version_root_document_id, patient_id, order_id, auto_name,
+               original_filename, mime_type, art, category, uploaded_by
+           ) VALUES ($1, $1, $2, $3, 'Supplier original', 'original.pdf',
+                     'application/pdf', 'invoice_document', 'finance', $4)"#,
+    )
+    .bind(source_document_id)
+    .bind(patient_a)
+    .bind(order_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+
     for (number, status, gross) in [
         ("PAYABLE", "received", 25_i64),
         ("EXPECTED", "expected", 15_i64),
@@ -244,10 +260,10 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
             r#"INSERT INTO external_invoices (
                    order_id, patient_id, external_invoice_number, invoice_date,
                    due_date, amount_net, amount_vat, amount_gross, currency,
-                   status, paid_by, service_delivered, created_by
+                   status, paid_by, service_delivered, created_by, source_document_id
                ) VALUES (
                    $1, $2, $3, CURRENT_DATE, CURRENT_DATE + 7,
-                   $4, 0, $4, 'EUR', $5, 'unpaid', false, $6
+                   $4, 0, $4, 'EUR', $5, 'unpaid', false, $6, $7
                )"#,
         )
         .bind(order_id)
@@ -256,6 +272,11 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
         .bind(gross)
         .bind(status)
         .bind(ctx.admin_id)
+        .bind(if number == "PAYABLE" {
+            Some(source_document_id)
+        } else {
+            None
+        })
         .execute(&ctx.pool)
         .await
         .unwrap();
@@ -340,6 +361,19 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     assert_eq!(result["summary"]["net_cash_flow"], "50");
     assert_eq!(result["patient_positions"].as_array().unwrap().len(), 2);
     assert_eq!(result["provider_liabilities"].as_array().unwrap().len(), 2);
+    let liabilities = result["provider_liabilities"].as_array().unwrap();
+    let payable = liabilities
+        .iter()
+        .find(|row| row["liability_kind"] == "payable")
+        .unwrap();
+    assert_eq!(payable["source_document_id"], json!(source_document_id));
+    assert_eq!(payable["source_document_name"], "original.pdf");
+    let expected = liabilities
+        .iter()
+        .find(|row| row["liability_kind"] == "expected")
+        .unwrap();
+    assert!(expected["source_document_id"].is_null());
+    assert!(expected["source_document_name"].is_null());
     assert_eq!(result["provider_positions"].as_array().unwrap().len(), 1);
     let provider_position = &result["provider_positions"][0];
     assert!(provider_position["provider_id"].is_null());
@@ -357,6 +391,21 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
             .iter()
             .any(|value| value == "USD")
     );
+
+    sqlx::query("UPDATE documents SET file_deleted_at = now() WHERE id = $1")
+        .bind(source_document_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    let (deleted_source_status, deleted_source) = request_json(
+        &ctx.app,
+        "/api/v1/company-financial-position?currency=EUR",
+        &billing,
+    )
+    .await;
+    assert_eq!(deleted_source_status, StatusCode::OK);
+    assert!(deleted_source["provider_liabilities"].as_array().unwrap().iter()
+        .all(|row| row["source_document_id"].is_null() && row["source_document_name"].is_null()));
 
     let (outflow_status, outflows) = request_json(
         &ctx.app,

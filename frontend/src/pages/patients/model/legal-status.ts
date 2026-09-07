@@ -145,10 +145,15 @@ export function getPatientLegalStatusCompletion(status: PatientLegalStatus) {
   };
 }
 
+export function isPatientLegalStatusComplete(status: PatientLegalStatus) {
+  const completion = getPatientLegalStatusCompletion(status);
+  return completion.total > 0 && completion.completed === completion.total;
+}
+
 export function getPatientLegalStatusSummary(status: PatientLegalStatus) {
   const translations = legalStatusTranslations();
   const completion = getPatientLegalStatusCompletion(status);
-  if (status.complianceCompleted) {
+  if (isPatientLegalStatusComplete(status)) {
     return translations.patient_legal_summary_complete;
   }
   if (completion.completed === 0) {

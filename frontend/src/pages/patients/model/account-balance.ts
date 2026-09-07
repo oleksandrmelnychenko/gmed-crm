@@ -1,7 +1,6 @@
 export type PatientBalanceSide = "debit" | "credit" | "settled" | "reconciliation_required";
 
 type PatientBalanceSummary = {
-  calculated_balance: string;
   closing_balance: string | null;
   balance_side: "debit" | "credit" | "settled" | "reconciliation_required";
 };
@@ -13,10 +12,23 @@ export type PatientBalancePresentation = {
 };
 
 export function resolvePatientBalancePresentation(
-  summary: PatientBalanceSummary,
+  summary: unknown,
 ): PatientBalancePresentation | null {
+  if (typeof summary !== "object" || summary == null || Array.isArray(summary)) {
+    return null;
+  }
+
+  const { closing_balance: rawBalance, balance_side: balanceSide } =
+    summary as Partial<PatientBalanceSummary>;
+  if (
+    (rawBalance !== null && typeof rawBalance !== "string") ||
+    !["debit", "credit", "settled", "reconciliation_required"].includes(balanceSide ?? "")
+  ) {
+    return null;
+  }
+
   const needsReconciliation =
-    summary.closing_balance == null || summary.balance_side === "reconciliation_required";
+    rawBalance == null || balanceSide === "reconciliation_required";
   if (needsReconciliation) {
     return {
       amount: null,
@@ -25,7 +37,7 @@ export function resolvePatientBalancePresentation(
     };
   }
 
-  const rawBalance = summary.closing_balance;
+  if (rawBalance.trim() === "") return null;
   const signedAmount = Number(rawBalance);
 
   if (!Number.isFinite(signedAmount)) return null;

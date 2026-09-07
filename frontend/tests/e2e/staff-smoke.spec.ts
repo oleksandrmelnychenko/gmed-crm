@@ -891,6 +891,74 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, patientInvoices);
     }
 
+    if (path === `/patients/${patientId}/account-statement`) {
+      return json(route, {
+        patient_id: patientId,
+        currency: "EUR",
+        available_currencies: ["EUR"],
+        scope: "staff",
+        amounts_complete: true,
+        summary: {
+          invoiced_gross: "1000.00",
+          cash_paid: "0.00",
+          prepayment_applied: "0.00",
+          available_prepayment: "0.00",
+          invoice_due: "1000.00",
+          external_receivable: "0.00",
+          total_due: "1000.00",
+          reconciliation_required: false,
+          opening_balance: "0.00",
+          debit_total: "1000.00",
+          credit_total: "0.00",
+          calculated_balance: "1000.00",
+          closing_balance: "1000.00",
+          balance_side: "debit",
+          unreconciled_external_debit: "0.00",
+        },
+        redaction: {
+          hidden_invoice_amount_count: 0,
+          external_expense_count: 0,
+          services_hidden: false,
+        },
+        movements: [],
+        items: [],
+      });
+    }
+
+    if (path === `/patients/${patientId}/financial-summary`) {
+      return json(route, {
+        patient_id: patientId,
+        currency: "EUR",
+        revenue_net: "1000.00",
+        revenue_vat: "0.00",
+        revenue_gross: "1000.00",
+        paid_amount: "0.00",
+        open_balance: "1000.00",
+        overdue_amount: "0.00",
+        expenses_net: null,
+        expenses_vat: null,
+        expenses_gross: null,
+        margin_net: null,
+        margin_percent: null,
+        margin_visible: false,
+        breakdown_by_order: [],
+        breakdown_by_service_type: [],
+        issues: [],
+      });
+    }
+
+    if (path === `/patients/${patientId}/financial-ledger`) {
+      return json(route, {
+        patient_id: patientId,
+        margin_visible: false,
+        entries: [],
+      });
+    }
+
+    if (path === `/patients/${patientId}/balance-adjustments`) {
+      return json(route, { items: [] });
+    }
+
     if (path === "/leads" && route.request().method() === "POST") {
       const payload = JSON.parse(route.request().postData() ?? "{}") as {
         first_name?: string;
@@ -1996,10 +2064,26 @@ test.describe("patient-profile RBAC shell", () => {
     ).toBeVisible();
 
     await workspaceNav.locator('a[href*="tab=contracts"]').click();
-    await expect(page.getByText("CTR-001")).toBeVisible();
+    await expect(page.getByText("CTR-001").first()).toBeVisible();
 
     await workspaceNav.locator('a[href*="tab=invoices"]').click();
-    await expect(page.getByText("INV-001")).toBeVisible();
+    await expect(page.getByText("INV-001").first()).toBeVisible();
+  });
+
+  test("a malformed account statement does not crash the patient workspace", async ({
+    page,
+  }) => {
+    await page.route(
+      "**/api/v1/patients/00000000-0000-0000-0000-000000000301/account-statement",
+      (route) => json(route, []),
+    );
+
+    await page.goto("/patients/00000000-0000-0000-0000-000000000301");
+
+    await expect(page.getByRole("heading", { name: "Anna Muster" })).toBeVisible();
+    await expect(
+      page.getByText(/Seite konnte nicht geladen werden|Page could not be loaded/i),
+    ).toHaveCount(0);
   });
 });
 

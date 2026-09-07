@@ -639,6 +639,7 @@ export type PatientOrderRecheck = {
   reason?: string | null;
   base_data_ready: boolean;
   compliance_ready: boolean;
+  confidentiality_release_ready: boolean;
   identity_ready: boolean;
   document_pack_ready: boolean;
   contract_ready: boolean;

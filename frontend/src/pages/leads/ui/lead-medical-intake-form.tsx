@@ -1,5 +1,6 @@
 import type { LeadDetail } from "@/lib/api/types";
 import { leadIntakeTypeFromLead } from "@/pages/leads/model/leads-model";
+import { fetchNarrativeHistory } from "@/pages/patients/data/patient-clinical";
 import { LeadQuestionnaireFacts } from "@/pages/leads/ui/lead-questionnaire-facts";
 import type {
   AllDoctorOption,
@@ -135,7 +136,9 @@ export function LeadMedicalIntakeForm({
             await onNarrativeChange(next);
             return next;
           }}
-          loadHistory={async () => (narrative ? [narrative] : [])}
+          loadHistory={async () => lead.prospect_patient_id
+            ? fetchNarrativeHistory(lead.prospect_patient_id)
+            : narrative ? [narrative] : []}
         />
       </div>
       <PatientMedicationSection

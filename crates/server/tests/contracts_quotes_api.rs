@@ -87,6 +87,14 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn load_patient_contract_status(pool: &PgPool, patient_id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT legal_status->>'contract_status' FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 async fn seed_lead(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO leads (
@@ -186,6 +194,12 @@ async fn framework_contract_create_list_and_sign_flow_work() {
     assert_eq!(status, StatusCode::CREATED);
     let contract_id = body["id"].as_str().unwrap().to_string();
     assert!(body["contract_number"].as_str().unwrap().starts_with("FC-"));
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("sent")
+    );
 
     let (status, body) = json_request(
         &app,
@@ -213,6 +227,12 @@ async fn framework_contract_create_list_and_sign_flow_work() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "signed");
     assert!(body["signed_at"].as_str().is_some());
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("signed")
+    );
 
     let (status, body) = json_request(
         &app,
@@ -225,6 +245,98 @@ async fn framework_contract_create_list_and_sign_flow_work() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["patient_id"], patient_id.to_string());
     assert_eq!(body["status"], "signed");
+}
+
+#[tokio::test]
+async fn patient_contract_status_is_derived_across_multiple_framework_contracts() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("patient-contract-status-sync");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let valid_from = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
+    let valid_to = (chrono::Utc::now().date_naive() + chrono::Duration::days(90)).to_string();
+
+    let (status, signed_contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "signed",
+            "valid_from": valid_from,
+            "valid_to": valid_to
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {signed_contract}");
+    let signed_contract_id = signed_contract["id"].as_str().unwrap();
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("signed"),
+        "an initially signed framework contract must update the patient profile"
+    );
+
+    let (status, sent_contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "sent"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {sent_contract}");
+    let sent_contract_id = sent_contract["id"].as_str().unwrap();
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("signed"),
+        "a current signed contract must take precedence over a newer sent contract"
+    );
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{signed_contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "terminated" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {terminated}");
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("sent"),
+        "an actionable sent replacement must win over a terminated historical contract"
+    );
+
+    let (status, signed_replacement) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{sent_contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {signed_replacement}");
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("signed")
+    );
 }
 
 #[tokio::test]

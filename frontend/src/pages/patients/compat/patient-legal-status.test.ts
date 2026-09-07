@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getPatientLegalStatusCompletion,
   getPatientLegalStatusSummary,
+  isPatientLegalStatusComplete,
   normalizePatientLegalStatus,
   serializePatientLegalStatus,
 } from "../model/legal-status";
@@ -83,17 +84,30 @@ describe("getPatientLegalStatusCompletion", () => {
 });
 
 describe("getPatientLegalStatusSummary", () => {
-  it("returns a complete summary when compliance is done", () => {
-    expect(
-      getPatientLegalStatusSummary({
-        dsgvoSigned: true,
-        confidentialityReleaseSigned: true,
-        identityVerified: true,
-        documentPackComplete: true,
-        complianceCompleted: true,
-        contractStatus: "signed",
-        notes: "",
-      })
-    ).toBe("Комплаенс завершен");
+  const completeStatus = {
+    dsgvoSigned: true,
+    confidentialityReleaseSigned: true,
+    identityVerified: true,
+    documentPackComplete: true,
+    complianceCompleted: true,
+    contractStatus: "signed",
+    notes: "",
+  };
+
+  it("returns a complete summary only when every checklist item is done", () => {
+    expect(isPatientLegalStatusComplete(completeStatus)).toBe(true);
+    expect(getPatientLegalStatusSummary(completeStatus)).toBe("Комплаенс завершен");
+  });
+
+  it("keeps a partial summary when compliance is done but another item is missing", () => {
+    const partialStatus = {
+      ...completeStatus,
+      confidentialityReleaseSigned: false,
+    };
+
+    expect(isPatientLegalStatusComplete(partialStatus)).toBe(false);
+    expect(getPatientLegalStatusSummary(partialStatus)).toBe(
+      "Выполнено 4 из 5 проверок комплаенса"
+    );
   });
 });

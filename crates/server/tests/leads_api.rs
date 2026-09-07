@@ -237,7 +237,6 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         sqlx::query(
             r#"UPDATE cases
                SET hauptanfragegrund = 'Chronic knee pain',
-                   aktuelle_anamnese = 'Pain for six months',
                    zuweiser = 'Self referral',
                    intake_completed_at = now(),
                    intake_completed_by = $2
@@ -253,10 +252,10 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         sqlx::query_scalar(
             r#"INSERT INTO cases (
                     case_id, lead_id, manager_id, status, hauptanfragegrund,
-                    aktuelle_anamnese, zuweiser, intake_completed_at, intake_completed_by
+                    zuweiser, intake_completed_at, intake_completed_by
                ) VALUES (
                     $1, $2, $3, 'open', 'Chronic knee pain',
-                    'Pain for six months', 'Self referral', now(), $3
+                    'Self referral', now(), $3
                ) RETURNING id"#,
         )
         .bind(format!("C-ONBOARD-{tag}"))
@@ -266,6 +265,17 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         .await
         .unwrap()
     };
+
+    sqlx::query(
+        r#"INSERT INTO patient_clinical_narrative (
+                patient_id, case_id, anamnese_aktuelle
+           ) SELECT patient_id, id, 'Pain for six months'
+             FROM cases WHERE id = $1 AND patient_id IS NOT NULL"#,
+    )
+    .bind(case_id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let mut document_ids = Vec::new();
     for compliance_kind in ["identity", "dsgvo", "confidentiality_release"] {
@@ -1728,6 +1738,25 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     assert_eq!(attached["attached"], true);
     assert_eq!(attached["lifecycle_status"], "active");
     let case_id = Uuid::parse_str(attached["case_id"].as_str().unwrap()).unwrap();
+
+    let replay_body = json!({ "attach_patient_id": patient_id });
+    let replay_path = format!("/api/v1/leads/{lead_id}/prospect");
+    let (first_replay, second_replay) = tokio::join!(
+        json_request(&app, "POST", &replay_path, &pm, Some(replay_body.clone())),
+        json_request(&app, "POST", &replay_path, &pm, Some(replay_body)),
+    );
+    for (status, replay) in [first_replay, second_replay] {
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(replay["patient_id"], patient_id.to_string());
+        assert_eq!(replay["case_id"], case_id.to_string());
+    }
+    let case_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cases WHERE source_lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(case_count, 1, "repeated attachment must reuse the episode");
 
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
     assert_eq!(artifacts.case_id, case_id);

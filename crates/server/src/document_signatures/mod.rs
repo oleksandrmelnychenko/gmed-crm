@@ -1,8 +1,8 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod connection;
 mod defaults;
-mod summary;
 pub mod provider;
+mod summary;
 
 #[cfg(test)]
 mod tests;

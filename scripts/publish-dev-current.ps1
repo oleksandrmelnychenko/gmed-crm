@@ -127,10 +127,23 @@ try {
   )
   $remote = "$User@$HostName"
 
+  # A queued publish must keep its own archive and matching runner: another
+  # workstation can upload while the current deployment holds the host lock.
+  $publishId = "$snapshotLabel-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+  if (-not $PSBoundParameters.ContainsKey("RemoteArchive")) {
+    $RemoteArchive = "/home/gmed/deploy/gmed-crm-$publishId.tgz"
+  }
+  if (-not $PSBoundParameters.ContainsKey("RemoteDeployScript")) {
+    $RemoteDeployScript = "/home/gmed/deploy/deploy-dev-current-$publishId.sh"
+  }
+
   Invoke-Checked "ssh" ($sshOptions + @($remote, "mkdir -p /home/gmed/deploy"))
   Invoke-Checked "scp" ($sshOptions + @($archive, "${remote}:$RemoteArchive"))
   Invoke-Checked "scp" ($sshOptions + @($localDeployScript, "${remote}:$RemoteDeployScript"))
-  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && bash $RemoteDeployScript $RemoteArchive"))
+  # Serialize builds as well as restarts: Compose uses shared image tags, so
+  # merely locking the final container replacement still permits mixed releases.
+  Write-Host "Waiting for the DEV deployment lock, then publishing $snapshotLabel..."
+  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && flock -x /home/gmed/deploy/deploy.lock bash $RemoteDeployScript $RemoteArchive"))
 
   if (-not $SkipSmoke) {
     $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 30

@@ -44,6 +44,7 @@ import {
 
 import {
   buildPatientLabelPrintHtml,
+  canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
@@ -948,7 +949,7 @@ function createPatientDetailPageFieldPatch<K extends keyof PatientDetailPageStat
 function usePatientDetailPageContent() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { staffGo } = useStaffNavigate();
+  const { staffGo, canStaffPath } = useStaffNavigate();
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -1178,18 +1179,9 @@ function usePatientDetailPageContent() {
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
   const canManageInvoices =
     user?.role === "ceo" || user?.role === "billing" || user?.role === "it_admin";
-  const canEditPatientProfile =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
-  const canExportPatientCompliance =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
-  const canOpenComplianceWorkspace =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
+  const canEditPatientProfile = canManagePatientProfile(user?.role);
+  const canExportPatientCompliance = canManagePatientProfile(user?.role);
+  const canOpenComplianceWorkspace = canManagePatientProfile(user?.role);
   const canPrintPatientLabel =
     user?.role === "ceo" ||
     user?.role === "patient_manager" ||
@@ -2073,6 +2065,7 @@ function usePatientDetailPageContent() {
         assignments={assignments}
         assignableStaff={assignableStaff}
         canCreateOrders={canCreateOrders}
+        canViewLeads={canStaffPath("/leads")}
         canCreateTasks={canCreateTasks}
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}

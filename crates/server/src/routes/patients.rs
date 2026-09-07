@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::access::{self, resolve_explicit_resource_access};
 use crate::audit;
 use crate::auth::{middleware::AuthUser, password};
-use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::documents::{
     can_view_document_row, document_access_allowed, is_iso_country_code, load_assignment_set,
     load_document_acl_candidates,
@@ -24,10 +23,6 @@ use gmed_domain::access::resource_access::{
     AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
 };
 use gmed_domain::role::Role;
-use printpdf::{
-    Color, Mm, Op, PaintMode, PdfDocument, PdfFontHandle, PdfPage, PdfWarnMsg, Point, Pt, Rect,
-    Rgb, WindingOrder,
-};
 use sqlx::postgres::PgRow;
 use sqlx::types::Json as SqlxJson;
 use sqlx::{Postgres, Row, Transaction};
@@ -7464,6 +7459,7 @@ pub(crate) async fn load_patient_recheck_readiness(
                 "can_create_order": true,
                 "base_data_ready": true,
                 "compliance_ready": true,
+                "confidentiality_release_ready": true,
                 "identity_ready": true,
                 "document_pack_ready": true,
                 "contract_ready": true,
@@ -7522,6 +7518,10 @@ pub(crate) async fn load_patient_recheck_readiness(
 
     let dsgvo_signed = legal_status
         .get("dsgvo_signed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let confidentiality_release_signed = legal_status
+        .get("confidentiality_release_signed")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let identity_verified = legal_status
@@ -7634,6 +7634,12 @@ pub(crate) async fn load_patient_recheck_readiness(
             "blocking_for": "create_order",
         }),
         json!({
+            "key": "confidentiality_release",
+            "label": "Medical confidentiality release signed",
+            "passed": confidentiality_release_signed,
+            "blocking_for": "create_order",
+        }),
+        json!({
             "key": "identity",
             "label": "Identity verified",
             "passed": identity_verified,
@@ -7688,6 +7694,9 @@ pub(crate) async fn load_patient_recheck_readiness(
             blocking_reasons.push("DSGVO/compliance documents are not signed".to_string());
         }
     }
+    if !confidentiality_release_signed {
+        blocking_reasons.push("Medical confidentiality release is not signed".to_string());
+    }
     if !identity_verified {
         blocking_reasons.push("Identity is not verified".to_string());
     }
@@ -7719,6 +7728,7 @@ pub(crate) async fn load_patient_recheck_readiness(
             "can_create_order": can_create_order,
             "base_data_ready": base_data_ready,
             "compliance_ready": compliance_ready,
+            "confidentiality_release_ready": confidentiality_release_signed,
             "identity_ready": identity_verified,
             "document_pack_ready": document_pack_ready,
             "contract_ready": contract_ready,
@@ -7748,6 +7758,7 @@ pub(crate) async fn load_patient_recheck_readiness(
             },
             "legal_status": {
                 "dsgvo_signed": dsgvo_signed,
+                "confidentiality_release_signed": confidentiality_release_signed,
                 "identity_verified": identity_verified,
                 "compliance_completed": compliance_completed,
                 "contract_status": stored_contract_status,
@@ -14380,207 +14391,136 @@ async fn save_patient_impfstatus(
 }
 
 // ---------------------------------------------------------------------------
-// Arztbrief (clinical profile) PDF export. Self-contained A4 layout built on
-// printpdf directly (no dependency on the documents.rs PDF helpers).
+// Arztbrief: a consistent, read-only snapshot of saved clinical records.
 // ---------------------------------------------------------------------------
 
-const CLIN_PDF_W: f32 = 210.0;
-const CLIN_PDF_H: f32 = 297.0;
-const CLIN_PDF_LEFT: f32 = 18.0;
-const CLIN_PDF_TOP: f32 = 18.0;
-const CLIN_PDF_BOTTOM: f32 = 16.0;
-const CLIN_PDF_CONTENT_W: f32 = CLIN_PDF_W - CLIN_PDF_LEFT - 18.0;
+async fn load_clinical_report_data(
+    state: &AppState,
+    patient_uuid: Uuid,
+    today: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    let mut transaction = state.db.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *transaction)
+        .await?;
+    let patient = sqlx::query_scalar::<_, Value>(
+        "SELECT jsonb_build_object('first_name', first_name, 'last_name', last_name,
+         'birth_date', birth_date, 'patient_id', patient_id, 'clinical_warnings', clinical_warnings)
+         FROM patients WHERE id = $1",
+    )
+    .bind(patient_uuid)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(patient) = patient else {
+        return Ok(None);
+    };
+    let mut data = Map::new();
+    data.insert("patient".into(), patient);
 
-fn clin_pt_to_mm(value: f32) -> f32 {
-    value * 0.352_778
-}
-
-fn clin_line_height(size_pt: f32) -> f32 {
-    clin_pt_to_mm(size_pt) * 1.32
-}
-
-fn clin_wrap(text: &str, size_pt: f32, width_mm: f32) -> Vec<String> {
-    let normalized = text.trim();
-    if normalized.is_empty() {
-        return Vec::new();
-    }
-    let avg = clin_pt_to_mm(size_pt) * 0.54;
-    let max_chars = ((width_mm / avg).floor() as usize).max(18);
-    let mut lines = Vec::new();
-    let mut current = String::new();
-    for word in normalized.split_whitespace() {
-        let projected = if current.is_empty() {
-            word.chars().count()
-        } else {
-            current.chars().count() + 1 + word.chars().count()
-        };
-        if projected <= max_chars {
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
-        } else {
-            if !current.is_empty() {
-                lines.push(std::mem::take(&mut current));
-            }
-            current.push_str(word);
+    // Table/filter/order identifiers below are constants, never request values.
+    // JSON preserves partially specified clinical dates and all clinical fields;
+    // the PDF formatter explicitly selects fields suitable for the report.
+    for (key, table, filter, order) in [
+        (
+            "diagnoses",
+            "patient_diagnoses",
+            "",
+            "r.sort_order, r.created_at, r.id",
+        ),
+        (
+            "procedures",
+            "patient_procedures",
+            "",
+            "r.sort_order, r.created_at, r.id",
+        ),
+        (
+            "examinations",
+            "patient_examinations",
+            "",
+            "r.sort_order, r.created_at, r.id",
+        ),
+        (
+            "verlauf",
+            "patient_clinical_verlauf",
+            "",
+            "r.occurred_on NULLS LAST, r.sort_order, r.created_at, r.id",
+        ),
+        (
+            "medications",
+            "patient_medications",
+            " AND r.superseded_at IS NULL AND r.status = 'aktiv' AND NOT COALESCE(r.on_hold, false)
+           AND (NULLIF(BTRIM(r.einnahme_von), '') IS NULL OR BTRIM(r.einnahme_von) <= $2)
+           AND (NULLIF(BTRIM(r.einnahme_bis), '') IS NULL OR BTRIM(r.einnahme_bis) >= $2)",
+            "r.sort_order, r.created_at, r.id",
+        ),
+    ] {
+        let query = format!(
+            "SELECT to_jsonb(r) || jsonb_build_object(
+                'provider_name', p.name, 'doctor_name', d.name, 'doctor_title', d.title,
+                'doctor_fachbereich', d.fachbereich,
+                'source_document_name', COALESCE(doc.original_filename, doc.auto_name))
+             FROM {table} r
+             LEFT JOIN providers p ON p.id = r.provider_id
+             LEFT JOIN provider_doctors d ON d.id = r.doctor_id
+             LEFT JOIN documents doc ON doc.id = (to_jsonb(r)->>'source_document_id')::uuid
+             WHERE r.patient_id = $1 {filter} ORDER BY {order}"
+        );
+        let mut query = sqlx::query_scalar::<_, Value>(&query).bind(patient_uuid);
+        if key == "medications" {
+            query = query.bind(today);
         }
+        data.insert(key.into(), json!(query.fetch_all(&mut *transaction).await?));
     }
-    if !current.is_empty() {
-        lines.push(current);
+    for (key, query) in [
+        ("warnings", "SELECT to_jsonb(w) FROM patient_clinical_warnings w WHERE patient_id = $1 ORDER BY kind, sort_order, created_at, id"),
+        ("recommendations", "SELECT to_jsonb(r) || jsonb_build_object(
+                'doctor_name', dr.name, 'doctor_title', dr.title, 'doctor_fachbereich', dr.fachbereich,
+                'provider_name', p.name, 'source_document_name', COALESCE(d.original_filename, d.auto_name))
+             FROM patient_recommendations r
+             LEFT JOIN provider_doctors dr ON dr.id = r.source_doctor_id
+             LEFT JOIN providers p ON p.id = dr.provider_id
+             LEFT JOIN documents d ON d.id = r.source_document_id
+             WHERE r.patient_id = $1 ORDER BY r.created_at, r.id"),
+        ("vitals", "SELECT to_jsonb(v) || jsonb_build_object('source_document_name', COALESCE(d.original_filename, d.auto_name))
+             FROM patient_vital_measurements v
+             LEFT JOIN documents d ON d.id = v.source_document_id
+             WHERE v.patient_id = $1 ORDER BY v.measured_at DESC, v.created_at DESC, v.id LIMIT 1"),
+        ("labs", "SELECT to_jsonb(l) || jsonb_build_object('source_document_name', COALESCE(d.original_filename, d.auto_name))
+             FROM patient_lab_results l
+             LEFT JOIN documents d ON d.id = l.source_document_id
+             WHERE l.patient_id = $1 AND l.deleted_at IS NULL ORDER BY l.measured_at DESC, l.created_at, l.id"),
+    ] {
+        let rows = sqlx::query_scalar::<_, Value>(query).bind(patient_uuid).fetch_all(&mut *transaction).await?;
+        data.insert(key.into(), json!(rows));
     }
-    lines
-}
-
-struct ClinPdf {
-    pages: Vec<PdfPage>,
-    ops: Vec<Op>,
-    y: f32,
-    regular: PdfFontHandle,
-    bold: PdfFontHandle,
-}
-
-impl ClinPdf {
-    fn new(regular: PdfFontHandle, bold: PdfFontHandle) -> Self {
-        Self {
-            pages: Vec::new(),
-            ops: Vec::new(),
-            y: CLIN_PDF_H - CLIN_PDF_TOP,
-            regular,
-            bold,
-        }
-    }
-
-    fn flush_page(&mut self) {
-        if self.ops.is_empty() {
-            return;
-        }
-        self.pages.push(PdfPage::new(
-            Mm(CLIN_PDF_W),
-            Mm(CLIN_PDF_H),
-            std::mem::take(&mut self.ops),
-        ));
-        self.y = CLIN_PDF_H - CLIN_PDF_TOP;
-    }
-
-    fn ensure(&mut self, need_mm: f32) {
-        if self.y - need_mm < CLIN_PDF_BOTTOM {
-            self.flush_page();
-        }
-    }
-
-    fn gap(&mut self, mm: f32) {
-        if mm > 0.0 {
-            self.ensure(mm);
-            self.y -= mm;
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn text(
-        &mut self,
-        text: &str,
-        size_pt: f32,
-        bold: bool,
-        gray: bool,
-        indent_mm: f32,
-        before: f32,
-        after: f32,
-    ) {
-        let lines = clin_wrap(text, size_pt, (CLIN_PDF_CONTENT_W - indent_mm).max(40.0));
-        if lines.is_empty() {
-            return;
-        }
-        if before > 0.0 {
-            self.gap(before);
-        }
-        let lh = clin_line_height(size_pt);
-        let x = CLIN_PDF_LEFT + indent_mm;
-        let font = if bold {
-            self.bold.clone()
-        } else {
-            self.regular.clone()
-        };
-        let col = if gray {
-            Color::Rgb(Rgb::new(0.42, 0.46, 0.54, None))
-        } else {
-            Color::Rgb(Rgb::new(0.09, 0.12, 0.18, None))
-        };
-        for line in lines {
-            self.ensure(lh);
-            self.ops.push(Op::SetFont {
-                font: font.clone(),
-                size: Pt(size_pt),
-            });
-            self.ops.push(Op::StartTextSection);
-            self.ops.push(Op::SetTextCursor {
-                pos: Point::new(Mm(x), Mm(self.y)),
-            });
-            self.ops.push(Op::SetFillColor { col: col.clone() });
-            self.ops.push(unicode_show_text_op(&line));
-            self.ops.push(Op::EndTextSection);
-            self.y -= lh;
-        }
-        if after > 0.0 {
-            self.gap(after);
-        }
-    }
-
-    fn heading(&mut self, text: &str) {
-        self.text(text, 12.0, true, false, 0.0, 4.0, 1.0);
-    }
-
-    fn finish(mut self) -> Vec<PdfPage> {
-        self.flush_page();
-        self.pages
-    }
-}
-
-/// "Dr. med. Doctor X · Provider Y" attribution from a joined clinical row.
-fn clin_attribution(row: &sqlx::postgres::PgRow) -> Option<String> {
-    let doctor = [
-        row.try_get::<Option<String>, _>("doctor_title")
-            .ok()
-            .flatten(),
-        row.try_get::<Option<String>, _>("doctor_name")
-            .ok()
-            .flatten(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" ");
-    let fachbereich = row
-        .try_get::<Option<String>, _>("doctor_fachbereich")
-        .ok()
-        .flatten();
-    let provider = row
-        .try_get::<Option<String>, _>("provider_name")
-        .ok()
-        .flatten();
-    let parts: Vec<String> = [
-        if doctor.trim().is_empty() {
-            None
-        } else {
-            Some(doctor)
-        },
-        fachbereich,
-        provider,
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" · "))
-    }
+    let narrative = sqlx::query_scalar::<_, Value>(
+        "SELECT to_jsonb(n) || jsonb_build_object(
+            'source_document_name', COALESCE(d.original_filename, d.auto_name),
+            'specializations', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('name_ru', ms.name_ru, 'name_de', ms.name_de,
+                    'code', ms.code, 'narrative_text', ns.narrative_text, 'assessment_text', ns.assessment_text)
+                    ORDER BY ns.sort_order, ms.id)
+                FROM patient_narrative_specializations ns
+                JOIN medical_specializations ms ON ms.id = ns.specialization_id
+                WHERE ns.narrative_id = n.id), '[]'::jsonb))
+         FROM patient_clinical_narrative n
+         LEFT JOIN documents d ON d.id = n.source_document_id
+         WHERE n.patient_id = $1 AND n.is_active ORDER BY n.updated_at DESC, n.id LIMIT 1"
+    ).bind(patient_uuid).fetch_optional(&mut *transaction).await?;
+    data.insert("narrative".into(), narrative.unwrap_or(Value::Null));
+    let vaccination = sqlx::query_scalar::<_, Value>(
+        "SELECT jsonb_build_object('status_text', status_text) FROM patient_impfstatus WHERE patient_id = $1"
+    ).bind(patient_uuid).fetch_optional(&mut *transaction).await?;
+    data.insert("impfstatus".into(), vaccination.unwrap_or(Value::Null));
+    transaction.commit().await?;
+    Ok(Some(Value::Object(data)))
 }
 
 async fn get_patient_clinical_pdf(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
@@ -14588,400 +14528,51 @@ async fn get_patient_clinical_pdf(
     match has_patient_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(resp) => return resp,
+        Err(response) => return response,
     }
-
-    let fail = || {
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build clinical PDF",
-        )
+    let russian = match query.lang.as_deref().unwrap_or("de") {
+        "ru" => true,
+        "de" => false,
+        _ => return err(StatusCode::BAD_REQUEST, "Unsupported PDF language"),
     };
-
-    let patient = match sqlx::query(
-        "SELECT first_name, last_name, birth_date, patient_id FROM patients WHERE id = $1",
+    let now = chrono::Utc::now().with_timezone(&chrono_tz::Europe::Berlin);
+    let data = match load_clinical_report_data(
+        &state,
+        patient_uuid,
+        &now.format("%Y-%m-%d").to_string(),
     )
-    .bind(patient_uuid)
-    .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(row)) => row,
+        Ok(Some(data)) => data,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Patient not found"),
-        Err(e) => {
-            tracing::error!(error = %e, patient_id = %patient_uuid, "load patient for clinical PDF");
-            return fail();
-        }
-    };
-
-    let diag_rows = match sqlx::query(
-        r#"SELECT d.kind, d.label, d.icd_code, d.grade, d.laterality, d.status, d.diagnosed_on,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
-           FROM patient_diagnoses d
-           LEFT JOIN providers pv ON pv.id = d.provider_id
-           LEFT JOIN provider_doctors dr ON dr.id = d.doctor_id
-           WHERE d.patient_id = $1 ORDER BY d.sort_order, d.created_at"#,
-    )
-    .bind(patient_uuid)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return fail(),
-    };
-
-    let proc_rows = match sqlx::query(
-        r#"SELECT p2.label, p2.ops_code, p2.performed_on, p2.note,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
-           FROM patient_procedures p2
-           LEFT JOIN providers pv ON pv.id = p2.provider_id
-           LEFT JOIN provider_doctors dr ON dr.id = p2.doctor_id
-           WHERE p2.patient_id = $1 ORDER BY p2.sort_order, p2.created_at"#,
-    )
-    .bind(patient_uuid)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return fail(),
-    };
-
-    let exam_rows = match sqlx::query(
-        r#"SELECT e.title, e.performed_on, e.status, e.result,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
-           FROM patient_examinations e
-           LEFT JOIN providers pv ON pv.id = e.provider_id
-           LEFT JOIN provider_doctors dr ON dr.id = e.doctor_id
-           WHERE e.patient_id = $1 ORDER BY e.sort_order, e.created_at"#,
-    )
-    .bind(patient_uuid)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return fail(),
-    };
-
-    let med_rows = match sqlx::query(
-        r#"SELECT m.category, m.wirkstoff, m.handelsname, m.staerke, m.form,
-                  m.dose_morgens, m.dose_mittags, m.dose_abends, m.dose_nachts, m.einheit, m.hinweis, m.grund,
-                  pv.name AS provider_name, dr.name AS doctor_name, dr.title AS doctor_title, dr.fachbereich AS doctor_fachbereich
-           FROM patient_medications m
-           LEFT JOIN providers pv ON pv.id = m.provider_id
-           LEFT JOIN provider_doctors dr ON dr.id = m.doctor_id
-           WHERE m.patient_id = $1 AND m.superseded_at IS NULL
-           ORDER BY m.sort_order, m.created_at"#,
-    )
-    .bind(patient_uuid)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return fail(),
-    };
-
-    // Use the same fail-on-error pattern as the sibling queries: a DB error must
-    // not be silently rendered as "no narrative", which would drop Anamnese /
-    // Beurteilung / Verlauf from a clinical document without any signal.
-    let narrative = match sqlx::query(
-        r#"SELECT anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
-                  untersuchungsbefund, beurteilung
-           FROM patient_clinical_narrative
-           WHERE patient_id = $1 AND is_active
-           ORDER BY updated_at DESC
-           LIMIT 1"#,
-    )
-    .bind(patient_uuid)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(_) => return fail(),
-    };
-
-    let verlauf_rows = match sqlx::query(
-        r#"SELECT v.occurred_on, v.note, p.name AS provider_name
-           FROM patient_clinical_verlauf v
-           LEFT JOIN providers p ON p.id = v.provider_id
-           WHERE v.patient_id = $1
-           ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
-    )
-    .bind(patient_uuid)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return fail(),
-    };
-
-    let first = patient
-        .try_get::<Option<String>, _>("first_name")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let last = patient
-        .try_get::<Option<String>, _>("last_name")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let mrn = patient
-        .try_get::<Option<String>, _>("patient_id")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let dob = patient
-        .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
-        .ok()
-        .flatten()
-        .map(|d| d.format("%d.%m.%Y").to_string())
-        .unwrap_or_default();
-
-    let mut document = PdfDocument::new("Arztbrief");
-    let (regular_font, bold_font) = match add_unicode_pdf_fonts(&mut document) {
-        Ok(fonts) => fonts,
         Err(error) => {
-            tracing::error!(error, patient_id = %patient_uuid, "load fonts for clinical PDF");
-            return fail();
+            tracing::error!(error = %error, patient_id = %patient_uuid, "load clinical report snapshot");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build clinical PDF",
+            );
         }
     };
-    let mut pdf = ClinPdf::new(regular_font, bold_font);
-    pdf.text("Arztbrief", 16.0, true, false, 0.0, 0.0, 1.0);
-    pdf.text(
-        format!("{} {}", first.trim(), last.trim()).trim(),
-        12.0,
-        true,
-        false,
-        0.0,
-        0.0,
-        0.5,
-    );
-    pdf.text(
-        &format!(
-            "Geb.: {dob}   ·   ID: {mrn}   ·   Stand: {}",
-            chrono::Utc::now().format("%d.%m.%Y")
-        ),
-        9.0,
-        false,
-        true,
-        0.0,
-        0.0,
-        2.5,
-    );
-
-    // ---- Diagnosen (Haupt / Neben) ----
-    if !diag_rows.is_empty() {
-        pdf.heading("Diagnosen");
-        for (kind, header) in [("main", "Hauptdiagnose"), ("secondary", "Nebendiagnosen")] {
-            let group: Vec<&sqlx::postgres::PgRow> = diag_rows
-                .iter()
-                .filter(|r| {
-                    r.try_get::<String, _>("kind")
-                        .map(|k| k == kind)
-                        .unwrap_or(false)
-                })
-                .collect();
-            if group.is_empty() {
-                continue;
-            }
-            pdf.text(header, 9.0, true, true, 0.0, 1.0, 0.5);
-            for row in group {
-                let label = row.try_get::<String, _>("label").unwrap_or_default();
-                let icd = row.try_get::<Option<String>, _>("icd_code").ok().flatten();
-                let grade = row.try_get::<Option<String>, _>("grade").ok().flatten();
-                let mut line = label;
-                if let Some(g) = grade.filter(|g| !g.is_empty()) {
-                    line.push_str(&format!(" {g}"));
-                }
-                if let Some(code) = icd.filter(|c| !c.is_empty()) {
-                    line.push_str(&format!(" ({code})"));
-                }
-                pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.0);
-                if let Some(attr) = clin_attribution(row) {
-                    pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
-                }
-            }
-        }
-    }
-
-    // ---- Therapie ----
-    if !proc_rows.is_empty() {
-        pdf.heading("Therapie");
-        for row in &proc_rows {
-            let label = row.try_get::<String, _>("label").unwrap_or_default();
-            let ops = row.try_get::<Option<String>, _>("ops_code").ok().flatten();
-            let date = row
-                .try_get::<Option<String>, _>("performed_on")
-                .ok()
-                .flatten();
-            let mut line = String::new();
-            if let Some(d) = date.filter(|d| !d.is_empty()) {
-                line.push_str(&format!("{d} "));
-            }
-            line.push_str(&label);
-            if let Some(code) = ops.filter(|c| !c.is_empty()) {
-                line.push_str(&format!(" ({code})"));
-            }
-            pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.0);
-            if let Some(attr) = clin_attribution(row) {
-                pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
-            }
-        }
-    }
-
-    // ---- Anamnese / Befund / Beurteilung ----
-    if let Some(row) = &narrative {
-        for (col, header) in [
-            ("anamnese_aktuelle", "Aktuelle Anamnese"),
-            ("anamnese_vorgeschichte", "Weitere Vorgeschichte"),
-            ("anamnese_vegetative", "Vegetative Anamnese"),
-            ("anamnese_sozial", "Sozialanamnese"),
-            ("untersuchungsbefund", "Untersuchungsbefund"),
-            ("beurteilung", "Beurteilung"),
-        ] {
-            if let Some(text) = row
-                .try_get::<Option<String>, _>(col)
-                .ok()
+    let printed_by =
+        match sqlx::query_scalar::<_, Option<String>>("SELECT name FROM users WHERE id = $1")
+            .bind(auth.user_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(name) => name
                 .flatten()
-                .filter(|t| !t.trim().is_empty())
-            {
-                pdf.text(header, 9.0, true, true, 0.0, 2.0, 0.5);
-                pdf.text(&text, 10.5, false, false, 0.0, 0.0, 0.5);
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "GMED".into()),
+            Err(error) => {
+                tracing::error!(error = %error, "load clinical PDF issuer");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to build clinical PDF",
+                );
             }
-        }
-    }
-
-    if !verlauf_rows.is_empty() {
-        pdf.heading("Verlauf");
-        for row in &verlauf_rows {
-            let date = row
-                .try_get::<Option<chrono::NaiveDate>, _>("occurred_on")
-                .ok()
-                .flatten()
-                .map(|value| value.format("%d.%m.%Y").to_string());
-            let provider = row
-                .try_get::<Option<String>, _>("provider_name")
-                .ok()
-                .flatten();
-            let note = row.try_get::<String, _>("note").unwrap_or_default();
-            let prefix = [date, provider]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-            let line = if prefix.is_empty() {
-                note
-            } else {
-                format!("{prefix}: {note}")
-            };
-            pdf.text(&format!("• {line}"), 10.5, false, false, 3.0, 0.0, 0.5);
-        }
-    }
-
-    // ---- Befunde ----
-    if !exam_rows.is_empty() {
-        pdf.heading("Befunde");
-        for row in &exam_rows {
-            let title = row.try_get::<String, _>("title").unwrap_or_default();
-            let date = row
-                .try_get::<Option<String>, _>("performed_on")
-                .ok()
-                .flatten();
-            let status = row.try_get::<String, _>("status").unwrap_or_default();
-            let result = row.try_get::<Option<String>, _>("result").ok().flatten();
-            let mut head = title;
-            if let Some(d) = date.filter(|d| !d.is_empty()) {
-                head.push_str(&format!(" ({d})"));
-            }
-            if status == "pending" {
-                head.push_str(" — Befund ausstehend");
-            }
-            pdf.text(&format!("• {head}"), 10.5, true, false, 3.0, 0.5, 0.0);
-            if let Some(text) = result.filter(|t| !t.trim().is_empty()) {
-                pdf.text(&text, 10.0, false, false, 6.0, 0.0, 0.0);
-            }
-            if let Some(attr) = clin_attribution(row) {
-                pdf.text(&attr, 8.5, false, true, 6.0, 0.0, 0.5);
-            }
-        }
-    }
-
-    // ---- Medikation (by category) ----
-    if !med_rows.is_empty() {
-        pdf.heading("Medikation");
-        for (cat, header) in [
-            ("dauer", "Dauermedikation"),
-            ("besondere", "Zu besonderen Zeiten"),
-            ("selbst", "Selbstmedikation"),
-        ] {
-            let group: Vec<&sqlx::postgres::PgRow> = med_rows
-                .iter()
-                .filter(|r| {
-                    r.try_get::<String, _>("category")
-                        .map(|c| c == cat)
-                        .unwrap_or(false)
-                })
-                .collect();
-            if group.is_empty() {
-                continue;
-            }
-            pdf.text(header, 9.0, true, true, 0.0, 1.0, 0.5);
-            for row in group {
-                let name = row.try_get::<String, _>("handelsname").unwrap_or_default();
-                let staerke = row.try_get::<Option<String>, _>("staerke").ok().flatten();
-                let form = row.try_get::<Option<String>, _>("form").ok().flatten();
-                let dosing = [
-                    row.try_get::<Option<String>, _>("dose_morgens")
-                        .ok()
-                        .flatten(),
-                    row.try_get::<Option<String>, _>("dose_mittags")
-                        .ok()
-                        .flatten(),
-                    row.try_get::<Option<String>, _>("dose_abends")
-                        .ok()
-                        .flatten(),
-                    row.try_get::<Option<String>, _>("dose_nachts")
-                        .ok()
-                        .flatten(),
-                ]
-                .into_iter()
-                .map(|v| v.unwrap_or_else(|| "0".to_string()))
-                .collect::<Vec<_>>()
-                .join("-");
-                let einheit = row
-                    .try_get::<Option<String>, _>("einheit")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                let grund = row.try_get::<Option<String>, _>("grund").ok().flatten();
-                let mut line = name;
-                if let Some(s) = staerke.filter(|s| !s.is_empty()) {
-                    line.push_str(&format!(" {s}"));
-                }
-                if let Some(f) = form.filter(|f| !f.is_empty()) {
-                    line.push_str(&format!(" {f}"));
-                }
-                line.push_str(&format!("  [{dosing} {einheit}]"));
-                if let Some(g) = grund.filter(|g| !g.is_empty()) {
-                    line.push_str(&format!("  — {g}"));
-                }
-                pdf.text(&format!("• {line}"), 10.0, false, false, 3.0, 0.0, 0.0);
-            }
-        }
-    }
-
-    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
-    let bytes = document
-        .with_pages(pdf.finish())
-        .save(&pdf_text_save_options(), &mut warnings);
-
-    state.audit_sender.try_send(audit::domain_event(
-        "export_patient_clinical_pdf",
-        Some(auth.user_id),
-        "patient",
-        Some(patient_uuid),
-        json!({ "bytes": bytes.len() }),
-    ));
-
-    let slug: String = mrn
+        };
+    let identifier = data["patient"]["patient_id"].as_str().unwrap_or_default();
+    let slug: String = identifier
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' {
@@ -14993,20 +14584,46 @@ async fn get_patient_clinical_pdf(
         .collect();
     let slug = slug.trim_matches('-');
     let filename = if slug.is_empty() {
-        "arztbrief.pdf".to_string()
+        "arztbrief.pdf".into()
     } else {
         format!("arztbrief-{slug}.pdf")
     };
-
+    let context = crate::services::patient_clinical_pdf::ClinicalReportContext {
+        russian,
+        data,
+        printed_by,
+        printed_on: now.format("%d.%m.%Y %H:%M").to_string(),
+    };
+    let bytes = match crate::services::patient_clinical_pdf::build_clinical_report_pdf(&context) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::error!(error, patient_id = %patient_uuid, "render clinical PDF");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build clinical PDF",
+            );
+        }
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        "export_patient_clinical_pdf",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_uuid),
+        json!({"bytes": bytes.len(), "language": if russian { "ru" } else { "de" }}),
+    ));
     (
         [
             (
                 axum::http::header::CONTENT_TYPE,
-                "application/pdf".to_string(),
+                "application/pdf".to_owned(),
+            ),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, no-store".to_owned(),
             ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                format!("inline; filename=\"{filename}\""),
+                format!("attachment; filename=\"{filename}\""),
             ),
         ],
         bytes,
@@ -15015,217 +14632,19 @@ async fn get_patient_clinical_pdf(
 }
 
 // ---------------------------------------------------------------------------
-// Bundeseinheitlicher Medikationsplan (BMP) — printable A4 plan with a real
-// ECC200 Data-Matrix carrier (see crate::bmp). Single page.
+// Current patient medication plan, generated from saved prescriptions.
 // ---------------------------------------------------------------------------
 
-const MP_LEFT: f32 = 14.0;
-const MP_RIGHT: f32 = 196.0;
-const MP_TOP: f32 = 283.0;
-const MP_BOTTOM: f32 = 14.0;
-/// Column widths (mm); sum == MP_RIGHT - MP_LEFT (182).
-const MP_COLS: [f32; 11] = [30.0, 28.0, 16.0, 14.0, 7.0, 7.0, 7.0, 7.0, 14.0, 30.0, 22.0];
-
-fn mp_pt(mm: f32) -> Pt {
-    Pt(mm * 2.834_646)
-}
-fn mp_ink() -> Color {
-    Color::Rgb(Rgb::new(0.09, 0.12, 0.18, None))
-}
-fn mp_grid() -> Color {
-    Color::Rgb(Rgb::new(0.55, 0.57, 0.62, None))
-}
-fn mp_col_x(i: usize) -> f32 {
-    MP_LEFT + MP_COLS[..i].iter().sum::<f32>()
-}
-
-struct MedPlan {
-    ops: Vec<Op>,
-    regular: PdfFontHandle,
-    bold: PdfFontHandle,
-}
-
-impl MedPlan {
-    fn new(regular: PdfFontHandle, bold: PdfFontHandle) -> Self {
-        Self {
-            ops: Vec::new(),
-            regular,
-            bold,
-        }
-    }
-
-    /// Filled rectangle; (x, y) is the lower-left corner, all in mm.
-    fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, col: Color) {
-        let rect = Rect {
-            x: mp_pt(x),
-            y: mp_pt(y),
-            width: mp_pt(w),
-            height: mp_pt(h),
-            mode: Some(PaintMode::Fill),
-            winding_order: Some(WindingOrder::NonZero),
-        };
-        self.ops.push(Op::SetFillColor { col });
-        self.ops.push(Op::DrawPolygon {
-            polygon: rect.to_polygon(),
-        });
-    }
-
-    fn hline(&mut self, x: f32, y: f32, w: f32) {
-        self.fill_rect(x, y, w, 0.25, mp_grid());
-    }
-    fn vline(&mut self, x: f32, y: f32, h: f32) {
-        self.fill_rect(x, y, 0.25, h, mp_grid());
-    }
-
-    fn text_at(&mut self, x: f32, baseline: f32, text: &str, size: f32, bold: bool, col: Color) {
-        if text.is_empty() {
-            return;
-        }
-        let font = if bold {
-            self.bold.clone()
-        } else {
-            self.regular.clone()
-        };
-        self.ops.push(Op::SetFont {
-            font,
-            size: Pt(size),
-        });
-        self.ops.push(Op::StartTextSection);
-        self.ops.push(Op::SetTextCursor {
-            pos: Point::new(Mm(x), Mm(baseline)),
-        });
-        self.ops.push(Op::SetFillColor { col });
-        self.ops.push(unicode_show_text_op(text));
-        self.ops.push(Op::EndTextSection);
-    }
-
-    /// Draws the Data-Matrix as filled square modules. `y_top` is the top edge.
-    fn draw_datamatrix(
-        &mut self,
-        modules: &[(usize, usize)],
-        cols: usize,
-        rows: usize,
-        x: f32,
-        y_top: f32,
-        target_mm: f32,
-    ) {
-        let n = cols.max(rows).max(1);
-        let cell = target_mm / n as f32;
-        let black = Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None));
-        for &(mx, my) in modules {
-            let px = x + mx as f32 * cell;
-            let py = y_top - (my as f32 + 1.0) * cell;
-            self.fill_rect(px, py, cell, cell, black.clone());
-        }
-    }
-
-    fn table_header(&mut self, y_top: f32) -> f32 {
-        let labels = [
-            "Wirkstoff",
-            "Handelsname",
-            "Stärke",
-            "Form",
-            "Morgens",
-            "Mittags",
-            "Abends",
-            "Zur Nacht",
-            "Einheit",
-            "Hinweise",
-            "Grund",
-        ];
-        let row_h = 8.0;
-        let y_bottom = y_top - row_h;
-        self.fill_rect(
-            MP_LEFT,
-            y_bottom,
-            MP_RIGHT - MP_LEFT,
-            row_h,
-            Color::Rgb(Rgb::new(0.84, 0.84, 0.87, None)),
-        );
-        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
-        for i in 0..=11 {
-            self.vline(mp_col_x(i), y_bottom, row_h);
-        }
-        for (i, label) in labels.iter().enumerate() {
-            let cx = mp_col_x(i);
-            let lines = clin_wrap(label, 7.0, (MP_COLS[i] - 1.5).max(4.0));
-            let mut ty = y_top - 3.0;
-            for line in lines.iter().take(2) {
-                self.text_at(cx + 0.9, ty, line, 7.0, true, mp_ink());
-                ty -= 2.7;
-            }
-        }
-        y_bottom
-    }
-
-    fn table_section(&mut self, label: &str, y_top: f32) -> f32 {
-        let row_h = 6.0;
-        let y_bottom = y_top - row_h;
-        self.fill_rect(
-            MP_LEFT,
-            y_bottom,
-            MP_RIGHT - MP_LEFT,
-            row_h,
-            Color::Rgb(Rgb::new(0.93, 0.93, 0.95, None)),
-        );
-        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
-        self.vline(MP_LEFT, y_bottom, row_h);
-        self.vline(MP_RIGHT, y_bottom, row_h);
-        self.text_at(MP_LEFT + 1.5, y_top - 4.2, label, 9.0, true, mp_ink());
-        y_bottom
-    }
-
-    fn table_med(&mut self, cells: &[String; 11], y_top: f32) -> f32 {
-        let size = 8.0;
-        let lh = 3.0;
-        let pad = 1.2;
-        let mut wrapped: Vec<Vec<String>> = Vec::with_capacity(11);
-        let mut max_lines = 1usize;
-        for (i, cell) in cells.iter().enumerate() {
-            let lines = clin_wrap(cell, size, (MP_COLS[i] - 2.0 * pad).max(4.0));
-            max_lines = max_lines.max(lines.len().max(1));
-            wrapped.push(lines);
-        }
-        let row_h = max_lines as f32 * lh + 2.0 * pad;
-        let y_bottom = y_top - row_h;
-        self.hline(MP_LEFT, y_top, MP_RIGHT - MP_LEFT);
-        for i in 0..=11 {
-            self.vline(mp_col_x(i), y_bottom, row_h);
-        }
-        for (i, lines) in wrapped.iter().enumerate() {
-            let cx = mp_col_x(i);
-            let centered = (4..8).contains(&i);
-            let mut ty = y_top - pad - 2.2;
-            for line in lines {
-                let tx = if centered {
-                    cx + (MP_COLS[i] - line.chars().count() as f32 * size * 0.17) / 2.0
-                } else {
-                    cx + pad
-                };
-                self.text_at(tx.max(cx + 0.5), ty, line, size, false, mp_ink());
-                ty -= lh;
-            }
-        }
-        y_bottom
-    }
-
-    fn finish(self) -> Vec<PdfPage> {
-        vec![PdfPage::new(Mm(CLIN_PDF_W), Mm(CLIN_PDF_H), self.ops)]
-    }
-}
-
-fn mp_dose(value: Option<&str>) -> String {
-    value
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("")
-        .to_string()
+#[derive(Deserialize, Default)]
+struct PatientPdfQuery {
+    lang: Option<String>,
 }
 
 async fn get_patient_medikationsplan_pdf(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
         return e;
@@ -15236,6 +14655,18 @@ async fn get_patient_medikationsplan_pdf(
         Err(resp) => return resp,
     }
 
+    if query
+        .lang
+        .as_deref()
+        .is_some_and(|lang| !matches!(lang, "ru" | "de"))
+    {
+        return err(StatusCode::BAD_REQUEST, "Unsupported document language");
+    }
+    let russian = query.lang.as_deref() == Some("ru");
+    let tx = |ru, de| if russian { ru } else { de };
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive();
     let fail = || {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -15260,13 +14691,17 @@ async fn get_patient_medikationsplan_pdf(
 
     let med_rows = match sqlx::query(
         r#"SELECT category, wirkstoff, handelsname, staerke, form,
-                  dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund
+                  dose_morgens, dose_mittags, dose_abends, dose_nachts, einheit, hinweis, grund,
+                  einnahmeform, einnahme_von, einnahme_bis, sonstige_vermerke
            FROM patient_medications
            WHERE patient_id = $1 AND superseded_at IS NULL
              AND status = 'aktiv' AND NOT COALESCE(on_hold, false)
+             AND (NULLIF(BTRIM(einnahme_von), '') IS NULL OR BTRIM(einnahme_von) <= $2)
+             AND (NULLIF(BTRIM(einnahme_bis), '') IS NULL OR BTRIM(einnahme_bis) >= $2)
            ORDER BY sort_order, created_at"#,
     )
     .bind(patient_uuid)
+    .bind(today.format("%Y-%m-%d").to_string())
     .fetch_all(&state.db)
     .await
     {
@@ -15277,8 +14712,12 @@ async fn get_patient_medikationsplan_pdf(
         }
     };
 
+    if med_rows.is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "medication_plan_empty");
+    }
+
     let issuer_row = sqlx::query(
-        r#"SELECT name, email,
+        r#"SELECT name,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name
            FROM users
            WHERE id = $1"#,
@@ -15299,10 +14738,6 @@ async fn get_patient_medikationsplan_pdf(
                 .filter(|s| !s.trim().is_empty())
         })
         .unwrap_or_else(|| "System".to_string());
-    let issuer_email = issuer_row
-        .as_ref()
-        .and_then(|r| r.try_get::<Option<String>, _>("email").ok().flatten());
-
     let first_name: String = patient.try_get("first_name").unwrap_or_default();
     let last_name: String = patient.try_get("last_name").unwrap_or_default();
     let mrn: String = patient.try_get("patient_id").unwrap_or_default();
@@ -15310,175 +14745,82 @@ async fn get_patient_medikationsplan_pdf(
         .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
         .ok()
         .flatten()
-        .map(|d| d.format("%Y-%m-%d").to_string());
-    let geschlecht = match patient
-        .try_get::<Option<String>, _>("gender")
-        .ok()
-        .flatten()
-        .as_deref()
-    {
-        Some("male") => Some("M".to_string()),
-        Some("female") => Some("W".to_string()),
-        Some("diverse") => Some("X".to_string()),
-        _ => None,
-    };
-
-    let meds: Vec<crate::bmp::BmpMed> = med_rows
+        .map(|date| date.format("%d.%m.%Y").to_string())
+        .unwrap_or_else(|| "-".into());
+    let entries = med_rows
         .iter()
-        .map(|row| crate::bmp::BmpMed {
-            category: row.try_get::<String, _>("category").unwrap_or_default(),
-            wirkstoff: row.try_get("wirkstoff").ok().flatten(),
-            handelsname: row.try_get("handelsname").ok().flatten(),
-            staerke: row.try_get("staerke").ok().flatten(),
-            form: row.try_get("form").ok().flatten(),
-            dose_morgens: row.try_get("dose_morgens").ok().flatten(),
-            dose_mittags: row.try_get("dose_mittags").ok().flatten(),
-            dose_abends: row.try_get("dose_abends").ok().flatten(),
-            dose_nachts: row.try_get("dose_nachts").ok().flatten(),
-            einheit: row.try_get("einheit").ok().flatten(),
-            hinweis: row.try_get("hinweis").ok().flatten(),
-            grund: row.try_get("grund").ok().flatten(),
+        .map(|row| {
+            let value = |key: &str| {
+                row.try_get::<Option<String>, _>(key)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            };
+            let mut notes = Vec::new();
+            for key in ["hinweis", "sonstige_vermerke"] {
+                let text = value(key);
+                if !text.trim().is_empty() {
+                    notes.push(text);
+                }
+            }
+            for (key, label) in [
+                ("einnahme_von", tx("Приём с", "Einnahme ab")),
+                ("einnahme_bis", tx("Приём до", "Einnahme bis")),
+            ] {
+                let raw = value(key);
+                if !raw.trim().is_empty() {
+                    let date = chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d")
+                        .map(|date| date.format("%d.%m.%Y").to_string())
+                        .unwrap_or(raw);
+                    notes.push(format!("{label}: {date}"));
+                }
+            }
+            let form = [value("form"), value("einnahmeform")]
+                .into_iter()
+                .filter(|text| !text.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            crate::services::patient_medication_pdf::MedicationPlanEntry {
+                category: value("category"),
+                cells: [
+                    value("wirkstoff"),
+                    value("handelsname"),
+                    value("staerke"),
+                    form,
+                    value("dose_morgens"),
+                    value("dose_mittags"),
+                    value("dose_abends"),
+                    value("dose_nachts"),
+                    value("einheit"),
+                    notes.join("\n"),
+                    value("grund"),
+                ],
+            }
         })
         .collect();
-
-    let print_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let plan_uuid = Uuid::new_v4().simple().to_string().to_uppercase();
-    let patient_bmp = crate::bmp::BmpPatient {
-        vorname: first_name.clone(),
-        nachname: last_name.clone(),
-        geburtsdatum: dob.clone(),
-        geschlecht,
+    let context = crate::services::patient_medication_pdf::MedicationPlanContext {
+        russian,
+        patient_name: format!("{first_name} {last_name}").trim().into(),
+        patient_identifier: mrn.clone(),
+        birth_date: dob,
+        printed_by: issuer_name,
+        printed_on: today.format("%d.%m.%Y").to_string(),
+        entries,
     };
-    let issuer_bmp = crate::bmp::BmpIssuer {
-        name: issuer_name.clone(),
-        email: issuer_email.clone(),
-        ..Default::default()
-    };
-    let xml = crate::bmp::build_bmp_xml(&plan_uuid, &patient_bmp, &issuer_bmp, &print_date, &meds);
-    let datamatrix = crate::bmp::encode_datamatrix(&xml);
-
-    // ---- Render ----
-    let mut document = PdfDocument::new("Medikationsplan");
-    let (regular_font, bold_font) = match add_unicode_pdf_fonts(&mut document) {
-        Ok(fonts) => fonts,
+    let bytes = match crate::services::patient_medication_pdf::build_medication_plan_pdf(&context) {
+        Ok(bytes) => bytes,
         Err(error) => {
-            tracing::error!(error, patient_id = %patient_uuid, "load fonts for Medikationsplan");
+            tracing::error!(error, patient_id = %patient_uuid, "render patient medication plan");
             return fail();
         }
     };
-    let mut pdf = MedPlan::new(regular_font, bold_font);
-    let full_name = format!("{first_name} {last_name}").trim().to_string();
-
-    pdf.text_at(MP_LEFT, MP_TOP, "Medikationsplan", 17.0, true, mp_ink());
-    pdf.text_at(
-        MP_LEFT,
-        MP_TOP - 8.5,
-        &format!("Für: {full_name}"),
-        10.0,
-        true,
-        mp_ink(),
-    );
-    pdf.text_at(
-        MP_LEFT,
-        MP_TOP - 13.5,
-        &format!("Geb. am: {}", dob.as_deref().unwrap_or("—")),
-        9.0,
-        false,
-        mp_ink(),
-    );
-    pdf.text_at(
-        MP_LEFT,
-        MP_TOP - 20.0,
-        &format!("Ausgedruckt von: {issuer_name}"),
-        9.0,
-        false,
-        mp_ink(),
-    );
-    if let Some(email) = issuer_email.as_deref() {
-        pdf.text_at(MP_LEFT, MP_TOP - 24.5, email, 9.0, false, mp_ink());
-    }
-    pdf.text_at(
-        MP_LEFT,
-        MP_TOP - 29.0,
-        &format!("Ausgedruckt am: {print_date}"),
-        9.0,
-        false,
-        mp_ink(),
-    );
-
-    if let Some((modules, cols, rows)) = datamatrix.as_ref() {
-        pdf.draw_datamatrix(modules, *cols, *rows, MP_RIGHT - 26.0, MP_TOP + 2.0, 26.0);
-    }
-
-    let mut y = MP_TOP - 36.0;
-    y = pdf.table_header(y);
-
-    let sections: [(&str, Option<&str>); 3] = [
-        ("dauer", None),
-        (
-            "besondere",
-            Some("Zu besonderen Zeiten anzuwendende Medikamente"),
-        ),
-        ("selbst", Some("Selbstmedikation")),
-    ];
-    let mut truncated = false;
-    'outer: for (key, heading) in sections {
-        let rows: Vec<&crate::bmp::BmpMed> = meds.iter().filter(|m| m.category == key).collect();
-        if rows.is_empty() {
-            continue;
-        }
-        if let Some(h) = heading {
-            if y - 6.0 < MP_BOTTOM {
-                truncated = true;
-                break;
-            }
-            y = pdf.table_section(h, y);
-        }
-        for m in rows {
-            let opt = |v: &Option<String>| v.clone().unwrap_or_default();
-            let cells: [String; 11] = [
-                opt(&m.wirkstoff),
-                opt(&m.handelsname),
-                opt(&m.staerke),
-                opt(&m.form),
-                mp_dose(m.dose_morgens.as_deref()),
-                mp_dose(m.dose_mittags.as_deref()),
-                mp_dose(m.dose_abends.as_deref()),
-                mp_dose(m.dose_nachts.as_deref()),
-                opt(&m.einheit),
-                opt(&m.hinweis),
-                opt(&m.grund),
-            ];
-            // Stop before overflowing the page (rough lower bound for one row).
-            if y - 14.0 < MP_BOTTOM {
-                truncated = true;
-                break 'outer;
-            }
-            y = pdf.table_med(&cells, y);
-        }
-    }
-    if truncated {
-        pdf.text_at(
-            MP_LEFT,
-            MP_BOTTOM - 2.0,
-            "… weitere Einträge nicht dargestellt (einseitig).",
-            7.0,
-            false,
-            mp_grid(),
-        );
-    }
-
-    let mut warnings: Vec<PdfWarnMsg> = Vec::new();
-    let bytes = document
-        .with_pages(pdf.finish())
-        .save(&pdf_text_save_options(), &mut warnings);
 
     state.audit_sender.try_send(audit::domain_event(
         "export_patient_medikationsplan_pdf",
         Some(auth.user_id),
         "patient",
         Some(patient_uuid),
-        json!({ "bytes": bytes.len(), "datamatrix": datamatrix.is_some() }),
+        json!({ "bytes": bytes.len(), "medication_count": med_rows.len(), "language": if russian { "ru" } else { "de" } }),
     ));
 
     let slug: String = mrn
@@ -15501,12 +14843,16 @@ async fn get_patient_medikationsplan_pdf(
     (
         [
             (
+                axum::http::header::CACHE_CONTROL,
+                "private, no-store".to_string(),
+            ),
+            (
                 axum::http::header::CONTENT_TYPE,
                 "application/pdf".to_string(),
             ),
             (
                 axum::http::header::CONTENT_DISPOSITION,
-                format!("inline; filename=\"{filename}\""),
+                format!("attachment; filename=\"{filename}\""),
             ),
         ],
         bytes,
@@ -15517,11 +14863,9 @@ async fn get_patient_medikationsplan_pdf(
 #[cfg(test)]
 mod unicode_pdf_tests {
     use super::{
-        ClinPdf, MedPlan, add_unicode_pdf_fonts, mp_ink,
         normalize_patient_lab_result_correction_payload, normalize_patient_lab_result_payload,
-        normalize_patient_vital_measurement_payload, pdf_text_save_options,
+        normalize_patient_vital_measurement_payload,
     };
-    use printpdf::{PdfDocument, PdfWarnMsg};
     use serde_json::json;
 
     #[test]
@@ -15729,45 +15073,5 @@ mod unicode_pdf_tests {
             .is_ok(),
             "mixed English grouping/decimal separators must be supported",
         );
-    }
-
-    #[test]
-    fn arztbrief_pdf_preserves_cyrillic_text() {
-        let mut document = PdfDocument::new("Arztbrief Unicode test");
-        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
-        let mut layout = ClinPdf::new(regular, bold);
-        layout.text(
-            "Пацієнт: Олександр Іванов",
-            12.0,
-            false,
-            false,
-            0.0,
-            0.0,
-            0.0,
-        );
-
-        let mut warnings: Vec<PdfWarnMsg> = Vec::new();
-        let bytes = document
-            .with_pages(layout.finish())
-            .save(&pdf_text_save_options(), &mut warnings);
-        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
-
-        assert!(text.contains("Пацієнт: Олександр Іванов"));
-    }
-
-    #[test]
-    fn medikationsplan_pdf_preserves_cyrillic_text() {
-        let mut document = PdfDocument::new("Medikationsplan Unicode test");
-        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
-        let mut layout = MedPlan::new(regular, bold);
-        layout.text_at(14.0, 283.0, "Препарат: Метформін", 12.0, false, mp_ink());
-
-        let mut warnings: Vec<PdfWarnMsg> = Vec::new();
-        let bytes = document
-            .with_pages(layout.finish())
-            .save(&pdf_text_save_options(), &mut warnings);
-        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
-
-        assert!(text.contains("Препарат: Метформін"));
     }
 }

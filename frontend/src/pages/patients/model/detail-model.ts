@@ -222,6 +222,7 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
 // roles the backend allows on /patients/{id}/clinical — not the broader
 // operational surface (which also includes billing / interpreter / concierge).
 const PATIENT_CLINICAL_PROFILE_ROLES = new Set(["ceo", "patient_manager", "it_admin"]);
+const PATIENT_PROFILE_MANAGE_ROLES = new Set(["ceo", "patient_manager"]);
 
 const PATIENT_LABEL_BIRTH_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
   day: "2-digit",
@@ -275,6 +276,10 @@ export function canViewPatientContractsSurface(role?: string) {
 
 export function canViewPatientClinicalProfile(role?: string) {
   return PATIENT_CLINICAL_PROFILE_ROLES.has(role ?? "");
+}
+
+export function canManagePatientProfile(role?: string) {
+  return PATIENT_PROFILE_MANAGE_ROLES.has(role ?? "");
 }
 
 export function canViewPatientInvoicesSurface(role?: string) {

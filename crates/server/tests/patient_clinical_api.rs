@@ -4941,61 +4941,107 @@ async fn patient_clinical_pdf_export_returns_pdf() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-
     let tag = unique_tag("patient-clinical-pdf");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
     seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
-    let ceo_bearer = auth_header_for(ceo_id, "ceo");
-
-    // Seed some content so the Arztbrief is non-empty.
+    let bearer = auth_header_for(ceo_id, "ceo");
+    let specialization: Uuid = sqlx::query_scalar("SELECT id FROM medical_specializations WHERE deleted_at IS NULL AND is_active ORDER BY sort_order, code LIMIT 1")
+        .fetch_one(&pool).await.unwrap();
+    for (endpoint, payload) in [
+        (
+            "diagnoses",
+            json!({"items":[{"kind":"main", "label":"Ambulant erworbene Pneumonie", "icd_code":"J15.9", "certainty":"verdacht"}]}),
+        ),
+        (
+            "narrative",
+            json!({
+                "beurteilung":"Verdacht auf Pneumonie.", "red_flags":"Особое наблюдение - DEMO",
+                "specializations":[{"specialization_id":specialization, "narrative_text":"Специальный анамнез - DEMO", "assessment_text":"Fachärztliche Beurteilung - DEMO"}]
+            }),
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/patients/{patient_id}/{endpoint}"),
+            &bearer,
+            Some(payload),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    sqlx::query("INSERT INTO patient_clinical_warnings (patient_id, kind, label, severity, reaction) VALUES ($1, 'allergie', 'Penicillin - DEMO', 'severe', 'Ausschlag - DEMO')")
+        .bind(patient_id).execute(&pool).await.unwrap();
+    for (suffix, title) in [
+        ("", "Arztbrief"),
+        ("?lang=ru", "Врачебное заключение"),
+        ("?lang=de", "Arztbrief"),
+    ] {
+        let request = Request::builder()
+            .uri(format!(
+                "/api/v1/patients/{patient_id}/clinical.pdf{suffix}"
+            ))
+            .header("Authorization", &bearer)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "application/pdf");
+        assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert!(
+            response.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment; filename=\"arztbrief-")
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for expected in [
+            title,
+            "Ambulant erworbene Pneumonie",
+            "J15.9",
+            "Verdacht auf Pneumonie.",
+            "Особое наблюдение - DEMO",
+            "Специальный анамнез - DEMO",
+            "Fachärztliche Beurteilung - DEMO",
+            "Penicillin - DEMO",
+            "Ausschlag - DEMO",
+        ] {
+            assert!(
+                normalized.contains(expected),
+                "missing {expected}: {normalized}"
+            );
+        }
+    }
     let (status, _) = json_request(
         &app,
-        "POST",
-        &format!("/api/v1/patients/{patient_id}/diagnoses"),
-        &ceo_bearer,
-        Some(json!({ "items": [{ "kind": "main", "label": "Ambulant erworbene Pneumonie", "icd_code": "J15.9" }] })),
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical.pdf?lang=xx"),
+        &bearer,
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let reader = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, reader, admin_id).await;
     let (status, _) = json_request(
         &app,
-        "POST",
-        &format!("/api/v1/patients/{patient_id}/narrative"),
-        &ceo_bearer,
-        Some(json!({ "beurteilung": "Verdacht auf Pneumonie." })),
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical.pdf"),
+        &auth_header_for(reader, "concierge"),
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-
-    let request = Request::builder()
-        .method("GET")
-        .uri(format!("/api/v1/patients/{patient_id}/clinical.pdf"))
-        .header("Authorization", &ceo_bearer)
-        .body(Body::empty())
-        .unwrap();
-    let response = app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    assert_eq!(content_type, "application/pdf");
-    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
-        .await
-        .unwrap();
-    assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
-    assert!(
-        bytes.len() > 500,
-        "expected a non-trivial PDF, got {} bytes",
-        bytes.len()
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
-async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
+async fn patient_medication_pdf_exports_only_current_prescriptions() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -5031,6 +5077,22 @@ async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
                     "on_hold": true,
                     "hold_until": "2026-07-15",
                     "hold_note": "Patient nimmt es nicht"
+                },
+                {
+                    "category": "dauer", "handelsname": "Expired Medication", "wirkstoff": "Expiredstoff",
+                    "form": "TABL", "einnahme_bis": "2000-01-01"
+                },
+                {
+                    "category": "dauer", "handelsname": "Future Medication", "wirkstoff": "Futurestoff",
+                    "form": "TABL", "einnahme_von": "2099-01-01"
+                },
+                {
+                    "category": "dauer", "handelsname": "Stopped Medication", "wirkstoff": "Stoppedstoff",
+                    "form": "TABL", "status": "abgesetzt"
+                },
+                {
+                    "category": "dauer", "handelsname": "Planned Medication", "wirkstoff": "Plannedstoff",
+                    "form": "TABL", "status": "geplant"
                 }
             ]
         })),
@@ -5038,23 +5100,79 @@ async fn patient_medikationsplan_pdf_excludes_on_hold_medications() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    for (endpoint, title) in [
+        ("medikationsplan.pdf", "Медикаментозный план"),
+        ("clinical.pdf", "Врачебное заключение"),
+    ] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("/api/v1/patients/{patient_id}/{endpoint}?lang=ru"))
+            .header("Authorization", &ceo_bearer)
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "private, no-store");
+        assert_eq!(response.headers()["content-type"], "application/pdf");
+        assert!(
+            response.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .starts_with("attachment;")
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+            .await
+            .unwrap();
+        assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
+
+        let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(pdf_text.contains("Metoprolol Active"));
+        assert!(pdf_text.contains(title));
+        assert!(
+            !pdf_text.contains("Held Medication"),
+            "on-hold medications must not be printed as active intake plan: {pdf_text:?}"
+        );
+        for name in [
+            "Expired Medication",
+            "Future Medication",
+            "Stopped Medication",
+            "Planned Medication",
+        ] {
+            assert!(
+                !pdf_text.contains(name),
+                "non-current prescription appeared: {name}"
+            );
+        }
+    }
+
+    // A reader without clinical access must not download the same document.
+    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
     let request = Request::builder()
         .method("GET")
         .uri(format!("/api/v1/patients/{patient_id}/medikationsplan.pdf"))
-        .header("Authorization", &ceo_bearer)
+        .header("Authorization", auth_header_for(concierge_id, "concierge"))
         .body(Body::empty())
         .unwrap();
-    let response = app.clone().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
-        .await
-        .unwrap();
-    assert!(bytes.starts_with(b"%PDF"), "expected PDF magic bytes");
-
-    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
-    assert!(pdf_text.contains("Metoprolol Active"));
-    assert!(
-        !pdf_text.contains("Held Medication"),
-        "on-hold medications must not be printed as active intake plan: {pdf_text:?}"
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::FORBIDDEN
     );
+
+    sqlx::query(
+        "UPDATE patient_medications SET on_hold = true, status = 'pausiert' WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/medikationsplan.pdf"),
+        &ceo_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["message"], "medication_plan_empty");
 }

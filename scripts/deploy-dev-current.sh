@@ -6,6 +6,8 @@
 # release tree only after a successful build, and rolls back automatically if
 # startup or the external health check fails. This path is intentionally DEV
 # only; production continues to use signed, digest-pinned release images.
+# The publisher runs this entire script under /home/gmed/deploy/deploy.lock.
+# Direct callers must acquire that same lock before building shared image tags.
 
 set -euo pipefail
 

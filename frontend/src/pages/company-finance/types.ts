@@ -39,6 +39,8 @@ export type CompanyPatientPosition = {
 export type CompanyProviderLiability = {
   id: string;
   external_invoice_number: string;
+  source_document_id?: string | null;
+  source_document_name?: string | null;
   invoice_date: string | null;
   due_date: string | null;
   status: string;

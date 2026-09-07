@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::access;
@@ -247,6 +247,76 @@ fn is_valid_contract_status(value: &str) -> bool {
         value,
         "draft" | "sent" | "signed" | "expired" | "terminated"
     )
+}
+
+fn patient_contract_status(framework_status: &str) -> &str {
+    match framework_status {
+        "draft" => "not_started",
+        status => status,
+    }
+}
+
+async fn sync_patient_contract_status_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    patient_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    // A currently valid signed contract remains the effective patient status
+    // even if another contract is edited afterwards. In the absence of one,
+    // prefer the most advanced actionable contract (signed, sent, then draft)
+    // over historical expired/terminated records. A signed contract whose
+    // validity already ended is presented as expired even when its persisted
+    // workflow status has not yet been advanced by a job.
+    let framework_status = sqlx::query_scalar::<_, String>(
+        r#"SELECT CASE
+                    WHEN status = 'signed' AND valid_to < CURRENT_DATE THEN 'expired'
+                    ELSE status
+                  END
+           FROM framework_contracts
+           WHERE patient_id = $1
+           ORDER BY CASE
+                      WHEN status = 'signed'
+                       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
+                       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+                      THEN 0
+                      WHEN status = 'signed' AND valid_to < CURRENT_DATE THEN 4
+                      WHEN status = 'signed' THEN 1
+                      WHEN status = 'sent' THEN 2
+                      WHEN status = 'draft' THEN 3
+                      WHEN status = 'expired' THEN 4
+                      WHEN status = 'terminated' THEN 5
+                      ELSE 6
+                    END,
+                    updated_at DESC,
+                    created_at DESC,
+                    id DESC
+           LIMIT 1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let Some(framework_status) = framework_status else {
+        return Ok(None);
+    };
+    let status = patient_contract_status(&framework_status).to_string();
+
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = jsonb_set(
+                   COALESCE(legal_status, '{}'::jsonb),
+                   '{contract_status}',
+                   to_jsonb($2::text),
+                   true
+               ),
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .bind(&status)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(Some(status))
 }
 
 fn is_valid_quote_status(value: &str) -> bool {
@@ -1889,8 +1959,19 @@ async fn create_framework_contract(
         .map(str::to_string);
     let conditions = body.conditions.unwrap_or(Value::Null);
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, "begin framework contract transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create contract",
+            );
+        }
+    };
+
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('contract_number_seq')")
-        .fetch_one(&state.db)
+        .fetch_one(&mut *tx)
         .await
     {
         Ok(value) => value,
@@ -1930,11 +2011,32 @@ async fn create_framework_contract(
     .bind(status.clone())
     .bind(auth.user_id)
     .bind(client_reference.as_deref())
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(row)) => {
             let contract_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            let patient_contract_status = if let Some(patient_id) = subject.patient_id() {
+                match sync_patient_contract_status_tx(&mut tx, patient_id).await {
+                    Ok(status) => status,
+                    Err(e) => {
+                        tracing::error!(error = %e, patient_id = %patient_id, contract_id = %contract_id, "sync patient contract status after contract creation");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to create contract",
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, contract_id = %contract_id, "commit framework contract creation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create contract",
+                );
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "create_framework_contract",
                 Some(auth.user_id),
@@ -1945,6 +2047,7 @@ async fn create_framework_contract(
                     "patient_id": subject.patient_id(),
                     "lead_id": subject.lead_id(),
                     "status": status,
+                    "patient_contract_status": patient_contract_status,
                 }),
             ));
             crate::realtime::publish_contract_event(
@@ -1994,29 +2097,54 @@ async fn create_framework_contract(
             .bind(subject.patient_id())
             .bind(subject.lead_id())
             .bind(&client_reference)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *tx)
             .await
             {
-                Ok(Some(row)) => Json(serde_json::json!({
-                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                    "patient_id": subject.patient_id(),
-                    "lead_id": subject.lead_id(),
-                    "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
-                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
-                    "signed_at": row.try_get::<Option<DateTime<Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-                    "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                    "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                    "client_reference": client_reference,
-                    "idempotent_replay": true,
-                }))
-                .into_response(),
+                Ok(Some(row)) => {
+                    let contract_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+                    if let Some(patient_id) = subject.patient_id()
+                        && let Err(e) = sync_patient_contract_status_tx(&mut tx, patient_id).await
+                    {
+                        tracing::error!(error = %e, patient_id = %patient_id, contract_id = %contract_id, "sync patient contract status on idempotent replay");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to create contract",
+                        );
+                    }
+                    if let Err(e) = tx.commit().await {
+                        tracing::error!(error = %e, contract_id = %contract_id, "commit idempotent framework contract replay");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to create contract",
+                        );
+                    }
+                    Json(serde_json::json!({
+                        "id": contract_id,
+                        "patient_id": subject.patient_id(),
+                        "lead_id": subject.lead_id(),
+                        "contract_number": row.try_get::<String, _>("contract_number").unwrap_or_default(),
+                        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "signed_at": row.try_get::<Option<DateTime<Utc>>, _>("signed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                        "client_reference": client_reference,
+                        "idempotent_replay": true,
+                    }))
+                    .into_response()
+                }
                 Ok(None) => {
                     tracing::error!(patient_id = ?subject.patient_id(), lead_id = ?subject.lead_id(), client_reference = %client_reference, "idempotent contract missing after conflict");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to create contract",
+                    )
                 }
                 Err(e) => {
                     tracing::error!(error = %e, patient_id = ?subject.patient_id(), lead_id = ?subject.lead_id(), client_reference = %client_reference, "load idempotent contract");
-                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create contract")
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to create contract",
+                    )
                 }
             }
         }
@@ -2089,6 +2217,17 @@ async fn update_framework_contract_status(
         signed_at
     };
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, contract_id = %contract_id, "begin framework contract status transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update framework contract",
+            );
+        }
+    };
+
     match sqlx::query(
         r#"UPDATE framework_contracts
            SET status = $2,
@@ -2104,13 +2243,35 @@ async fn update_framework_contract_status(
     .bind(valid_from)
     .bind(valid_to)
     .bind(body.conditions)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
+            let patient_contract_status = if let Some(patient_id) = subject.patient_id() {
+                match sync_patient_contract_status_tx(&mut tx, patient_id).await {
+                    Ok(status) => status,
+                    Err(e) => {
+                        tracing::error!(error = %e, patient_id = %patient_id, contract_id = %contract_id, "sync patient contract status after contract update");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update framework contract",
+                        );
+                    }
+                }
+            } else {
+                None
+            };
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, contract_id = %contract_id, "commit framework contract status update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update framework contract",
+                );
+            }
             let realtime_payload = serde_json::json!({
                 "status": body.status,
                 "signed_at": signed_at.map(|v| v.to_rfc3339()),
+                "patient_contract_status": patient_contract_status,
             });
             state.audit_sender.try_send(audit::domain_event(
                 "update_framework_contract_status",
@@ -3225,5 +3386,18 @@ async fn update_quote_status(
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => resp,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::patient_contract_status;
+
+    #[test]
+    fn framework_contract_status_maps_to_patient_profile_domain() {
+        assert_eq!(patient_contract_status("draft"), "not_started");
+        for status in ["sent", "signed", "expired", "terminated"] {
+            assert_eq!(patient_contract_status(status), status);
+        }
     }
 }

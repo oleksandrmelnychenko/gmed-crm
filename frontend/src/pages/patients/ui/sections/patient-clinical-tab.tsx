@@ -19,7 +19,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
-// import { downloadApiFile } from "@/lib/api"; // PDF-Export (Medikationsplan / Arztbrief) тимчасово вимкнено
 import { getLang, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -106,6 +105,7 @@ import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
 import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
+import { MedicationPlanPdfAction } from "./medication-plan-pdf-action";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
 import {
   collectAttachedClinicalSpecializations,
@@ -3154,31 +3154,6 @@ export function PatientClinicalTab({
       embedded={embedded}
       className={embedded ? "space-y-4" : "mt-4 min-h-[400px] space-y-4"}
     >
-      {/* PDF-Export (Medikationsplan / Arztbrief) — тимчасово вимкнено.
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg"
-            onClick={() => void downloadApiFile(`/patients/${patientId}/medikationsplan.pdf`, "medikationsplan.pdf")}
-          >
-            {tx("Медикаментозный план (PDF)", "Medikationsplan (PDF)")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg"
-            onClick={() => void downloadApiFile(`/patients/${patientId}/clinical.pdf`, "arztbrief.pdf")}
-          >
-            {tx("Экспорт Arztbrief (PDF)", "Arztbrief (PDF)")}
-          </Button>
-        </div>
-      </div>
-      */}
-
       {error ? (
         <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {error}
@@ -3609,12 +3584,13 @@ export function PatientClinicalTab({
       {/* ---- Medications (Medikationsplan) ---- */}
       <ClinicalSection<ClinicalMedication>
         title={tx("Медикаменты", "Medikation")}
-        headerAction={canManage ? (
-          <MedicationBmpImportAction
+        headerAction={<div className="flex flex-wrap items-center gap-2">
+          <MedicationPlanPdfAction patientId={patientId} lang={lang} disabled={!medications.length} />
+          {canManage ? <MedicationBmpImportAction
             patientId={patientId}
             onImported={() => setVersion((current) => current + 1)}
-          />
-        ) : null}
+          /> : null}
+        </div>}
         sectionClassName="bg-slate-50/60"
         rowClassName="border-border/40 bg-white"
         items={medications}

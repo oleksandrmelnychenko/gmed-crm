@@ -156,6 +156,7 @@ import {
 
 import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
+import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 
 import {
   createLead,
@@ -2195,7 +2196,7 @@ function errorText(error: unknown, tx: Tx): string {
   return leadErrorMessage(error, tx);
 }
 
-function readinessStepLabel(key: string, tx: Tx) {
+function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
   const labels: Record<string, string> = {
     master_data: tx("Данные клиента", "Personendaten"),
     medical: tx("Медицинская характеристика", "Medizinische Merkmale"),
@@ -2204,7 +2205,8 @@ function readinessStepLabel(key: string, tx: Tx) {
     documents: tx("Документы", "Unterlagen"),
     order: tx("Оформление заказа", "Auftragserfassung"),
     commercial: tx("Договор, заказ и смета", "Vertrag, Auftrag und Kostenvoranschlag"),
-    release: tx("Готовность к созданию пациента", "Bereit zur Patientenanlage"),
+    release: repeatIntake ? tx("Готовность к завершению обращения", "Bereit zum Abschluss der Anfrage")
+      : tx("Готовность к созданию пациента", "Bereit zur Patientenanlage"),
   };
   return labels[key] ?? tx("Проверка данных", "Datenprüfung");
 }
@@ -2704,6 +2706,9 @@ export function LeadWizard({
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
+  const isRepeatIntake = Boolean(existingPatient?.id
+    || lead?.prospect_patient_lifecycle === "active"
+    || lead?.prospect_patient_lifecycle === "inactive");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [referrerSearch, setReferrerSearch] = useState("");
   const deferredReferrerSearch = useDeferredValue(referrerSearch);
@@ -3646,8 +3651,8 @@ export function LeadWizard({
       return { patientId: prospectPatientIdRef.current, caseId: caseIdRef.current };
     }
     const response = await createLeadProspect(leadId, {
-      attach_patient_id: options?.attachPatientId,
-      force_create: options?.forceCreate,
+      attach_patient_id: existingPatient?.id ?? options?.attachPatientId,
+      force_create: existingPatient ? false : options?.forceCreate,
       hauptanfragegrund: medicalDraft.concern.trim(),
       zuweiser: medicalDraft.referrer.trim(),
     });
@@ -3658,7 +3663,8 @@ export function LeadWizard({
         "Vorhandener Patient mit denselben Stammdaten gefunden — bitte verknüpfen oder neu anlegen",
       ));
     }
-    if (!response.patient_id || !response.case_id) {
+    if (!response.patient_id || !response.case_id
+      || (existingPatient && response.patient_id !== existingPatient.id)) {
       throw new Error(tx(
         "Не удалось создать карточку пациента",
         "Patientenakte konnte nicht angelegt werden",
@@ -3677,7 +3683,7 @@ export function LeadWizard({
       prospect_case_id: response.case_id!,
     } : current);
     return { patientId: response.patient_id, caseId: response.case_id };
-  }, [leadId, tx]);
+  }, [existingPatient, leadId, tx]);
 
   const hydrateProspectClinical = useCallback(async (
     patientId: string,
@@ -3748,9 +3754,11 @@ export function LeadWizard({
         narrative.anamnese_sozial,
         narrative.beurteilung,
       ].some((field) => field?.trim()));
-      if (narrative && (narrative.id || hasNarrativeContent)) {
+      if (narrative && (narrative.id || hasNarrativeContent)
+        && (!narrative.id || narrative.case_id === caseId)) {
         const saved = await savePatientNarrative(patientId, {
           ...narrative,
+          case_id: caseId,
           is_active: true,
         });
         safeDraft.narrative = saved;
@@ -3780,11 +3788,7 @@ export function LeadWizard({
           if (!medicalDraft.narrative) {
             throw new Error(tx("Анамнез не заполнен", "Anamnese ist nicht ausgefüllt"));
           }
-          await savePatientNarrative(patientId, {
-            ...medicalDraft.narrative,
-            case_id: medicalDraft.narrative.case_id ?? caseId,
-            is_active: true,
-          });
+          await savePatientNarrative(patientId, narrativeForIntakeSave(medicalDraft.narrative, caseId));
           break;
         case "diagnoses":
           await savePatientDiagnoses(
@@ -3857,7 +3861,8 @@ export function LeadWizard({
     const run = async () => {
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
 
-      let targetLeadId = leadId;
+      let targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
+      const initializing = !leadId;
       if (
         (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
         currentAutosaveSignatureRef.current === signature
@@ -3867,7 +3872,6 @@ export function LeadWizard({
       }
 
       try {
-        let createdNow = false;
         if (!targetLeadId) {
           const created = await createLead({
             first_name: snapshot.draft.firstName.trim(),
@@ -3879,18 +3883,15 @@ export function LeadWizard({
             notes: snapshot.draft.serviceNotes.trim() || null,
           });
           targetLeadId = created.id;
-          createdNow = true;
           hydrated.current = targetLeadId;
           lastPersistedLeadIdRef.current = targetLeadId;
-          setCreatedLeadId(targetLeadId);
-          onCreated?.(targetLeadId);
-          await createOrder({ source_lead_id: targetLeadId });
         }
 
         lastPersistedLeadIdRef.current = targetLeadId;
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
 
+        let savedDraft = snapshot.draft;
         if (
           existingPatient?.id
           && !prospectPatientIdRef.current
@@ -3901,7 +3902,7 @@ export function LeadWizard({
             hauptanfragegrund: snapshot.draft.concern.trim(),
             zuweiser: snapshot.draft.referrer.trim(),
           });
-          if (!prospect.patient_id || !prospect.case_id) {
+          if (prospect.patient_id !== existingPatient.id || !prospect.case_id) {
             throw new Error(tx(
               "Не удалось привязать повторное обращение к пациенту",
               "Die erneute Anfrage konnte dem Patienten nicht zugeordnet werden",
@@ -3913,18 +3914,38 @@ export function LeadWizard({
           setCases([{ id: prospect.case_id }]);
         }
 
+        if (initializing) {
+          if (existingPatient?.id && caseIdRef.current) {
+            const clinical = await fetchPatientClinical(existingPatient.id);
+            savedDraft = mergePatientClinicalDraft(snapshot.draft, clinical, caseIdRef.current);
+          }
+          await createOrder({ source_lead_id: targetLeadId });
+        }
+
         wizardStateBaseRef.current = payload.wizard_state;
-        if (createdNow) setLead(await fetchLeadDetail(targetLeadId));
+        if (initializing) setLead(await fetchLeadDetail(targetLeadId));
         lastSavedAutosaveSignatureRef.current = signature;
         if (currentAutosaveSignatureRef.current === signature) {
+          if (savedDraft !== snapshot.draft) {
+            const savedSignature = autosaveSnapshotSignature({ ...snapshot, draft: savedDraft });
+            setDraft(savedDraft);
+            currentAutosaveSignatureRef.current = savedSignature;
+            lastSavedAutosaveSignatureRef.current = savedSignature;
+          }
           setAutosaveError("");
           setAutosaveStatus("saved");
         } else {
           setAutosaveStatus("dirty");
         }
+        // Publish the ID only after bootstrap completes. Otherwise the reload
+        // triggered by onCreated races with attachment and hides save failures.
+        if (initializing) {
+          setCreatedLeadId(targetLeadId);
+          onCreated?.(targetLeadId);
+        }
       } catch (nextError) {
         if (
-          hydrated.current === targetLeadId &&
+          (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
           currentAutosaveSignatureRef.current === signature
         ) {
           setAutosaveError(errorText(nextError, tx));
@@ -5631,6 +5652,7 @@ ${serviceCommentLines.join("\n")}`
   const autosaveIsDirty = autosaveStatus === "dirty"
     || autosaveStatus === "saving"
     || autosaveStatus === "error";
+  const saveInProgress = isBusy || autosaveStatus === "saving";
   const editingTrustedContact = Boolean(
     trustedContactEditor
     && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
@@ -5640,11 +5662,18 @@ ${serviceCommentLines.join("\n")}`
       <Dialog
         open={open}
         modal={!documentPreview}
-        dirty={autosaveIsDirty}
-        onOpenChange={onOpenChange}
+        dirty={!saveInProgress && autosaveIsDirty}
+        onOpenChange={(nextOpen, details) => {
+          if (!nextOpen && saveInProgress) {
+            details.cancel();
+            return;
+          }
+          onOpenChange(nextOpen);
+        }}
       >
       <DialogContent
         showOverlay={!documentPreview}
+        showCloseButton={!saveInProgress}
         className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
@@ -5653,10 +5682,18 @@ ${serviceCommentLines.join("\n")}`
             <h2 className="truncate text-base font-semibold text-foreground">
               {lead
                 ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
+                : existingPatient
+                  ? [existingPatient.first_name, existingPatient.last_name].filter(Boolean).join(" ")
                 : createMode
                   ? tx("Новый лид", "Neuer Lead")
                   : tx("Оформление обращения", "Lead-Aufnahme")}
             </h2>
+            {isRepeatIntake ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {tx("Повторное обращение", "Erneute Anfrage")}
+                {existingPatient?.patient_id ? ` · ${existingPatient.patient_id}` : ""}
+              </p>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {leadId && lead && ["new", "in_progress", "qualified"].includes(lead.qualification_status) ? (
@@ -5766,7 +5803,9 @@ ${serviceCommentLines.join("\n")}`
                     className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <StepIcon aria-hidden="true" className="size-4 shrink-0" />
-                    <span className="whitespace-nowrap">{lang === "de" ? item.de : item.ru}</span>
+                    <span className="whitespace-nowrap">{item.id === "release" && isRepeatIntake
+                      ? tx("Завершение обращения", "Anfrage abschließen")
+                      : lang === "de" ? item.de : item.ru}</span>
                     <span
                       aria-hidden="true"
                       data-count
@@ -5805,7 +5844,7 @@ ${serviceCommentLines.join("\n")}`
                         className="w-full text-left text-xs leading-5 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => openValidationIssue(issue)}
                       >
-                        <span className="font-medium">{readinessStepLabel(issue.step, tx)}:</span>{" "}
+                        <span className="font-medium">{readinessStepLabel(issue.step, tx, isRepeatIntake)}:</span>{" "}
                         {issue.message}
                       </button>
                     </li>
@@ -7663,9 +7702,11 @@ ${serviceCommentLines.join("\n")}`
 
           {lead && step === "release" ? (
             <section className="space-y-5">
-              <Section title={tx("Создание пациента", "Patient anlegen")}>
+              <Section title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
                 <p className="text-sm text-muted-foreground">
-                  {tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
+                  {isRepeatIntake
+                    ? tx("Проверьте все этапы. После подтверждения обращение и заказ будут связаны с существующей карточкой пациента.", "Prüfen Sie alle Schritte. Nach der Bestätigung werden Anfrage und Auftrag der bestehenden Patientenakte zugeordnet.")
+                    : tx("Проверьте все этапы. После подтверждения система создаст карточку пациента и перенесёт в неё данные обращения.", "Prüfen Sie alle Schritte. Nach der Bestätigung wird die Patientenakte angelegt und die Angaben aus dem Lead werden übernommen.")}
                 </p>
                 <div>
                   {lead.readiness.steps.map((item) => {
@@ -7679,7 +7720,7 @@ ${serviceCommentLines.join("\n")}`
                         disabled={isBusy || !target || target.id === step}
                         onClick={() => target && navigateToStep(target.id)}
                       >
-                        <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx)}</span>
+                        <span className="text-sm text-foreground">{readinessStepLabel(item.key, tx, isRepeatIntake)}</span>
                         <span className="inline-flex shrink-0 items-center gap-2">
                           <StateMark done={ready} label={ready ? tx("Выполнено", "Erledigt") : tx("Не завершено", "Noch offen")} />
                           <ArrowRight aria-hidden="true" className="size-3.5 text-muted-foreground" />
@@ -7724,7 +7765,10 @@ ${serviceCommentLines.join("\n")}`
                   onChange={(event) => setConversionConfirmed(event.target.checked)}
                 />
                 <span className="text-sm leading-5 text-foreground">
-                  {tx(
+                  {isRepeatIntake ? tx(
+                    "Я проверил данные повторного обращения. Документы, медицинские данные и заказ будут связаны с существующей карточкой пациента.",
+                    "Ich habe die erneute Anfrage geprüft. Unterlagen, medizinische Daten und Auftrag werden der bestehenden Patientenakte zugeordnet.",
+                  ) : tx(
                     "Я проверил данные обращения и подтверждаю, что пациента можно создать. Данные, документы, медицинская характеристика, услуги и заказ будут перенесены в карточку пациента.",
                     "Ich habe die Angaben geprüft und bestätige, dass der Patient angelegt werden kann. Daten, Dokumente, medizinische Merkmale, Leistungen und Auftrag werden in die Patientenakte übernommen.",
                   )}
@@ -7764,10 +7808,10 @@ ${serviceCommentLines.join("\n")}`
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
               <span>{tx("Этап", "Schritt")} {stepIndex + 1} {tx("из", "von")} {STEPS.length}</span>
               <span role="status" className="inline-flex items-center gap-1.5">
-                {autosaveStatus === "error" ? null : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
-                  : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
+                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
-                  ) : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
+                  ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
+                  : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
                     : autosaveStatus === "saved" ? (
                       <><Check aria-hidden="true" className="size-3 text-emerald-700" />{tx("Данные сохранены", "Daten gespeichert")}</>
                     ) : null}
@@ -7800,7 +7844,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : (
                   <Button type="button" className="h-9" disabled={loading || isBusy || !conversionReady || !conversionConfirmed} onClick={() => void convert()}>
                     {busy === "convert" ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <UserRoundCheck aria-hidden="true" className="size-4" />}
-                    {tx("Создать пациента", "Patient anlegen")}
+                    {isRepeatIntake ? tx("Завершить обращение", "Anfrage abschließen") : tx("Создать пациента", "Patient anlegen")}
                   </Button>
                 )}
               </div>

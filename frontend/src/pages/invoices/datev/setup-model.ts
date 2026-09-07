@@ -1,4 +1,6 @@
 import type { DatevModule, DatevProfile } from "./setup-api";
+import { DATEV_COMPATIBILITY_DOCS, datevReadiness, READINESS_LABELS_DE } from "./readiness-model";
+export { profileNumbersValid } from "./readiness-model";
 
 export const DATEV_PORTAL = "https://www.datev.de/web/de/berufsgruppenuebergreifend/mydatev/cloud-anwendungen/datev-unternehmen-online";
 export const DATEV_EXPORT_DOCS = "https://developer.datev.de/en/use-cases/details/lz85bfgyb2m809rvuie5yuq3";
@@ -10,11 +12,6 @@ export const DATEV_MODULE_NAMES: Record<DatevModule, string> = {
   auswertungspakete: "Auswertungspakete Rechnungswesen online",
   liquiditaetsmonitor: "Liquiditätsmonitor online",
 };
-
-export function profileNumbersValid(profile: DatevProfile) {
-  return (!profile.consultant_number && !profile.client_number)
-    || (/^\d{1,7}$/.test(profile.consultant_number) && /^\d{1,5}$/.test(profile.client_number));
-}
 
 // A preparation document for the accountant, never an authorization or an API export.
 export function datevSetupBrief(profile: DatevProfile) {
@@ -32,11 +29,16 @@ export function datevSetupBrief(profile: DatevProfile) {
     "",
     `DATEV Datenservice Export Rechnungswesen: ${exportLabel}`,
     "",
+    "Vorbereitung laut gespeichertem GMed-Profil:",
+    ...datevReadiness(profile).map((check) => `- [${check.complete ? "x" : " "}] ${READINESS_LABELS_DE[check.id]}`),
+    "Diese Angaben bestätigen weder API-Berechtigungen noch DATEV-Kompatibilität.",
+    "",
     "Mit der Steuerberatung zu klären:",
     "1. Berater-/Mandantenzuordnung und eingesetzte Version von Belege online bestätigen.",
     "2. Prüfen, ob DATEV Datenservice Export Rechnungswesen für den Bestand aktiviert ist und aktuelle Rechnungswesendaten im DATEV-Rechenzentrum bereitstehen.",
     "3. Separat klären, wie Originalrechnungen (PDF/XML) aus Belege online bereitgestellt werden können. Upload-Schnittstellen sind kein Nachweis für einen Download-Zugriff.",
     "4. Für Belegfreigaben, Bankumsätze, Kassenbuch, PDF-Auswertungspakete und Liquiditätsprognosen verfügbare Leseschnittstellen bzw. Exporte prüfen.",
+    "5. Bei der neuen Belege-online-Version wird Rechnungsdatenservice 1.0 derzeit nicht unterstützt. Datenservice und unterstützte Formate für den konkreten Bestand bestätigen.",
     "",
     "Durch die GMED-Integration vorzubereiten:",
     "- DATEV-Developer-Organisation, App und API-Abonnements einrichten.",
@@ -46,7 +48,7 @@ export function datevSetupBrief(profile: DatevProfile) {
     "Aktueller Stand: Keine DATEV-Verbindung. Keine Synchronisation. Das Speichern dieses Profils erteilt keine Zugriffsrechte.",
     "Umfang der ersten Stufe: Daten lesen. Keine Belege hochladen, keine Buchungen ändern, keine Rechnungen freigeben und keine Zahlungen auslösen.",
     "",
-    "Offizielle Quellen:", DATEV_PORTAL, DATEV_EXPORT_DOCS,
+    "Offizielle Quellen:", DATEV_PORTAL, DATEV_EXPORT_DOCS, DATEV_COMPATIBILITY_DOCS,
     "https://developer.datev.de/en/product-detail/accounting-dataexchange/1/documentation",
     "",
   ].join("\n");

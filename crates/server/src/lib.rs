@@ -7,6 +7,8 @@
 pub mod access;
 pub mod audit;
 pub mod auth;
+// Legacy BMP 2.2 encoder fixtures; printable plans use the Unicode PDF renderer.
+#[cfg(test)]
 pub(crate) mod bmp;
 pub mod business_metrics;
 pub mod config;

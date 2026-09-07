@@ -118,6 +118,7 @@ export function normalizePatientOrderRecheck(value: unknown): PatientOrderRechec
     reason: nullableStringValue(payload.reason),
     base_data_ready: booleanValue(payload.base_data_ready),
     compliance_ready: booleanValue(payload.compliance_ready),
+    confidentiality_release_ready: booleanValue(payload.confidentiality_release_ready),
     identity_ready: booleanValue(payload.identity_ready),
     document_pack_ready: booleanValue(payload.document_pack_ready),
     contract_ready: booleanValue(payload.contract_ready),

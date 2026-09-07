@@ -59,6 +59,7 @@ import {
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
+import { ClinicalReportPdfAction } from "../sections/clinical-report-pdf-action";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -228,6 +229,7 @@ type PatientDetailWorkspaceContentProps = {
   assignments: PatientAssignment[];
   assignableStaff: StaffOption[];
   canCreateOrders: boolean;
+  canViewLeads: boolean;
   canCreateTasks: boolean;
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
@@ -396,6 +398,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     assignments,
     assignableStaff,
     canCreateOrders,
+    canViewLeads,
     canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
@@ -582,9 +585,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     };
   }, [activeTab, canViewInvoices, detail, id]);
 
-  const balance = accountStatement
-    ? resolvePatientBalancePresentation(accountStatement.summary)
-    : null;
+  const balance = resolvePatientBalancePresentation(accountStatement?.summary);
   const balanceSideLabel =
     balance?.side === "debit"
       ? lang === "de" ? "Offener Betrag" : "Долг"
@@ -707,6 +708,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             </span>
           </button>
         ) : null}
+        {canViewClinical && id ? <ClinicalReportPdfAction patientId={id} /> : null}
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
@@ -1112,7 +1114,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               setRepeatIntakeLeadId(null);
               reload();
             }}
-            onShowDetails={(leadId) => staffGo(`/leads?lead=${encodeURIComponent(leadId)}`)}
+            onShowDetails={canViewLeads ? (leadId) => staffGo(`/leads?lead=${encodeURIComponent(leadId)}`) : undefined}
             onConverted={() => {
               setRepeatIntakeOpen(false);
               setRepeatIntakeLeadId(null);

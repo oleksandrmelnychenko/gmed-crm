@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 import {
   getPatientLegalStatusCompletion,
+  isPatientLegalStatusComplete,
   type PatientLegalStatus,
 } from "../../model/legal-status";
 
@@ -13,7 +14,7 @@ export function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
 
   let kind: "complete" | "partial" | "none";
   let text: string;
-  if (status.complianceCompleted) {
+  if (isPatientLegalStatusComplete(status)) {
     kind = "complete";
     text = lp("patients_legal_status_ready");
   } else if (completion.completed === 0) {

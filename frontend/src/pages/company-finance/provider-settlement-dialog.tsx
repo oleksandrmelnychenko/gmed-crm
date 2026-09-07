@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { LoaderCircle, Undo2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { CheckCircle2, LoaderCircle, Undo2 } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +14,6 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   Banner as ShellBanner,
-  SuccessBanner as ShellSuccessBanner,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -130,6 +130,21 @@ function formatMoney(value: string | null | undefined, currency: string, locale:
 function formatDate(value: string, locale: string) {
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale);
+}
+
+const paymentFieldClassName = "grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground";
+const paymentInputClassName = "h-9 min-w-0 bg-field font-normal text-foreground";
+
+function SettlementSection({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
+        <AdminSectionTitle>{title}</AdminSectionTitle>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 export function ProviderSettlementDialog({
@@ -301,29 +316,35 @@ export function ProviderSettlementDialog({
 
   return (
     <Dialog open={Boolean(liability)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{text.title}</DialogTitle>
-          <DialogDescription>
-            {settlement?.external_invoice_number ?? liability?.external_invoice_number} · {text.description}
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
+        <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
+          <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
+          <DialogDescription className="break-words text-xs leading-5">
+            <span className="font-mono text-foreground">{settlement?.external_invoice_number ?? liability?.external_invoice_number}</span> · {text.description}
           </DialogDescription>
         </DialogHeader>
 
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
         {loadError ? <ShellBanner tone="error">{loadError}</ShellBanner> : null}
         {loading && !settlement ? (
           <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
         ) : settlement ? (
-          <div className="space-y-5">
-            <dl className="grid grid-cols-3 gap-1.5 sm:gap-2">
+          <div className="min-w-0 space-y-3">
+            <dl className="grid gap-2 sm:grid-cols-3">
               {([
                 [text.invoiceAmount, settlement.amount_gross, "default"],
                 [text.paid, settlement.company_paid_gross, "positive"],
                 [text.remaining, settlement.remaining_provider_liability_gross, remaining > 0 ? "negative" : "positive"],
               ] as const).map(([label, value, tone]) => (
-                <div key={label} className="min-w-0 rounded-lg border border-border/70 bg-muted/20 p-2 sm:p-3">
-                  <dt className="line-clamp-2 min-h-7 text-[10px] leading-3.5 text-muted-foreground sm:min-h-0 sm:text-xs">{label}</dt>
+                <div key={label} className={cn(
+                  "flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/70 border-l-[3px] bg-card px-3 py-2.5 sm:flex-col sm:items-start sm:justify-between sm:gap-1.5",
+                  tone === "default" && "border-l-slate-300 dark:border-l-slate-600",
+                  tone === "positive" && "border-l-emerald-400 dark:border-l-emerald-500",
+                  tone === "negative" && "border-l-rose-400 dark:border-l-rose-500",
+                )}>
+                  <dt className="min-w-0 break-words text-xs leading-5 text-muted-foreground">{label}</dt>
                   <dd className={cn(
-                    "mt-1 truncate text-xs font-semibold tabular-nums sm:text-lg",
+                    "shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums sm:text-base",
                     tone === "positive" && "text-emerald-700 dark:text-emerald-400",
                     tone === "negative" && "text-rose-700 dark:text-rose-400",
                   )}>{formatMoney(value, currency, locale)}</dd>
@@ -332,22 +353,23 @@ export function ProviderSettlementDialog({
             </dl>
 
             {canPay ? (
-              <form className="space-y-3 rounded-lg border border-border/70 p-3" onSubmit={handlePayment}>
-                <h3 className="text-sm font-semibold">{text.payment}</h3>
+              <SettlementSection title={text.payment}>
+              <form onSubmit={handlePayment}>
+                <div className="space-y-3 p-3.5">
                 {paymentError ? <ShellBanner tone="error">{paymentError}</ShellBanner> : null}
                 {activeAccounts.length === 0 ? <ShellBanner tone="warning">{text.noAccount}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block space-y-1.5 text-sm">
+                  <label className={paymentFieldClassName}>
                     <span>{text.account}</span>
-                    <select className={shellSelectClassName} required value={paymentForm.accountId} onChange={(event) => setPaymentForm((current) => ({ ...current, accountId: event.target.value }))}>
+                    <select className={cn(shellSelectClassName, paymentInputClassName, "w-full text-sm")} required value={paymentForm.accountId} onChange={(event) => setPaymentForm((current) => ({ ...current, accountId: event.target.value }))}>
                       {activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {formatMoney(account.current_balance, account.currency, locale)}</option>)}
                     </select>
                   </label>
-                  <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} /></label>
-                  <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" max={todayIso()} value={paymentForm.paidOn} onChange={(event) => setPaymentForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
-                  <label className="block space-y-1.5 text-sm">
+                  <label className={paymentFieldClassName}><span>{text.amount}</span><Input className={paymentInputClassName} required inputMode="decimal" value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" max={todayIso()} value={paymentForm.paidOn} onChange={(event) => setPaymentForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}>
                     <span>{text.method}</span>
-                    <select className={shellSelectClassName} value={paymentForm.method} onChange={(event) => setPaymentForm((current) => ({ ...current, method: event.target.value }))}>
+                    <select className={cn(shellSelectClassName, paymentInputClassName, "w-full text-sm")} value={paymentForm.method} onChange={(event) => setPaymentForm((current) => ({ ...current, method: event.target.value }))}>
                       <option value="bank_transfer">{text.bankTransfer}</option>
                       <option value="cash">{text.cash}</option>
                       <option value="card">{text.card}</option>
@@ -355,67 +377,71 @@ export function ProviderSettlementDialog({
                     </select>
                   </label>
                 </div>
-                <label className="block space-y-1.5 text-sm"><span>{text.reference}</span><Input maxLength={200} value={paymentForm.reference} onChange={(event) => setPaymentForm((current) => ({ ...current, reference: event.target.value }))} /></label>
-                <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
-                <div className="flex justify-stretch sm:justify-end">
-                  <Button type="submit" className="w-full sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
+                <label className={paymentFieldClassName}><span>{text.reference}</span><Input className={paymentInputClassName} maxLength={200} value={paymentForm.reference} onChange={(event) => setPaymentForm((current) => ({ ...current, reference: event.target.value }))} /></label>
+                <label className={paymentFieldClassName}><span>{text.note}</span><Input className={paymentInputClassName} maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
+                </div>
+                <div className="flex justify-stretch border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:justify-end">
+                  <Button type="submit" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
                     {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.record}
                   </Button>
                 </div>
               </form>
+              </SettlementSection>
             ) : settlement.status === "expected" || settlement.status === "received" ? (
               <ShellBanner tone="warning">{text.approveFirst}</ShellBanner>
             ) : remaining <= 0 ? (
-              <ShellSuccessBanner>{text.paidInFull}</ShellSuccessBanner>
+              <div role="status" className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" /><p>{text.paidInFull}</p></div>
             ) : null}
 
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold">{text.history}</h3>
+            <SettlementSection title={text.history} action={<Badge variant="secondary">{(settlement.transactions ?? []).length}</Badge>}>
               {(settlement.transactions ?? []).length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">{text.noHistory}</p>
+                <p className="px-3.5 py-6 text-center text-xs text-muted-foreground">{text.noHistory}</p>
               ) : (
-                <div className="space-y-2">
+                <div className="divide-y divide-border/60">
                   {settlement.transactions.map((item) => {
                     const isReversal = item.transaction_type === "reversal";
                     const isReversed = !isReversal && reversedPaymentIds.has(item.id);
                     return (
-                      <article key={item.id} className="rounded-lg border border-border/70 p-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0">
+                      <article key={item.id} className="min-w-0 p-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant={isReversal ? "outline" : "secondary"}>{isReversal ? text.reversalOperation : text.paymentOperation}</Badge>
-                              <span className="text-xs text-muted-foreground">{formatDate(item.paid_on, locale)} · {item.financial_account_name}</span>
+                              <Badge variant={isReversal ? "outline" : "secondary"} className="whitespace-normal text-[10px]">{isReversal ? text.reversalOperation : text.paymentOperation}</Badge>
+                              <span className="text-xs text-muted-foreground">{formatDate(item.paid_on, locale)}</span>
                             </div>
-                            <p className="mt-1 text-xs text-muted-foreground">{item.reference || item.note || "—"}</p>
-                            <p className="mt-1 text-[11px] text-muted-foreground">{text.by}: {item.created_by_name}</p>
                           </div>
-                          <div className="text-right">
-                            <p className={cn("font-semibold tabular-nums", isReversal ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{isReversal ? "+" : "−"} {formatMoney(item.amount_gross, item.currency, locale)}</p>
-                            {!isReversal && !isReversed ? <Button type="button" size="xs" variant="ghost" className="mt-1" onClick={() => { setReversalError(null); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button> : null}
-                          </div>
+                          <p className={cn("shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums", isReversal ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{isReversal ? "+" : "−"} {formatMoney(item.amount_gross, item.currency, locale)}</p>
                         </div>
+                        <p className="mt-1.5 break-words text-xs leading-5">{item.financial_account_name}</p>
+                        <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{item.reference || item.note || "—"}</p>
+                        <p className="mt-1 break-words text-[11px] leading-5 text-muted-foreground">{text.by}: {item.created_by_name}</p>
+                        {!isReversal && !isReversed ? <div className="mt-2 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs text-muted-foreground hover:text-destructive" onClick={() => { setReversalError(null); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button></div> : null}
                       </article>
                     );
                   })}
                 </div>
               )}
-            </section>
+            </SettlementSection>
 
             {reversal ? (
-              <form className="space-y-3 rounded-lg border border-rose-200 bg-rose-50/50 p-3 dark:border-rose-500/30 dark:bg-rose-500/5" onSubmit={handleReversal}>
-                <h3 className="text-sm font-semibold">{text.reverse}: {formatMoney(reversal.amount_gross, reversal.currency, locale)}</h3>
+              <SettlementSection title={text.reverse} action={<Badge variant="outline" className="text-rose-700 dark:text-rose-400">{formatMoney(reversal.amount_gross, reversal.currency, locale)}</Badge>}>
+              <form onSubmit={handleReversal}>
+                <div className="space-y-3 p-3.5">
                 {reversalError ? <ShellBanner tone="error">{reversalError}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
-                  <label className="block space-y-1.5 text-sm"><span>{text.reversalReason}</span><Input required maxLength={1000} value={reversalForm.note} onChange={(event) => setReversalForm((current) => ({ ...current, note: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" min={reversal.paid_on} max={todayIso()} value={reversalForm.paidOn} onChange={(event) => setReversalForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}><span>{text.reversalReason}</span><Input className={paymentInputClassName} required maxLength={1000} value={reversalForm.note} onChange={(event) => setReversalForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end"><Button type="button" variant="outline" onClick={() => setReversal(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
+                </div>
+                <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:justify-end"><Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" onClick={() => setReversal(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" size="sm" className="h-9 rounded-md sm:h-8" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
               </form>
+              </SettlementSection>
             ) : null}
 
-            <div className="flex justify-stretch sm:justify-end"><Button type="button" variant="outline" className="w-full sm:w-auto" onClick={onClose}>{text.close}</Button></div>
           </div>
         ) : null}
+        </div>
+        <div className="flex shrink-0 justify-end border-t border-border/70 bg-muted/20 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5"><Button type="button" variant="outline" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" onClick={onClose}>{text.close}</Button></div>
       </DialogContent>
     </Dialog>
   );

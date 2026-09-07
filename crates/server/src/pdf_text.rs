@@ -7,6 +7,18 @@ use printpdf::{
 const PDF_ARIAL_REGULAR_BYTES: &[u8] = include_bytes!("../../../docs/comparison/fonts/arial.ttf");
 const PDF_ARIAL_BOLD_BYTES: &[u8] = include_bytes!("../../../docs/comparison/fonts/arialbd.ttf");
 
+pub(crate) fn unicode_pdf_font_face(bold: bool) -> Result<ttf_parser::Face<'static>, &'static str> {
+    ttf_parser::Face::parse(
+        if bold {
+            PDF_ARIAL_BOLD_BYTES
+        } else {
+            PDF_ARIAL_REGULAR_BYTES
+        },
+        0,
+    )
+    .map_err(|_| "Failed to load PDF font metrics")
+}
+
 pub(crate) fn pdf_text_save_options() -> PdfSaveOptions {
     // Some legacy builders emit pre-encoded Tj operations for built-in fonts;
     // Unicode builders use embedded fonts and regular ShowText operations.

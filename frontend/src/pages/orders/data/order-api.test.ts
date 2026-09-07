@@ -12,12 +12,14 @@ describe("normalizePatientOrderRecheck", () => {
     const value = normalizePatientOrderRecheck({
       requires_recheck: true,
       can_create_order: false,
+      confidentiality_release_ready: true,
       blocking_reasons: null,
       document_alerts: null,
     });
 
     expect(value.requires_recheck).toBe(true);
     expect(value.can_create_order).toBe(false);
+    expect(value.confidentiality_release_ready).toBe(true);
     expect(value.checks).toEqual([]);
     expect(value.base_data_missing_fields).toEqual([]);
     expect(value.blocking_reasons).toEqual([]);

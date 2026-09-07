@@ -61,6 +61,67 @@ struct ProviderPositionAccumulator {
     latest_payment_on: Option<NaiveDate>,
 }
 
+fn provider_position_key(id: Option<Uuid>, name: Option<&str>) -> (Option<Uuid>, Option<String>) {
+    // An invoice can identify its supplier without a link to the providers
+    // registry. Keep those named suppliers separate from genuinely unknown ones.
+    let name = if id.is_some() {
+        None
+    } else {
+        name.map(|value| {
+            value
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
+        .filter(|value| !value.is_empty())
+    };
+    (id, name)
+}
+
+#[cfg(test)]
+mod provider_group_tests {
+    use super::*;
+
+    #[test]
+    fn unlinked_suppliers_keep_separate_balances() {
+        let mut totals = HashMap::new();
+        for (name, amount) in [
+            (Some("Telekom Deutschland GmbH"), 30),
+            (Some(" telekom   deutschland gmbh "), 20),
+            (Some("Stadtwerke"), 70),
+            (None, 10),
+            (Some("  "), 5),
+        ] {
+            *totals.entry(provider_position_key(None, name)).or_insert(0) += amount;
+        }
+        assert_eq!(totals.len(), 3);
+        assert_eq!(
+            totals[&provider_position_key(None, Some("Telekom Deutschland GmbH"))],
+            50
+        );
+        assert_eq!(totals[&provider_position_key(None, Some("Stadtwerke"))], 70);
+        assert_eq!(totals[&provider_position_key(None, None)], 15);
+    }
+
+    #[test]
+    fn registry_identity_takes_priority_without_linking_invoices_by_name() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            provider_position_key(Some(id), Some("Old name")),
+            provider_position_key(Some(id), Some("New name"))
+        );
+        assert_ne!(
+            provider_position_key(Some(id), Some("Telekom")),
+            provider_position_key(None, Some("Telekom"))
+        );
+        assert_ne!(
+            provider_position_key(Some(id), Some("Telekom")),
+            provider_position_key(Some(Uuid::new_v4()), Some("Telekom"))
+        );
+    }
+}
+
 fn parse_date(value: Option<&str>, field: &str) -> Result<Option<NaiveDate>, String> {
     value
         .map(str::trim)
@@ -387,6 +448,8 @@ async fn get_company_financial_position(
 
     let provider_rows = match sqlx::query(
         r#"SELECT external.id, external.external_invoice_number,
+                  source_document.id AS source_document_id,
+                  COALESCE(NULLIF(BTRIM(source_document.original_filename), ''), source_document.auto_name) AS source_document_name,
                   external.invoice_date, external.due_date, external.status,
                   external.paid_by, external.amount_gross,
                   settlement.company_paid_gross,
@@ -397,8 +460,11 @@ async fn get_company_financial_position(
                   patient.patient_id AS patient_pid,
                   patient.first_name, patient.last_name,
                   provider.id AS provider_id,
-                  COALESCE(provider.name, external.supplier_name) AS provider_name
+                  COALESCE(NULLIF(BTRIM(provider.name), ''), NULLIF(BTRIM(external.supplier_name), '')) AS provider_name
            FROM external_invoices external
+           LEFT JOIN documents source_document
+             ON source_document.id = external.source_document_id
+            AND source_document.file_deleted_at IS NULL
            LEFT JOIN orders ON orders.id = external.order_id
            LEFT JOIN patients patient ON patient.id = external.patient_id
            JOIN external_invoice_provider_settlement_balances settlement
@@ -425,7 +491,7 @@ async fn get_company_financial_position(
     let mut provider_payables = Decimal::ZERO;
     let mut expected_provider_costs = Decimal::ZERO;
     let mut provider_liabilities = Vec::with_capacity(provider_rows.len());
-    let mut provider_position_map = HashMap::<Option<Uuid>, ProviderPositionAccumulator>::new();
+    let mut provider_position_map = HashMap::<_, ProviderPositionAccumulator>::new();
     for row in provider_rows {
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let amount_gross = row
@@ -458,13 +524,13 @@ async fn get_company_financial_position(
             provider_payables += remaining_gross;
             "payable"
         };
-        let position = provider_position_map.entry(provider_id).or_insert_with(|| {
-            ProviderPositionAccumulator {
+        let position = provider_position_map
+            .entry(provider_position_key(provider_id, provider_name.as_deref()))
+            .or_insert_with(|| ProviderPositionAccumulator {
                 provider_id,
                 provider_name: provider_name.clone(),
                 ..ProviderPositionAccumulator::default()
-            }
-        });
+            });
         position.invoice_total_gross += amount_gross;
         position.company_paid_gross += company_paid_gross;
         position.invoice_count += 1;
@@ -495,6 +561,8 @@ async fn get_company_financial_position(
         provider_liabilities.push(json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "external_invoice_number": row.try_get::<String, _>("external_invoice_number").unwrap_or_default(),
+            "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
+            "source_document_name": row.try_get::<Option<String>, _>("source_document_name").unwrap_or_default(),
             "invoice_date": row.try_get::<Option<NaiveDate>, _>("invoice_date").unwrap_or_default().map(|value| value.to_string()),
             "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
             "status": status,

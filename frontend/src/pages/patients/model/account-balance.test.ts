@@ -42,4 +42,20 @@ describe("resolvePatientBalancePresentation", () => {
       }),
     ).toBeNull();
   });
+
+  it.each([undefined, null, [], {}, { closing_balance: "450.00" }])(
+    "does not crash on a malformed summary: %j",
+    (summary) => {
+      expect(resolvePatientBalancePresentation(summary)).toBeNull();
+    },
+  );
+
+  it("does not interpret an empty balance as zero", () => {
+    expect(
+      resolvePatientBalancePresentation({
+        closing_balance: " ",
+        balance_side: "settled",
+      }),
+    ).toBeNull();
+  });
 });
