@@ -79,49 +79,6 @@ fn provider_position_key(id: Option<Uuid>, name: Option<&str>) -> (Option<Uuid>,
     (id, name)
 }
 
-#[cfg(test)]
-mod provider_group_tests {
-    use super::*;
-
-    #[test]
-    fn unlinked_suppliers_keep_separate_balances() {
-        let mut totals = HashMap::new();
-        for (name, amount) in [
-            (Some("Telekom Deutschland GmbH"), 30),
-            (Some(" telekom   deutschland gmbh "), 20),
-            (Some("Stadtwerke"), 70),
-            (None, 10),
-            (Some("  "), 5),
-        ] {
-            *totals.entry(provider_position_key(None, name)).or_insert(0) += amount;
-        }
-        assert_eq!(totals.len(), 3);
-        assert_eq!(
-            totals[&provider_position_key(None, Some("Telekom Deutschland GmbH"))],
-            50
-        );
-        assert_eq!(totals[&provider_position_key(None, Some("Stadtwerke"))], 70);
-        assert_eq!(totals[&provider_position_key(None, None)], 15);
-    }
-
-    #[test]
-    fn registry_identity_takes_priority_without_linking_invoices_by_name() {
-        let id = Uuid::new_v4();
-        assert_eq!(
-            provider_position_key(Some(id), Some("Old name")),
-            provider_position_key(Some(id), Some("New name"))
-        );
-        assert_ne!(
-            provider_position_key(Some(id), Some("Telekom")),
-            provider_position_key(None, Some("Telekom"))
-        );
-        assert_ne!(
-            provider_position_key(Some(id), Some("Telekom")),
-            provider_position_key(Some(Uuid::new_v4()), Some("Telekom"))
-        );
-    }
-}
-
 fn parse_date(value: Option<&str>, field: &str) -> Result<Option<NaiveDate>, String> {
     value
         .map(str::trim)
@@ -806,4 +763,47 @@ async fn get_company_financial_position(
         "generated_at": Utc::now().to_rfc3339(),
     }))
     .into_response()
+}
+
+#[cfg(test)]
+mod provider_group_tests {
+    use super::*;
+
+    #[test]
+    fn unlinked_suppliers_keep_separate_balances() {
+        let mut totals = HashMap::new();
+        for (name, amount) in [
+            (Some("Telekom Deutschland GmbH"), 30),
+            (Some(" telekom   deutschland gmbh "), 20),
+            (Some("Stadtwerke"), 70),
+            (None, 10),
+            (Some("  "), 5),
+        ] {
+            *totals.entry(provider_position_key(None, name)).or_insert(0) += amount;
+        }
+        assert_eq!(totals.len(), 3);
+        assert_eq!(
+            totals[&provider_position_key(None, Some("Telekom Deutschland GmbH"))],
+            50
+        );
+        assert_eq!(totals[&provider_position_key(None, Some("Stadtwerke"))], 70);
+        assert_eq!(totals[&provider_position_key(None, None)], 15);
+    }
+
+    #[test]
+    fn registry_identity_takes_priority_without_linking_invoices_by_name() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            provider_position_key(Some(id), Some("Old name")),
+            provider_position_key(Some(id), Some("New name"))
+        );
+        assert_ne!(
+            provider_position_key(Some(id), Some("Telekom")),
+            provider_position_key(None, Some("Telekom"))
+        );
+        assert_ne!(
+            provider_position_key(Some(id), Some("Telekom")),
+            provider_position_key(Some(Uuid::new_v4()), Some("Telekom"))
+        );
+    }
 }

@@ -304,16 +304,15 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                     date(&value(row, "diagnosed_on")),
                 );
                 let parent = value(row, "parent_id");
-                if !parent.is_empty() {
-                    if let Some(parent_row) =
+                if !parent.is_empty()
+                    && let Some(parent_row) =
                         diagnoses.iter().find(|item| value(item, "id") == parent)
-                    {
-                        field(
-                            &mut lines,
-                            context.tx("Связано с", "Zugeordnet zu"),
-                            value(parent_row, "label"),
-                        );
-                    }
+                {
+                    field(
+                        &mut lines,
+                        context.tx("Связано с", "Zugeordnet zu"),
+                        value(parent_row, "label"),
+                    );
                 }
                 Entry {
                     title: format!(
