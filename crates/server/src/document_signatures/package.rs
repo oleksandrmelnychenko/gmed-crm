@@ -51,10 +51,11 @@ pub(super) async fn options(
         .fetch_all(&state.db).await.map_err(db_error)?;
     let mut choices = Vec::new();
     for id in ids {
-        if let Ok(row) = signature_document_access(state, auth, id, false).await {
-            if same_scope(source, &row) && eligibility(&row).is_none() {
-                choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number")}));
-            }
+        if let Ok(row) = signature_document_access(state, auth, id, false).await
+            && same_scope(source, &row)
+            && eligibility(&row).is_none()
+        {
+            choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number")}));
         }
     }
     Ok(json!({"template":template,"documents":choices}))

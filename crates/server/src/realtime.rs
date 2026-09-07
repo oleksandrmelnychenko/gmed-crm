@@ -375,12 +375,11 @@ pub async fn publish_invoice_event(
         return;
     };
 
-    if let Ok(order_id) = row.try_get::<Uuid, _>("order_id") {
-        if let Err(error) =
+    if let Ok(order_id) = row.try_get::<Uuid, _>("order_id")
+        && let Err(error) =
             crate::services::order_payment_tracking::sync_notifications(state, Some(order_id)).await
-        {
-            tracing::error!(%error, %order_id, "notify invoice payment change");
-        }
+    {
+        tracing::error!(%error, %order_id, "notify invoice payment change");
     }
 
     let patient_id: Uuid = match row.try_get("patient_id") {

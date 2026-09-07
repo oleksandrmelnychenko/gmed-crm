@@ -8989,18 +8989,17 @@ async fn update_invoice_status(
         }
     }
 
-    if requested_status == "cancelled" {
-        if let Err(error) = sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
+    if requested_status == "cancelled"
+        && let Err(error) = sqlx::query("SELECT set_config('gmed.accounting_actor_id', $1, true)")
             .bind(auth.user_id.to_string())
             .execute(&mut *transaction)
             .await
-        {
-            tracing::error!(%error, "set cancelled invoice allocation release actor");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to release invoice prepayment",
-            );
-        }
+    {
+        tracing::error!(%error, "set cancelled invoice allocation release actor");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release invoice prepayment",
+        );
     }
     if requested_status == "cancelled"
         && let Err(e) =
