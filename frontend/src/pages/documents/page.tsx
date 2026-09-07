@@ -90,7 +90,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { clearApiCache } from "@/lib/api";
+import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, getLang, t as translateCatalog, uiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -3152,9 +3152,13 @@ function StaffDocumentsPage({
         refresh();
       } else {
         setDeleteError(
-          nextError instanceof Error
-            ? nextError.message
-            : t.documents_failed_delete_file,
+          nextError instanceof ApiRequestError && nextError.body?.error === "document_signature_file_protected"
+            ? lang === "de"
+              ? "Diese Datei gehört zu einer laufenden Signaturanfrage oder zu gespeicherten Signaturnachweisen und kann nicht gelöscht werden."
+              : "Этот файл относится к текущему запросу подписи или сохранённым доказательствам подписания и не может быть удалён."
+            : nextError instanceof Error
+              ? nextError.message
+              : t.documents_failed_delete_file,
         );
       }
     } finally {

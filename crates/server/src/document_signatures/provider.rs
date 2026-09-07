@@ -209,9 +209,12 @@ impl Provider {
         if matches!(response.status().as_u16(), 401 | 403) {
             *self.token.lock().await = None;
         }
+        if response.status().as_u16() == 429 {
+            return Err("provider_rate_limited");
+        }
         if matches!(
             response.status().as_u16(),
-            400 | 401 | 403 | 413 | 415 | 422
+            400 | 401 | 403 | 406 | 413 | 415 | 422
         ) {
             return Err("provider_request_rejected");
         }

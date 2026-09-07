@@ -140,6 +140,7 @@ struct MockProvider {
     creates: Arc<AtomicUsize>,
     fail_report: Arc<AtomicBool>,
     reject: Arc<AtomicBool>,
+    create_status: Arc<AtomicUsize>,
     auth_status: Arc<AtomicUsize>,
     logins: Arc<AtomicUsize>,
     requests: Arc<AtomicUsize>,
@@ -167,6 +168,12 @@ async fn mock(State(mock): State<MockProvider>, request: AxumRequest) -> Respons
     }
     if path == "/v2/signature-requests" && method == Method::POST {
         mock.creates.fetch_add(1, Ordering::SeqCst);
+        let create_status = mock.create_status.load(Ordering::SeqCst);
+        if create_status != 0 {
+            return StatusCode::from_u16(create_status as u16)
+                .unwrap()
+                .into_response();
+        }
         if mock.reject.load(Ordering::SeqCst) {
             return StatusCode::UNPROCESSABLE_ENTITY.into_response();
         }
@@ -251,6 +258,37 @@ async fn provider_uses_german_protocol_and_classifies_definite_rejection() {
 }
 
 #[tokio::test]
+async fn creation_rejections_allow_manual_retry_without_replaying_ambiguous_errors() {
+    for (status, expected) in [
+        (406, "provider_request_rejected"),
+        (429, "provider_rate_limited"),
+        (408, "provider_http_error"),
+        (500, "provider_http_error"),
+        (503, "provider_http_error"),
+    ] {
+        let (mock, endpoint, handle) = mock_server().await;
+        let p = provider(false).with_test_endpoint(endpoint);
+        mock.create_status.store(status, Ordering::SeqCst);
+        let result = p.create(Uuid::new_v4(), "hash", b"pdf", &signers()).await;
+        assert_eq!(result.unwrap_err(), expected, "HTTP {status}");
+        assert_eq!(
+            mock.creates.load(Ordering::SeqCst),
+            1,
+            "POST must not replay"
+        );
+        assert!(mock.value.lock().unwrap().is_null());
+        if matches!(status, 406 | 429) {
+            mock.create_status.store(0, Ordering::SeqCst);
+            p.create(Uuid::new_v4(), "hash", b"pdf", &signers())
+                .await
+                .unwrap();
+            assert_eq!(mock.creates.load(Ordering::SeqCst), 2);
+        }
+        handle.abort();
+    }
+}
+
+#[tokio::test]
 async fn rejected_authentication_refreshes_the_token_without_replaying_creation() {
     for status in [401, 403] {
         let (mock, endpoint, handle) = mock_server().await;
@@ -328,7 +366,16 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
     };
     let (mock, endpoint, handle) = mock_server().await;
     let mut created_keys = Vec::new();
-    for scenario in ["live", "demo", "stale", "declined", "withdrawn", "unknown"] {
+    for scenario in [
+        "live",
+        "demo",
+        "stale",
+        "declined",
+        "withdrawn",
+        "unknown",
+        "rate_limited",
+        "unacceptable",
+    ] {
         let demo = scenario == "demo";
         let state = AppState::new(
             pool.clone(),
@@ -347,9 +394,18 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         sqlx::query("INSERT INTO provider_document_links(provider_id,document_id,linked_by) VALUES ($1,$2,$3)")
             .bind(linked_provider).bind(source_id).bind(actor).execute(&pool).await.unwrap();
         let app = router()
+            .merge(documents::router())
             .with_state(state.clone())
             .layer(Extension(auth.clone()));
         let payload = json!({"signers":signers()}).to_string();
+        mock.create_status.store(
+            match scenario {
+                "rate_limited" => 429,
+                "unacceptable" => 406,
+                _ => 0,
+            },
+            Ordering::SeqCst,
+        );
         let http = app
             .clone()
             .oneshot(
@@ -365,19 +421,50 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         assert_eq!(http.status(), StatusCode::ACCEPTED, "{scenario}");
         let created: Value =
             serde_json::from_slice(&to_bytes(http.into_body(), 10000).await.unwrap()).unwrap();
-        let request_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
-        for _ in 0..100 {
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM document_signature_requests WHERE id=$1")
-                    .bind(request_id)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
-            if status == "pending" {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let mut request_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+        if matches!(scenario, "rate_limited" | "unacceptable") {
+            wait_for_status(&pool, request_id, "error").await;
+            let failed = sqlx::query("SELECT last_error,provider_request_id FROM document_signature_requests WHERE id=$1")
+                .bind(request_id).fetch_one(&pool).await.unwrap();
+            assert_eq!(
+                failed.get::<String, _>("last_error"),
+                if scenario == "rate_limited" {
+                    "provider_rate_limited"
+                } else {
+                    "provider_request_rejected"
+                }
+            );
+            assert!(
+                failed
+                    .get::<Option<Uuid>, _>("provider_request_id")
+                    .is_none()
+            );
+            assert!(!poll_one(&state, Some(request_id)).await.unwrap());
+            mock.create_status.store(0, Ordering::SeqCst);
+            let retry = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/documents/{source_id}/signature-requests"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(payload.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                retry.status(),
+                StatusCode::ACCEPTED,
+                "manual retry must be allowed"
+            );
+            let retry: Value =
+                serde_json::from_slice(&to_bytes(retry.into_body(), 10000).await.unwrap()).unwrap();
+            let retry_id = Uuid::parse_str(retry["id"].as_str().unwrap()).unwrap();
+            assert_ne!(retry_id, request_id);
+            request_id = retry_id;
         }
+        wait_for_status(&pool, request_id, "pending").await;
         let duplicate = app
             .clone()
             .oneshot(
@@ -391,6 +478,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             .await
             .unwrap();
         assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+        assert_signature_file_protected(&app, &pool, source_id).await;
         let before_count = mock.creates.load(Ordering::SeqCst);
         if scenario == "unknown" {
             sqlx::query("UPDATE document_signature_requests SET status='submission_unknown',provider_request_id=NULL WHERE id=$1").bind(request_id).execute(&pool).await.unwrap();
@@ -413,6 +501,28 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             remote["document_id"] = json!(Uuid::new_v4());
         }
         if scenario == "live" {
+            // A 429 during reconciliation must retain the active request,
+            // unlike a 429 that rejects its initial creation.
+            mock.auth_status.store(429, Ordering::SeqCst);
+            assert!(poll_one(&state, Some(request_id)).await.unwrap());
+            let limited = sqlx::query(
+                "SELECT status,last_error FROM document_signature_requests WHERE id=$1",
+            )
+            .bind(request_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(limited.get::<String, _>("status"), "pending");
+            assert_eq!(
+                limited.get::<String, _>("last_error"),
+                "provider_rate_limited"
+            );
+            mock.auth_status.store(0, Ordering::SeqCst);
+            sqlx::query("UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1")
+                .bind(request_id)
+                .execute(&pool)
+                .await
+                .unwrap();
             mock.fail_report.store(true, Ordering::SeqCst);
             assert!(poll_one(&state, Some(request_id)).await.unwrap());
             let pending = sqlx::query(
@@ -453,6 +563,16 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
                     .get::<Option<Uuid>, _>("result_document_id")
                     .is_none()
             );
+            let deleted = app
+                .clone()
+                .oneshot(delete_file_request(source_id))
+                .await
+                .unwrap();
+            assert_eq!(
+                deleted.status(),
+                StatusCode::OK,
+                "inactive source without signed evidence may be deleted"
+            );
             continue;
         }
         assert_eq!(
@@ -466,6 +586,8 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
             result.get::<Option<String>, _>("last_error")
         );
         let document_id: Uuid = result.get("result_document_id");
+        assert_signature_file_protected(&app, &pool, source_id).await;
+        assert_signature_file_protected(&app, &pool, document_id).await;
         let summaries = app
             .clone()
             .oneshot(
@@ -758,6 +880,62 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .await
         .unwrap();
     admin.close().await;
+}
+
+async fn wait_for_status(pool: &sqlx::PgPool, id: Uuid, expected: &str) {
+    for _ in 0..150 {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM document_signature_requests WHERE id=$1")
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        if status == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("signature request {id} did not reach {expected}");
+}
+
+fn delete_file_request(id: Uuid) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(format!("/documents/{id}/delete"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"reason":"signature regression test"}).to_string(),
+        ))
+        .unwrap()
+}
+
+async fn assert_signature_file_protected(app: &Router, pool: &sqlx::PgPool, id: Uuid) {
+    let before = sqlx::query("SELECT id,storage_key FROM documents WHERE id=$1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let expected_bytes = source_bytes(&before).await.unwrap();
+    let deleted = app.clone().oneshot(delete_file_request(id)).await.unwrap();
+    assert_eq!(deleted.status(), StatusCode::CONFLICT);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(deleted.into_body(), 10000).await.unwrap()).unwrap();
+    assert_eq!(body["error"], "document_signature_file_protected");
+    let after = sqlx::query("SELECT id,storage_key,file_deleted_at FROM documents WHERE id=$1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        after
+            .get::<Option<DateTime<Utc>>, _>("file_deleted_at")
+            .is_none()
+    );
+    assert_eq!(
+        source_bytes(&after).await.unwrap(),
+        expected_bytes,
+        "protected file bytes must remain available"
+    );
 }
 
 async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {

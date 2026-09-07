@@ -232,9 +232,11 @@ async fn create(
             .and_then(|v| provider.validate(&v, request_id, &source_hash, None, &signers));
         let (remote, status, reason) = match result {
             Ok(v) => (Some(v.id), "pending", None),
-            Err(reason @ ("provider_request_rejected" | "provider_login_failed")) => {
-                (None, "error", Some(reason))
-            }
+            Err(
+                reason @ ("provider_request_rejected"
+                | "provider_login_failed"
+                | "provider_rate_limited"),
+            ) => (None, "error", Some(reason)),
             Err(reason) => (None, "submission_unknown", Some(reason)),
         };
         if let Err(e) = sqlx::query("UPDATE document_signature_requests SET provider_request_id=$2,status=$3,last_error=$4,lease_until=NULL,next_poll_at=now(),updated_at=now() WHERE id=$1 AND status='submitting'")

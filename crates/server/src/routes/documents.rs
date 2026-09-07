@@ -21956,6 +21956,34 @@ async fn delete_document_file(
         }
     }
 
+    // Signing creation and archival lock this same row. Lock before checking
+    // references and before moving bytes, so a concurrent signing request
+    // cannot start while its source file is being deleted.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "begin document delete transaction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    };
+    let current = match sqlx::query(
+        "SELECT status,visibility,patient_id,storage_key,file_deleted_at FROM documents WHERE id=$1 FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "lock document before file deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete document file");
+        }
+    };
+
     let previous_status = current
         .try_get::<String, _>("status")
         .unwrap_or_else(|_| "active".to_string());
@@ -21976,23 +22004,38 @@ async fn delete_document_file(
         return err(StatusCode::CONFLICT, "Document file was already deleted");
     }
 
+    // Use a separate statement after the row lock: a signing transaction that
+    // committed while we waited must be visible to this reference check.
+    let signature_file_protected = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM document_signature_requests
+         WHERE result_document_id=$1 OR (source_document_id=$1 AND status IN
+           ('submitting','submission_unknown','pending','completed','needs_review')))",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "validate signature evidence before delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate document references",
+            );
+        }
+    };
+    if signature_file_protected {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error":"document_signature_file_protected",
+                "message":"Document belongs to an active signature request or stored signature evidence"})),
+        )
+            .into_response();
+    }
+
     let staged_delete = match stage_document_file_delete(had_storage_key.as_deref()).await {
         Ok(value) => value,
         Err(resp) => return resp,
-    };
-
-    let mut tx = match state.db.begin().await {
-        Ok(tx) => tx,
-        Err(error) => {
-            if let Some(staged) = staged_delete.as_ref() {
-                rollback_staged_document_delete(staged).await;
-            }
-            tracing::error!(error = %error, document_id = %id, "begin document delete transaction");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to delete document file",
-            );
-        }
     };
 
     let revoked_rows = match sqlx::query(

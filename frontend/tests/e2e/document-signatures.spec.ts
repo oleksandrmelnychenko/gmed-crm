@@ -935,3 +935,60 @@ test("contract recipient validation retains the selection and permits correcting
   await expect.poll(() => fixture.submissions.length).toBe(1);
   expect(fixture.submissions).toEqual([{ signers: [client, agency] }]);
 });
+
+test("a rate-limited creation explains the refusal and permits an explicit retry", async ({ page }) => {
+  await prepare(page);
+  const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+  let attempts = 0;
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
+    if (route.request().method() === "POST") {
+      attempts++;
+      return route.fulfill({ status: 202, json: { id: `attempt-${attempts}` } });
+    }
+    return route.fulfill({ json: {
+      enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true,
+      ineligible_reason: null, suggested_signers: [client],
+      requests: attempts ? [{ id: `attempt-${attempts}`, status: attempts === 1 ? "error" : "pending",
+        test_mode: true, signers: [client], evidence: {}, result_document_id: null, has_report: false,
+        last_error: attempts === 1 ? "provider_rate_limited" : null, created_at: document.created_at }] : [],
+    } });
+  });
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  const consent = dialog.getByRole("checkbox", { name: /Ich habe die gespeicherte PDF/ });
+  const send = dialog.getByRole("button", { name: "Zur Unterschrift senden", exact: true });
+  await consent.check();
+  await send.click();
+  await expect(dialog.getByRole("alert")).toContainText("Es wurden keine Einladungen versendet");
+  await expect(consent).not.toBeChecked();
+  await expect(send).toBeDisabled();
+  expect(attempts).toBe(1);
+  await consent.check();
+  await send.click();
+  await expect(dialog.getByText("TEST · Unterschriften ausstehend", { exact: true })).toBeVisible();
+  await expect(send).toHaveCount(0);
+  expect(attempts).toBe(2);
+});
+
+for (const lang of ["ru", "de"] as const) {
+  test(`protected signature evidence shows a localized deletion error and keeps the file in ${lang}`, async ({ page }) => {
+    await prepare(page);
+    await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    let deleteAttempts = 0;
+    await page.route(`**/api/v1/documents/${documentId}/delete`, route => {
+      deleteAttempts++;
+      return route.fulfill({ status: 409, json: { error: "document_signature_file_protected", message: "Document belongs to signature evidence" } });
+    });
+    await page.goto(`/documents/${documentId}`);
+    await page.getByRole("button", { name: lang === "de" ? "Datei löschen" : "Удалить файл", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: lang === "de" ? "Datei löschen" : "Удалить файл", exact: true });
+    await dialog.getByRole("textbox").fill("Fixture cleanup");
+    await dialog.getByRole("button", { name: lang === "de" ? "Datei endgültig löschen" : "Удалить файл окончательно", exact: true }).click();
+    await expect(dialog.getByText(lang === "de"
+      ? "Diese Datei gehört zu einer laufenden Signaturanfrage oder zu gespeicherten Signaturnachweisen und kann nicht gelöscht werden."
+      : "Этот файл относится к текущему запросу подписи или сохранённым доказательствам подписания и не может быть удалён.", { exact: true })).toBeVisible();
+    await expect(dialog).toBeVisible();
+    expect(deleteAttempts).toBe(1);
+  });
+}
