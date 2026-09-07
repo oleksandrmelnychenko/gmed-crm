@@ -7013,10 +7013,11 @@ ${serviceCommentLines.join("\n")}`
                                     <ChevronDown aria-hidden="true" className="size-4" />
                                   </span>
                                   <span className="min-w-0 flex-1">
-                                    <span className="block break-words text-xs font-semibold text-foreground">
-                                      {specialtyLabel(specializationValue(specialization))}
+                                    <span className="flex items-start gap-2 text-xs font-semibold text-foreground">
+                                      <span aria-hidden="true" className="mt-1 size-2 shrink-0 rounded-full bg-orange-500" />
+                                      <span className="min-w-0 break-words">{specialtyLabel(specializationValue(specialization))}</span>
                                     </span>
-                                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                                    <span className="mt-0.5 block pl-4 text-[11px] text-muted-foreground">
                                       {selectedInSpecialization > 0
                                         ? tx(
                                             `${selectedInSpecialization} из ${specializationWorkTypes.length} выбрано`,
