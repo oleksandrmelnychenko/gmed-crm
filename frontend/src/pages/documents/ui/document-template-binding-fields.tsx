@@ -400,12 +400,6 @@ export function DocumentTemplateBindingFields({
             <div className="grid gap-4 md:grid-cols-2">
               {groupFields.map((field) => {
                 if (
-                  templateId === "privacy_consents" &&
-                  field.kind === "boolean"
-                ) {
-                  return null;
-                }
-                if (
                   useOrderServices &&
                   field.key === "estimate_total"
                 ) {

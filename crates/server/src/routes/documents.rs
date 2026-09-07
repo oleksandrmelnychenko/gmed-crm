@@ -333,6 +333,7 @@ struct GeneratedTreatmentPlanContext {
     treatment_plan_note: Option<String>,
     appointments: Vec<GeneratedAppointmentLine>,
     text_blocks: Vec<String>,
+    agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -349,6 +350,7 @@ struct GeneratedMedicationSummaryContext {
     scope_note: String,
     medications: Vec<GeneratedMedicationLine>,
     text_blocks: Vec<String>,
+    agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -481,6 +483,7 @@ struct GeneratedProviderTemplateContext {
     location: Option<String>,
     order_number: Option<String>,
     body_paragraphs: Vec<String>,
+    agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -3362,6 +3365,10 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
     )
 }
 
+fn is_structured_generated_document_template(template_id: &str) -> bool {
+    template_id != "free_text_document" && document_template_by_id(template_id).is_some()
+}
+
 fn is_lead_allowed_document_template(template_id: &str) -> bool {
     matches!(
         template_id,
@@ -5586,13 +5593,12 @@ fn build_treatment_plan_pdf(
         None => context.patient_name.clone(),
     };
 
-    let footer_text = format!(
-        "{}: {}",
-        translated_label(&context.language, "generated_footer"),
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    let mut layout = legal_document_pdf_layout(
+        document_reference,
+        &context.agency,
+        regular_handle,
+        bold_handle,
     );
-    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
-    layout.set_document_reference(document_reference);
 
     layout.text_block(
         translated_label(&context.language, "draft_badge"),
@@ -6218,13 +6224,12 @@ fn build_medication_summary_pdf(
         None => context.patient_name.clone(),
     };
 
-    let footer_text = format!(
-        "{}: {}",
-        translated_label(&context.language, "generated_footer"),
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    let mut layout = legal_document_pdf_layout(
+        document_reference,
+        &context.agency,
+        regular_handle,
+        bold_handle,
     );
-    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
-    layout.set_document_reference(document_reference);
 
     layout.text_block(
         translated_label(&context.language, "draft_badge"),
@@ -7900,13 +7905,12 @@ fn build_visa_invitation_pdf(
         .birth_date
         .map(|value| value.format("%d.%m.%Y").to_string())
         .unwrap_or_else(|| "n/a".to_string());
-    let footer_text = format!(
-        "{}: {}",
-        translated_label(&context.language, "generated_footer"),
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
+    let mut layout = legal_document_pdf_layout(
+        document_reference,
+        &context.agency,
+        regular_handle,
+        bold_handle,
     );
-    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
-    layout.set_document_reference(document_reference);
 
     for line in agency_block_lines(&context.agency) {
         admin_block(&mut layout, &line, 0.0, 0.3);
@@ -8572,13 +8576,12 @@ fn build_provider_template_pdf(
     let mut document = PdfDocument::new(&context.auto_name);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
-    let footer_text = format!(
-        "{} · {}",
-        context.provider_name,
-        context.generated_at.format("%Y-%m-%d")
+    let mut layout = legal_document_pdf_layout(
+        document_reference,
+        &context.agency,
+        regular_handle,
+        bold_handle,
     );
-    let mut layout = TreatmentPlanPdfLayout::new(footer_text, regular_handle, bold_handle);
-    layout.set_document_reference(document_reference);
 
     layout.text_block(
         &context.title,
@@ -11638,6 +11641,8 @@ async fn generate_provider_document_from_template_internal(
         }
     }
 
+    let agency = load_agency_contract_settings(state).await?;
+
     let context = GeneratedProviderTemplateContext {
         patient_pid: patient_pid.clone(),
         patient_name: patient_name.clone(),
@@ -11661,6 +11666,7 @@ async fn generate_provider_document_from_template_internal(
         location: appointment_location,
         order_number: order_number.clone(),
         body_paragraphs,
+        agency,
         generated_at,
     };
 
@@ -11994,10 +12000,10 @@ async fn generate_document(
             .closing_note
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
-    if is_fixed_legal_document_template(template.id) && has_free_form_override {
+    if is_structured_generated_document_template(template.id) && has_free_form_override {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Fixed legal templates do not support free-form text overrides",
+            "Structured document templates do not support free-form text overrides",
         );
     }
 
@@ -12543,6 +12549,11 @@ async fn generate_document(
                 None
             };
 
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+
             let context = GeneratedTreatmentPlanContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
@@ -12557,6 +12568,7 @@ async fn generate_document(
                 treatment_plan_note,
                 appointments,
                 text_blocks,
+                agency,
                 generated_at,
             };
 
@@ -12684,6 +12696,11 @@ async fn generate_document(
                     })
             });
 
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
+
             let context = GeneratedMedicationSummaryContext {
                 patient_pid: patient_pid.clone(),
                 patient_name: patient_name.clone(),
@@ -12697,6 +12714,7 @@ async fn generate_document(
                 scope_note,
                 medications,
                 text_blocks,
+                agency,
                 generated_at,
             };
 
@@ -15430,13 +15448,7 @@ fn build_cost_coverage_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let footer = format!(
-        "{} · {}",
-        context.auto_name,
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
-    );
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
-    layout.set_document_reference(document_reference);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     // Ordinal used throughout the intro / headings ("1." in the reference).
     let ordinal = context.order_sequence.max(1);
@@ -16026,13 +16038,7 @@ fn build_appointment_confirmation_pdf(
     document_reference: &str,
 ) -> Result<Vec<u8>, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
-    let footer = format!(
-        "{} · {}",
-        context.auto_name,
-        context.generated_at.format("%d.%m.%Y %H:%M UTC")
-    );
-    let mut layout = TreatmentPlanPdfLayout::new(footer, regular, bold);
-    layout.set_document_reference(document_reference);
+    let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
     // --- Header meta table (Datum / Seiten / Doc.-ID / Ersteller / Für / Project) ---
     let meta_date = if context.sign_date.is_some() {
@@ -16563,9 +16569,9 @@ fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
     agency.data_controller_statement.trim()
 }
 
-fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
     layout.text_block_justified(
-        &format!("[ ]  {text}"),
+        &format!("[{}]  {text}", if checked { "x" } else { " " }),
         10.5,
         false,
         4.0,
@@ -16575,9 +16581,9 @@ fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, label: &str) {
+fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, checked: bool, label: &str) {
     layout.text_block(
-        &format!("[ ]  {label}"),
+        &format!("[{}]  {label}", if checked { "x" } else { " " }),
         10.5,
         false,
         12.0,
@@ -17100,24 +17106,28 @@ fn build_adult_privacy_consents_pdf(
     fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
     adult_legal_checkbox(
         &mut layout,
+        bindings.consent_healthcare.unwrap_or(false),
         &format!(
             "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        bindings.consent_provider_release.unwrap_or(false),
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        bindings.consent_privacy.unwrap_or(false),
         &format!(
             "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        recipients.is_some(),
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
     if let Some(recipients) = recipients {
@@ -17145,12 +17155,37 @@ fn build_adult_privacy_consents_pdf(
     }
     adult_legal_checkbox(
         &mut layout,
+        [
+            bindings.consent_email,
+            bindings.consent_threema,
+            bindings.consent_whatsapp,
+            bindings.consent_telegram,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|checked| checked),
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
-    adult_legal_channel(&mut layout, "E-mail");
-    adult_legal_channel(&mut layout, "Threema-Messenger");
-    adult_legal_channel(&mut layout, "WhatsApp-Messenger");
-    adult_legal_channel(&mut layout, "Telegram-Messenger");
+    adult_legal_channel(
+        &mut layout,
+        bindings.consent_email.unwrap_or(false),
+        "E-mail",
+    );
+    adult_legal_channel(
+        &mut layout,
+        bindings.consent_threema.unwrap_or(false),
+        "Threema-Messenger",
+    );
+    adult_legal_channel(
+        &mut layout,
+        bindings.consent_whatsapp.unwrap_or(false),
+        "WhatsApp-Messenger",
+    );
+    adult_legal_channel(
+        &mut layout,
+        bindings.consent_telegram.unwrap_or(false),
+        "Telegram-Messenger",
+    );
     fc_body(
         &mut layout,
         "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
@@ -23485,7 +23520,7 @@ mod tests {
     use super::create_private_ocr_temp_file;
     use super::{
         AdminSignatureParty, AgencyContractSettings, AmlEnhancedDueDiligenceBindings,
-        DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
+        DOCUMENT_TEMPLATES, DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
         GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
         GeneratedPatientStickerContext, GeneratedSingleOrderContext, PDF_LEGAL_CONTENT_BOTTOM_MM,
         PDF_PAGE_WIDTH_MM, ServiceLineInput, TreatmentPlanPdfColor, TreatmentPlanPdfLayout,
@@ -23501,10 +23536,11 @@ mod tests {
         generated_binding_snapshot, generated_cost_estimate_document_number,
         generated_document_number_for_template, generated_order_reference,
         generated_typed_document_number, german_document_country, is_fixed_legal_document_template,
-        is_lead_allowed_document_template, legal_agency_block_lines, legal_document_reference,
-        localized_estimate_work_type_sections, new_admin_pdf, parse_document_ocr_max_concurrency,
-        parse_document_ocr_timeout_seconds, patient_sticker_agency_line, pdf_mm_to_pt,
-        single_order_scope_points, tesseract_input_extension, trusted_contact_recipients_binding,
+        is_lead_allowed_document_template, is_structured_generated_document_template,
+        legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
+        new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
+        patient_sticker_agency_line, pdf_mm_to_pt, single_order_scope_points,
+        tesseract_input_extension, trusted_contact_recipients_binding,
         valid_tesseract_language_spec,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
@@ -23820,6 +23856,21 @@ mod tests {
     }
 
     #[test]
+    fn every_builtin_except_free_text_is_a_protected_structured_template() {
+        for template in DOCUMENT_TEMPLATES {
+            assert_eq!(
+                is_structured_generated_document_template(template.id),
+                template.id != "free_text_document",
+                "unexpected structured-template classification for {}",
+                template.id
+            );
+        }
+        assert!(!is_structured_generated_document_template(
+            "provider_template:demo"
+        ));
+    }
+
+    #[test]
     fn german_document_addresses_translate_known_countries_and_keep_free_text() {
         assert_eq!(german_document_country("DE"), "Deutschland");
         assert_eq!(german_document_country("Germany"), "Deutschland");
@@ -23985,6 +24036,7 @@ mod tests {
                 address: Some("Agency Street 1, 50667 Cologne".to_string()),
                 phone: Some("+49 221 123456".to_string()),
                 email: Some("label@example.test".to_string()),
+                website: Some("https://gmed-health.com".to_string()),
             },
             format: PATIENT_LABEL_FORMATS[1],
             auto_name: "Patientenetikett".to_string(),
@@ -24111,11 +24163,11 @@ mod tests {
         assert!(consent_text.contains("anna@example.test"));
         assert!(consent_text.contains("GMED-EDV-System"));
         assert!(consent_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(!consent_text.contains("[x]"));
+        assert!(consent_text.contains("[x]"));
         assert!(consent_text.contains("[ ]"));
-        assert!(consent_text.contains("[ ] Threema-Messenger"));
+        assert!(consent_text.contains("[x] Threema-Messenger"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
-        assert!(consent_text.contains("[ ] Telegram-Messenger"));
+        assert!(consent_text.contains("[x] Telegram-Messenger"));
         assert!(!consent_text.contains('?'));
 
         let privacy_information =

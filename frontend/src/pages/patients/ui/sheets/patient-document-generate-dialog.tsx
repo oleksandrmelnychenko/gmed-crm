@@ -31,6 +31,8 @@ import {
   buildGenerateDocumentAutoName,
   buildGenerateDocumentPayload,
   documentTemplateRequiresOrder,
+  documentTemplateSupportsAppointmentContext,
+  documentTemplateSupportsOrderContext,
   emptyGenerateForm,
   isFreeTextDocumentTemplate,
   patientDocumentAddresseeLabel,
@@ -226,14 +228,6 @@ export function PatientDocumentGenerateDialog({
     selectedTemplate &&
       isDesignedAgencyDocumentTemplate(selectedTemplate.id),
   );
-  const selectedTemplateIsCompliance = Boolean(
-    selectedTemplate &&
-      [
-        "confidentiality_release",
-        "privacy_information",
-        "privacy_consents",
-      ].includes(selectedTemplate.id),
-  );
   const frameworkContractMissing = Boolean(
     selectedTemplate?.id === "framework_contract" &&
       frameworkContracts !== null &&
@@ -242,6 +236,11 @@ export function PatientDocumentGenerateDialog({
   const selectedTemplateRequiresOrder = documentTemplateRequiresOrder(
     selectedTemplate?.id,
   );
+  const selectedTemplateSupportsOrder = documentTemplateSupportsOrderContext(
+    selectedTemplate?.id,
+  );
+  const selectedTemplateSupportsAppointment =
+    documentTemplateSupportsAppointmentContext(selectedTemplate?.id);
   const orderContextRequiredMessage = tx(
     "Выберите заказ для создания этого документа.",
     "Wählen Sie einen Auftrag aus, um dieses Dokument zu erstellen.",
@@ -488,8 +487,11 @@ export function PatientDocumentGenerateDialog({
             </label>
           </div>
 
-          {!selectedTemplateIsCompliance ? (
+          {selectedTemplateSupportsOrder ||
+          selectedTemplateSupportsAppointment ||
+          frameworkContractMissing ? (
             <div className="grid gap-3 border-y border-border py-4 md:grid-cols-2">
+              {selectedTemplateSupportsOrder ? (
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                   {tx("Заказ", "Auftrag")}
@@ -534,6 +536,8 @@ export function PatientDocumentGenerateDialog({
                   <p className="mt-1 text-xs text-destructive">{validationError}</p>
                 ) : null}
               </label>
+              ) : null}
+              {selectedTemplateSupportsAppointment ? (
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                   {tx("Термин", "Termin")}
@@ -558,6 +562,7 @@ export function PatientDocumentGenerateDialog({
                   ))}
                 </NativeComboboxSelect>
               </label>
+              ) : null}
               {frameworkContractMissing ? (
                 <p className="text-xs text-destructive md:col-span-2">
                   {tx(

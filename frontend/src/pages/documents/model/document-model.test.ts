@@ -8,6 +8,8 @@ import {
   buildDocumentsPath,
   detailToEditForm,
   documentTemplateRequiresOrder,
+  documentTemplateSupportsAppointmentContext,
+  documentTemplateSupportsOrderContext,
   emptyGenerateForm,
   emptyUploadForm,
   formatBusinessDocumentNumber,
@@ -64,6 +66,17 @@ describe("commercial document context", () => {
     expect(documentTemplateRequiresOrder("order_cost_estimate")).toBe(true);
     expect(documentTemplateRequiresOrder("cost_estimate")).toBe(false);
     expect(documentTemplateRequiresOrder("privacy_consents")).toBe(false);
+  });
+
+  it("shows order and appointment context only where the renderer consumes it", () => {
+    expect(documentTemplateSupportsOrderContext("framework_contract")).toBe(true);
+    expect(documentTemplateSupportsOrderContext("enhanced_due_diligence")).toBe(true);
+    expect(documentTemplateSupportsOrderContext("patient_sticker_compact")).toBe(false);
+    expect(documentTemplateSupportsAppointmentContext("appointment_confirmation")).toBe(true);
+    expect(documentTemplateSupportsAppointmentContext("medication_summary")).toBe(false);
+    expect(documentTemplateSupportsAppointmentContext("privacy_consents")).toBe(false);
+    expect(documentTemplateSupportsOrderContext("provider_template:demo")).toBe(true);
+    expect(documentTemplateSupportsAppointmentContext("provider_template:demo")).toBe(true);
   });
 });
 
@@ -322,7 +335,7 @@ describe("buildGenerateDocumentPayload", () => {
     });
   });
 
-  it("keeps the structured template renderer active until the operator edits the text", () => {
+  it("keeps the structured template renderer active even when legacy form text is dirty", () => {
     expect(
       buildGenerateDocumentPayload({
         template: template(),
@@ -339,7 +352,7 @@ describe("buildGenerateDocumentPayload", () => {
         patients,
         displayedManualText: "Form fallback text",
       }).manual_text,
-    ).toBe("Form fallback text");
+    ).toBeNull();
   });
 
   it("always sends the operator text for a free text document", () => {
@@ -368,13 +381,24 @@ describe("buildGenerateDocumentPayload", () => {
   });
 
   it.each([
+    "treatment_plan",
+    "medication_summary",
     "framework_contract",
+    "visa_invitation_letter",
+    "patient_sticker_compact",
+    "patient_sticker_standard",
+    "patient_sticker_sheet",
     "single_order",
     "order_cost_estimate",
+    "cost_coverage_declaration",
     "cost_estimate",
+    "appointment_confirmation",
     "confidentiality_release",
     "privacy_consents",
     "privacy_information",
+    "enhanced_due_diligence",
+    "consent_data_release_child",
+    "consent_data_release_single",
   ])(
     "never sends free-form overrides for the designed agency template %s",
     (templateId) => {
@@ -405,6 +429,30 @@ describe("buildGenerateDocumentPayload", () => {
       });
     },
   );
+
+  it("keeps typed treatment-plan text blocks without enabling free-form replacement", () => {
+    const payload = buildGenerateDocumentPayload({
+      template: template({
+        id: "treatment_plan",
+        art: "treatment_plan",
+        category: "treatment_plan",
+        text_block_keys: ["fasting"],
+      }),
+      form: generateForm({
+        templateId: "treatment_plan",
+        textBlockKeys: ["fasting"],
+        manualText: "Arbitrary replacement",
+        manualTextDirty: true,
+      }),
+      patients,
+      displayedManualText: "Arbitrary replacement",
+    });
+
+    expect(payload).toMatchObject({
+      manual_text: null,
+      text_block_keys: ["fasting"],
+    });
+  });
 
   it("resolves generated finance templates to financial access", () => {
     const payload = buildGenerateDocumentPayload({

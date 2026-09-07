@@ -83,10 +83,20 @@ const FIXED_LEGAL_TEMPLATE_IDS = new Set([
 
 const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([
   ...FIXED_LEGAL_TEMPLATE_IDS,
+  "treatment_plan",
+  "medication_summary",
   "framework_contract",
+  "visa_invitation_letter",
+  "patient_sticker_compact",
+  "patient_sticker_standard",
+  "patient_sticker_sheet",
   "single_order",
   "order_cost_estimate",
+  "cost_coverage_declaration",
   "cost_estimate",
+  "appointment_confirmation",
+  "consent_data_release_child",
+  "consent_data_release_single",
 ]);
 
 export function isFixedLegalDocumentTemplate(templateId: string) {

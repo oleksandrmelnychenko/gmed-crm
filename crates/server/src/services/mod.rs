@@ -12,3 +12,4 @@ pub mod medication_intelligence_sources;
 pub mod order_service_groups;
 pub mod patient_clinical_pdf;
 pub mod patient_medication_pdf;
+pub mod patient_pdf_brand;

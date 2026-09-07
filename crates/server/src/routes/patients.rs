@@ -1354,6 +1354,7 @@ pub(crate) struct PatientLabelAgencySettings {
     pub(crate) address: Option<String>,
     pub(crate) phone: Option<String>,
     pub(crate) email: Option<String>,
+    pub(crate) website: Option<String>,
 }
 
 const PATIENT_CARD_ENTRY_CATEGORIES: &[&str] = &[
@@ -2098,7 +2099,8 @@ pub(crate) async fn load_patient_label_agency_settings(
                'agency_care_of',
                'agency_address',
                'agency_phone',
-               'agency_email'
+               'agency_email',
+               'agency_website'
            )"#,
     )
     .fetch_all(&state.db)
@@ -2154,7 +2156,21 @@ pub(crate) async fn load_patient_label_agency_settings(
         address: values.get("agency_address").cloned(),
         phone: values.get("agency_phone").cloned(),
         email: values.get("agency_email").cloned(),
+        website: values.get("agency_website").cloned(),
     })
+}
+
+fn patient_pdf_brand(
+    agency: PatientLabelAgencySettings,
+) -> crate::services::patient_pdf_brand::PatientPdfBrand {
+    crate::services::patient_pdf_brand::PatientPdfBrand {
+        name: agency.name,
+        responsible_person: agency.care_of,
+        address: agency.address,
+        phone: agency.phone,
+        email: agency.email,
+        website: agency.website,
+    }
 }
 
 async fn list_patients(
@@ -14588,11 +14604,16 @@ async fn get_patient_clinical_pdf(
     } else {
         format!("arztbrief-{slug}.pdf")
     };
+    let brand = match load_patient_label_agency_settings(&state).await {
+        Ok(agency) => patient_pdf_brand(agency),
+        Err(response) => return response,
+    };
     let context = crate::services::patient_clinical_pdf::ClinicalReportContext {
         russian,
         data,
         printed_by,
         printed_on: now.format("%d.%m.%Y %H:%M").to_string(),
+        brand,
     };
     let bytes = match crate::services::patient_clinical_pdf::build_clinical_report_pdf(&context) {
         Ok(bytes) => bytes,
@@ -14798,6 +14819,10 @@ async fn get_patient_medikationsplan_pdf(
             }
         })
         .collect();
+    let brand = match load_patient_label_agency_settings(&state).await {
+        Ok(agency) => patient_pdf_brand(agency),
+        Err(response) => return response,
+    };
     let context = crate::services::patient_medication_pdf::MedicationPlanContext {
         russian,
         patient_name: format!("{first_name} {last_name}").trim().into(),
@@ -14806,6 +14831,7 @@ async fn get_patient_medikationsplan_pdf(
         printed_by: issuer_name,
         printed_on: today.format("%d.%m.%Y").to_string(),
         entries,
+        brand,
     };
     let bytes = match crate::services::patient_medication_pdf::build_medication_plan_pdf(&context) {
         Ok(bytes) => bytes,

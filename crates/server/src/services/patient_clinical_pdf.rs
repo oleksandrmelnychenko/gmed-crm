@@ -9,15 +9,19 @@ use printpdf::{
 };
 use serde_json::Value;
 
-const LEFT: f32 = 16.0;
-const WIDTH: f32 = 178.0;
-const BOTTOM: f32 = 22.0;
+use super::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
+
+const LEFT: f32 = 25.0;
+const RIGHT: f32 = 185.0;
+const WIDTH: f32 = RIGHT - LEFT;
+const BOTTOM: f32 = 34.0;
 
 pub struct ClinicalReportContext {
     pub russian: bool,
     pub data: Value,
     pub printed_on: String,
     pub printed_by: String,
+    pub brand: PatientPdfBrand,
 }
 
 impl ClinicalReportContext {
@@ -876,17 +880,41 @@ impl Layout<'_> {
         });
     }
     fn header(&mut self) -> Result<(), &'static str> {
-        self.rect(LEFT, 282.0, WIDTH, 0.8, color(1.0, 0.43, 0.06));
-        self.text(
+        append_company_chrome(
+            &mut self.ops,
+            &self.context.brand,
+            &self.regular,
             LEFT,
-            274.0,
-            self.context.tx("Врачебное заключение", "Arztbrief"),
+            RIGHT,
+            274.5,
+            21.5,
+            18.5,
+        );
+        let patient = &self.context.data["patient"];
+        let identifier = value(patient, "patient_id");
+        if !identifier.is_empty() {
+            let reference = format!(
+                "{}: {identifier}",
+                self.context.tx("ID пациента", "Patienten-ID")
+            );
+            self.text(
+                RIGHT - self.width(&reference, 8.5, false),
+                278.0,
+                &reference,
+                8.5,
+                false,
+                false,
+            );
+        }
+        let title = self.context.tx("Врачебное заключение", "Arztbrief");
+        self.text(
+            (210.0 - self.width(title, 17.0, true)) / 2.0,
+            258.5,
+            title,
             17.0,
             true,
             false,
         );
-        self.text(180.0, 274.0, "GMED", 10.0, true, false);
-        let patient = &self.context.data["patient"];
         let name = format!(
             "{} {}",
             value(patient, "first_name"),
@@ -894,7 +922,6 @@ impl Layout<'_> {
         )
         .trim()
         .to_owned();
-        let identifier = value(patient, "patient_id");
         let birth = date(&value(patient, "birth_date"));
         let meta = format!(
             "{}: {}\n{}: {} | ID: {}\n{}: {} | {}: {}",
@@ -912,16 +939,25 @@ impl Layout<'_> {
             self.context.tx("Сформировал", "Erstellt von"),
             self.context.printed_by
         );
-        self.y = 266.0;
-        let lines = self.wrap(&meta, 9.0, WIDTH, false);
-        if lines.len() > 25 {
+        let lines = self.wrap(&meta, 9.0, WIDTH - 8.0, false);
+        if lines.len() > 12 {
             return Err("Clinical PDF patient header is too large");
         }
+        let card_top = 249.5;
+        let card_height = lines.len() as f32 * 4.3 + 7.0;
+        self.rect(
+            LEFT,
+            card_top - card_height,
+            WIDTH,
+            card_height,
+            color(0.975, 0.975, 0.978),
+        );
+        self.y = card_top - 5.0;
         for line in lines {
-            self.text(LEFT, self.y, &line, 9.0, false, false);
+            self.text(LEFT + 4.0, self.y, &line, 9.0, false, false);
             self.y -= 4.3;
         }
-        self.y -= 3.0;
+        self.y -= 8.0;
         Ok(())
     }
     fn new_page(&mut self) -> Result<(), &'static str> {
@@ -997,26 +1033,14 @@ impl Layout<'_> {
         ));
         let count = self.pages.len();
         for index in 0..count {
-            self.rect(LEFT, 17.0, WIDTH, 0.2, color(0.86, 0.87, 0.88));
-            self.text(
-                LEFT,
-                12.0,
-                self.context.tx(
-                    "Сводка сохранённых данных пациента",
-                    "Zusammenfassung der gespeicherten Patientendaten",
-                ),
-                7.5,
-                false,
-                true,
-            );
             let page = format!(
                 "{} {} / {count}",
                 self.context.tx("Страница", "Seite"),
                 index + 1
             );
             self.text(
-                194.0 - self.width(&page, 8.0, false),
-                12.0,
+                RIGHT - self.width(&page, 8.0, false),
+                16.8,
                 &page,
                 8.0,
                 false,
@@ -1060,6 +1084,14 @@ mod tests {
             russian,
             printed_on: "06.09.2026 15:00".into(),
             printed_by: "GMED DEMO".into(),
+            brand: PatientPdfBrand {
+                name: "GMED - Agentur für Patientenbetreuung".into(),
+                responsible_person: "Heorhii Hudiiev".into(),
+                address: Some("Albert-Schweitzer-Straße 56 · 81735 München · Deutschland".into()),
+                phone: Some("+49 151 20943768".into()),
+                email: Some("contact@gmed-health.com".into()),
+                website: Some("https://gmed-health.com".into()),
+            },
             data: json!({
                 "patient": {"first_name":"Anna / Анна", "last_name":"Beispiel", "birth_date":"1974-03-12", "patient_id":"P-DEMO-0042"},
                 "warnings":[{"kind":"allergie", "label":"Penicillin - DEMO", "reaction":"Hautausschlag / Висип", "severity":"moderate"}],
@@ -1105,6 +1137,11 @@ mod tests {
                 assert!(text.contains(expected), "Missing {expected}");
             }
             assert!(text.contains(context.tx("Врачебное заключение", "Arztbrief")));
+            assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
+            assert!(text.contains("contact@gmed-health.com"));
+            assert!(
+                text.contains(context.tx("ID пациента: P-DEMO-0042", "Patienten-ID: P-DEMO-0042"))
+            );
             assert!(text.contains(context.tx("Подозрение", "Verdacht")));
             assert!(text.contains(context.tx("День: -", "Mittags: -")));
             assert!(!text.contains("PRIVATE_INTERNAL_NOTE_NEVER_EXPORT"));

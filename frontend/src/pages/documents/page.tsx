@@ -51,7 +51,6 @@ import {
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
-  isFixedLegalDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
@@ -150,6 +149,8 @@ import {
   canViewDocuments,
   detailToEditForm,
   documentTemplateRequiresOrder,
+  documentTemplateSupportsAppointmentContext,
+  documentTemplateSupportsOrderContext,
   emptyGenerateForm,
   emptyUploadForm,
   formatConfidenceLabel,
@@ -1465,9 +1466,6 @@ function StaffDocumentsPage({
       null,
     [generateForm.templateId, templates],
   );
-  const selectedTemplateIsFixedLegal = Boolean(
-    selectedTemplate && isFixedLegalDocumentTemplate(selectedTemplate.id),
-  );
   const selectedTemplateUsesDesignedRenderer = Boolean(
     selectedTemplate && isDesignedAgencyDocumentTemplate(selectedTemplate.id),
   );
@@ -1482,6 +1480,11 @@ function StaffDocumentsPage({
   const selectedTemplateRequiresOrder = documentTemplateRequiresOrder(
     selectedTemplate?.id,
   );
+  const selectedTemplateSupportsOrder = documentTemplateSupportsOrderContext(
+    selectedTemplate?.id,
+  );
+  const selectedTemplateSupportsAppointment =
+    documentTemplateSupportsAppointmentContext(selectedTemplate?.id);
   const orderContextRequiredMessage =
     lang === "ru"
       ? "Выберите заказ для создания этого документа."
@@ -3859,8 +3862,7 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-              {!selectedTemplateIsFixedLegal ? (
-                <>
+              {selectedTemplateSupportsOrder ? (
               <div className="space-y-1">
               <Field label={t.orders_title} required={selectedTemplateRequiresOrder}>
                 <NativeComboboxSelect
@@ -3905,6 +3907,8 @@ function StaffDocumentsPage({
                 </p>
               ) : null}
               </div>
+              ) : null}
+              {selectedTemplateSupportsAppointment ? (
               <Field label={t.appointments_title}>
                 <NativeComboboxSelect
                   value={generateForm.appointmentId}
@@ -3928,7 +3932,6 @@ function StaffDocumentsPage({
                   ))}
                 </NativeComboboxSelect>
               </Field>
-                </>
               ) : null}
                   </div>
                 </DocumentSheetSection>
@@ -4261,8 +4264,7 @@ function StaffDocumentsPage({
                     />
                   </DocumentSheetSection>
                 ) : null}
-                {availableTemplateBlocks.length > 0 &&
-                !selectedTemplateUsesDesignedRenderer ? (
+                {availableTemplateBlocks.length > 0 ? (
                   <DocumentSheetSection title={t.documents_text_blocks}>
                     <div className="space-y-4">
                       <p className="text-xs text-muted-foreground">

@@ -9,11 +9,12 @@ use printpdf::{
 use crate::pdf_text::{
     add_unicode_pdf_fonts, pdf_text_save_options, unicode_pdf_font_face, unicode_show_text_op,
 };
+use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
 
 const LEFT: f32 = 14.0;
 const RIGHT: f32 = 283.0;
 const TOP: f32 = 195.0;
-const BOTTOM: f32 = 18.0;
+const BOTTOM: f32 = 29.0;
 const WIDTH: f32 = RIGHT - LEFT;
 const COLS: [f32; 11] = [
     40.0, 36.0, 20.0, 22.0, 14.0, 14.0, 14.0, 14.0, 15.0, 48.0, 32.0,
@@ -38,6 +39,7 @@ pub struct MedicationPlanContext {
     pub printed_by: String,
     pub printed_on: String,
     pub entries: Vec<MedicationPlanEntry>,
+    pub brand: PatientPdfBrand,
 }
 
 impl MedicationPlanContext {
@@ -168,16 +170,40 @@ impl<'a> Layout<'a> {
     }
 
     fn page_header(&mut self) {
-        self.rect(LEFT, TOP + 5.0, WIDTH, 0.8, orange());
-        self.text(
+        append_company_chrome(
+            &mut self.ops,
+            &self.context.brand,
+            &self.regular,
             LEFT,
-            TOP - 3.0,
-            self.context.tx("Медикаментозный план", "Medikationsplan"),
+            RIGHT,
+            TOP + 3.0,
+            17.0,
+            14.0,
+        );
+        if !self.context.patient_identifier.is_empty() {
+            let reference = format!(
+                "{}: {}",
+                self.context.tx("ID пациента", "Patienten-ID"),
+                self.context.patient_identifier
+            );
+            self.text(
+                RIGHT - self.text_width(&reference, 8.5, false),
+                201.5,
+                &reference,
+                8.5,
+                false,
+                ink(),
+            );
+        }
+        let title = self.context.tx("Медикаментозный план", "Medikationsplan");
+        self.text(
+            (297.0 - self.text_width(title, 17.0, true)) / 2.0,
+            TOP - 7.0,
+            title,
             17.0,
             true,
             ink(),
         );
-        self.text(RIGHT - 13.0, TOP - 3.0, "GMED", 10.0, true, orange());
         let patient = format!(
             "{}: {}\n{}: {}  |  ID: {}",
             self.context.tx("Пациент", "Patient"),
@@ -196,12 +222,28 @@ impl<'a> Layout<'a> {
         let left = self.wrap(&patient, 9.0, 130.0, false);
         let right = self.wrap(&issue, 9.0, 125.0, false);
         let count = left.len().max(right.len());
+        let card_top = TOP - 15.0;
+        let card_height = count as f32 * 4.0 + 7.0;
+        self.rect(
+            LEFT,
+            card_top - card_height,
+            WIDTH,
+            card_height,
+            rgb(0.975, 0.975, 0.978),
+        );
         for (x, lines) in [(LEFT, left), (LEFT + 144.0, right)] {
             for (i, line) in lines.iter().enumerate() {
-                self.text(x, TOP - 12.0 - i as f32 * 4.0, line, 9.0, false, ink());
+                self.text(
+                    x + 4.0,
+                    card_top - 5.0 - i as f32 * 4.0,
+                    line,
+                    9.0,
+                    false,
+                    ink(),
+                );
             }
         }
-        self.y = TOP - 17.0 - count as f32 * 4.0;
+        self.y = card_top - card_height - 5.0;
         self.text(
             LEFT,
             self.y,
@@ -381,21 +423,9 @@ impl<'a> Layout<'a> {
                 index + 1,
                 count
             );
-            self.rect(LEFT, 13.0, WIDTH, 0.2, rgb(0.88, 0.89, 0.90));
-            self.text(
-                LEFT,
-                8.5,
-                self.context.tx(
-                    "Данные сохранённых назначений",
-                    "Gespeicherte Verordnungsdaten",
-                ),
-                8.0,
-                false,
-                muted(),
-            );
             self.text(
                 RIGHT - self.text_width(&page, 8.0, false),
-                8.5,
+                12.3,
                 &page,
                 8.0,
                 false,
@@ -480,6 +510,14 @@ mod tests {
             birth_date: "02.03.1980".into(),
             printed_by: "GMED Test".into(),
             printed_on: "06.09.2026".into(),
+            brand: PatientPdfBrand {
+                name: "GMED - Agentur für Patientenbetreuung".into(),
+                responsible_person: "Heorhii Hudiiev".into(),
+                address: Some("Albert-Schweitzer-Straße 56 · 81735 München · Deutschland".into()),
+                phone: Some("+49 151 20943768".into()),
+                email: Some("contact@gmed-health.com".into()),
+                website: Some("https://gmed-health.com".into()),
+            },
             ..Default::default()
         }
     }
@@ -524,6 +562,13 @@ mod tests {
             }
             assert!(text.contains("END-OF-LONG-NOTE"));
             assert!(text.contains("Олена Приклад"));
+            assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
+            assert!(text.contains("contact@gmed-health.com"));
+            assert!(text.contains(if russian {
+                "ID пациента: TEST-001"
+            } else {
+                "Patienten-ID: TEST-001"
+            }));
             assert!(text.contains(if russian {
                 "Страница 2 /"
             } else {

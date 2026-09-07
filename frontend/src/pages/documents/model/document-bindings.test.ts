@@ -333,20 +333,31 @@ describe("document template binding payloads", () => {
     expect(isFixedLegalDocumentTemplate("cost_estimate")).toBe(false);
   });
 
-  it("keeps every canonical lead document on the designed PDF renderer", () => {
+  it("keeps every structured built-in document on its designed PDF renderer", () => {
     for (const templateId of [
+      "treatment_plan",
+      "medication_summary",
       "framework_contract",
+      "visa_invitation_letter",
+      "patient_sticker_compact",
+      "patient_sticker_standard",
+      "patient_sticker_sheet",
       "single_order",
       "order_cost_estimate",
+      "cost_coverage_declaration",
       "cost_estimate",
+      "appointment_confirmation",
       "confidentiality_release",
       "privacy_information",
       "privacy_consents",
       "enhanced_due_diligence",
+      "consent_data_release_child",
+      "consent_data_release_single",
     ]) {
       expect(isDesignedAgencyDocumentTemplate(templateId)).toBe(true);
     }
-    expect(isDesignedAgencyDocumentTemplate("appointment_confirmation")).toBe(false);
+    expect(isDesignedAgencyDocumentTemplate("free_text_document")).toBe(false);
+    expect(isDesignedAgencyDocumentTemplate("provider_template:demo")).toBe(false);
   });
 
   it("prefills visible party fields without binding trusted contacts", () => {

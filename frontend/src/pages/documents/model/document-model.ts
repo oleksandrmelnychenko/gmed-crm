@@ -34,8 +34,39 @@ const ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS = new Set([
   "order_cost_estimate",
 ]);
 
+const ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([
+  "free_text_document",
+  "treatment_plan",
+  "framework_contract",
+  "visa_invitation_letter",
+  "single_order",
+  "order_cost_estimate",
+  "cost_coverage_declaration",
+  "cost_estimate",
+  "appointment_confirmation",
+  "enhanced_due_diligence",
+]);
+
+const APPOINTMENT_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([
+  "free_text_document",
+  "treatment_plan",
+  "visa_invitation_letter",
+  "single_order",
+  "appointment_confirmation",
+]);
+
 export function documentTemplateRequiresOrder(templateId?: string | null) {
   return ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS.has(templateId?.trim() ?? "");
+}
+
+export function documentTemplateSupportsOrderContext(templateId?: string | null) {
+  const id = templateId?.trim() ?? "";
+  return id.startsWith("provider_template:") || ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id);
+}
+
+export function documentTemplateSupportsAppointmentContext(templateId?: string | null) {
+  const id = templateId?.trim() ?? "";
+  return id.startsWith("provider_template:") || APPOINTMENT_CONTEXT_SUPPORTED_TEMPLATE_IDS.has(id);
 }
 
 export function formatBusinessDocumentNumber(documentNumber?: string | null) {
@@ -895,7 +926,8 @@ export function buildGenerateDocumentPayload(input: {
     payment_method: form.paymentMethod || null,
     notes: form.notes.trim() || null,
     manual_text: manualText || null,
-    text_block_keys: designedAgencyTemplate ? [] : form.textBlockKeys,
+    text_block_keys:
+      template.text_block_keys.length > 0 ? form.textBlockKeys : [],
     bindings: buildBindingsPayload(template.id, form.bindings),
   };
 }
