@@ -48,6 +48,10 @@ jobs:
             env_name: PARSER
             dockerfile: services/clinical-document-parser/Dockerfile
             context: services/clinical-document-parser
+          - name: invoice-parser
+            env_name: INVOICE_PARSER
+            dockerfile: services/invoice-parser/Dockerfile
+            context: .
     steps:
       - name: Resolve source revision
         id: source
@@ -129,6 +133,18 @@ jobs:
           set -euo pipefail
           test "$(docker run --rm --entrypoint id "$IMAGE_REF" -u)" -ne 0
           docker run --rm --entrypoint python "$IMAGE_REF" -c "import time; from PIL import Image,ImageDraw,ImageFont; from app.extraction import _get_paddle_runtime, _run_paddle; from app.parser import parse_clinical_text; image=Image.new('RGB',(1600,420),'white'); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',72); ImageDraw.Draw(image).multiline_text((60,60),'Diagnosen\nArterielle Hypertonie',font=font,fill='black',spacing=28); outcome=_run_paddle(image,time.monotonic()+120); image.close(); _get_paddle_runtime().close(); draft=parse_clinical_text(outcome.text); recognized=outcome.text.casefold(); assert outcome.engine == 'paddle' and not outcome.timed_out and all(token in recognized for token in ('diagnosen','hypertonie')) and any(candidate.target == 'diagnosis' and 'hypertonie' in candidate.value.casefold() for candidate in draft.candidates)"
+
+      - name: Verify invoice parser runtime before signing
+        if: matrix.name == 'invoice-parser'
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.name }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id "$IMAGE_REF" -u)" -ne 0
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=256m \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -v "$PWD/services/invoice-parser/examples:/examples:ro" \
+            --entrypoint python "$IMAGE_REF" - < services/invoice-parser/tests/smoke.py
 
       - name: Trivy scan (HIGH+CRITICAL, fixable only)
         id: trivy

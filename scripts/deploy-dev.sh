@@ -102,6 +102,7 @@ env_value() {
 backend_image="$(env_value GMED_BACKEND_IMAGE)"
 frontend_image="$(env_value GMED_FRONTEND_IMAGE)"
 parser_image="$(env_value GMED_PARSER_IMAGE)"
+invoice_parser_image="$(env_value GMED_INVOICE_PARSER_IMAGE)"
 
 compose_args=(
   --env-file "$RELEASE_ENV"
@@ -118,12 +119,12 @@ prepare_upload_volume() {
     backend
 }
 
-if [[ -n "$backend_image" || -n "$frontend_image" || -n "$parser_image" ]]; then
-  if [[ -z "$backend_image" || -z "$frontend_image" || -z "$parser_image" ]]; then
-    echo "ERROR: set GMED_BACKEND_IMAGE, GMED_FRONTEND_IMAGE, and GMED_PARSER_IMAGE together, or leave all three empty for local build." >&2
+if [[ -n "$backend_image" || -n "$frontend_image" || -n "$parser_image" || -n "$invoice_parser_image" ]]; then
+  if [[ -z "$backend_image" || -z "$frontend_image" || -z "$parser_image" || -z "$invoice_parser_image" ]]; then
+    echo "ERROR: set GMED_BACKEND_IMAGE, GMED_FRONTEND_IMAGE, GMED_PARSER_IMAGE, and GMED_INVOICE_PARSER_IMAGE together, or leave all four empty for local build." >&2
     exit 1
   fi
-  for image in "$backend_image" "$frontend_image" "$parser_image"; do
+  for image in "$backend_image" "$frontend_image" "$parser_image" "$invoice_parser_image"; do
     if [[ "$image" != *"@sha256:"* ]]; then
       echo "ERROR: DEV image pins must be digest-pinned (@sha256:...). Got: $image" >&2
       exit 1
@@ -131,12 +132,12 @@ if [[ -n "$backend_image" || -n "$frontend_image" || -n "$parser_image" ]]; then
   done
 
   echo "Deploying DEV from prebuilt GHCR images"
-  docker compose "${compose_args[@]}" -f docker-compose.ghcr.yml pull backend frontend clinical-document-parser
+  docker compose "${compose_args[@]}" -f docker-compose.ghcr.yml pull backend frontend clinical-document-parser invoice-parser
   prepare_upload_volume -f docker-compose.ghcr.yml
   docker compose "${compose_args[@]}" -f docker-compose.ghcr.yml up -d --remove-orphans
 else
   echo "Deploying DEV from local host build"
-  docker compose "${compose_args[@]}" build backend frontend clinical-document-parser
+  docker compose "${compose_args[@]}" build backend frontend clinical-document-parser invoice-parser
   prepare_upload_volume
   docker compose "${compose_args[@]}" up -d --no-build --remove-orphans
 fi

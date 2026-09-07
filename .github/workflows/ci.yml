@@ -15,7 +15,9 @@ jobs:
       - name: Check DEV runner syntax and recovery
         run: |
           bash -n scripts/deploy-dev-current.sh
+          bash -n scripts/deploy-dev.sh
           python3 -m unittest discover -s scripts -p test_deploy_dev_current.py -v
+          python3 -m unittest discover -s scripts -p test_release_image_coverage.py -v
 
   rust:
     runs-on: ubuntu-latest
@@ -230,6 +232,28 @@ jobs:
           --required-cohort laboratory
           --required-cohort medication
           --minimum-required-cohort-cases 1
+
+  invoice-parser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/invoice-parser/pyproject.toml
+      - name: Install CPU OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Install invoice parser test dependencies
+        run: python -m pip install -e 'services/invoice-parser[dev]'
+      - name: Invoice API, fields, structured formats and OCR tests
+        working-directory: services/invoice-parser
+        run: python -m pytest -q
+      - name: Validate standalone Compose configuration
+        env:
+          INVOICE_PARSER_API_KEY: synthetic-compose-validation-key-000000000
+        run: docker compose -f services/invoice-parser/compose.yml config --quiet
 
   containers:
     runs-on: ubuntu-latest
