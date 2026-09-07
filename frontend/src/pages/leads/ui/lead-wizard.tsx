@@ -6643,7 +6643,7 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
                   accessory={(
-                    <Button type="button" variant={wizardDocuments.confidentiality_release.length > 0 ? "outline" : "default"} size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                       {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>

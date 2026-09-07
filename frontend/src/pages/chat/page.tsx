@@ -806,7 +806,7 @@ function useChatPageContent() {
       }, delay + Math.floor(delay * 0.2 * Math.random()));
     };
     const connect = async () => {
-      if (disposed || connecting || connected) return;
+      if (disposed || connecting || connected || socket) return;
       if (!navigator.onLine) { setConnectionStatus("offline"); return; }
       connecting = true;
       setConnectionStatus(reconnectAttempt ? "reconnecting" : "connecting");
@@ -816,19 +816,20 @@ function useChatPageContent() {
         if (!next) { scheduleReconnect(); return; }
         socket = next;
         handshakeTimer = window.setTimeout(() => next.close(), 10_000);
-        next.onopen = () => {
-          if (disposed || socket !== next) return;
-          window.clearTimeout(handshakeTimer);
-          connected = true;
-          reconnectAttempt = 0;
-          setConnectionStatus("connected");
-          void refresh();
-        };
         next.onmessage = (event) => {
           if (disposed || socket !== next) return;
           let payload: ChatStreamEvent;
           try { payload = JSON.parse(event.data) as ChatStreamEvent; } catch { return; }
-          if (!payload || payload.user_id !== myId ||
+          if (!payload || payload.user_id !== myId) return;
+          if (payload.type === "messages.connected") {
+            window.clearTimeout(handshakeTimer);
+            connected = true;
+            reconnectAttempt = 0;
+            setConnectionStatus("connected");
+            void refresh();
+            return;
+          }
+          if (!connected ||
               !["message_created", "message_deleted", "conversation_read"].includes(payload.type)) return;
           if (payload.type === "message_deleted" && payload.peer_id === activePeerRef.current) {
             setMessages((current) => current.filter((message) => message.id !== payload.message_id));

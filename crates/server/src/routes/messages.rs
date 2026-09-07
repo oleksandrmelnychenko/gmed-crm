@@ -89,6 +89,8 @@ async fn messages_ws(
 }
 
 async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
+    use crate::websocket::{PONG_TIMEOUT, send_before_expiry};
+
     let Some(mut connection_permit) = state.websocket_connections.try_acquire_handshake() else {
         tracing::warn!("chat websocket global handshake quota exceeded");
         return;
@@ -115,17 +117,46 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
         .unwrap_or_default();
     let expiry_check = tokio::time::sleep(expires_in);
     tokio::pin!(expiry_check);
+    let mut last_pong = tokio::time::Instant::now();
     let user_id_string = auth.user_id.to_string();
+
+    let connected = json!({ "type": "messages.connected", "user_id": auth.user_id });
+    if !send_before_expiry(
+        &mut socket,
+        WsMessage::Text(connected.to_string().into()),
+        auth.access_token_expires_at,
+    )
+    .await
+    {
+        return;
+    }
 
     loop {
         let received = tokio::select! {
             _ = &mut expiry_check => break,
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(WsMessage::Pong(_))) => last_pong = tokio::time::Instant::now(),
+                    Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {},
+                }
+                continue;
+            }
             _ = authorization_check.tick() => {
                 match revalidate_auth_user(&state, &auth).await {
                     Ok(current)
                         if release_workspace_allows_path(current.role, "/messages/ws")
                             && ensure_chat_workspace_role(&current).is_ok() => {
                         auth = current;
+                        if last_pong.elapsed() >= PONG_TIMEOUT
+                            || !send_before_expiry(
+                                &mut socket,
+                                WsMessage::Ping(Default::default()),
+                                auth.access_token_expires_at,
+                            ).await
+                        {
+                            break;
+                        }
                         continue;
                     }
                     _ => break,
@@ -154,10 +185,12 @@ async fn handle_messages_ws(mut socket: WebSocket, state: AppState) {
             _ => break,
         };
 
-        if socket
-            .send(WsMessage::Text(event.to_string().into()))
-            .await
-            .is_err()
+        if !send_before_expiry(
+            &mut socket,
+            WsMessage::Text(event.to_string().into()),
+            auth.access_token_expires_at,
+        )
+        .await
         {
             break;
         }

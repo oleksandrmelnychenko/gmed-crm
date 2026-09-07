@@ -27,6 +27,7 @@ pub mod services;
 pub mod settings;
 pub mod state;
 pub mod telemetry;
+mod websocket;
 
 use axum::{Json, Router, http::StatusCode, middleware, response::IntoResponse};
 use serde_json::json;

@@ -35,6 +35,7 @@ pub mod me;
 pub mod medication_evidence_reviews;
 pub mod medication_identity;
 pub mod medication_intelligence;
+pub mod medication_names;
 pub mod messages;
 pub mod notifications;
 pub mod order_service_groups;
@@ -100,6 +101,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(order_service_groups::router())
         .merge(drug_products::router())
         .merge(medication_identity::router())
+        .merge(medication_names::router())
         .merge(medication_evidence_reviews::router())
         .merge(medication_intelligence::router())
         .merge(appointments::router())

@@ -1,6 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { MedicationNameFields } from "./medication-name-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CountBadge, EmptyCell } from "@/components/ui-shell";
@@ -3723,25 +3724,7 @@ export function PatientClinicalTab({
                 </NativeComboboxSelect>
               </Field>
             </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Торговое название", "Handelsname")}>
-                <Input
-                  value={draft.handelsname}
-                  onChange={(e) => set({ handelsname: e.target.value })}
-                  className={inputClass}
-                  placeholder="Bisoprolol-ratiopharm"
-                />
-              </Field>
-              <Field required label={tx("Действующее вещество", "Wirkstoff")}>
-                <Input
-                  required
-                  value={draft.wirkstoff ?? ""}
-                  onChange={(e) => set({ wirkstoff: blankToNull(e.target.value) })}
-                  className={inputClass}
-                  placeholder="Bisoprolol"
-                />
-              </Field>
-            </div>
+            <MedicationNameFields value={draft} onChange={set} lang={lang} inputClassName={inputClass} />
             <div className="grid gap-2 md:grid-cols-2">
               <Field label={tx("Дозировка", "Stärke")}>
                 <Input

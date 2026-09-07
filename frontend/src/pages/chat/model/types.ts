@@ -50,7 +50,10 @@ export interface UserItem {
   is_active: boolean;
 }
 
-export interface ChatStreamEvent {
+export type ChatStreamEvent = {
+  type: "messages.connected";
+  user_id: string;
+} | {
   type: "message_created" | "message_deleted" | "conversation_read";
   user_id: string;
   peer_id: string;

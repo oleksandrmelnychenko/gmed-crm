@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test";
 
 import type { Message } from "../../src/pages/chat/model/types";
 
@@ -532,10 +532,10 @@ test.describe("chat secure flows", () => {
     expect(api.getMessages().at(-1)?.message).toBeNull();
   });
 
-  test("CEO and care manager exchange and decrypt messages in separate browser sessions", async ({ page, browser }) => {
+  test("CEO and care manager exchange and decrypt messages in separate browser sessions", async ({ page, browser, baseURL }) => {
     const [ceoKey, managerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
     const ceo = await installSecureChatApiMocks(page, ceoKey, managerKey);
-    const recipientContext = await browser.newContext({ baseURL: "http://127.0.0.1:5174" });
+    const recipientContext = await browser.newContext({ baseURL });
     try {
       const recipientPage = await recipientContext.newPage();
       const manager = await installSecureChatApiMocks(recipientPage, managerKey, ceoKey, {
@@ -959,15 +959,10 @@ test.describe("chat secure flows", () => {
   test("connection status changes do not move the message viewport or composer", async ({ page }) => {
     const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
     await installSecureChatApiMocks(page, myKey, peerKey);
-    await page.addInitScript(() => {
-      class StableTestSocket extends EventTarget {
-        onopen: ((event: Event) => void) | null = null;
-        onclose: ((event: CloseEvent) => void) | null = null;
-        constructor() { super(); window.setTimeout(() => this.onopen?.(new Event("open")), 10); }
-        send() { /* HTTP handles test messages. */ }
-        close() { this.onclose?.(new CloseEvent("close")); }
-      }
-      Object.defineProperty(window, "WebSocket", { value: StableTestSocket });
+    await page.routeWebSocket("**/messages/ws", (socket) => {
+      socket.onMessage(() => socket.send(JSON.stringify({
+        type: "messages.connected", user_id: "00000000-0000-0000-0000-000000000001",
+      })));
     });
     await openCeoChat(page);
     await expect(page.getByText("Verbunden", { exact: true })).toBeVisible();
@@ -1115,6 +1110,76 @@ test.describe("chat secure flows", () => {
     await expect(page.getByText("Secure browser hello")).toHaveCount(0);
   });
 
+  test("chat and realtime wait for server readiness without opening duplicate sockets on focus", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    const sockets = new Map<string, WebSocketRoute>();
+    let connectionCount = 0;
+    await page.routeWebSocket(/\/(messages|events)\/ws/, (socket) => {
+      connectionCount++;
+      socket.onMessage(() => sockets.set(new URL(socket.url()).pathname, socket));
+    });
+    await openCeoChat(page);
+    await expect.poll(() => sockets.has("/api/v1/messages/ws")).toBe(true);
+    const countBeforeFocus = connectionCount;
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect(page.getByText("Verbunden", { exact: true })).toHaveCount(0);
+    await expect(page.locator('[aria-label="Realtime verbunden"]')).toHaveCount(0);
+    expect(connectionCount).toBe(countBeforeFocus);
+
+    sockets.get("/api/v1/messages/ws")!.send(JSON.stringify({ type: "messages.connected", user_id: "wrong-user" }));
+    sockets.get("/api/v1/events/ws")!.send(JSON.stringify({ type: "realtime.connected", entity_id: "wrong-user" }));
+    await expect(page.getByText("Verbunden", { exact: true })).toHaveCount(0);
+    sockets.get("/api/v1/messages/ws")!.send(JSON.stringify({ type: "messages.connected", user_id: api.myId }));
+    sockets.get("/api/v1/events/ws")!.send(JSON.stringify({ type: "realtime.connected", entity_id: api.myId }));
+    await expect(page.getByText("Verbunden", { exact: true })).toBeVisible();
+    await expect(page.locator('[aria-label="Realtime verbunden"]')).toBeVisible();
+    expect(connectionCount).toBe(countBeforeFocus);
+  });
+
+  test("rejected chat and realtime sockets back off without flashing connected", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.addInitScript(() => {
+      const statuses: string[] = [];
+      window.localStorage.setItem("gmed_access_token", "playwright-access-token");
+      window.localStorage.setItem("gmed_refresh_token", "playwright-refresh-token");
+      Object.assign(window, { __realtimeStatuses: statuses });
+      window.addEventListener("gmed:realtime-connection", (event) => {
+        statuses.push((event as CustomEvent<{ status: string }>).detail.status);
+      });
+    });
+    const attempts = new Map<string, number[]>();
+    await page.routeWebSocket(/\/(messages|events)\/ws/, (socket) => {
+      socket.onMessage(() => {
+        const path = new URL(socket.url()).pathname;
+        const times = attempts.get(path) ?? [];
+        times.push(Date.now());
+        attempts.set(path, times);
+        socket.close();
+      });
+    });
+    await page.goto("/chat");
+    await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
+    await expect.poll(() => Math.min(
+      attempts.get("/api/v1/messages/ws")?.length ?? 0,
+      attempts.get("/api/v1/events/ws")?.length ?? 0,
+    ), { timeout: 25_000 }).toBeGreaterThanOrEqual(4);
+    for (const [path, times] of attempts) {
+      const timing = JSON.stringify({ path, offsets: times.map((time) => time - times[0]) });
+      expect(times[1] - times[0], timing).toBeGreaterThanOrEqual(900);
+      expect(times[2] - times[1], timing).toBeGreaterThanOrEqual(1_800);
+      expect(times[3] - times[2], timing).toBeGreaterThanOrEqual(3_600);
+    }
+    await expect(page.getByText("Verbunden", { exact: true })).toHaveCount(0);
+    const statuses = await page.evaluate(() => (window as Window & { __realtimeStatuses: string[] }).__realtimeStatuses);
+    expect(statuses).not.toContain("connected");
+  });
+
   test("chat reconnects after a websocket disconnect", async ({ page }) => {
     const [myKey, peerKey] = await Promise.all([
       generateLocalMessageKey(),
@@ -1122,43 +1187,14 @@ test.describe("chat secure flows", () => {
     ]);
 
     await installSecureChatApiMocks(page, myKey, peerKey);
-    await page.addInitScript(() => {
-      let connectionCount = 0;
-      class TestWebSocket extends EventTarget {
-        onopen: ((event: Event) => void) | null = null;
-        onmessage: ((event: MessageEvent) => void) | null = null;
-        onerror: ((event: Event) => void) | null = null;
-        onclose: ((event: CloseEvent) => void) | null = null;
-
-        constructor(url: string | URL) {
-          super();
-          void url;
-          connectionCount += 1;
-          const currentConnection = connectionCount;
-          window.setTimeout(() => {
-            const event = new Event("open");
-            this.dispatchEvent(event);
-            this.onopen?.(event);
-            if (currentConnection === 1) {
-              window.setTimeout(() => this.close(), 100);
-            }
-          }, 10);
-        }
-
-        send(data: string) {
-          void data;
-        }
-
-        close() {
-          const event = new CloseEvent("close");
-          this.dispatchEvent(event);
-          this.onclose?.(event);
-        }
-      }
-
-      Object.defineProperty(window, "WebSocket", { value: TestWebSocket });
-      Object.defineProperty(window, "__chatSocketConnectionCount", {
-        get: () => connectionCount,
+    let connectionCount = 0;
+    await page.routeWebSocket("**/messages/ws", (socket) => {
+      const currentConnection = ++connectionCount;
+      socket.onMessage(() => {
+        socket.send(JSON.stringify({
+          type: "messages.connected", user_id: "00000000-0000-0000-0000-000000000001",
+        }));
+        if (currentConnection === 1) setTimeout(() => socket.close(), 100);
       });
     });
 
@@ -1170,14 +1206,7 @@ test.describe("chat secure flows", () => {
     await page.goto("/chat");
     await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
 
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => (window as Window & { __chatSocketConnectionCount?: number })
-            .__chatSocketConnectionCount ?? 0,
-        ),
-      )
-      .toBeGreaterThanOrEqual(2);
+    await expect.poll(() => connectionCount).toBeGreaterThanOrEqual(2);
     await expect(page.getByText(/Verbunden|В сети/i)).toBeVisible({ timeout: 5_000 });
   });
 

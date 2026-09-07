@@ -12797,6 +12797,12 @@ async fn save_patient_medications(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
+        if let Err(error) =
+            super::medication_names::remember_pair(&mut tx, &handelsname, &wirkstoff).await
+        {
+            tracing::error!(%error, "remember medication name pair");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
         if on_hold {
             on_hold_count += 1;
         }

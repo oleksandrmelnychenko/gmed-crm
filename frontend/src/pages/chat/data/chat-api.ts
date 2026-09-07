@@ -2,10 +2,8 @@ import {
   apiFetch,
   apiFetchFile,
   clearApiCache,
-  getAccessToken,
-  getAccessTokenExpiresAtMs,
+  getWebSocketAccessToken,
   openAuthenticatedApiWebSocket,
-  refreshAuthSession,
 } from "@/lib/api";
 
 import type { Conversation, Message, UserItem } from "../model/types";
@@ -113,11 +111,7 @@ export async function downloadMessageAttachmentBytes(fileKey: string) {
 }
 
 export async function openMessagesSocket() {
-  const expiresAt = getAccessTokenExpiresAtMs();
-  if (expiresAt !== null && expiresAt - Date.now() < 30_000) {
-    if (!await refreshAuthSession()) return null;
-  }
-  const token = getAccessToken();
+  const token = await getWebSocketAccessToken();
   if (!token) return null;
   return openAuthenticatedApiWebSocket("/messages/ws", token);
 }

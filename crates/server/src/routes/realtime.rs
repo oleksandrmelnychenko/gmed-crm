@@ -20,6 +20,7 @@ use crate::auth::middleware::{
 };
 use crate::realtime::RealtimeEvent;
 use crate::state::AppState;
+use crate::websocket::{PONG_TIMEOUT, send_before_expiry};
 use gmed_domain::role::Role;
 
 const REPLAY_BATCH_LIMIT: i64 = 250;
@@ -71,6 +72,7 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64)
         .unwrap_or_default();
     let expiry_check = tokio::time::sleep(expires_in);
     tokio::pin!(expiry_check);
+    let mut last_pong = tokio::time::Instant::now();
     let mut cursor_seq = last_seq;
 
     let connected = serde_json::json!({
@@ -99,10 +101,27 @@ async fn handle_events_ws(mut socket: WebSocket, state: AppState, last_seq: i64)
     loop {
         let received = tokio::select! {
             _ = &mut expiry_check => break,
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(WsMessage::Pong(_))) => last_pong = tokio::time::Instant::now(),
+                    Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {},
+                }
+                continue;
+            }
             _ = authorization_check.tick() => {
                 match revalidate_auth_user(&state, &auth).await {
                     Ok(current) if release_workspace_allows_path(current.role, "/events/ws") => {
                         auth = current;
+                        if last_pong.elapsed() >= PONG_TIMEOUT
+                            || !send_before_expiry(
+                                &mut socket,
+                                WsMessage::Ping(Default::default()),
+                                auth.access_token_expires_at,
+                            ).await
+                        {
+                            break;
+                        }
                         continue;
                     }
                     _ => break,
@@ -259,17 +278,7 @@ async fn send_text_before_expiry(
     payload: String,
     expires_at: chrono::DateTime<chrono::Utc>,
 ) -> bool {
-    let now = chrono::Utc::now();
-    if expires_at <= now {
-        return false;
-    }
-    let Ok(remaining) = (expires_at - now).to_std() else {
-        return false;
-    };
-    tokio::select! {
-        _ = tokio::time::sleep(remaining) => false,
-        result = socket.send(WsMessage::Text(payload.into())) => result.is_ok(),
-    }
+    send_before_expiry(socket, WsMessage::Text(payload.into()), expires_at).await
 }
 
 async fn send_resync_required(

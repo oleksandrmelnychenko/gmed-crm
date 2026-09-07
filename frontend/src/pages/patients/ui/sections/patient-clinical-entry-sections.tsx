@@ -32,6 +32,7 @@ import {
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+import { MedicationNameFields } from "./medication-name-fields";
 
 type Bilingual = (ru: string, de: string) => string;
 type SectionTone = "neutral" | "danger" | "warning";
@@ -980,10 +981,7 @@ export function PatientMedicationSection({
                 </NativeComboboxSelect>
               </Field>
             </div>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Field label={tx("Торговое название", "Handelsname")}><Input value={draft.handelsname} onChange={(event) => set({ handelsname: event.target.value })} className={inputClass} /></Field>
-              <Field required label={tx("Действующее вещество", "Wirkstoff")}><Input required value={draft.wirkstoff ?? ""} onChange={(event) => set({ wirkstoff: blankToNull(event.target.value) })} className={inputClass} /></Field>
-            </div>
+            <MedicationNameFields value={draft} onChange={set} lang={lang} inputClassName={inputClass} />
             <div className="grid gap-2 md:grid-cols-2">
               <Field label={tx("Дозировка", "Stärke")}><Input value={draft.staerke ?? ""} onChange={(event) => set({ staerke: blankToNull(event.target.value) })} className={inputClass} /></Field>
               <Field label={tx("Единица", "Einheit")}><Input value={draft.einheit ?? ""} onChange={(event) => set({ einheit: blankToNull(event.target.value) })} className={inputClass} /></Field>

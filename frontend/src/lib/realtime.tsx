@@ -5,7 +5,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { clearApiCache, getAccessToken, openAuthenticatedApiWebSocket } from "@/lib/api";
+import { clearApiCache, getWebSocketAccessToken, openAuthenticatedApiWebSocket } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export type RealtimeEvent = {
@@ -208,6 +208,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let handshakeTimer: number | undefined;
+    let connecting = false;
     let stopped = false;
     let attempt = 0;
     const storageKey = cursorStorageKey(userId);
@@ -225,68 +227,89 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }
 
     function scheduleReconnect() {
-      if (stopped) return;
+      if (stopped || reconnectTimer !== null) return;
       const delay = Math.min(
-        BASE_RECONNECT_DELAY_MS * 2 ** attempt,
+        BASE_RECONNECT_DELAY_MS * 2 ** Math.min(attempt, 5),
         MAX_RECONNECT_DELAY_MS,
       );
       attempt += 1;
       dispatchConnectionSnapshot("reconnecting", attempt, userId);
-      reconnectTimer = window.setTimeout(connect, delay);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, delay);
     }
 
-    function connect() {
-      const token = getAccessToken();
-      if (stopped) return;
-      if (!token) {
-        dispatchConnectionSnapshot("disconnected", attempt, userId);
-        return;
-      }
-
-      socket = openAuthenticatedApiWebSocket("/events/ws", token, {
-        last_seq: lastSeq > 0 ? lastSeq : undefined,
-      });
-      socket.onopen = () => {
-        attempt = 0;
-        dispatchConnectionSnapshot("connected", attempt, userId);
-      };
-      socket.onmessage = (message) => {
-        if (typeof message.data !== "string") return;
-        try {
-          const event = JSON.parse(message.data) as RealtimeEvent;
-          rememberCursor(event);
-          if (event.type === "realtime.resync_required") {
-            clearApiCache();
-          } else {
-            invalidateStatsCacheForEvent(event);
-          }
-          dispatch(event);
-        } catch {
-          // Ignore malformed realtime frames; the next valid frame can still be used.
-        }
-      };
-      socket.onclose = () => {
-        socket = null;
-        if (!stopped) {
-          clearApiCache();
-          dispatch({
-            type: "realtime.disconnected",
-            entity_type: "realtime",
-            entity_id: userId,
-          });
+    async function connect() {
+      if (stopped || connecting || socket) return;
+      connecting = true;
+      try {
+        const token = await getWebSocketAccessToken();
+        if (stopped) return;
+        if (!token) {
           scheduleReconnect();
+          return;
         }
-      };
-      socket.onerror = () => {
-        socket?.close();
-      };
+
+        const next = openAuthenticatedApiWebSocket("/events/ws", token, {
+          last_seq: lastSeq > 0 ? lastSeq : undefined,
+        });
+        socket = next;
+        handshakeTimer = window.setTimeout(() => next.close(), 10_000);
+        let connected = false;
+        next.onmessage = (message) => {
+          if (stopped || socket !== next || typeof message.data !== "string") return;
+          try {
+            const event = JSON.parse(message.data) as RealtimeEvent;
+            if (!event || typeof event.type !== "string") return;
+            if (event.type === "realtime.connected" && event.entity_id === userId) {
+              window.clearTimeout(handshakeTimer);
+              connected = true;
+              attempt = 0;
+              dispatchConnectionSnapshot("connected", attempt, userId);
+            }
+            if (!connected) return;
+            rememberCursor(event);
+            if (event.type === "realtime.resync_required") {
+              clearApiCache();
+            } else {
+              invalidateStatsCacheForEvent(event);
+            }
+            dispatch(event);
+          } catch {
+            // Ignore malformed realtime frames; the next valid frame can still be used.
+          }
+        };
+        next.onclose = () => {
+          if (socket !== next) return;
+          window.clearTimeout(handshakeTimer);
+          socket = null;
+          if (!stopped) {
+            clearApiCache();
+            dispatch({
+              type: "realtime.disconnected",
+              entity_type: "realtime",
+              entity_id: userId,
+            });
+            scheduleReconnect();
+          }
+        };
+        next.onerror = () => {
+          next.close();
+        };
+      } catch {
+        scheduleReconnect();
+      } finally {
+        connecting = false;
+      }
     }
 
     dispatchConnectionSnapshot("connecting", attempt, userId);
-    connect();
+    void connect();
 
     return () => {
       stopped = true;
+      window.clearTimeout(handshakeTimer);
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
       }

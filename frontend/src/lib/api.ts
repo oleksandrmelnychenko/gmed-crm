@@ -611,6 +611,13 @@ export function buildApiWebSocketUrl(
   return url.toString();
 }
 
+export async function getWebSocketAccessToken() {
+  if (shouldRefreshAccessTokenBeforeRequest(30_000)) {
+    return refreshAuthSession();
+  }
+  return getAccessToken();
+}
+
 export function openAuthenticatedApiWebSocket(
   path: string,
   token: string,

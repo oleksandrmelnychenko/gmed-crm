@@ -128,6 +128,28 @@ describe("API URL builders", () => {
 });
 
 describe("API request deduplication and cache", () => {
+  it("refreshes an expired token before opening either WebSocket transport", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage(jwtWithExp(Math.floor(Date.now() / 1000) - 1), "refresh-token");
+    const freshToken = jwtWithExp(Math.floor(Date.now() / 1000) + 900);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      access_token: freshToken, refresh_token: "next-refresh-token",
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { getWebSocketAccessToken } = await loadApiModule();
+    expect(await Promise.all([getWebSocketAccessToken(), getWebSocketAccessToken()]))
+      .toEqual([freshToken, freshToken]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not authenticate a WebSocket with an expired token when refresh fails", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage(jwtWithExp(Math.floor(Date.now() / 1000) - 1), "refresh-token");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    const { getWebSocketAccessToken } = await loadApiModule();
+    expect(await getWebSocketAccessToken()).toBeNull();
+  });
+
   it("deduplicates concurrent GET requests for the same URL", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage("token-a");
