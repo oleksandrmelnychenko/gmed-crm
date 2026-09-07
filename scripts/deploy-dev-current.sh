@@ -21,6 +21,12 @@ CADDY_HOSTNAME_VALUE="${CADDY_HOSTNAME_VALUE:-console-dev.gmed-health.com}"
 GMED_CORS_ORIGIN_VALUE="${GMED_CORS_ORIGIN_VALUE:-https://console-dev.gmed-health.com,https://localhost,capacitor://localhost}"
 HEALTH_URL="${HEALTH_URL:-https://console-dev.gmed-health.com/health}"
 LOG_FILE="${LOG_FILE:-$DEPLOY_DIR/deploy-dev-current.log}"
+# Rust release/LTO reached roughly 5.5 GiB on the 8 GiB DEV host. Keep OCR
+# workers from taking the remaining headroom, and cancel before SSH/API stall.
+BUILD_MEMORY_HEADROOM_MB="${BUILD_MEMORY_HEADROOM_MB:-6144}"
+BUILD_MEMORY_ABORT_MB="${BUILD_MEMORY_ABORT_MB:-768}"
+BUILD_PID=""
+STOPPED_OCR_CONTAINERS=()
 STAGING_DIR=""
 BACKUP_PATH=""
 ROLLBACK_OVERRIDE=""
@@ -45,9 +51,96 @@ prepare_upload_volume() {
     backend
 }
 
+available_memory_mb() {
+  local available
+  available="$(awk '$1 == "MemAvailable:" { print int($2 / 1024) }' /proc/meminfo)"
+  if [[ ! "$available" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: cannot read available host RAM." >&2
+    return 1
+  fi
+  printf '%s\n' "$available"
+}
+
+pause_ocr_for_build() {
+  local container running
+  for container in gmed-crm-clinical-document-parser-1 gmed-crm-invoice-parser-1; do
+    running="$(docker inspect --format '{{.State.Running}}' "$container")" || return 1
+    if [[ "$running" == "true" ]]; then
+      # Record before stopping so a partial stop failure is recovered by EXIT.
+      STOPPED_OCR_CONTAINERS+=("$container")
+      echo "Temporarily stopping $container to leave RAM for the DEV build."
+      docker stop --timeout 20 "$container" || return 1
+    fi
+  done
+}
+
+restore_ocr_after_build() {
+  local container running failed=0
+  for container in "${STOPPED_OCR_CONTAINERS[@]}"; do
+    running="$(docker inspect --format '{{.State.Running}}' "$container")" || running=false
+    if [[ "$running" != "true" ]]; then
+      echo "Restoring $container after the DEV build."
+      docker start "$container" || failed=1
+    fi
+  done
+  return "$failed"
+}
+
+stop_active_build() {
+  if [[ -n "$BUILD_PID" ]]; then
+    # Each build owns a process group: terminate the Compose client and its
+    # children, so BuildKit cancels the compiler before OCR is restarted.
+    kill -TERM -- "-$BUILD_PID" 2>/dev/null || kill -TERM "$BUILD_PID" 2>/dev/null || true
+    wait "$BUILD_PID" 2>/dev/null || true
+    BUILD_PID=""
+  fi
+}
+
+build_with_memory_guard() {
+  local directory="$1" available result
+  shift
+  available="$(available_memory_mb)" || return 1
+  echo "Available RAM before building $*: ${available} MiB."
+  if (( available < BUILD_MEMORY_HEADROOM_MB )); then
+    pause_ocr_for_build || return 1
+  fi
+  available="$(available_memory_mb)" || return 1
+  if (( available < BUILD_MEMORY_ABORT_MB )); then
+    echo "ERROR: insufficient RAM even with OCR stopped (${available} MiB); DEV build cancelled." >&2
+    return 1
+  fi
+
+  # A separate session lets EXIT/INT/TERM and low-memory cancellation stop the
+  # entire build command without signalling this deployment or the live API.
+  setsid docker compose --project-name gmed-crm --env-file "$directory/release.env" \
+    -f "$directory/docker-compose.yml" -f "$directory/docker-compose.release.yml" \
+    -f "$directory/docker-compose.hetzner.yml" -f "$directory/docker-compose.dev-hetzner.yml" \
+    build "$@" &
+  BUILD_PID=$!
+  while kill -0 "$BUILD_PID" 2>/dev/null; do
+    sleep 2
+    kill -0 "$BUILD_PID" 2>/dev/null || break
+    available="$(available_memory_mb)" || return 1
+    if (( available < BUILD_MEMORY_ABORT_MB * 2 )); then
+      pause_ocr_for_build || return 1
+      available="$(available_memory_mb)" || return 1
+      if (( available < BUILD_MEMORY_ABORT_MB )); then
+        echo "ERROR: available RAM fell to ${available} MiB; cancelling the build to keep DEV responsive." >&2
+        stop_active_build
+        return 1
+      fi
+    fi
+  done
+  if wait "$BUILD_PID"; then result=0; else result=$?; fi
+  BUILD_PID=""
+  return "$result"
+}
+
 finish() {
   local rc=$?
-  trap - EXIT
+  trap - EXIT INT TERM HUP
+  set +e
+  stop_active_build
 
   if [[ "$rc" -ne 0 && "$SWAPPED" -eq 1 ]]; then
     local failed_path="$FAILED_DIR/gmed-crm.failed-$STAMP"
@@ -58,6 +151,11 @@ finish() {
     echo "Failed release preserved at $failed_path"
   fi
 
+  if ! restore_ocr_after_build; then
+    echo "ERROR: an OCR service could not be restored; check docker ps -a." >&2
+    rc=1
+  fi
+
   if [[ -n "${STAGING_DIR:-}" && -d "$STAGING_DIR" ]]; then
     rm -rf -- "$STAGING_DIR"
   fi
@@ -66,12 +164,23 @@ finish() {
   exit "$rc"
 }
 trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 mkdir -p "$BACKUP_DIR" "$FAILED_DIR" "$(dirname "$LOG_FILE")"
 touch "$LOG_FILE"
 exec > >(TZ=UTC awk '{ print strftime("[%Y-%m-%dT%H:%M:%SZ]"), $0; fflush(); }' | tee -a "$LOG_FILE") 2>&1
 
 echo "deploy-dev-current started archive=$ARCHIVE repo=$REPO_DIR"
+
+if [[ ! "$BUILD_MEMORY_HEADROOM_MB" =~ ^[1-9][0-9]*$ ||
+      ! "$BUILD_MEMORY_ABORT_MB" =~ ^[1-9][0-9]*$ ]] ||
+   (( BUILD_MEMORY_HEADROOM_MB < BUILD_MEMORY_ABORT_MB * 2 )); then
+  echo "ERROR: build RAM thresholds must be positive MiB values; headroom must be at least twice the abort threshold." >&2
+  exit 1
+fi
+command -v setsid >/dev/null
 
 archive_real="$(realpath -m "$ARCHIVE")"
 repo_real="$(realpath -m "$REPO_DIR")"
@@ -186,16 +295,20 @@ tag_running_image() {
 tag_running_image gmed-crm-backend-1 "gmed-dev-rollback-backend:$STAMP" gmed-crm-backend
 tag_running_image gmed-crm-frontend-1 "gmed-dev-rollback-frontend:$STAMP" gmed-crm-frontend
 tag_running_image gmed-crm-clinical-document-parser-1 "gmed-dev-rollback-parser:$STAMP" gmed-crm-clinical-document-parser
+tag_running_image gmed-crm-invoice-parser-1 "gmed-dev-rollback-invoice-parser:$STAMP" gmed-crm-invoice-parser
 {
   printf 'services:\n'
   printf '  backend:\n    image: gmed-dev-rollback-backend:%s\n' "$STAMP"
   printf '  frontend:\n    image: gmed-dev-rollback-frontend:%s\n' "$STAMP"
   printf '  clinical-document-parser:\n    image: gmed-dev-rollback-parser:%s\n' "$STAMP"
+  printf '  invoice-parser:\n    image: gmed-dev-rollback-invoice-parser:%s\n' "$STAMP"
 } > "$ROLLBACK_OVERRIDE"
 
 echo "Building DEV images with the host Docker cache..."
 export COMPOSE_BAKE=true
-compose "$STAGING_DIR" build backend frontend clinical-document-parser invoice-parser
+# Do not overlap Vite/OCR image builds with Rust's peak release/LTO memory use.
+build_with_memory_guard "$STAGING_DIR" backend
+build_with_memory_guard "$STAGING_DIR" frontend clinical-document-parser invoice-parser
 unset COMPOSE_BAKE
 prepare_upload_volume "$STAGING_DIR"
 

@@ -8,6 +8,15 @@ on:
   pull_request:
 
 jobs:
+  dev-deployment-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check DEV runner syntax and recovery
+        run: |
+          bash -n scripts/deploy-dev-current.sh
+          python3 -m unittest discover -s scripts -p test_deploy_dev_current.py -v
+
   rust:
     runs-on: ubuntu-latest
     env:
