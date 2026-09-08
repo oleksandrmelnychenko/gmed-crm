@@ -103,6 +103,26 @@ async function generateLocalMessageKey(): Promise<LocalMessageKeyRecord> {
   };
 }
 
+async function encryptTestMessage(text: string, sender: LocalMessageKeyRecord, recipient: LocalMessageKeyRecord): Promise<Partial<Message>> {
+  const privateKey = await webcrypto.subtle.importKey("jwk", sender.privateKeyJwk,
+    { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  const publicKey = await webcrypto.subtle.importKey("spki", Buffer.from(recipient.publicKey, "base64"),
+    { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = await webcrypto.subtle.deriveBits({ name: "ECDH", public: publicKey }, privateKey, 256);
+  const material = await webcrypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+  const salt = webcrypto.getRandomValues(new Uint8Array(16));
+  const nonce = webcrypto.getRandomValues(new Uint8Array(12));
+  const key = await webcrypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt,
+    info: new TextEncoder().encode("gmed-chat-e2e-v1") }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const ciphertext = await webcrypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, new TextEncoder().encode(text));
+  return {
+    message: null, is_e2e: true, e2e_algorithm: CHAT_E2E_ALGORITHM,
+    e2e_ciphertext: Buffer.from(ciphertext).toString("base64"),
+    e2e_salt: bytesToBase64(salt), e2e_nonce: bytesToBase64(nonce),
+    sender_key_fingerprint: sender.fingerprint, recipient_key_fingerprint: recipient.fingerprint,
+  };
+}
+
 async function installSecureChatApiMocks(
   page: Page,
   myKey: LocalMessageKeyRecord,
@@ -181,9 +201,9 @@ async function installSecureChatApiMocks(
             : "2026-04-13T09:00:00Z",
         is_read: unreadIncoming === 0,
         last_read_at: lastIncomingReadAt ?? "2026-04-13T09:00:00Z",
-        is_mine: false,
+        is_mine: messages.at(-1)?.from_user === myId,
         unread: unreadIncoming,
-        is_e2e: true,
+        is_e2e: messages.at(-1)?.is_e2e ?? false,
       },
     ];
   };
@@ -294,6 +314,10 @@ async function installSecureChatApiMocks(
       });
     }
 
+    if (path === `/messages/e2e-key/${myId}`) {
+      return json(route, { message: "Not found" }, 404);
+    }
+
     if (path === "/messages/conversations") {
       return json(route, buildConversations());
     }
@@ -329,7 +353,7 @@ async function installSecureChatApiMocks(
       return json(route, [...messages]
         .filter((message) => !before || message.created_at < before || (message.created_at === before && message.id < beforeId))
         .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id))
-        .slice(0, 100));
+        .slice(0, Number(url.searchParams.get("limit") ?? 100)));
     }
 
     if (
@@ -496,6 +520,127 @@ test.describe("chat secure flows", () => {
     if (openConversation) await page.getByRole("button", { name: /Dr Secure Peer/i }).click();
   }
 
+  test("opening an unread message for a missing device key clears both badges and stays cleared after reload", async ({ page }) => {
+    const [myKey, peerKey, otherDeviceKey] = await Promise.all([
+      generateLocalMessageKey(), generateLocalMessageKey(), generateLocalMessageKey(),
+    ]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    api.setMessages([{ ...api.getMessages()[0], ...await encryptTestMessage("Other device only", peerKey, otherDeviceKey) }]);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await openCeoChat(page, false);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    const nav = page.locator('a[href="/chat"]').filter({ visible: true }).first();
+    await expect(conversation.getByText("1", { exact: true })).toBeVisible();
+    await expect(nav.getByText("1", { exact: true })).toBeVisible();
+    await conversation.click();
+    await expect(page.getByTestId("chat-message-history").getByText(/auf diesem Gerät nicht verfügbar/)).toBeVisible();
+    await expect(conversation.getByText("1", { exact: true })).toHaveCount(0);
+    await expect(nav.getByText("1", { exact: true })).toHaveCount(0);
+    expect(api.getMessages()[0].is_read).toBe(true);
+    await page.reload();
+    await expect(conversation).toBeVisible();
+    await expect(conversation.getByText("1", { exact: true })).toHaveCount(0);
+    await expect(nav.getByText("1", { exact: true })).toHaveCount(0);
+  });
+
+  for (const mine of [false, true]) {
+    test(`conversation preview decrypts ${mine ? "outgoing" : "incoming"} ciphertext without opening or marking it read`, async ({ page }) => {
+      const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+      const api = await installSecureChatApiMocks(page, myKey, peerKey);
+      const latest = { ...api.getMessages()[0],
+        from_user: mine ? api.myId : api.peerId, to_user: mine ? api.peerId : api.myId,
+        ...await encryptTestMessage("Latest private message", mine ? myKey : peerKey, mine ? peerKey : myKey) };
+      api.setMessages([latest]);
+      let previewsFetched = 0;
+      let readReceipts = 0;
+      await page.route(`**/messages/${api.peerId}?limit=1`, route => { previewsFetched++; return route.fallback(); });
+      await page.route(`**/messages/${api.peerId}/read`, route => { readReceipts++; return route.fallback(); });
+      await page.routeWebSocket("**/api/**", socket => socket.close());
+      await openCeoChat(page, false);
+      const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+      await expect(conversation).toContainText("Latest private message");
+      expect(readReceipts).toBe(0);
+      expect(api.getMessages()[0].is_read).toBe(false);
+      await expect(conversation.getByText("1", { exact: true })).toHaveCount(mine ? 0 : 1);
+      const before = previewsFetched;
+      const refreshed = page.waitForResponse(response => response.url().endsWith("/messages/conversations"));
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await refreshed;
+      await expect(conversation).toContainText("Latest private message");
+      expect(previewsFetched).toBe(before);
+
+      api.setMessages([{ ...latest, id: "new-preview", created_at: "2026-04-13T09:02:00Z",
+        ...await encryptTestMessage("Changed private preview", mine ? myKey : peerKey, mine ? peerKey : myKey) }]);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(conversation).toContainText("Changed private preview");
+      expect(readReceipts).toBe(0);
+      await conversation.click();
+      await expect(page.getByTestId("chat-message-history").getByText("Changed private preview", { exact: true })).toBeVisible();
+      const storage = await page.evaluate(() => JSON.stringify({ ...localStorage }));
+      expect(storage).not.toContain("Changed private preview");
+    });
+  }
+
+  test("legacy inactive keys survive IndexedDB migration and decrypt historical messages", async ({ page }) => {
+    const [myKey, oldKey, peerKey] = await Promise.all([
+      generateLocalMessageKey(), generateLocalMessageKey(), generateLocalMessageKey(),
+    ]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    await page.addInitScript(({ active, old }) => {
+      localStorage.setItem("gmed_chat_e2e_keyring_v1", JSON.stringify({
+        activeFingerprint: active.fingerprint,
+        keys: { [old.fingerprint]: old, [active.fingerprint]: active },
+      }));
+    }, { active: myKey, old: oldKey });
+    await page.route(`**/messages/e2e-key/${api.myId}?fingerprint=${oldKey.fingerprint}`, route => json(route, {
+      id: "historical-own-key", user_id: api.myId, algorithm: oldKey.algorithm,
+      public_key: oldKey.publicKey, fingerprint: oldKey.fingerprint, is_active: false, created_at: oldKey.createdAt,
+    }));
+    api.setMessages([{ ...api.getMessages()[0], ...await encryptTestMessage("History still readable", peerKey, oldKey) }]);
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await openCeoChat(page);
+    await expect(page.getByTestId("chat-message-history").getByText("History still readable", { exact: true })).toBeVisible();
+    const stored = await page.evaluate(async ({ owner, fingerprint }) => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("gmed-chat-e2e-v2", 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const record = await new Promise<{ privateKey: CryptoKey }>((resolve, reject) => {
+          const request = database.transaction("message-keys", "readonly").objectStore("message-keys").get([owner, fingerprint]);
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        return { extractable: record.privateKey.extractable, legacyRemoved: localStorage.getItem("gmed_chat_e2e_keyring_v1") === null };
+      } finally { database.close(); }
+    }, { owner: api.myId, fingerprint: oldKey.fingerprint });
+    expect(stored).toEqual({ extractable: false, legacyRemoved: true });
+  });
+
+  test("preview key lookup recovers after a temporary failure without acknowledging messages", async ({ page }) => {
+    const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
+    const api = await installSecureChatApiMocks(page, myKey, peerKey);
+    api.setMessages([{ ...api.getMessages()[0], ...await encryptTestMessage("Preview recovered", peerKey, myKey) }]);
+    let failing = true;
+    let failures = 0;
+    await page.route(`**/messages/e2e-key/${api.peerId}?fingerprint=*`, route => {
+      if (!failing) return route.fallback();
+      failures++;
+      return json(route, { message: "Temporarily unavailable" }, 503);
+    });
+    await page.routeWebSocket("**/api/**", socket => socket.close());
+    await openCeoChat(page, false);
+    await expect.poll(() => failures).toBeGreaterThan(0);
+    const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
+    await expect(conversation.getByText("1", { exact: true })).toBeVisible();
+    failing = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(conversation).toContainText("Preview recovered");
+    await expect(conversation.getByText("1", { exact: true })).toBeVisible();
+    expect(api.getMessages()[0].is_read).toBe(false);
+  });
+
   test("opening a conversation clears both unread badges despite unavailable already-read history and no websocket", async ({ page }) => {
     const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
     const api = await installSecureChatApiMocks(page, myKey, peerKey);
@@ -510,7 +655,7 @@ test.describe("chat secure flows", () => {
     await expect(conversation.getByText("1", { exact: true })).toBeVisible();
     await expect(nav.getByText("1", { exact: true })).toBeVisible();
     await conversation.click();
-    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap", { exact: true })).toBeVisible();
     await expect(conversation.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
     await expect(nav.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
     expect(api.getMessages().every(message => message.is_read)).toBe(true);
@@ -530,7 +675,7 @@ test.describe("chat secure flows", () => {
     await expect.poll(() => attempts).toBeGreaterThan(0);
     const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
     const nav = page.locator('a[href="/chat"]').filter({ visible: true }).first();
-    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap", { exact: true })).toBeVisible();
     await expect(conversation.getByText("1", { exact: true })).toBeVisible();
     await expect(nav.getByText("1", { exact: true })).toBeVisible();
     reject = false;
@@ -578,7 +723,7 @@ test.describe("chat secure flows", () => {
     await openCeoChat(page);
     const conversation = page.getByRole("button", { name: /Dr Secure Peer/i });
     await expect(conversation.getByText("1", { exact: true })).toHaveCount(0, { timeout: 3000 });
-    await expect(page.getByText("Secure history bootstrap", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap", { exact: true })).toBeVisible();
   });
 
   test("a newly signed-in CEO registers a device key before visiting chat", async ({ page }) => {
@@ -638,12 +783,12 @@ test.describe("chat secure flows", () => {
       await page.locator("form button[type='submit']").click();
       await expect(page.getByText("Gesendet", { exact: true })).toBeVisible();
       manager.setMessages(ceo.getMessages());
-      await expect(recipientPage.getByText("Encrypted message from the CEO", { exact: true })).toBeVisible({ timeout: 12_000 });
+      await expect(recipientPage.getByTestId("chat-message-history").getByText("Encrypted message from the CEO", { exact: true })).toBeVisible({ timeout: 12_000 });
       await recipientPage.getByPlaceholder(/Nachricht eingeben/i).fill("Care manager received and replied");
       await recipientPage.locator("form button[type='submit']").click();
       await expect(recipientPage.getByText("Gesendet", { exact: true })).toBeVisible();
       ceo.setMessages(manager.getMessages());
-      await expect(page.getByText("Care manager received and replied", { exact: true })).toBeVisible({ timeout: 12_000 });
+      await expect(page.getByTestId("chat-message-history").getByText("Care manager received and replied", { exact: true })).toBeVisible({ timeout: 12_000 });
       await expect(page.getByText(/Gesehen/).first()).toBeVisible();
     } finally {
       await recipientContext.close();
@@ -671,15 +816,15 @@ test.describe("chat secure flows", () => {
     const api = await installSecureChatApiMocks(page, myKey, peerKey);
     await page.routeWebSocket("**/messages/ws", (socket) => socket.close());
     await openCeoChat(page);
-    await expect(page.getByText("Secure history bootstrap")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap")).toBeVisible();
     api.setMessages([...api.getMessages(), {
       ...api.getMessages()[0], id: webcrypto.randomUUID(), message: "Arrived without a websocket",
       is_read: false, read_at: null, created_at: new Date().toISOString(),
     }]);
-    await expect(page.getByText("Arrived without a websocket")).toBeVisible({ timeout: 12_000 });
+    await expect(page.getByTestId("chat-message-history").getByText("Arrived without a websocket")).toBeVisible({ timeout: 12_000 });
     api.setMessages([]);
-    await expect(page.getByText("Arrived without a websocket")).toHaveCount(0, { timeout: 12_000 });
-    await expect(page.getByText("Secure history bootstrap")).toHaveCount(0);
+    await expect(page.getByTestId("chat-message-history").getByText("Arrived without a websocket")).toHaveCount(0, { timeout: 12_000 });
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap")).toHaveCount(0);
   });
 
   test("failed CEO sends survive refresh and retry exactly once with the original idempotency key", async ({ page }) => {
@@ -700,13 +845,13 @@ test.describe("chat secure flows", () => {
     const refreshed = page.waitForResponse((response) => response.url().includes(`/messages/${api.peerId}?`) && response.request().method() === "GET");
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await refreshed;
-    await expect(page.getByText("Keep this failed message")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Keep this failed message")).toBeVisible();
     fail = false;
     await page.getByRole("button", { name: "Erneut versuchen", exact: true }).click();
     await expect(page.getByText("Gesendet", { exact: true })).toBeVisible();
     expect(attempts).toHaveLength(2);
     expect(new Set(attempts).size).toBe(1);
-    await expect(page.getByText("Keep this failed message")).toHaveCount(1);
+    await expect(page.getByTestId("chat-message-history").getByText("Keep this failed message")).toHaveCount(1);
   });
 
   test("an accepted attachment clears the composer even if the subsequent history refresh fails", async ({ page }) => {
@@ -722,7 +867,7 @@ test.describe("chat secure flows", () => {
     await page.locator("form button[type='submit']").click();
     await expect(page.getByPlaceholder(/Nachricht eingeben/i)).toHaveValue("");
     await expect(page.getByRole("button", { name: "Herunterladen: confirmed-document.txt", exact: true })).toBeVisible();
-    await expect(page.getByText("Confirmed attachment caption")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Confirmed attachment caption")).toBeVisible();
     await expect(page.getByTestId("chat-attachment-queue")).toHaveCount(0);
     await expect(page.locator("form button[type='submit']")).toBeDisabled();
     expect(api.getMessages().filter((message) => message.attachment_key)).toHaveLength(1);
@@ -775,7 +920,7 @@ test.describe("chat secure flows", () => {
     await page.locator("form button[type='submit']").click();
     await expect(queue).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Herunterladen: queued-/ })).toHaveCount(3);
-    await expect(page.getByText("Caption sent once")).toHaveCount(1);
+    await expect(page.getByTestId("chat-message-history").getByText("Caption sent once")).toHaveCount(1);
     expect(api.getMessages().filter((message) => message.attachment_key)).toHaveLength(3);
     expect(attempts.map((attempt) => attempt.fileName)).toEqual(["queued-1.txt", "queued-2.txt", "queued-2.txt", "queued-3.txt"]);
     expect(attempts[1].fields).toEqual(attempts[2].fields);
@@ -983,12 +1128,12 @@ test.describe("chat secure flows", () => {
     }]);
     await page.route(`**/api/v1/messages/e2e-key/${api.peerId}?fingerprint=*`, (route) => json(route, { message: "Unavailable key" }, 503));
     await openCeoChat(page);
-    await expect(page.getByText("History item 119", { exact: true })).toBeVisible();
-    expect(api.getMessages().some((message) => message.is_read)).toBe(false);
+    await expect(page.getByTestId("chat-message-history").getByText("History item 119", { exact: true })).toBeVisible();
+    await expect.poll(() => api.getMessages().every((message) => message.is_read)).toBe(true);
     const log = page.getByRole("log");
     await log.evaluate((element) => { element.scrollTop = 0; });
     await page.getByRole("button", { name: "Ältere Nachrichten laden" }).click();
-    await expect(page.getByText("History item 0", { exact: true })).toBeAttached();
+    await expect(page.getByTestId("chat-message-history").getByText("History item 0", { exact: true })).toBeAttached();
     expect(await log.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeGreaterThan(1_000);
     await expect(page.getByRole("button", { name: "Zu den neuesten Nachrichten" })).toBeVisible();
   });
@@ -1002,7 +1147,7 @@ test.describe("chat secure flows", () => {
       created_at: new Date(Date.UTC(2026, 8, 1, 12, index)).toISOString(),
     })));
     await openCeoChat(page);
-    await expect(page.getByText("Reading position 49", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Reading position 49", { exact: true })).toBeVisible();
     await expect(page.getByText(/Ende-zu-Ende verschlüsselt/i)).toBeVisible();
     const log = page.getByRole("log");
     await log.evaluate((element) => { element.scrollTop = element.scrollHeight - element.clientHeight - 40; element.dispatchEvent(new Event("scroll", { bubbles: true })); });
@@ -1015,7 +1160,7 @@ test.describe("chat secure flows", () => {
     // A new incoming message must not pull someone out of the history either.
     api.setMessages([...api.getMessages(), { ...base, id: "new-while-reading", message: "New while reading", created_at: "2026-09-01T14:00:00Z" }]);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(page.getByText("New while reading", { exact: true })).toBeAttached();
+    await expect(page.getByTestId("chat-message-history").getByText("New while reading", { exact: true })).toBeAttached();
     await expect.poll(() => log.evaluate((element) => element.scrollTop)).toBeCloseTo(before, 0);
     await expect(page.getByRole("button", { name: "Zu den neuesten Nachrichten" })).toBeVisible();
     const viewport = await log.boundingBox();
@@ -1024,7 +1169,7 @@ test.describe("chat secure flows", () => {
     // Readers already at the bottom still follow incoming messages.
     api.setMessages([...api.getMessages(), { ...base, id: "follow-at-bottom", message: "Follow at bottom", created_at: "2026-09-01T14:01:00Z" }]);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(page.getByText("Follow at bottom", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Follow at bottom", { exact: true })).toBeVisible();
     await expect.poll(() => log.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThanOrEqual(2);
   });
 
@@ -1032,7 +1177,7 @@ test.describe("chat secure flows", () => {
     const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
     const api = await installSecureChatApiMocks(page, myKey, peerKey);
     await openCeoChat(page);
-    await expect(page.getByText("Secure history bootstrap")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap")).toBeVisible();
     await page.getByPlaceholder("Nachrichten durchsuchen").fill("no matches here");
     await expect(page.getByText("Keine Treffer im geladenen Verlauf.")).toBeVisible();
     let releaseRefresh!: () => void;
@@ -1077,15 +1222,15 @@ test.describe("chat secure flows", () => {
     const [myKey, peerKey] = await Promise.all([generateLocalMessageKey(), generateLocalMessageKey()]);
     const api = await installSecureChatApiMocks(page, myKey, peerKey);
     await openCeoChat(page);
-    await expect(page.getByText("Secure history bootstrap")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure history bootstrap")).toBeVisible();
     await expect(page.getByText(/Ende-zu-Ende verschlüsselt/i)).toBeVisible();
     const before = await page.getByRole("log").boundingBox();
-    const messageBefore = await page.getByText("Secure history bootstrap").boundingBox();
+    const messageBefore = await page.getByTestId("chat-message-history").getByText("Secure history bootstrap").boundingBox();
     await page.route(`**/api/v1/messages/${api.peerId}?*`, (route) => json(route, { message: "Unavailable" }, 503));
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(page.getByRole("alert")).toBeVisible();
     expect(await page.getByRole("log").boundingBox()).toEqual(before);
-    expect(await page.getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
+    expect(await page.getByTestId("chat-message-history").getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
     let releaseRefresh!: () => void;
     const gate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
     let requested = false;
@@ -1094,10 +1239,10 @@ test.describe("chat secure flows", () => {
     await expect.poll(() => requested).toBe(true);
     try {
       await expect(page.getByRole("alert")).toBeVisible();
-      expect(await page.getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
+      expect(await page.getByTestId("chat-message-history").getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
     } finally { releaseRefresh(); }
     await expect(page.getByRole("alert")).toHaveCount(0);
-    expect(await page.getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
+    expect(await page.getByTestId("chat-message-history").getByText("Secure history bootstrap").boundingBox()).toEqual(messageBefore);
   });
 
   test("temporary key lookup failures keep the verified layout and changed keys show one warning", async ({ page }) => {
@@ -1186,7 +1331,7 @@ test.describe("chat secure flows", () => {
     await page.getByPlaceholder(/Nachricht eingeben/i).fill("Secure browser hello");
     await page.locator("form button[type='submit']").click();
 
-    await expect(page.getByText("Secure browser hello")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure browser hello")).toBeVisible();
     expect(activePeerKeyRequests).toBeGreaterThanOrEqual(2);
 
     const deleteRequest = page.waitForRequest((request) =>
@@ -1196,7 +1341,7 @@ test.describe("chat secure flows", () => {
     await page.getByRole("button", { name: /Nachricht löschen|Удалить сообщение/i }).click();
     await page.getByRole("button", { name: /Löschen|Удалить/i }).last().click();
     await deleteRequest;
-    await expect(page.getByText("Secure browser hello")).toHaveCount(0);
+    await expect(page.getByTestId("chat-message-history").getByText("Secure browser hello")).toHaveCount(0);
   });
 
   test("chat and realtime wait for server readiness without opening duplicate sockets on focus", async ({ page }) => {
@@ -1339,7 +1484,7 @@ test.describe("chat secure flows", () => {
     await uploadRequest;
 
     await expect(page.getByRole("button", { name: "Herunterladen: secure-result.pdf", exact: true })).toBeVisible();
-    await expect(page.getByText("Secure attachment browser hello")).toBeVisible();
+    await expect(page.getByTestId("chat-message-history").getByText("Secure attachment browser hello")).toBeVisible();
 
     const downloadRequest = page.waitForRequest((request) =>
       request.method() === "GET" &&
@@ -1390,7 +1535,7 @@ test.describe("chat secure flows", () => {
       .fill("Patient secure update for the care team");
     await page.locator("form button[type='submit']").click();
     await expect(
-      page.getByText("Patient secure update for the care team"),
+      page.getByTestId("chat-message-history").getByText("Patient secure update for the care team"),
     ).toBeVisible();
 
     await page.locator("form input[type='file']").setInputFiles({
@@ -1411,7 +1556,7 @@ test.describe("chat secure flows", () => {
 
     await expect(page.getByRole("button", { name: "Herunterladen: patient-secure-note.pdf", exact: true })).toBeVisible();
     await expect(
-      page.getByText("Please see the attached secure note."),
+      page.getByTestId("chat-message-history").getByText("Please see the attached secure note."),
     ).toBeVisible();
 
     const downloadRequest = page.waitForRequest((request) =>

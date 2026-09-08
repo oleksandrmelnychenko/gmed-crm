@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { Check, FileText, LoaderCircle } from "lucide-react";
+import { PdfFileIcon } from "@/components/pdf-file-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +32,7 @@ const CLINICAL_REPORT_SECTIONS = [
 
 type ClinicalReportSectionKey = typeof CLINICAL_REPORT_SECTIONS[number]["key"];
 
-export function ClinicalReportPdfAction({ patientId }: { patientId: string }) {
+export function ClinicalReportPdfAction({ patientId, className }: { patientId: string; className?: string }) {
   const { lang } = useLang();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,7 +86,7 @@ export function ClinicalReportPdfAction({ patientId }: { patientId: string }) {
       type="button"
       size="sm"
       variant="outline"
-      className="h-9 gap-1.5 rounded-lg px-3.5"
+      className={cn("h-9 gap-1.5 rounded-lg px-3.5", className)}
       disabled={!patientId}
       title={tx(
         "Сформировать медицинскую сводку из сохранённых данных пациента",
@@ -93,7 +94,7 @@ export function ClinicalReportPdfAction({ patientId }: { patientId: string }) {
       )}
       onClick={() => setDialogOpen(true)}
     >
-      <FileText className="size-3.5" aria-hidden />
+      <PdfFileIcon />
       {tx("Медицинская сводка (PDF)", "Medizinische Zusammenfassung (PDF)")}
     </Button>
 

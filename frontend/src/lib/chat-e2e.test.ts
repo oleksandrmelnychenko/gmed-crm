@@ -47,7 +47,9 @@ vi.mock("@/lib/api", () => ({
 import {
   CHAT_E2E_ALGORITHM,
   decryptAttachmentFromPeer,
+  decryptMessageFromPeer,
   encryptAttachmentForPeer,
+  encryptMessageForPeer,
   ensureServerMessageKey,
   fetchPeerMessageKey,
   getLocalMessageKey,
@@ -78,6 +80,7 @@ function installLocalStorageMock() {
 async function makeKeyRecord(seed: Uint8Array): Promise<{
   local: MessageKeyRecord;
   envelope: MessageKeyEnvelope;
+  privateKeyJwk: JsonWebKey;
 }> {
   const keyPair = await crypto.subtle.generateKey(
     {
@@ -106,6 +109,7 @@ async function makeKeyRecord(seed: Uint8Array): Promise<{
   const createdAt = new Date(Date.UTC(2026, 3, seed[0] ?? 0, 10, 0, 0)).toISOString();
 
   return {
+    privateKeyJwk,
     local: {
       ownerUserId: `owner-${seed[0] ?? 0}`,
       algorithm: CHAT_E2E_ALGORITHM,
@@ -159,6 +163,128 @@ describe("secure chat server key setup", () => {
     });
     const reused = await ensureServerMessageKey("owner-user");
     expect(reused.fingerprint).toBe(local.fingerprint);
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+  });
+});
+
+describe("secure chat legacy key preservation", () => {
+  function installLegacyKeys(keys: Awaited<ReturnType<typeof makeKeyRecord>>[]) {
+    localStorage.setItem("gmed_chat_e2e_keyring_v1", JSON.stringify({
+      activeFingerprint: keys.at(-1)!.local.fingerprint,
+      keys: Object.fromEntries(keys.map(({ local, privateKeyJwk }) => [local.fingerprint, {
+        algorithm: local.algorithm, fingerprint: local.fingerprint, publicKey: local.publicKey,
+        createdAt: local.createdAt, privateKeyJwk,
+      }])),
+    }));
+  }
+
+  it("migrates inactive history as well as the active key and can decrypt both", async () => {
+    const [old, active, peer] = await Promise.all([21, 22, 23].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-history-owner";
+    old.envelope = { ...old.envelope, user_id: owner, is_active: false };
+    active.envelope.user_id = owner;
+    installLegacyKeys([old, active]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope).mockResolvedValueOnce(old.envelope);
+
+    expect((await ensureServerMessageKey(owner)).fingerprint).toBe(active.local.fingerprint);
+    for (const original of [old, active]) {
+      const key = (await getLocalMessageKey(owner, original.local.fingerprint))!;
+      expect(key.privateKey.extractable).toBe(false);
+      const encrypted = await encryptMessageForPeer("Preserved history", peer.local, original.envelope);
+      expect(await decryptMessageFromPeer(encrypted, key, peer.envelope)).toBe("Preserved history");
+    }
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBeNull();
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+  });
+
+  it("migrates remaining history even when this account already has a secure key", async () => {
+    const [active, old] = await Promise.all([24, 25].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-existing-owner";
+    active.envelope.user_id = owner;
+    old.envelope = { ...old.envelope, user_id: owner, is_active: false };
+    installLegacyKeys([active]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope);
+    await ensureServerMessageKey(owner);
+    installLegacyKeys([old]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope).mockResolvedValueOnce(old.envelope);
+
+    expect((await ensureServerMessageKey(owner)).fingerprint).toBe(active.local.fingerprint);
+    expect(await getLocalMessageKey(owner, old.local.fingerprint)).not.toBeNull();
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBeNull();
+  });
+
+  it("does not import or delete another account's legacy keys", async () => {
+    const [active, foreign] = await Promise.all([26, 27].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-isolated-owner";
+    active.envelope.user_id = owner;
+    installLegacyKeys([active, foreign]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope).mockRejectedValueOnce(new Error("404 not found"));
+
+    await ensureServerMessageKey(owner);
+    expect(await getLocalMessageKey(owner, foreign.local.fingerprint)).toBeNull();
+    const remaining = JSON.parse(localStorage.getItem("gmed_chat_e2e_keyring_v1")!);
+    expect(Object.keys(remaining.keys)).toEqual([foreign.local.fingerprint]);
+  });
+
+  it("preserves unverified keys on lookup failure and retries without creating a replacement", async () => {
+    const [old, remote] = await Promise.all([28, 29].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-retry-owner";
+    old.envelope = { ...old.envelope, user_id: owner, is_active: false };
+    remote.envelope.user_id = owner;
+    installLegacyKeys([old]);
+    const original = localStorage.getItem("gmed_chat_e2e_keyring_v1");
+    apiFetchMock.mockResolvedValueOnce(remote.envelope).mockRejectedValueOnce(new Error("Offline"));
+    await expect(ensureServerMessageKey(owner)).rejects.toThrow("Offline");
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBe(original);
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+
+    apiFetchMock.mockResolvedValueOnce(remote.envelope).mockResolvedValueOnce(old.envelope)
+      .mockResolvedValueOnce({ ...old.envelope, is_active: true });
+    expect((await ensureServerMessageKey(owner)).fingerprint).toBe(old.local.fingerprint);
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBeNull();
+  });
+
+  it("keeps the original material when private key import fails", async () => {
+    const active = await makeKeyRecord(new Uint8Array([30]));
+    const owner = "migration-invalid-owner";
+    active.envelope.user_id = owner;
+    installLegacyKeys([{ ...active, privateKeyJwk: {} }]);
+    const original = localStorage.getItem("gmed_chat_e2e_keyring_v1");
+    apiFetchMock.mockResolvedValueOnce(active.envelope);
+    await expect(ensureServerMessageKey(owner)).rejects.toThrow();
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBe(original);
+    expect(await getLocalMessageKey(owner, active.local.fingerprint)).toBeNull();
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+  });
+
+  it("keeps an already verified device usable while historical-key verification is offline", async () => {
+    const [active, old] = await Promise.all([33, 34].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-available-owner";
+    active.envelope.user_id = owner;
+    installLegacyKeys([active]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope);
+    await ensureServerMessageKey(owner);
+    installLegacyKeys([old]);
+    const original = localStorage.getItem("gmed_chat_e2e_keyring_v1");
+    apiFetchMock.mockResolvedValueOnce(active.envelope).mockRejectedValueOnce(new Error("Offline"));
+    expect((await ensureServerMessageKey(owner)).fingerprint).toBe(active.local.fingerprint);
+    expect(localStorage.getItem("gmed_chat_e2e_keyring_v1")).toBe(original);
+    expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
+  });
+
+  it("uses the current server key available locally without reactivating stale local metadata", async () => {
+    const [old, active] = await Promise.all([31, 32].map(seed => makeKeyRecord(new Uint8Array([seed]))));
+    const owner = "migration-current-owner";
+    old.envelope.user_id = owner;
+    active.envelope.user_id = owner;
+    installLegacyKeys([old]);
+    apiFetchMock.mockResolvedValueOnce(old.envelope);
+    await ensureServerMessageKey(owner);
+    installLegacyKeys([active]);
+    apiFetchMock.mockResolvedValueOnce(active.envelope);
+    expect((await ensureServerMessageKey(owner)).fingerprint).toBe(active.local.fingerprint);
+    expect((await getLocalMessageKey(owner))?.fingerprint).toBe(active.local.fingerprint);
+    expect(await getLocalMessageKey(owner, old.local.fingerprint)).not.toBeNull();
     expect(apiFetchMock.mock.calls.filter(([, init]) => Boolean(init?.body))).toHaveLength(0);
   });
 });

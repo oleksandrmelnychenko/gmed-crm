@@ -50,6 +50,11 @@ export function fetchConversations() {
   return apiFetch<Conversation[]>("/messages/conversations", { cache: "no-store" });
 }
 
+export async function fetchLatestPeerMessage(peerId: string) {
+  const messages = await apiFetch<Message[]>(`/messages/${encodeURIComponent(peerId)}?limit=1`, { cache: "no-store" });
+  return messages[0];
+}
+
 export function fetchPeerMessages(
   peerId: string,
   before?: Pick<Message, "created_at" | "id">,

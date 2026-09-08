@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { FileDown, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
+import { PdfFileIcon } from "@/components/pdf-file-icon";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { apiFetch, ApiRequestError, downloadApiFile } from "@/lib/api";
@@ -106,7 +107,7 @@ export function LabResultsPdfAction({ patientId, disabled = false, hasResults, c
     title={status === "empty" ? emptyMessage : tx("Скачать лабораторные результаты", "Laborergebnisse herunterladen")}
     onClick={() => void download()}
   >
-    {busy ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : <FileDown className="size-3.5" aria-hidden />}
+    {busy ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : <PdfFileIcon />}
     {tx("Лабораторные результаты (PDF)", "Laborergebnisse (PDF)")}
   </Button>;
 }

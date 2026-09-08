@@ -337,10 +337,15 @@ async function validateMessageKeyEnvelope(
   return envelope;
 }
 
-async function fetchMyServerMessageKey(ownerUserId: string) {
+async function fetchMyServerMessageKey(ownerUserId: string, fingerprint?: string) {
   try {
-    const envelope = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key");
-    return await validateMessageKeyEnvelope(envelope, ownerUserId, true);
+    const path = fingerprint
+      ? `/messages/e2e-key/${encodeURIComponent(ownerUserId)}?fingerprint=${encodeURIComponent(fingerprint)}`
+      : "/messages/e2e-key";
+    const envelope = await apiFetch<MessageKeyEnvelope>(path, { cache: "no-store" });
+    await validateMessageKeyEnvelope(envelope, ownerUserId, !fingerprint);
+    if (fingerprint && envelope.fingerprint !== fingerprint) throw new Error("Server message key fingerprint mismatch");
+    return envelope;
   } catch (error) {
     if (isNotFoundError(error)) return null;
     throw error;
@@ -354,70 +359,88 @@ async function migrateLegacyMessageKey(
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     return null;
   }
-  if (!raw || !serverKey) return null;
+  if (!raw) return null;
 
+  let ring: LegacyMessageKeyRing;
   try {
-    const ring = JSON.parse(raw) as LegacyMessageKeyRing;
-    const legacy = ring.keys?.[serverKey.fingerprint];
-    if (
-      !legacy ||
-      legacy.fingerprint !== serverKey.fingerprint ||
-      legacy.publicKey !== serverKey.public_key ||
-      legacy.algorithm !== CHAT_E2E_ALGORITHM
-    ) {
-      return null;
-    }
-    const computedFingerprint = await fingerprintPublicKey(
-      base64ToBytes(legacy.publicKey),
-    );
-    if (computedFingerprint !== legacy.fingerprint) return null;
-    const migrated: MessageKeyRecord = {
-      ownerUserId,
-      algorithm: legacy.algorithm,
-      fingerprint: legacy.fingerprint,
-      publicKey: legacy.publicKey,
-      privateKey: await importPrivateKey(legacy.privateKeyJwk),
-      createdAt: legacy.createdAt,
-    };
-    await storeMessageKey(migrated, true);
-    return migrated;
+    ring = JSON.parse(raw) as LegacyMessageKeyRing;
+    if (!ring?.keys || typeof ring.keys !== "object" || Array.isArray(ring.keys)) return null;
   } catch {
     return null;
   }
+
+  const remaining = { ...ring.keys };
+  let preferred: MessageKeyRecord | null = null;
+  let migrationError: unknown;
+  for (const [fingerprint, legacy] of Object.entries(ring.keys)) {
+    try {
+      if (!legacy || legacy.fingerprint !== fingerprint || legacy.algorithm !== CHAT_E2E_ALGORITHM ||
+          await fingerprintPublicKey(base64ToBytes(legacy.publicKey)) !== fingerprint) continue;
+      // V1 keys were not account-bound. Validate each historical key's owner
+      // against the server before importing it, even when it is no longer active.
+      const registered = serverKey?.fingerprint === fingerprint
+        ? serverKey : await fetchMyServerMessageKey(ownerUserId, fingerprint);
+      if (!registered || registered.public_key !== legacy.publicKey) continue;
+      const migrated: MessageKeyRecord = {
+        ownerUserId,
+        algorithm: legacy.algorithm,
+        fingerprint,
+        publicKey: legacy.publicKey,
+        privateKey: await importPrivateKey(legacy.privateKeyJwk),
+        createdAt: legacy.createdAt,
+      };
+      await storeMessageKey(migrated, false);
+      delete remaining[fingerprint];
+      if (!preferred || fingerprint === ring.activeFingerprint) preferred = migrated;
+    } catch (error) {
+      // Keep the only copy when verification or durable storage fails.
+      migrationError = error;
+    }
+  }
+  try {
+    if (localStorage.getItem(LEGACY_STORAGE_KEY) === raw) {
+      if (Object.keys(remaining).length === 0) localStorage.removeItem(LEGACY_STORAGE_KEY);
+      else localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ ...ring, keys: remaining }));
+    }
+  } catch {
+    // Secure copies are already durable; cleanup can be retried on the next setup.
+  }
+  if (!preferred && migrationError) throw migrationError;
+  return preferred;
 }
 
 async function ensureServerMessageKeyOnce(ownerUserId: string): Promise<MessageKeyRecord> {
   if (!ownerUserId) throw new Error("Authenticated user is required for secure chat");
 
   const serverExisting = await fetchMyServerMessageKey(ownerUserId);
+  const registeredLocal = serverExisting ? await getStoredKey(ownerUserId, serverExisting.fingerprint) : null;
+  const migrated = await migrateLegacyMessageKey(ownerUserId, serverExisting).catch((error: unknown) => {
+    // Retrying an unrelated old key must not disable a verified current device.
+    // Without that current key, do not generate a replacement after a failed migration.
+    if (!registeredLocal) throw error;
+    return null;
+  });
   const meta = await getStoredMeta(ownerUserId);
-  let active = meta?.activeFingerprint
+  // Prefer the server's current key if this browser already has it, rather than
+  // reactivating stale metadata and changing the identity seen by other users.
+  let active = registeredLocal ?? (serverExisting ? await getStoredKey(ownerUserId, serverExisting.fingerprint) : null);
+  active ??= meta?.activeFingerprint
     ? await getStoredKey(ownerUserId, meta.activeFingerprint)
     : null;
-  if (!active && serverExisting) {
-    active = await getStoredKey(ownerUserId, serverExisting.fingerprint);
-  }
-  if (!active) {
-    active = await migrateLegacyMessageKey(ownerUserId, serverExisting);
-  } else {
-    // Plaintext v1 material must not survive once a user-bound key is available.
-    try {
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
-    } catch {
-      // Storage may be disabled; the secure IndexedDB key remains authoritative.
-    }
-  }
+  active ??= migrated;
   if (!active) {
     active = await generateLocalMessageKey(ownerUserId);
     await storeMessageKey(active, true);
   }
 
   if (serverExisting?.fingerprint === active.fingerprint &&
-      serverExisting.public_key === active.publicKey) return active;
+      serverExisting.public_key === active.publicKey) {
+    if (meta?.activeFingerprint !== active.fingerprint) await storeMessageKey(active, true);
+    return active;
+  }
 
   const serverKey = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key", {
     method: "POST",

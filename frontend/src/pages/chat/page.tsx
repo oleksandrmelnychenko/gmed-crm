@@ -52,6 +52,7 @@ import {
   deletePeerMessage,
   fetchAllowedPeers,
   fetchConversations,
+  fetchLatestPeerMessage,
   fetchPeerMessages,
   markPeerMessagesRead,
   openMessagesSocket,
@@ -367,26 +368,6 @@ function useChatPageContent() {
     return () => window.clearInterval(interval);
   }, [messages]);
 
-  // Load conversations
-  const loadConversations = useCallback(async () => {
-    if (!canViewChat) {
-      setConversations([]);
-      setLoading(false);
-      return;
-    }
-    const requestId = ++conversationRequestIdRef.current;
-    try {
-      const data = await fetchConversations();
-      if (requestId !== conversationRequestIdRef.current) return;
-      setConversations(data);
-      setConversationError(false);
-    } catch {
-      if (requestId === conversationRequestIdRef.current) setConversationError(true);
-    } finally {
-      if (requestId === conversationRequestIdRef.current) setLoading(false);
-    }
-  }, [canViewChat]);
-
   const loadPeerMessageKey = useCallback(
     async (peerId: string, fingerprint?: string | null) => {
       if (fingerprint) {
@@ -468,6 +449,75 @@ function useChatPageContent() {
     },
     [loadPeerMessageKey, myId],
   );
+
+  // Previews stay in memory and reuse the latest envelope until the conversation
+  // changes. The list endpoint deliberately contains no decrypted E2E text.
+  const conversationPreviewsRef = useRef(new Map<string, { source: string; text: string; decrypted: boolean }>());
+  const previewRequestsRef = useRef(new Map<string, Promise<string>>());
+  const loadConversations = useCallback(async () => {
+    if (!canViewChat) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
+    const requestId = ++conversationRequestIdRef.current;
+    try {
+      const data = await fetchConversations();
+      if (requestId !== conversationRequestIdRef.current) return;
+      const previewSource = (conversation: Conversation) =>
+        JSON.stringify([myId, conversation.user_id, conversation.last_at, conversation.is_mine, conversation.last_message]);
+      setConversations(data.map((conversation) => {
+        if (!conversation.is_e2e) return conversation;
+        const cached = conversationPreviewsRef.current.get(conversation.user_id);
+        return { ...conversation, last_message: cached?.source === previewSource(conversation) ? cached.text : CHAT_E2E_PREVIEW };
+      }));
+      setConversationError(false);
+      setLoading(false);
+      const peers = new Set(data.map((conversation) => conversation.user_id));
+      for (const peer of conversationPreviewsRef.current.keys()) {
+        if (!peers.has(peer)) conversationPreviewsRef.current.delete(peer);
+      }
+      // Preview lookups must not hold up foreground message/read reconciliation.
+      void Promise.all(data.filter((conversation) => conversation.is_e2e).map(async (conversation) => {
+        const source = previewSource(conversation);
+        const cached = conversationPreviewsRef.current.get(conversation.user_id);
+        if (cached?.source === source && cached.decrypted) return;
+        let pending = previewRequestsRef.current.get(source);
+        if (!pending) {
+          pending = (async () => {
+            // Only one message is needed; fetching it must never mark the chat read.
+            const latest = await fetchLatestPeerMessage(conversation.user_id);
+            if (!latest || Date.parse(latest.created_at) !== Date.parse(conversation.last_at) ||
+                (latest.from_user === myId) !== conversation.is_mine) {
+              return CHAT_E2E_PREVIEW;
+            }
+            const [hydrated] = await hydrateMessages(conversation.user_id, [latest]);
+            const preview = hydrated.message || (hydrated.attachment_filename ? `[${hydrated.attachment_filename}]` : "");
+            conversationPreviewsRef.current.set(conversation.user_id, {
+              source, text: preview, decrypted: !hydrated.decryption_failed,
+            });
+            return preview;
+          })();
+          previewRequestsRef.current.set(source, pending);
+        }
+        try {
+          const preview = await pending;
+          if (requestId !== conversationRequestIdRef.current) return;
+          setConversations((current) => current.map((row) =>
+            row.user_id === conversation.user_id ? { ...row, last_message: preview } : row,
+          ));
+        } catch {
+          // A failed preview lookup must not hide the conversation or its badge.
+        } finally {
+          previewRequestsRef.current.delete(source);
+        }
+      }));
+    } catch {
+      if (requestId === conversationRequestIdRef.current) setConversationError(true);
+    } finally {
+      if (requestId === conversationRequestIdRef.current) setLoading(false);
+    }
+  }, [canViewChat, hydrateMessages, myId]);
 
   const loadMessagesForPeer = useCallback(
     async (peerId: string, markRead = false, preserveHistory = true) => {
@@ -1562,7 +1612,7 @@ function useChatPageContent() {
                   <div className="flex items-center justify-between gap-2 mt-0.5">
                     <span className={cn("text-xs truncate", c.unread > 0 ? "text-foreground font-medium" : "text-muted-foreground")}>
                       {c.is_mine ? `${t.chat_you}: ` : ""}
-                      {truncate(c.is_e2e ? CHAT_E2E_PREVIEW : c.last_message, 40)}
+                      {truncate(c.last_message, 40)}
                     </span>
                     {c.unread > 0 && (
                       <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-primary text-[10px] font-semibold text-primary-foreground px-1 shrink-0">
@@ -1697,6 +1747,7 @@ function useChatPageContent() {
             <div className="relative min-h-0 flex-1">
             <div
               ref={messagesScrollRef}
+              data-testid="chat-message-history"
               onScroll={(event) => {
                 const container = event.currentTarget;
                 const distance = container.scrollHeight - container.scrollTop - container.clientHeight;

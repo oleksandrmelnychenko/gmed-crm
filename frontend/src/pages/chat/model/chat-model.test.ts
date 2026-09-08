@@ -27,11 +27,17 @@ describe("chat synchronization", () => {
     ], "me")).toBe(true);
   });
 
-  it("does not acknowledge unread ciphertext or a page with no unread incoming messages", () => {
+  it("acknowledges displayed unavailable messages without trapping the unread badge", () => {
     expect(canMarkLoadedMessagesRead([
       message("new", 2, { to_user: "me", decryption_failed: true }),
       message("readable", 3, { to_user: "me" }),
-    ], "me")).toBe(false);
+    ], "me")).toBe(true);
+    expect(canMarkLoadedMessagesRead([
+      message("unavailable", 2, { to_user: "me", decryption_failed: true }),
+    ], "me")).toBe(true);
+  });
+
+  it("does not acknowledge a page with no unread incoming messages", () => {
     expect(canMarkLoadedMessagesRead([message("outgoing", 2)], "me")).toBe(false);
     expect(canMarkLoadedMessagesRead([message("read", 2, { to_user: "me", is_read: true })], "me")).toBe(false);
     expect(canMarkLoadedMessagesRead([], "me")).toBe(false);

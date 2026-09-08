@@ -46,10 +46,9 @@ export function mergeChatMessages(current: Message[], incoming: Message[]) {
 }
 
 export function canMarkLoadedMessagesRead(messages: Message[], myId: string) {
-  const unreadIncoming = messages.filter((message) => message.to_user === myId && !message.is_read);
-  // An unavailable historical message that was already read must not block
-  // newer readable messages. Do not acknowledge currently unread ciphertext.
-  return unreadIncoming.length > 0 && unreadIncoming.every((message) => !message.decryption_failed);
+  // Opening the visible conversation acknowledges the displayed rows, including
+  // an unavailable-message notice. Missing device keys must not trap its badge.
+  return messages.some((message) => message.to_user === myId && !message.is_read);
 }
 
 export function reconcileChatMessages(current: Message[], incoming: Message[], pageSize = 100) {

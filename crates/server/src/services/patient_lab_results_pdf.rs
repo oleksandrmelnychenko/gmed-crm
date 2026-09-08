@@ -23,6 +23,9 @@ const WIDTH: f32 = RIGHT - LEFT;
 const FIXED_COLS: [f32; 3] = [66.0, 35.0, 18.0];
 const MAX_DATES: usize = 6;
 const FONT_SIZE: f32 = 8.3;
+const SOURCE_COL_WIDTH: f32 = 7.0;
+const SOURCE_FONT_SIZE: f32 = 6.3;
+const SOURCE_RAISE: f32 = 0.8;
 const LINE_HEIGHT: f32 = 3.7;
 const PAD: f32 = 1.3;
 
@@ -121,11 +124,15 @@ fn matrix_rows(entries: &[LabResultEntry]) -> Vec<MatrixRow> {
 
 fn column_widths(date_count: usize) -> Vec<f32> {
     let mut widths = FIXED_COLS.to_vec();
-    widths.extend(std::iter::repeat_n(
-        (WIDTH - FIXED_COLS.iter().sum::<f32>()) / date_count as f32,
-        date_count,
-    ));
+    let date_width = (WIDTH - FIXED_COLS.iter().sum::<f32>()) / date_count as f32;
+    for _ in 0..date_count {
+        widths.extend([date_width - SOURCE_COL_WIDTH, SOURCE_COL_WIDTH]);
+    }
     widths
+}
+
+fn is_source_column(index: usize) -> bool {
+    index >= FIXED_COLS.len() && (index - FIXED_COLS.len()) % 2 == 1
 }
 
 pub fn format_reference_bounds(low: &str, high: &str) -> String {
@@ -140,7 +147,7 @@ pub fn format_reference_bounds(low: &str, high: &str) -> String {
 fn flag_marker(entry: &LabResultEntry) -> &'static str {
     match entry.flag {
         LabResultFlag::Normal => "",
-        LabResultFlag::Unknown => " ?",
+        LabResultFlag::Unknown => "",
         LabResultFlag::Abnormal => match entry.cells[7].as_str() {
             "Выше нормы" | "Erhöht" => " ↑",
             "Ниже нормы" | "Erniedrigt" => " ↓",
@@ -404,8 +411,8 @@ impl Layout<'_> {
             self.y -= 8.0;
         } else {
             let legend = self.context.tx(
-                "↑ Выше нормы   ↓ Ниже нормы   ! Отклонение   ? Не определено   Без отметки: Норма   [№] документ-источник. Пустая ячейка: результата нет.",
-                "↑ Erhöht   ↓ Erniedrigt   ! Auffällig   ? Nicht bestimmt   Ohne Markierung: Normal   [Nr.] Quelldokument. Leere Zelle: kein Ergebnis."
+                "↑ Выше нормы   ↓ Ниже нормы   ! Отклонение   №: документ-источник. Пустая ячейка: результата нет.",
+                "↑ Erhöht   ↓ Erniedrigt   ! Auffällig   Nr.: Quelldokument. Leere Zelle: kein Ergebnis."
             );
             for line in self.wrap(legend, 7.0, WIDTH, false) {
                 self.text(LEFT, self.y - 2.5, &line, 7.0, false, muted());
@@ -426,11 +433,12 @@ impl Layout<'_> {
         .into_iter()
         .map(str::to_owned)
         .collect();
-        labels.extend(
-            self.dates
-                .iter()
-                .map(|date| date.format("%d.%m.%Y").to_string()),
-        );
+        labels.extend(self.dates.iter().flat_map(|date| {
+            [
+                date.format("%d.%m.%Y").to_string(),
+                self.context.tx("№", "Nr.").to_owned(),
+            ]
+        }));
         let widths = column_widths(self.dates.len());
         let lines: Vec<_> = labels
             .iter()
@@ -504,7 +512,7 @@ impl Layout<'_> {
         self.y -= height;
     }
 
-    fn row(&mut self, row: &MatrixRow, number: usize) {
+    fn row_cells(&self, row: &MatrixRow) -> Vec<Vec<CellLine>> {
         let widths = column_widths(self.dates.len());
         let mut wrapped: Vec<Vec<CellLine>> = [&row.analyte, &row.reference, &row.unit]
             .iter()
@@ -522,6 +530,7 @@ impl Layout<'_> {
             .collect();
         for (index, date) in self.dates.iter().enumerate() {
             let mut lines = Vec::new();
+            let mut sources = Vec::new();
             if let Some(values) = row.values.get(date) {
                 for source_index in values {
                     let entry = &self.context.entries[*source_index];
@@ -530,24 +539,48 @@ impl Layout<'_> {
                         .map(|(_, time)| format!("{time}: "))
                         .unwrap_or_default();
                     let source = self.source_numbers[*source_index]
-                        .map(|number| format!(" [{number}]"))
+                        .map(|number| number.to_string())
                         .unwrap_or_default();
-                    let value = format!("{time}{}{}{source}", entry.cells[4], flag_marker(entry));
+                    let value = format!("{time}{}{}", entry.cells[4], flag_marker(entry));
                     let bold = entry.flag == LabResultFlag::Abnormal;
                     let color = if bold { rgb(0.75, 0.08, 0.18) } else { ink() };
-                    lines.extend(
-                        self.wrap(&value, FONT_SIZE, widths[index + 3] - PAD * 2.0, bold)
-                            .into_iter()
-                            .map(|text| CellLine {
-                                text,
-                                bold,
-                                color: color.clone(),
-                            }),
+                    let value_lines = self.wrap(
+                        &value,
+                        FONT_SIZE,
+                        widths[FIXED_COLS.len() + index * 2] - PAD * 2.0,
+                        bold,
                     );
+                    let source_lines = self.wrap(
+                        &source,
+                        SOURCE_FONT_SIZE,
+                        SOURCE_COL_WIDTH - PAD * 2.0,
+                        false,
+                    );
+                    // Keep each source beside its own measurement, even when
+                    // values wrap or the same date contains several results.
+                    for line in 0..value_lines.len().max(source_lines.len()).max(1) {
+                        lines.push(CellLine {
+                            text: value_lines.get(line).cloned().unwrap_or_default(),
+                            bold,
+                            color: color.clone(),
+                        });
+                        sources.push(CellLine {
+                            text: source_lines.get(line).cloned().unwrap_or_default(),
+                            bold: false,
+                            color: muted(),
+                        });
+                    }
                 }
             }
             wrapped.push(lines);
+            wrapped.push(sources);
         }
+        wrapped
+    }
+
+    fn row(&mut self, row: &MatrixRow, number: usize) {
+        let widths = column_widths(self.dates.len());
+        let wrapped = self.row_cells(row);
         let total_lines = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         let row_height = total_lines as f32 * LINE_HEIGHT + 2.0 * PAD;
         if self.active_panel.as_deref() != Some(&row.panel) {
@@ -587,11 +620,18 @@ impl Layout<'_> {
             let mut x = LEFT;
             for (index, lines) in wrapped.iter().enumerate() {
                 for (line_index, line) in lines.iter().skip(offset).take(take).enumerate() {
+                    let source = is_source_column(index);
+                    let size = if source { SOURCE_FONT_SIZE } else { FONT_SIZE };
                     self.text(
-                        x + PAD,
-                        self.y - PAD - 2.7 - line_index as f32 * LINE_HEIGHT,
+                        if source {
+                            x + widths[index] - PAD - self.text_width(&line.text, size, false)
+                        } else {
+                            x + PAD
+                        },
+                        self.y - PAD - 2.7 - line_index as f32 * LINE_HEIGHT
+                            + if source { SOURCE_RAISE } else { 0.0 },
                         &line.text,
-                        FONT_SIZE,
+                        size,
                         line.bold,
                         line.color.clone(),
                     );
@@ -1052,6 +1092,69 @@ mod tests {
     }
 
     #[test]
+    fn lab_unknown_flags_do_not_add_question_marks_or_hide_abnormal_flags() {
+        let mut result = entry(3, false);
+        result.flag = LabResultFlag::Unknown;
+        assert_eq!(flag_marker(&result), "");
+        result.flag = LabResultFlag::Abnormal;
+        result.cells[7] = "Erhöht".into();
+        assert_eq!(flag_marker(&result), " ↑");
+        result.cells[7] = "Erniedrigt".into();
+        assert_eq!(flag_marker(&result), " ↓");
+    }
+
+    #[test]
+    fn lab_source_columns_stay_aligned_with_wrapped_and_repeated_results() {
+        let mut report = context(false);
+        report.entries = vec![entry(2, false); 3];
+        report.entries[0].cells[4] = "Long laboratory result ".repeat(12);
+        report.entries[0].flag = LabResultFlag::Unknown;
+        report.entries[1].cells[0].push_str(" 16:30");
+        report.entries[1].source_document_id = None;
+        report.entries[1].source_document_name.clear();
+        report.entries[2].measured_date = report.entries[0].measured_date.succ_opt().unwrap();
+        report.entries[2].source_document_id = Some(uuid::Uuid::from_u128(99));
+        let first_date = report.entries[0].measured_date;
+        let mut document = PdfDocument::new("Laboratory source alignment");
+        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
+        let mut layout = Layout {
+            context: &report,
+            regular,
+            bold,
+            regular_metrics: unicode_pdf_font_face(false).unwrap(),
+            bold_metrics: unicode_pdf_font_face(true).unwrap(),
+            ops: Vec::new(),
+            pages: Vec::new(),
+            y: TOP,
+            table_top: TOP,
+            dates: (0..MAX_DATES)
+                .map(|day| first_date + chrono::Duration::days(day as i64))
+                .collect(),
+            active_panel: None,
+            source_numbers: source_references(&report.entries).1,
+        };
+        // Two-digit legend references must fit, too.
+        layout.source_numbers[2] = Some(12);
+        let rows = matrix_rows(&report.entries);
+        assert_eq!(rows.len(), 1);
+        let cells = layout.row_cells(&rows[0]);
+        assert_eq!(cells.len(), FIXED_COLS.len() + MAX_DATES * 2);
+        let values = &cells[3];
+        let sources = &cells[4];
+        assert_eq!(values.len(), sources.len());
+        assert!(values.len() > 2, "the long result must wrap");
+        assert!(values.iter().all(|line| !line.text.contains(['[', '?'])));
+        assert_eq!(sources[0].text, "1");
+        assert!(sources.iter().skip(1).all(|line| line.text.is_empty()));
+        assert!(values.iter().any(|line| line.text.contains("16:30:")));
+        assert_eq!(cells[6][0].text, "12");
+        assert!(layout.text_width("12", SOURCE_FONT_SIZE, false) < SOURCE_COL_WIDTH - PAD * 2.0);
+        for cell in cells.iter().skip(7) {
+            assert!(cell.is_empty(), "missing dates must remain blank");
+        }
+    }
+
+    #[test]
     fn lab_results_pdf_preserves_table_rows_and_localized_title() {
         for russian in [false, true] {
             let mut report = context(russian);
@@ -1096,12 +1199,21 @@ mod tests {
             assert!(!text.contains("1. C-reaktives Protein"));
             assert!(!text.contains("2. C-reaktives Protein"));
             for label in if russian {
-                ["Выше нормы", "Ниже нормы", "Норма", "Не определено"]
+                [
+                    "Выше нормы",
+                    "Ниже нормы",
+                    "Отклонение",
+                    "документ-источник",
+                ]
             } else {
-                ["Erhöht", "Erniedrigt", "Normal", "Nicht bestimmt"]
+                ["Erhöht", "Erniedrigt", "Auffällig", "Quelldokument"]
             } {
                 assert!(text.contains(label), "missing lab flag {label}");
             }
+            assert!(
+                !text.contains('?'),
+                "unknown flags do not print question marks"
+            );
             assert!(text.contains("Олена Приклад"));
             assert!(text.contains(if russian {
                 "Лабораторные результаты"
@@ -1188,7 +1300,14 @@ mod tests {
         for count in 1..=MAX_DATES {
             let widths = column_widths(count);
             assert!((widths.iter().sum::<f32>() - WIDTH).abs() < 0.01);
-            assert!(widths.iter().all(|width| *width >= 18.0));
+            assert_eq!(widths.len(), FIXED_COLS.len() + count * 2);
+            for (index, width) in widths.iter().enumerate() {
+                if is_source_column(index) {
+                    assert_eq!(*width, SOURCE_COL_WIDTH);
+                } else {
+                    assert!(*width >= 18.0);
+                }
+            }
         }
     }
 }

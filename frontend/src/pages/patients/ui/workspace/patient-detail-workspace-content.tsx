@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
-  FileUp,
   LoaderCircle,
   Plus,
   SquarePen,
@@ -18,7 +17,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { getLang, type Translations } from "@/lib/i18n";
+import type { Translations } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -58,9 +57,7 @@ import {
   humanizeFunctionalLabel,
 } from "../shared/patient-form-primitives";
 import { PatientOverviewCard } from "../sections/patient-overview-card";
-import { ClinicalReportPdfAction } from "../sections/clinical-report-pdf-action";
-import { LabResultsPdfAction } from "../sections/lab-results-pdf-action";
-import { MedicationPlanPdfAction } from "../sections/medication-plan-pdf-action";
+import { PatientClinicalDocumentActions } from "../sections/patient-clinical-document-actions";
 
 const loadPatientProfileTab = () => import("../sections/patient-profile-section");
 const loadPatientCuratorsTab = () => import("../sections/patient-curators-tab");
@@ -714,13 +711,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             </span>
           </button>
         ) : null}
-        {canViewClinical && id ? (
-          <>
-            <ClinicalReportPdfAction patientId={id} />
-            <LabResultsPdfAction patientId={id} className="h-9 px-3.5" />
-            <MedicationPlanPdfAction patientId={id} lang={lang} className="h-9 px-3.5" />
-          </>
-        ) : null}
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
@@ -761,23 +751,16 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             {l("patients_edit_profile")}
           </Button>
         ) : null}
-        {canManageDocuments ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-9 rounded-lg gap-1.5 px-3.5"
-            onClick={openClinicalDocumentImport}
-          >
-            <FileUp className="size-3.5" />
-            {getLang() === "de" ? "Scannen und erkennen" : "Сканировать и распознать"}
-            {clinicalImportAttentionCount > 0 ? (
-              <span className="flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold leading-5 text-amber-800">
-                {clinicalImportAttentionCount}
-              </span>
-            ) : null}
-          </Button>
-        ) : null}
       </div>
+
+      {id ? <PatientClinicalDocumentActions
+        patientId={id}
+        lang={lang}
+        canViewClinical={canViewClinical}
+        canManageDocuments={canManageDocuments}
+        importAttentionCount={clinicalImportAttentionCount}
+        onScan={openClinicalDocumentImport}
+      /> : null}
 
       <Tabs value={activeTab} onValueChange={handleWorkspaceTabChange}>
         <div className="border-b border-slate-200 lg:hidden overflow-x-auto">
