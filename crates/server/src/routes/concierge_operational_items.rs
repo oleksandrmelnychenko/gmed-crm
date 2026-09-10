@@ -327,6 +327,12 @@ async fn list_items(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
+    if auth.role == Role::Concierge
+        && let Some(project_id) = query.project_id
+        && !super::projects::has_project_access(&state, &auth, project_id).await
+    {
+        return err(StatusCode::FORBIDDEN, "Project not accessible");
+    }
     if let Some(status) = query.status.as_deref()
         && !is_valid_status(status)
     {
@@ -413,12 +419,12 @@ async fn list_items(
                      WHERE visible_project.id = t.project_id
                        AND visible_project.archived_at IS NULL
                        AND (
-                           visible_project.owner_id = $9
+                           CASE WHEN (SELECT role FROM users WHERE id = $9) = 'concierge' THEN visible_project.created_by = $9 ELSE (visible_project.owner_id = $9
                            OR EXISTS (
                                SELECT 1 FROM crm_project_members visible_member
                                WHERE visible_member.project_id = visible_project.id
                                  AND visible_member.user_id = $9
-                           )
+                           )) END
                      )
                  ))
                  OR (t.patient_id IS NOT NULL AND EXISTS (
@@ -578,12 +584,12 @@ async fn list_all_attachments(
                      WHERE visible_project.id = task.project_id
                        AND visible_project.archived_at IS NULL
                        AND (
-                           visible_project.owner_id = $3
+                           CASE WHEN (SELECT role FROM users WHERE id = $3) = 'concierge' THEN visible_project.created_by = $3 ELSE (visible_project.owner_id = $3
                            OR EXISTS (
                                SELECT 1 FROM crm_project_members visible_member
                                WHERE visible_member.project_id = visible_project.id
                                  AND visible_member.user_id = $3
-                           )
+                           )) END
                      )
                  ))
                  OR (task.patient_id IS NOT NULL AND EXISTS (
@@ -1173,6 +1179,7 @@ async fn create_item(
             project_id,
             auth.user_id,
             auth.role == Role::Ceo,
+            auth.role == Role::Concierge,
         )
         .await
     {
@@ -1531,6 +1538,7 @@ async fn update_item(
             project_id,
             auth.user_id,
             auth.role == Role::Ceo,
+            auth.role == Role::Concierge,
         )
         .await
     {
@@ -3343,12 +3351,12 @@ async fn lock_item_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
                                   AND visible_member.user_id = $2
-                            )
+                            )) END
                         )
                   ) AS project_access,
                   EXISTS (
@@ -3372,12 +3380,12 @@ async fn lock_item_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
                                   AND visible_member.user_id = $2
-                            )
+                            )) END
                         )
                   ) AS project_access,
                   EXISTS (
@@ -3439,12 +3447,12 @@ async fn ensure_operational_view_access(
                       WHERE visible_project.id = task.project_id
                         AND visible_project.archived_at IS NULL
                         AND (
-                            visible_project.owner_id = $2
+                            CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
                             OR EXISTS (
                                 SELECT 1 FROM crm_project_members visible_member
                                 WHERE visible_member.project_id = visible_project.id
                                   AND visible_member.user_id = $2
-                            )
+                            )) END
                         )
                   ) AS project_access,
                   EXISTS (
@@ -4048,6 +4056,7 @@ async fn ensure_project_access_in_transaction(
     project_id: Uuid,
     actor_id: Uuid,
     is_ceo: bool,
+    is_concierge: bool,
 ) -> Result<(), axum::response::Response> {
     let accessible = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(
@@ -4055,15 +4064,16 @@ async fn ensure_project_access_in_transaction(
              FROM crm_projects project
              WHERE project.id = $1
                AND project.archived_at IS NULL
-               AND ($2::boolean OR project.owner_id = $3 OR EXISTS (
+               AND (CASE WHEN $4::boolean THEN project.created_by = $3 ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
                  SELECT 1 FROM crm_project_members member
                  WHERE member.project_id = project.id AND member.user_id = $3
-               ))
+               )) END)
            )"#,
     )
     .bind(project_id)
     .bind(is_ceo)
     .bind(actor_id)
+    .bind(is_concierge)
     .fetch_one(&mut **tx)
     .await
     .unwrap_or(false);

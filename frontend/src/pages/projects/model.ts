@@ -40,6 +40,12 @@ export type ProjectWorkflowDependency = {
   created_at: string;
 };
 
+export function canManageProject(project: Project, actor: { id: string; role: string }) {
+  if (actor.role === "concierge") return project.created_by === actor.id;
+  return actor.role === "ceo" || project.owner_id === actor.id
+    || Boolean(project.members?.some(member => member.id === actor.id && member.member_role === "manager"));
+}
+
 export type ProjectFormValue = {
   name: string;
   description: string | null;

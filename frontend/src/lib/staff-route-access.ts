@@ -578,9 +578,6 @@ export function listStaffNavItems(role: string): StaffNavItem[] {
     if (!rule.nav || !STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role)) {
       continue;
     }
-    if (rule.id === "projects" && role === "concierge") {
-      continue;
-    }
     items.push({
       id: rule.id,
       to: rule.path,

@@ -19,6 +19,203 @@ use gmed_server::state::AppState;
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
 #[tokio::test]
+async fn concierge_projects_are_creator_scoped_and_ceo_can_delete_any_project() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let creator = seed_user(&ctx.pool, "concierge", &format!("creator-{tag}")).await;
+    let peer = seed_user(&ctx.pool, "concierge", &format!("peer-{tag}")).await;
+    let creator_bearer = auth_header_for(creator, "concierge");
+    let peer_bearer = auth_header_for(peer, "concierge");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let create_body =
+        json!({ "name": "Creator scoped project", "owner_id": peer, "member_ids": [peer] });
+    let (status, own) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/projects",
+        &creator_bearer,
+        Some(create_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own}");
+    assert_eq!(own["created_by"], creator.to_string());
+    assert_eq!(own["owner_id"], peer.to_string());
+    let own_id = own["id"].as_str().unwrap();
+    // Manager membership and ownership are not substitutes for authorship.
+    sqlx::query("UPDATE crm_project_members SET member_role = 'manager' WHERE project_id = $1 AND user_id = $2")
+        .bind(Uuid::parse_str(own_id).unwrap()).bind(peer).execute(&ctx.pool).await.unwrap();
+    for path in [
+        format!("/api/v1/projects/{own_id}"),
+        format!("/api/v1/projects/{own_id}/workflow/dependencies"),
+    ] {
+        assert_eq!(
+            json_request(&ctx.app, "GET", &path, &creator_bearer, None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            json_request(&ctx.app, "GET", &path, &peer_bearer, None)
+                .await
+                .0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    let (_, peer_list) =
+        json_request(&ctx.app, "GET", "/api/v1/projects", &peer_bearer, None).await;
+    assert!(
+        !peer_list
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == own_id)
+    );
+    let mut update_body = create_body.clone();
+    update_body["name"] = json!("Edited by creator");
+    update_body["expected_updated_at"] = own["updated_at"].clone();
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/projects/{own_id}/update"),
+            &peer_bearer,
+            Some(update_body.clone())
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/projects/{own_id}/delete"),
+            &peer_bearer,
+            Some(json!({ "expected_updated_at": own["updated_at"] }))
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, edited) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/projects/{own_id}/update"),
+        &creator_bearer,
+        Some(update_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    let task_body = json!({ "request_id": Uuid::new_v4(), "kind": "task", "title": "Keep task history", "project_id": own_id, "assigned_to": creator });
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &creator_bearer,
+        Some(task_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let mut foreign_task = task_body;
+    foreign_task["request_id"] = json!(Uuid::new_v4());
+    foreign_task["assigned_to"] = json!(peer);
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            "/api/v1/concierge-operational-items",
+            &peer_bearer,
+            Some(foreign_task)
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "GET",
+            &format!("/api/v1/concierge-operational-items?project_id={own_id}"),
+            &peer_bearer,
+            None
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/projects/{own_id}/delete"),
+        &creator_bearer,
+        Some(json!({ "expected_updated_at": own["updated_at"] })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "stale confirmation must not delete a changed project"
+    );
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/projects/{own_id}/delete"),
+            &creator_bearer,
+            Some(json!({ "expected_updated_at": edited["updated_at"] }))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "GET",
+            &format!("/api/v1/projects/{own_id}"),
+            &ceo_bearer,
+            None
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let task_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = $1 AND deleted_at IS NULL)",
+    )
+    .bind(Uuid::parse_str(task["id"].as_str().unwrap()).unwrap())
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert!(task_exists);
+    let (_, another) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/projects",
+        &peer_bearer,
+        Some(json!({ "name": "CEO can remove this" })),
+    )
+    .await;
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &format!(
+                "/api/v1/projects/{}/delete",
+                another["id"].as_str().unwrap()
+            ),
+            &ceo_bearer,
+            Some(json!({ "expected_updated_at": another["updated_at"] }))
+        )
+        .await
+        .0,
+        StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
 async fn work_center_intervals_hold_and_children_are_persisted_and_authorized() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
@@ -2769,10 +2966,10 @@ async fn project_members_can_read_project_tasks_but_cannot_mutate_unassigned_wor
     };
     let tag = Uuid::new_v4().simple().to_string();
     let owner_id = seed_user(&ctx.pool, "concierge", &format!("project-owner-{tag}")).await;
-    let member_id = seed_user(&ctx.pool, "concierge", &format!("project-member-{tag}")).await;
+    let member_id = seed_user(&ctx.pool, "billing", &format!("project-member-{tag}")).await;
     let outsider_id = seed_user(&ctx.pool, "concierge", &format!("project-outsider-{tag}")).await;
     let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
-    let member_bearer = auth_header_for(member_id, "concierge");
+    let member_bearer = auth_header_for(member_id, "billing");
     let outsider_bearer = auth_header_for(outsider_id, "concierge");
 
     let (status, project) = json_request(

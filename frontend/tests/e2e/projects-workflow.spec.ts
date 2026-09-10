@@ -244,7 +244,7 @@ test("a newer refresh wins when responses for the same project arrive out of ord
 });
 
 test("project managers keep workflow permissions when project details arrive before the list", async ({ page }) => {
-  const mock = await mockWorkflow(page, "concierge");
+  const mock = await mockWorkflow(page, "billing");
   mock.projects[0].members[0].member_role = "manager";
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -282,7 +282,7 @@ test("new task drafts survive refresh and tasks assigned elsewhere stay out of t
 
 test("mobile workflow stays within the viewport and read-only members cannot edit dependencies", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await mockWorkflow(page, "concierge");
+  await mockWorkflow(page, "billing");
   await page.goto(`/projects?view=workflow&project=${projectA}`);
   const card = page.getByRole("button", { name: /TASK-.*Sign documents/ });
   await expect(card).toBeVisible();

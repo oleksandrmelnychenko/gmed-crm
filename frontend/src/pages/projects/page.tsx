@@ -1,6 +1,6 @@
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, UsersRound, Workflow, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, Trash2, UsersRound, Workflow, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ import {
 } from "@/pages/concierge/task-event-dialog";
 
 import type { Project, ProjectFormValue, ProjectPriority, ProjectStatus, ProjectWorkflowDependency } from "./model";
+import { canManageProject } from "./model";
 import { ProjectWorkflowView } from "./workflow-view";
 
 const copy = {
@@ -198,6 +199,9 @@ export function ProjectsPage() {
   const [editing, setEditing] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskDialogError, setTaskDialogError] = useState("");
@@ -229,6 +233,7 @@ export function ProjectsPage() {
   useDebouncedRealtimeSubscription([
     "crm_project.created",
     "crm_project.updated",
+    "crm_project.deleted",
     "crm_project.workflow_updated",
     "concierge_operational_item.created",
     "concierge_operational_item.updated",
@@ -258,7 +263,9 @@ export function ProjectsPage() {
       setAssignees(userRows);
       setPatients(patientRows);
       if (projectResult.error || !projectResult.value) throw projectResult.error;
-      const projectRows = projectResult.value;
+      const projectRows = user?.role === "concierge"
+        ? projectResult.value.filter(project => project.created_by === user.id)
+        : projectResult.value;
       setProjects((current) => projectRows.map((project) => ({
         ...project,
         members: current.find((entry) => entry.id === project.id)?.members,
@@ -285,6 +292,9 @@ export function ProjectsPage() {
           .catch((dependencyLoadError: unknown) => ({ value: null, error: displayApiError(dependencyLoadError, labels.loadFailed, labels.apiUnavailable) })),
       ]);
       if (projectId !== activeProjectIdRef.current || requestId !== workflowRequestRef.current) return;
+      if (user?.role === "concierge" && detail.created_by !== user.id) {
+        throw new Error(lang === "de" ? "Nur selbst erstellte Projekte sind verfügbar." : "Доступны только созданные вами проекты.");
+      }
       setProjects((current) => current.some((project) => project.id === detail.id)
         ? current.map((project) => project.id === detail.id ? detail : project)
         : [...current, detail]);
@@ -298,7 +308,7 @@ export function ProjectsPage() {
     } finally {
       if (projectId === activeProjectIdRef.current && requestId === workflowRequestRef.current) setDetailLoading(false);
     }
-  }, [labels.apiUnavailable, labels.loadFailed]);
+  }, [labels.apiUnavailable, labels.loadFailed, lang, user?.id, user?.role]);
 
   useEffect(() => {
     setTasks([]);
@@ -408,6 +418,27 @@ export function ProjectsPage() {
     }
   }
 
+  async function deleteProject() {
+    if (!deleteCandidate || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await apiFetch<void>(`/projects/${deleteCandidate.id}/delete`, {
+        method: "POST",
+        body: JSON.stringify({ expected_updated_at: deleteCandidate.updated_at }),
+      });
+      workflowRequestRef.current += 1;
+      clearApiCache("/projects");
+      setProjects(current => current.filter(project => project.id !== deleteCandidate.id));
+      if (selectedId === deleteCandidate.id) clearSelection();
+      setDeleteCandidate(null);
+    } catch (failure) {
+      setDeleteError(displayApiError(failure, labels.saveFailed, labels.apiUnavailable));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function addWorkflowDependency(taskId: string, dependsOnTaskId: string) {
     if (!selected) return;
     const created = await apiFetch<ProjectWorkflowDependency>(`/projects/${selected.id}/workflow/dependencies`, {
@@ -436,15 +467,14 @@ export function ProjectsPage() {
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />{labels.loading}</div>;
 
   const filtersActive = Boolean(query.trim()) || status !== "all";
-  const canEditSelected = Boolean(selected && user && (
-    user.role === "ceo"
-    || selected.owner_id === user.id
-    || selected.members?.some((member) => member.id === user.id && member.member_role === "manager")
-  ));
+  const canEditSelected = Boolean(selected && user && canManageProject(selected, user));
 
   return (
     <div className="space-y-4">
-      <PageHeader title={labels.title} actions={<Button onClick={openCreate}><Plus />{labels.create}</Button>} />
+      <PageHeader title={labels.title} actions={<>
+        {canEditSelected ? <Button variant="outline" disabled={detailLoading || deleting} onClick={() => { setDeleteError(""); setDeleteCandidate(selected); }}><Trash2 />{lang === "de" ? "Projekt löschen" : "Удалить проект"}</Button> : null}
+        <Button onClick={openCreate}><Plus />{labels.create}</Button>
+      </>} />
       {error && activeView === "overview" ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
       <div className="flex justify-center">
         <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-xl border bg-card p-1 shadow-sm" role="tablist" aria-label={labels.title}>
@@ -520,6 +550,18 @@ export function ProjectsPage() {
       )}
 
       <ProjectDialog open={dialogOpen} editing={editing} assignees={assignees} patients={patients} lang={lang} saving={saving} error={dialogError} onOpenChange={(open) => { setDialogOpen(open); if (!open) setDialogError(""); }} onSave={saveProject} currentUserId={user?.id ?? ""} />
+      <Dialog open={Boolean(deleteCandidate)} onOpenChange={open => { if (!open && !deleting) setDeleteCandidate(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{lang === "de" ? "Projekt löschen" : "Удалить проект"}</DialogTitle></DialogHeader>
+          <p className="break-words text-sm font-medium">{deleteCandidate?.name}</p>
+          <p className="text-sm text-muted-foreground">{lang === "de" ? "Das Projekt wird aus der Liste entfernt. Verknüpfte Aufgaben und ihr Verlauf bleiben erhalten." : "Проект будет удалён из списка. Связанные задачи и их история сохранятся."}</p>
+          {deleteError ? <p role="alert" className="text-sm text-destructive">{deleteError}</p> : null}
+          <DialogFooter>
+            <Button variant="outline" disabled={deleting} onClick={() => setDeleteCandidate(null)}>{labels.cancel}</Button>
+            <Button variant="destructive" disabled={deleting} onClick={() => void deleteProject()}>{deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}{lang === "de" ? "Löschen" : "Удалить"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <ConciergeTaskEventDialog
         item={null}
         services={[]}

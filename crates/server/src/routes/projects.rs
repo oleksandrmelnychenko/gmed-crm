@@ -18,6 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/projects", get(list_projects).post(create_project))
         .route("/projects/{project_id}", get(get_project))
         .route("/projects/{project_id}/update", post(update_project))
+        .route("/projects/{project_id}/delete", post(delete_project))
         .route(
             "/projects/{project_id}/workflow/dependencies",
             get(list_workflow_dependencies).post(create_workflow_dependency),
@@ -69,6 +70,12 @@ struct WorkflowDependencyRequest {
     depends_on_task_id: Uuid,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeleteProjectRequest {
+    expected_updated_at: DateTime<Utc>,
+}
+
 const PROJECT_SELECT: &str = r#"
     SELECT project.id, project.name, project.description, project.status, project.priority,
            project.owner_id, owner.name AS owner_name, project.patient_id,
@@ -114,13 +121,13 @@ async fn list_projects(
            AND ($1::text IS NULL OR project.name ILIKE $1 OR COALESCE(project.description, '') ILIKE $1)
            AND ($2::text IS NULL OR project.status = $2)
            AND ($3::uuid IS NULL OR project.patient_id = $3)
-           AND ($4::boolean OR project.owner_id = $5 OR EXISTS (
+           AND (CASE WHEN $6::boolean THEN project.created_by = $5 ELSE ($4::boolean OR project.owner_id = $5 OR EXISTS (
                 SELECT 1 FROM crm_project_members access_member
                 WHERE access_member.project_id = project.id AND access_member.user_id = $5
            ) OR EXISTS (
                 SELECT 1 FROM tasks access_task
                 WHERE access_task.project_id = project.id AND access_task.assigned_to = $5 AND access_task.deleted_at IS NULL
-           ))
+           )) END)
          GROUP BY project.id, owner.name, patient.first_name, patient.last_name, creator.name
          ORDER BY CASE project.status WHEN 'active' THEN 0 WHEN 'planned' THEN 1 WHEN 'on_hold' THEN 2 ELSE 3 END,
                   project.updated_at DESC
@@ -132,6 +139,7 @@ async fn list_projects(
         .bind(query.patient_id)
         .bind(matches!(auth.role, Role::Ceo))
         .bind(auth.user_id)
+        .bind(auth.role == Role::Concierge)
         .fetch_all(&state.db)
         .await
     {
@@ -514,21 +522,7 @@ async fn update_project(
         Ok(fields) => fields,
         Err(response) => return response,
     };
-    let can_manage = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-             SELECT 1 FROM crm_projects project
-             LEFT JOIN crm_project_members member
-               ON member.project_id = project.id AND member.user_id = $2 AND member.member_role = 'manager'
-             WHERE project.id = $1 AND project.archived_at IS NULL
-               AND ($3::boolean OR project.owner_id = $2 OR member.user_id IS NOT NULL)
-           )"#,
-    )
-    .bind(project_id)
-    .bind(auth.user_id)
-    .bind(matches!(auth.role, Role::Ceo))
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
+    let can_manage = can_manage_project(&state, &auth, project_id).await;
     if !can_manage {
         return err(
             StatusCode::FORBIDDEN,
@@ -613,6 +607,56 @@ async fn update_project(
         Ok(None) => err(StatusCode::NOT_FOUND, "Project not found"),
         Err(response) => response,
     }
+}
+
+async fn delete_project(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(project_id): Path<Uuid>,
+    Json(body): Json<DeleteProjectRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_project_staff(&auth) {
+        return response;
+    }
+    if !can_manage_project(&state, &auth, project_id).await {
+        return err(StatusCode::FORBIDDEN, "You cannot delete this project");
+    }
+    // Preserve task history and references; all project endpoints exclude archived rows.
+    let result = sqlx::query(
+        "UPDATE crm_projects SET archived_at = now(), updated_at = now()
+         WHERE id = $1 AND archived_at IS NULL AND updated_at = $2",
+    )
+    .bind(project_id)
+    .bind(body.expected_updated_at)
+    .execute(&state.db)
+    .await;
+    match result {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => return err(StatusCode::CONFLICT, "Project was changed by another user"),
+        Err(error) => {
+            tracing::error!(%error, %project_id, "delete CRM project");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete project",
+            );
+        }
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_crm_project",
+        Some(auth.user_id),
+        "crm_project",
+        Some(project_id),
+        serde_json::json!({ "tasks_preserved": true }),
+    ));
+    publish_workflow_event(
+        &state,
+        &auth,
+        project_id,
+        "crm_project.deleted",
+        serde_json::json!({}),
+    )
+    .await;
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn validate_fields(
@@ -774,19 +818,20 @@ async fn load_project(
     let sql = format!(
         "{PROJECT_SELECT}
          WHERE project.id = $1 AND project.archived_at IS NULL
-           AND ($2::boolean OR project.owner_id = $3 OR EXISTS (
+           AND (CASE WHEN $4::boolean THEN project.created_by = $3 ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
              SELECT 1 FROM crm_project_members access_member
              WHERE access_member.project_id = project.id AND access_member.user_id = $3
            ) OR EXISTS (
              SELECT 1 FROM tasks access_task
              WHERE access_task.project_id = project.id AND access_task.assigned_to = $3 AND access_task.deleted_at IS NULL
-           ))
+           )) END)
          GROUP BY project.id, owner.name, patient.first_name, patient.last_name, creator.name"
     );
     let row = sqlx::query(&sql)
         .bind(project_id)
         .bind(matches!(auth.role, Role::Ceo))
         .bind(auth.user_id)
+        .bind(auth.role == Role::Concierge)
         .fetch_optional(&state.db)
         .await
         .map_err(|error| {
@@ -844,14 +889,18 @@ fn project_summary_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value
     }))
 }
 
-async fn has_project_access(state: &AppState, auth: &AuthUser, project_id: Uuid) -> bool {
+pub(super) async fn has_project_access(
+    state: &AppState,
+    auth: &AuthUser,
+    project_id: Uuid,
+) -> bool {
     sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(
              SELECT 1
                FROM crm_projects project
               WHERE project.id = $1
                 AND project.archived_at IS NULL
-                AND ($2::boolean OR project.owner_id = $3 OR EXISTS (
+                AND (CASE WHEN $4::boolean THEN project.created_by = $3 ELSE ($2::boolean OR project.owner_id = $3 OR EXISTS (
                     SELECT 1
                       FROM crm_project_members member
                      WHERE member.project_id = project.id
@@ -862,12 +911,13 @@ async fn has_project_access(state: &AppState, auth: &AuthUser, project_id: Uuid)
                      WHERE task.project_id = project.id
                        AND task.assigned_to = $3
                        AND task.deleted_at IS NULL
-                ))
+                )) END)
            )"#,
     )
     .bind(project_id)
     .bind(matches!(auth.role, Role::Ceo))
     .bind(auth.user_id)
+    .bind(auth.role == Role::Concierge)
     .fetch_one(&state.db)
     .await
     .unwrap_or(false)
@@ -884,15 +934,34 @@ async fn can_manage_project(state: &AppState, auth: &AuthUser, project_id: Uuid)
                 AND member.member_role = 'manager'
               WHERE project.id = $1
                 AND project.archived_at IS NULL
-                AND ($3::boolean OR project.owner_id = $2 OR member.user_id IS NOT NULL)
+                AND (CASE WHEN $4::boolean THEN project.created_by = $2
+                     ELSE ($3::boolean OR project.owner_id = $2 OR member.user_id IS NOT NULL) END)
            )"#,
     )
     .bind(project_id)
     .bind(auth.user_id)
     .bind(matches!(auth.role, Role::Ceo))
+    .bind(auth.role == Role::Concierge)
     .fetch_one(&state.db)
     .await
     .unwrap_or(false)
+}
+
+async fn project_event_targets(
+    state: &AppState,
+    project_id: Uuid,
+    previous_members: &[Uuid],
+) -> Vec<Uuid> {
+    // A concierge who is only an owner/member must not receive foreign project payloads.
+    sqlx::query_scalar(
+        "SELECT recipient.id FROM crm_projects project JOIN users recipient ON
+           recipient.id = project.created_by OR recipient.id = project.owner_id
+           OR recipient.id = ANY($2) OR EXISTS (
+             SELECT 1 FROM crm_project_members member
+             WHERE member.project_id = project.id AND member.user_id = recipient.id)
+         WHERE project.id = $1 AND (recipient.role <> 'concierge' OR recipient.id = project.created_by)",
+    )
+    .bind(project_id).bind(previous_members).fetch_all(&state.db).await.unwrap_or_default()
 }
 
 async fn publish_workflow_event(
@@ -902,19 +971,7 @@ async fn publish_workflow_event(
     event_type: &str,
     payload: serde_json::Value,
 ) {
-    let target_user_ids = sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT project.owner_id
-             FROM crm_projects project
-            WHERE project.id = $1
-           UNION
-           SELECT member.user_id
-             FROM crm_project_members member
-            WHERE member.project_id = $1"#,
-    )
-    .bind(project_id)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    let target_user_ids = project_event_targets(state, project_id, &[]).await;
 
     crate::realtime::publish_event(
         state,
@@ -945,10 +1002,7 @@ async fn publish_project_event(
     fields: &ProjectFields,
     previous_member_ids: &[Uuid],
 ) {
-    let mut target_user_ids = fields.member_ids.clone();
-    target_user_ids.extend_from_slice(previous_member_ids);
-    target_user_ids.sort_unstable();
-    target_user_ids.dedup();
+    let target_user_ids = project_event_targets(state, project_id, previous_member_ids).await;
     crate::realtime::publish_event(
         state,
         RealtimeEvent::new(event_type, "crm_project", project_id)

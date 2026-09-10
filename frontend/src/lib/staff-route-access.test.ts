@@ -188,7 +188,7 @@ describe("first-release staff RBAC", () => {
     expect(concierge).toContain("/employees");
     expect(concierge).not.toContain("/concierge");
     expect(concierge).toContain("/task-manager");
-    expect(concierge).not.toContain("/projects");
+    expect(concierge).toContain("/projects");
     expect(concierge).toContain("/files");
     expect(concierge).toContain("/documents");
     expect(concierge).not.toContain("/sops");
