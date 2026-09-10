@@ -13,7 +13,7 @@ type HotelDocument = { id: string; auto_name: string; original_filename: string 
 
 export function HotelDocuments({ providerId, role, lang, onDirty }: { providerId: string | null; role: string; lang: Lang; onDirty: (id: string, dirty: boolean) => void }) {
   const labels = copy[lang];
-  const canRead = ["ceo", "billing", "patient_manager"].includes(role), canUpload = ["ceo", "patient_manager"].includes(role);
+  const canRead = ["ceo", "billing", "patient_manager", "concierge"].includes(role), canUpload = ["ceo", "patient_manager", "concierge"].includes(role);
   const [documents, setDocuments] = useState<HotelDocument[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState("");
   const [adding, setAdding] = useState(false), [file, setFile] = useState<File | null>(null), [title, setTitle] = useState(""), [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false), [uploadError, setUploadError] = useState(""), [saved, setSaved] = useState(false);

@@ -53,6 +53,8 @@ describe("first-release staff RBAC", () => {
   it("keeps Concierge in the operational workspace only", () => {
     for (const path of [
       "/",
+      "/hotels",
+      "/reports/hotels",
       "/chat",
       "/leads",
       "/providers/provider-1",

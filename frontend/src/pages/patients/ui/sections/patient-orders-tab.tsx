@@ -114,7 +114,7 @@ export function PatientOrdersTab({
       {
         id: "status",
         label: dict.users_status,
-        accessor: (item) => statusLabel(item.status),
+        accessor: (item) => item.intake_state === "draft" ? (labelLang === "de" ? "Entwurf" : "Черновик") : statusLabel(item.status),
         sortable: true,
         width: 150,
         render: (item) => (
@@ -122,7 +122,7 @@ export function PatientOrdersTab({
             variant="outline"
             className={cn("rounded-full font-mono text-[10px]", statusColors[item.status] ?? "")}
           >
-            {statusLabel(item.status)}
+            {item.intake_state === "draft" ? (labelLang === "de" ? "Entwurf · Fortsetzen" : "Черновик · Продолжить") : statusLabel(item.status)}
           </Badge>
         ),
       },

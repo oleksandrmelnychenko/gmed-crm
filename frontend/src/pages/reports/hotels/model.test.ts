@@ -78,7 +78,10 @@ describe("hotel negotiation statistics", () => {
     expect(csv).toContain('"\'=HYPERLINK(""bad"")"'); expect(csv).toContain('"Hotel; A";""');
   });
   it("restricts the hotel screen to the corresponding reporting roles", () => {
-    for (const role of ["ceo", "ceo_assistant", "billing", "patient_manager"]) expect(canAccessStaffRoute(role, "/hotels")).toBe(true);
-    for (const role of ["patient", "sales", "concierge", "interpreter"]) expect(canAccessStaffRoute(role, "/hotels")).toBe(false);
+    for (const role of ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"]) {
+      expect(canAccessStaffRoute(role, "/hotels")).toBe(true);
+      expect(canAccessStaffRoute(role, "/reports/hotels")).toBe(true);
+    }
+    for (const role of ["patient", "sales", "interpreter"]) expect(canAccessStaffRoute(role, "/hotels")).toBe(false);
   });
 });

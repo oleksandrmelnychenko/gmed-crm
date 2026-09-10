@@ -7,6 +7,7 @@ param(
   [string]$HealthUrl = "https://console-dev.gmed-health.com/health",
   [switch]$CommittedOnly,
   [switch]$SkipSmoke,
+  [switch]$DirectMigrations,
   [switch]$DryRun
 )
 
@@ -143,7 +144,8 @@ try {
   # Serialize builds as well as restarts: Compose uses shared image tags, so
   # merely locking the final container replacement still permits mixed releases.
   Write-Host "Waiting for the DEV deployment lock, then publishing $snapshotLabel..."
-  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && flock -x /home/gmed/deploy/deploy.lock bash $RemoteDeployScript $RemoteArchive"))
+  $migrationMode = if ($DirectMigrations) { "direct" } else { "rehearse" }
+  Invoke-Checked "ssh" ($sshOptions + @($remote, "chmod 700 $RemoteDeployScript && flock -x /home/gmed/deploy/deploy.lock env GMED_DEV_MIGRATION_MODE=$migrationMode bash $RemoteDeployScript $RemoteArchive"))
 
   if (-not $SkipSmoke) {
     $response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 30

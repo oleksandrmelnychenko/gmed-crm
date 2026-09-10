@@ -568,6 +568,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   useFinanceAutoRefresh(refreshAccount, accountStatementLoading, Boolean(id && canViewFinance));
   const [repeatIntakeOpen, setRepeatIntakeOpen] = useState(false);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
+  const [intakeOrderId, setIntakeOrderId] = useState<string | undefined>();
   const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -883,7 +884,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onCreateOrder={canCreateOrders && id
                 ? () => setCreateOrderOpen(true)
                 : undefined}
-              onOpenOrder={onOpenOrder}
+              onOpenOrder={(orderId) => {
+                if (orders.find(order => order.id === orderId)?.intake_state === "draft" && canCreateOrders) {
+                  setIntakeOrderId(orderId); setCreateOrderOpen(true);
+                } else { onOpenOrder(orderId); }
+              }}
               orderPhaseLabel={orderPhaseLabel}
               orders={orders}
               statusColors={statusColors}
@@ -1098,12 +1103,15 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       {createOrderOpen && canCreateOrders ? (
         <Suspense fallback={<TabLoader />}>
           <LazyPatientOrderCreateSheet
-            key={detail.id}
+            key={`${detail.id}:${intakeOrderId ?? "new"}`}
             patient={detail}
-            onClose={() => setCreateOrderOpen(false)}
-            onCreated={() => {
+            orderId={intakeOrderId}
+            onClose={() => { setCreateOrderOpen(false); setIntakeOrderId(undefined); reload(); }}
+            onCreated={(orderId) => {
               setCreateOrderOpen(false);
+              setIntakeOrderId(undefined);
               reload();
+              onOpenOrder(orderId);
             }}
           />
         </Suspense>

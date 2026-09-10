@@ -13,10 +13,17 @@ use uuid::Uuid;
 
 use crate::{auth::middleware::AuthUser, state::AppState};
 
+#[path = "hotel_breakfast_terms.rs"]
+mod breakfast_terms;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/stats/reports/hotels", get(workspace))
         .route("/stats/reports/hotels/directory", get(directory))
+        .route(
+            "/stats/reports/hotels/{id}/breakfast-terms",
+            get(breakfast_terms::get).put(breakfast_terms::save),
+        )
         .route(
             "/stats/reports/hotels/{source}/{id}/rooms",
             put(update_rooms),
@@ -39,11 +46,33 @@ fn allowed(auth: &AuthUser) -> Result<(), Response> {
         Role::CeoAssistant,
         Role::Billing,
         Role::PatientManager,
+        Role::Concierge,
     ])
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
+}
+
+#[cfg(test)]
+mod hotel_access_tests {
+    use super::*;
+
+    #[test]
+    fn concierge_can_access_hotel_operations() {
+        let mut auth = AuthUser {
+            user_id: Uuid::nil(),
+            role: Role::Concierge,
+            family_id: Uuid::nil(),
+            access_token_jti: Uuid::nil(),
+            access_token_expires_at: Utc::now(),
+        };
+        assert!(allowed(&auth).is_ok());
+        for role in [Role::Patient, Role::Sales, Role::Interpreter] {
+            auth.role = role;
+            assert_eq!(allowed(&auth).unwrap_err().status(), StatusCode::FORBIDDEN);
+        }
+    }
 }
 
 async fn directory(

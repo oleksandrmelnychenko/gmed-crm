@@ -363,13 +363,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "hotel-statistics",
     match: "exact",
     path: "/reports/hotels",
-    roles: ["ceo", "ceo_assistant", "billing", "patient_manager"],
+    roles: ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"],
   },
   {
     id: "hotels",
     match: "exact",
     path: "/hotels",
-    roles: ["ceo", "ceo_assistant", "billing", "patient_manager"],
+    roles: ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"],
     nav: { section: "crm", labelKey: "nav_hotels", after: "providers" },
   },
   {

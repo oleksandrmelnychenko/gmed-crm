@@ -207,6 +207,7 @@ import type {
   WorkflowChecklistResponse,
 } from "./model/types";
 import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
+import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
@@ -4137,47 +4138,7 @@ function useOrdersPageContent() {
                             </div>
                           </div>
 
-                          <div className="overflow-x-auto rounded-lg border border-border/70">
-                            <table className="w-full min-w-[760px] text-left text-xs [&_td:not(:first-child)]:whitespace-nowrap [&_td:not(:first-child)]:font-mono [&_td:not(:first-child)]:tabular-nums">
-                              <thead className="border-b border-border/60 bg-muted/20 text-muted-foreground">
-                                <tr>
-                                  <th className="px-3 py-2.5 font-medium">{lang === "de" ? "Leistung" : "Услуга"}</th>
-                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplanter Erlös" : "Плановый доход"}</th>
-                                  <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Abgerechneter Erlös" : "Выставленный доход"}</th>
-                                  {orderEconomics.margin_visible ? (
-                                    <>
-                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Geplante Partnerkosten" : "Плановые затраты на партнёра"}</th>
-                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Tatsächliche Partnerkosten" : "Фактические затраты на партнёра"}</th>
-                                      <th className="px-3 py-2.5 text-right font-medium">{lang === "de" ? "Marge ohne Mehrwertsteuer" : "Маржа без налога"}</th>
-                                    </>
-                                  ) : null}
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-border/70">
-                                {orderEconomics.services.map((service) => (
-                                  <tr key={service.order_leistung_id} className="even:bg-muted/15 hover:bg-muted/30">
-                                    <td className="max-w-[300px] px-3 py-2.5 font-medium text-foreground">{service.name}</td>
-                                    <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_revenue_net, orderEconomics.currency)}</td>
-                                    <td className="px-3 py-2.5 text-right">{formatMoney(service.actual_revenue_net, orderEconomics.currency)}</td>
-                                    {orderEconomics.margin_visible ? (
-                                      <>
-                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.planned_partner_cost_net, orderEconomics.currency)}</td>
-                                        <td className="px-3 py-2.5 text-right">{formatOptionalMoney(service.actual_partner_cost_net, orderEconomics.currency)}</td>
-                                        <td className="px-3 py-2.5 text-right font-semibold">{formatOptionalMoney(service.margin_net, orderEconomics.currency)}</td>
-                                      </>
-                                    ) : null}
-                                  </tr>
-                                ))}
-                                {orderEconomics.services.length === 0 ? (
-                                  <tr>
-                                    <td colSpan={orderEconomics.margin_visible ? 6 : 3} className="px-3 py-6 text-center text-xs text-muted-foreground">
-                                      {lang === "de" ? "Noch keine Leistungen hinzugefügt" : "Услуги ещё не добавлены"}
-                                    </td>
-                                  </tr>
-                                ) : null}
-                              </tbody>
-                            </table>
-                          </div>
+                          <OrderEconomicsTable economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />
                         </div>
                       ) : null}
                     </SectionCard>

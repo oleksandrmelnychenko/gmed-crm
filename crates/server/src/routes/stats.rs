@@ -267,7 +267,7 @@ async fn overview(
     let leads = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "c!" FROM leads WHERE qualification_status NOT IN ('archived', 'converted')"#)
         .fetch_one(&state.db).await.unwrap_or(0);
     let orders =
-        sqlx::query_scalar!(r#"SELECT COUNT(*) AS "c!" FROM orders WHERE status = 'active'"#)
+        sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM orders WHERE status = 'active' AND intake_state <> 'draft'")
             .fetch_one(&state.db)
             .await
             .unwrap_or(0);
@@ -1219,10 +1219,10 @@ async fn orders_by_phase(
         return e;
     }
 
-    match sqlx::query!(
-        r#"SELECT phase AS "phase!", COUNT(*)::int AS "count!: i32"
-         FROM orders WHERE status = 'active'
-         GROUP BY phase ORDER BY 2 DESC"#
+    match sqlx::query_as::<_,(String,i64)>(
+        "SELECT phase, COUNT(*)
+         FROM orders WHERE status = 'active' AND intake_state <> 'draft'
+         GROUP BY phase ORDER BY 2 DESC"
     )
     .fetch_all(&state.db)
     .await
@@ -1230,7 +1230,7 @@ async fn orders_by_phase(
         Ok(rows) => {
             let mut data: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
             for r in rows {
-                data.push(serde_json::json!({"phase": r.phase, "count": r.count}));
+                data.push(serde_json::json!({"phase": r.0, "count": r.1}));
             }
             Json(data).into_response()
         }
@@ -1353,7 +1353,7 @@ async fn load_ceo_summary(state: &AppState) -> Result<Value, sqlx::Error> {
                 (
                     SELECT COUNT(DISTINCT patient_id)::bigint
                     FROM orders
-                    WHERE status = 'active'
+                    WHERE status = 'active' AND intake_state <> 'draft'
                 ) AS active_patients_under_care
            FROM patients"#,
     )
@@ -1363,7 +1363,7 @@ async fn load_ceo_summary(state: &AppState) -> Result<Value, sqlx::Error> {
     let retention = sqlx::query(
         r#"WITH per_patient AS (
                 SELECT patient_id, COUNT(*)::bigint AS order_count
-                FROM orders
+                FROM orders WHERE intake_state <> 'draft'
                 GROUP BY patient_id
             )
             SELECT

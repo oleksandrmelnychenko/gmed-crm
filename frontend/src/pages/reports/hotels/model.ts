@@ -19,7 +19,7 @@ export type HotelWorkspace = { rows: HotelStay[]; from: string; to: string; time
 export type HotelDirectoryItem = { id: string; name: string; city: string | null; country: string | null };
 export type HotelFilters = { hotel: string; city: string; currency: string; status: string; search: string; breakfast: string };
 export const initialFilters: HotelFilters = { hotel: "all", city: "all", currency: "EUR", status: "committed", search: "", breakfast: "all" };
-export const hotelStatisticsRoles = ["ceo", "ceo_assistant", "billing", "patient_manager"];
+export const hotelStatisticsRoles = ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"];
 
 export function moneyCents(value: string | null): bigint | null {
   if (value === null || !/^\d+(\.\d{1,2})?$/.test(value)) return null;

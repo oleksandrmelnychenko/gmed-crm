@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  ArrowUpRight,
   Building2,
   CalendarDays,
   ChevronLeft,
@@ -21,6 +22,7 @@ import {
   Trash2,
   UserRound,
   UsersRound,
+  Workflow,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +57,8 @@ import {
   type TaskCalendarScale,
 } from "./task-calendar";
 import { TaskTimeline } from "./task-timeline";
+import { TaskWorkflowDialog } from "./task-workflow-dialog";
+import { taskWorkflowCounts } from "./task-workflow";
 
 type TaskView = "board" | "list" | "calendar" | "timeline";
 type CalendarScale = TaskCalendarScale;
@@ -267,6 +271,8 @@ function assigneeRoleTone(role?: string) {
 
 function TaskCard({
   task,
+  parentTask,
+  subCount,
   assignedToRole,
   lang,
   now,
@@ -286,8 +292,11 @@ function TaskCard({
   onRestore,
   onExpense,
   onStatusChange,
+  onWorkflow,
 }: {
   task: ConciergeTask;
+  parentTask?: ConciergeTask;
+  subCount?: { total: number; paused: number };
   assignedToRole?: string;
   lang: Lang;
   now: Date;
@@ -307,18 +316,35 @@ function TaskCard({
   onRestore: (task: ConciergeTask) => void;
   onExpense: (task: ConciergeTask) => void;
   onStatusChange: (task: ConciergeTask, status: string) => void;
+  onWorkflow: (task: ConciergeTask) => void;
 }) {
   const labels = copy[lang];
   const interval = conciergeTaskInterval(task);
   const overdue = isConciergeTaskOverdue(task, now);
   const archived = Boolean(task.archived_at);
   const terminal = task.status === "completed" || task.status === "cancelled";
+  const workflowLabel = lang === "ru" ? "Процесс задачи" : "Aufgabenablauf";
+  const countLabel = lang === "ru" ? "Подзадачи и события" : "Unteraufgaben und Termine";
+  const parentLabel = lang === "ru" ? "В составе" : "Gehört zu";
   return (
-    <article className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center")}>
-      <button type="button" className={cn("min-w-0 w-full max-w-full overflow-hidden text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
-        <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-36")}>
-          <Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge>
-          {task.parent_task_id ? <Badge variant="outline" className="rounded-full text-[10px]">↳ {task.kind === "event" ? labels.event : labels.child}</Badge> : null}
+    <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md focus:outline-2 focus:outline-primary focus:outline-offset-2", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
+      <div className={cn("min-w-0", compact && "col-span-2 sm:col-span-1")}>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
+        <button type="button" title={conciergeTaskCode(task)} onClick={() => onOpen(task)}><Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge></button>
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {archived ? (
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
+        ) : terminal ? (
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
+        ) : null}
+        <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className="min-w-4 rounded-full bg-primary/10 px-1 font-mono text-[10px] leading-4">{subCount?.total ?? 0}</span></Button>
+        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
+        {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
+      </div>
+      </div>
+      <button type="button" className="min-w-0 w-full max-w-full overflow-hidden text-left" onClick={() => onOpen(task)}>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {task.parent_task_id ? <Badge variant="outline" className={cn("rounded-full text-[10px]", task.kind === "event" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-orange-200 bg-orange-50 text-orange-700")}>↳ {task.kind === "event" ? labels.event : labels.child}</Badge> : null}
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
@@ -396,14 +422,7 @@ function TaskCard({
           {task.reminder_at ? <span><CircleAlert className="mr-1 inline size-3" />{labels.reminder}</span> : null}
         </div>
       </button>
-      <div className={cn("flex items-center gap-1", !compact && "absolute right-2 top-2 z-10")}>
-        {archived ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.restore : labels.noPermission} onClick={() => onRestore(task)}><ArchiveRestore /><span className={cn(!compact && "sr-only")}>{labels.restore}</span></Button>
-        ) : terminal ? (
-          <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
-        ) : null}
-        {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
-        {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
+      {parentTask ? <button type="button" className="mt-2 flex w-full min-w-0 items-center gap-1.5 rounded-md border border-primary/15 bg-primary/5 px-2 py-1.5 text-left text-[10px] text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary" title={`${parentLabel}: ${localizeTaskTitle(parentTask.title, lang)}`} onClick={() => onWorkflow(parentTask)}><Workflow className="size-3 shrink-0" /><span className="truncate">{parentLabel}: {localizeTaskTitle(parentTask.title, lang)}</span><ArrowUpRight className="ml-auto size-3 shrink-0" /></button> : null}
       </div>
       <div className={cn("space-y-1.5", compact && "col-span-2 sm:col-span-1")}>
         {!archived && ["open", "in_progress", "on_hold"].includes(task.status) ? (
@@ -450,6 +469,7 @@ function TaskCard({
 
 export function ConciergeTaskManager({
   tasks,
+  refreshing,
   assignees,
   lang,
   now,
@@ -472,6 +492,7 @@ export function ConciergeTaskManager({
   onCreateAt,
 }: {
   tasks: ConciergeTask[];
+  refreshing: boolean;
   assignees: ConciergeAssignee[];
   lang: Lang;
   now: Date;
@@ -490,11 +511,13 @@ export function ConciergeTaskManager({
   onRestore: (task: ConciergeTask) => void;
   onOpen: (task: ConciergeTask) => void;
   onExpense: (task: ConciergeTask) => void;
-  onStatusChange: (task: ConciergeTask, status: string) => void;
+  onStatusChange: (task: ConciergeTask, status: string) => Promise<string | null>;
   onCreateAt?: (date: Date) => void;
 }) {
   const labels = copy[lang];
   const [view, setView] = useState<TaskView>("board");
+  const [workflowTaskId, setWorkflowTaskId] = useState<string | null>(null);
+  const [focusBoardTaskId, setFocusBoardTaskId] = useState<string | null>(null);
   const [calendarScale, setCalendarScale] = useState<CalendarScale>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
   const [expandedCalendarDays, setExpandedCalendarDays] = useState<Set<string>>(
@@ -504,6 +527,27 @@ export function ConciergeTaskManager({
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
+  const tasksById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks]);
+  const subCounts = useMemo(() => taskWorkflowCounts(tasks), [tasks]);
+  useEffect(() => {
+    if (!focusBoardTaskId || view !== "board") return;
+    const frame = requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-task-card-id="${CSS.escape(focusBoardTaskId)}"]`);
+      if (!card) return;
+      card.scrollIntoView({ block: "center", inline: "center" });
+      card.focus({ preventScroll: true });
+      setFocusBoardTaskId(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusBoardTaskId, view]);
+  function showOnBoard(task: ConciergeTask) {
+    setWorkflowTaskId(null);
+    setView("board");
+    if (!filtered.some(row => row.id === task.id)) {
+      setFilters({ query: "", assignee: "all", status: task.status, priority: "all", kind: "all", audience: "all", timing: "all", archive: task.archived_at ? "archived" : "active" });
+    }
+    setFocusBoardTaskId(task.id);
+  }
   const hiddenCompletedCount = useMemo(() => {
     if (filters.archive !== "active" || filters.status !== "all" || filters.query.trim()) return 0;
     return filterConciergeTasks(tasks, { ...filters, status: "completed" }, effectiveNow)
@@ -657,12 +701,12 @@ export function ConciergeTaskManager({
         <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-3 2xl:grid-cols-6")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
-            return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div></section>;
+            return <section key={status} data-testid={`task-column-${status}`} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div></section>;
           })}
         </div>
       ) : null}
 
-      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div> : null}
+      {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} parentTask={tasksById.get(task.parent_task_id ?? "")} subCount={subCounts.get(task.id)} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} onWorkflow={(item) => setWorkflowTaskId(item.id)} />)}</div> : null}
 
       {view === "timeline" ? <TaskTimeline tasks={filtered} lang={lang} now={effectiveNow} onOpen={onOpen} onStatusChange={onStatusChange} availableStatusesForTask={availableStatusesForTask} updatingTaskId={updatingTaskId} /> : null}
 
@@ -749,6 +793,7 @@ export function ConciergeTaskManager({
           </div>
         </div>
       ) : null}
+      {workflowTaskId ? <TaskWorkflowDialog key={workflowTaskId} rootId={workflowTaskId} tasks={tasks} lang={lang} busy={refreshing || Boolean(updatingTaskId || deletingTaskId || archivingTaskId)} availableStatusesForTask={availableStatusesForTask} onStatusChange={onStatusChange} onOpen={onOpen} onShowOnBoard={showOnBoard} onClose={() => setWorkflowTaskId(null)} /> : null}
     </section>
   );
 }

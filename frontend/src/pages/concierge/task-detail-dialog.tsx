@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   ArrowLeft,
   Building2,
-  CalendarClock,
   Cake,
   Check,
   ChevronDown,
@@ -23,6 +22,8 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,10 +81,13 @@ const copy = {
     unavailable: "Die Aufgabe wurde gelöscht oder ist nicht mehr verfügbar.",
     children: "Unteraufgaben und Termine",
     emptyChildren: "Noch keine Unteraufgaben oder Termine",
+    noMatchingChildren: "Keine Unteraufgaben oder Termine entsprechen den Filtern.",
     subtask: "Unteraufgabe",
     event: "Termin",
     parentTask: "Zur übergeordneten Aufgabe",
     title: "Titel",
+    type: "Typ",
+    code: "ID",
     period: "Zeitraum",
     start: "Beginn",
     end: "Ende / Frist",
@@ -176,10 +180,13 @@ const copy = {
     unavailable: "Задача удалена или больше недоступна.",
     children: "Подзадачи и события",
     emptyChildren: "Подзадач и событий пока нет",
+    noMatchingChildren: "Нет подзадач и событий, соответствующих фильтрам.",
     subtask: "Подзадача",
     event: "Событие",
     parentTask: "К основной задаче",
     title: "Название",
+    type: "Тип",
+    code: "ID",
     period: "Период",
     start: "Начало",
     end: "Окончание / срок",
@@ -323,6 +330,68 @@ function taskStatusClassName(status: ConciergeTask["status"]) {
     case "completed": return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300";
     case "cancelled": return "border-border bg-muted text-muted-foreground";
   }
+}
+
+function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: {
+  rows: ConciergeTask[];
+  parentId: string;
+  lang: Lang;
+  disabled: boolean;
+  onOpen?: (task: ConciergeTask) => void;
+  actions?: ReactNode;
+}) {
+  const labels = copy[lang];
+  const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
+  const dateCell = (value: string | null) => {
+    if (!value) return <span className="text-muted-foreground">—</span>;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return <span className="text-muted-foreground">—</span>;
+    return <Badge variant="outline" className="bg-muted/15 text-[10px] font-normal"><time dateTime={date.toISOString()}>{new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
+  };
+  const columns: ColumnDef<ConciergeTask>[] = [
+    {
+      id: "title", label: labels.title, accessor: task => localizeTaskTitle(task.title, lang), required: true, minWidth: 220,
+      render: task => <button type="button" className="block min-w-0 max-w-full truncate text-left font-medium text-primary hover:underline disabled:cursor-default disabled:text-foreground disabled:no-underline" title={localizeTaskTitle(task.title, lang)} disabled={disabled || !onOpen} onClick={event => { event.stopPropagation(); onOpen?.(task); }}>{localizeTaskTitle(task.title, lang)}</button>,
+    },
+    { id: "code", label: labels.code, accessor: conciergeTaskCode, width: 150, render: task => <span className="font-mono text-xs text-muted-foreground">{conciergeTaskCode(task)}</span> },
+    {
+      id: "kind", label: labels.type, accessor: task => task.kind, width: 115, filterType: "enum",
+      filterOptions: [{ value: "task", label: labels.subtask }, { value: "event", label: labels.event }],
+      render: task => <Badge variant="outline" className={task.kind === "event" ? "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300" : "border-primary/20 bg-primary/5 text-primary"}>{task.kind === "event" ? labels.event : labels.subtask}</Badge>,
+    },
+    {
+      id: "assignee", label: labels.assignee, accessor: task => task.assigned_to_name, width: 150,
+      render: task => <Badge variant="outline" className="min-w-0 max-w-full gap-1.5 bg-muted/15 text-[10px] font-normal text-muted-foreground" title={task.assigned_to_name || labels.noAssignee}><UserRound /><span className="truncate">{task.assigned_to_name || labels.noAssignee}</span></Badge>,
+    },
+    { id: "start", label: labels.start, accessor: task => task.starts_at, filterType: "date", width: 155, render: task => dateCell(task.starts_at) },
+    { id: "end", label: labels.end, accessor: task => task.kind === "event" ? task.ends_at : task.due_at, filterType: "date", width: 155, render: task => dateCell(task.kind === "event" ? task.ends_at : task.due_at) },
+    {
+      id: "status", label: labels.status, accessor: task => task.archived_at ? "archived" : task.status, width: 125, filterType: "enum",
+      filterOptions: [...statuses.map(value => ({ value, label: labels[value] })), { value: "archived", label: labels.archivedStatus }],
+      render: task => <Badge variant="outline" className={task.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(task.status)}>{task.archived_at ? labels.archivedStatus : labels[task.status]}</Badge>,
+    },
+  ];
+  return <section data-testid="task-children-table" className="min-w-0" aria-label={labels.children}>
+    <DataTableSurface
+      key={parentId}
+      rows={rows}
+      columns={columns}
+      rowId={task => task.id}
+      storageKey="tasks:children"
+      defaultHiddenColumns={["code"]}
+      defaultDensity="compact"
+      rowHeightOverrides={{ compact: 44 }}
+      pagination={{ pageSize: 10, resetKey: parentId }}
+      onRowClick={disabled ? undefined : onOpen}
+      mobilePrimaryColumnId="title"
+      mobileDetailColumnIds={["code", "kind", "assignee", "start", "end", "status"]}
+      toolbarStart={<>
+        <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-primary" />{labels.children}</h3>
+        {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+      </>}
+      emptyState={<p className="px-4 py-6 text-center text-xs text-muted-foreground">{rows.length ? labels.noMatchingChildren : labels.emptyChildren}</p>}
+    />
+  </section>;
 }
 
 function TaskDetailSection({
@@ -886,50 +955,19 @@ export function ConciergeTaskDetailDialog({
                 </Button>
               ) : null}
               {detail.item.kind === "task" && (onCreateChild || childTasks.length > 0) ? (
-                <TaskDetailSection
-                  title={labels.children}
-                  count={childTasks.length}
-                  action={onCreateChild && canCollaborate && !detail.item.archived_at && !["completed", "cancelled"].includes(detail.item.status) ? (
+                <TaskChildrenTable
+                  rows={childTasks}
+                  parentId={detail.item.id}
+                  lang={lang}
+                  disabled={busy || hasUnsavedChanges}
+                  onOpen={onOpenRelated}
+                  actions={onCreateChild && canCollaborate && !detail.item.archived_at && !["completed", "cancelled"].includes(detail.item.status) ? (
                     <>
                       <Button type="button" size="sm" className="h-8" disabled={busy || hasUnsavedChanges} onClick={() => onCreateChild(detail.item, "task")}><Plus />{labels.subtask}</Button>
                       <Button type="button" size="sm" className="h-8" disabled={busy || hasUnsavedChanges} onClick={() => onCreateChild(detail.item, "event")}><Plus />{labels.event}</Button>
                     </>
                   ) : undefined}
-                >
-                  {childTasks.length === 0 ? (
-                    <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChildren}</p>
-                  ) : (
-                    <div>
-                      <div aria-hidden="true" className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,1.1fr)_7rem] gap-3 border-b border-border/60 bg-muted/10 px-3.5 py-2 text-xs text-muted-foreground sm:grid">
-                        <span>{labels.title}</span><span>{labels.assignee}</span><span>{labels.period}</span><span>{labels.status}</span>
-                      </div>
-                      <div className="divide-y divide-border/60">
-                        {childTasks.map((task) => {
-                          const end = task.kind === "event" ? task.ends_at : task.due_at;
-                          const KindIcon = task.kind === "event" ? CalendarClock : ListChecks;
-                          return (
-                            <button key={task.id} type="button" className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3.5 py-3 text-left text-sm enabled:cursor-pointer enabled:hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,1.1fr)_7rem]" disabled={!onOpenRelated || busy || hasUnsavedChanges} onClick={() => onOpenRelated?.(task)}>
-                              <span className="col-span-2 flex min-w-0 items-start gap-2.5 sm:col-span-1">
-                                <KindIcon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", task.kind === "event" ? "text-sky-600 dark:text-sky-400" : "text-[var(--brand)]")} />
-                                <span className="min-w-0">
-                                  <span className="block break-words font-medium leading-snug">{localizeTaskTitle(task.title, lang)}</span>
-                                  <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground"><span className="font-mono">{conciergeTaskCode(task)}</span><span>{task.kind === "event" ? labels.event : labels.subtask}</span></span>
-                                </span>
-                              </span>
-                              <span className="flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground"><UserRound aria-hidden="true" className="size-3.5 shrink-0 sm:hidden" /><span className="break-words">{task.assigned_to_name || labels.noAssignee}</span></span>
-                              <span className="col-span-2 row-start-3 grid min-w-0 gap-1 text-xs tabular-nums text-muted-foreground sm:col-span-1 sm:row-auto">
-                                {task.starts_at ? <span className="break-words"><span>{labels.start}: </span>{dateTime(task.starts_at, lang)}</span> : null}
-                                {end ? <span className="break-words"><span>{labels.due}: </span>{dateTime(end, lang)}</span> : null}
-                                {!task.starts_at && !end ? labels.noDate : null}
-                              </span>
-                              <Badge variant="outline" className={cn("col-start-2 row-start-2 max-sm:justify-self-end sm:col-auto sm:row-auto", task.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(task.status))}>{task.archived_at ? labels.archivedStatus : labels[task.status]}</Badge>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </TaskDetailSection>
+                />
               ) : null}
               <TaskDetailSection title={labels.overview}>
                 <div className="divide-y divide-border/60">

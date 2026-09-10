@@ -2835,6 +2835,11 @@ async fn create_quote(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
         }
     };
+    let intake = match sqlx::query_scalar::<_,Uuid>("SELECT order_id FROM order_intakes WHERE order_id=$1 FOR UPDATE")
+        .bind(order_id).fetch_optional(&mut *tx).await {
+        Ok(value) => value.is_some(),
+        Err(e) => { tracing::error!(%e,"lock order intake quote"); return err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to prepare quote"); }
+    };
     let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
         Ok(items) if !items.is_empty() => items,
         Ok(_) => {
@@ -2865,6 +2870,20 @@ async fn create_quote(
     // Persist only the canonical order snapshot. Client-supplied lines are a
     // concurrency guard, not a second commercial source of truth.
     let line_items = persisted_line_items;
+
+    if intake {
+        let replay = sqlx::query_scalar::<_,Value>("SELECT to_jsonb(q) FROM quotes q WHERE order_id=$1 AND line_items=$2
+            AND valid_until IS NOT DISTINCT FROM $3 AND notes IS NOT DISTINCT FROM $4
+            AND q.id=(SELECT latest.id FROM quotes latest WHERE latest.order_id=$1 ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+            AND status NOT IN ('rejected','expired') ORDER BY created_at DESC,id DESC LIMIT 1")
+            .bind(order_id).bind(serde_json::to_value(&line_items).unwrap_or_default()).bind(valid_until).bind(&body.notes)
+            .fetch_optional(&mut *tx).await;
+        match replay {
+            Ok(Some(value)) => return Json(value).into_response(),
+            Ok(None) => {},
+            Err(e) => { tracing::error!(%e,"find prepared quote"); return err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to prepare quote"); }
+        }
+    }
 
     let totals = compute_quote_totals(&line_items);
     // Cash is read from the journal, never carried from a mutable quote flag.

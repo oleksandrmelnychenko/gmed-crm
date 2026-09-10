@@ -103,6 +103,40 @@ async function refresh(page: Page, type = "order.process_gates_updated") {
   })), {id:orderId, type});
 }
 
+for (const lang of ["ru", "de"]) {
+  test(`service economics table sorts numbers and preserves hidden margins in ${lang}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1720, height: 1120 });
+    const { economics, errors } = await prepare(page, lang);
+    economics.services = [
+      { order_leistung_id: "s1", name: "Visa Support", planned_revenue_net: "10", actual_revenue_net: "0", planned_partner_cost_net: "1", actual_partner_cost_net: "0", margin_net: "0" },
+      { order_leistung_id: "s2", name: "Beratung", planned_revenue_net: "2", actual_revenue_net: "0", planned_partner_cost_net: "1", actual_partner_cost_net: "0", margin_net: "0" },
+      { order_leistung_id: "s3", name: "Transfer", planned_revenue_net: "120", actual_revenue_net: "0", planned_partner_cost_net: null, actual_partner_cost_net: null, margin_net: null },
+    ];
+    await page.goto(`/orders/${orderId}`);
+    const section = page.getByTestId("order-economics-table");
+    const table = section.getByRole("table");
+    await expect(table.getByRole("columnheader")).toHaveCount(6);
+    await section.scrollIntoViewIfNeeded();
+    await table.locator('[role="columnheader"][data-column-id="planned_revenue_net"]').click();
+    await expect(table.locator('[role="row"][aria-rowindex="2"]')).toContainText("Beratung");
+    await expect(table).toContainText(lang === "ru" ? "Нельзя рассчитать" : "Nicht berechenbar");
+    await page.screenshot({ path: `../artifacts/design-qa/order-economics-table-${lang}-desktop.png`, animations: "disabled" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await section.scrollIntoViewIfNeeded();
+    const box = (await section.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: `../artifacts/design-qa/order-economics-table-${lang}-mobile.png`, animations: "disabled" });
+
+    economics.margin_visible = false;
+    await page.setViewportSize({ width: 1720, height: 1120 });
+    await page.reload();
+    await expect(table.getByRole("columnheader")).toHaveCount(3);
+    await section.getByRole("button", { name: lang === "ru" ? /Колонки/ : /Spalten/ }).click();
+    await expect(section.getByRole("menuitemcheckbox")).toHaveCount(3);
+    expect(errors).toEqual([]);
+  });
+}
+
 test("orders list loads patient context on the first request and shows delayed rows", async ({page}) => {
   const {order, errors} = await prepare(page);
   const requests: string[] = [];

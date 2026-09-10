@@ -6744,7 +6744,7 @@ async fn list_patient_orders(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT id, order_number, phase, status, needs_description, created_at,
+        r#"SELECT id, order_number, phase, status, intake_state, needs_description, created_at,
                   total_estimated, total_actual, currency, date_from, date_to,
                   signed_patient, signed_agency, signed_at
            FROM orders
@@ -6768,6 +6768,7 @@ async fn list_patient_orders(
             serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                "intake_state": row.try_get::<String, _>("intake_state").unwrap_or_else(|_| "legacy".into()),
                 "phase": row.try_get::<String, _>("phase").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "needs_description": row.try_get::<Option<String>, _>("needs_description").unwrap_or_default(),
@@ -10018,7 +10019,7 @@ pub(crate) async fn has_patient_access(
     has_baseline_patient_access(state, auth, patient_id).await
 }
 
-async fn has_patient_edit_access(
+pub(crate) async fn has_patient_edit_access(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,

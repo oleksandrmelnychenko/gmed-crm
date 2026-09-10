@@ -7,7 +7,8 @@
 # startup or the external health check fails. This path is intentionally DEV
 # only; production continues to use signed, digest-pinned release images.
 # An optional second argument supplies four signed DEV image pins instead of
-# building on the host. Both modes rehearse migrations on a backup clone first.
+# building on the host. Migrations normally rehearse on a backup clone first;
+# GMED_DEV_MIGRATION_MODE=direct applies them on DEV startup without a clone.
 # The publisher runs this entire script under /home/gmed/deploy/deploy.lock.
 # Direct callers must acquire that same lock before building shared image tags.
 
@@ -23,6 +24,11 @@ RELEASE_ENV="${RELEASE_ENV:-$REPO_DIR/release.env}"
 CADDY_HOSTNAME_VALUE="${CADDY_HOSTNAME_VALUE:-console-dev.gmed-health.com}"
 GMED_CORS_ORIGIN_VALUE="${GMED_CORS_ORIGIN_VALUE:-https://console-dev.gmed-health.com,https://localhost,capacitor://localhost}"
 HEALTH_URL="${HEALTH_URL:-https://console-dev.gmed-health.com/health}"
+GMED_DEV_MIGRATION_MODE="${GMED_DEV_MIGRATION_MODE:-rehearse}"
+case "$GMED_DEV_MIGRATION_MODE" in
+  rehearse|direct) ;;
+  *) echo "ERROR: invalid DEV migration mode." >&2; exit 1 ;;
+esac
 LOG_FILE="${LOG_FILE:-$DEPLOY_DIR/deploy-dev-current.log}"
 # DEV uses dev-fast with one Cargo job instead of release/LTO. Retain the RAM
 # guard and OCR recovery even with the lower-memory compiler profile.
@@ -373,16 +379,24 @@ else
   unset COMPOSE_BAKE
 fi
 
-# Always rehearse against a fresh backup, including the fast source-build path.
-# The live database is changed only by the new backend after this succeeds.
+# Direct mode retains a backup file but creates no temporary databases.
+# The new backend applies pending migrations to DEV during startup.
 (
   export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   POSTGRES_USER="$(docker exec gmed-postgres printenv POSTGRES_USER)"
   POSTGRES_PASSWORD="$(docker exec gmed-postgres printenv POSTGRES_PASSWORD)"
   POSTGRES_DB="$(docker exec gmed-postgres printenv POSTGRES_DB)"
-  python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py" \
-    --migrations "$STAGING_DIR/migrations" \
-    --backup-dir "$BACKUP_DIR/database-$STAMP"
+  if [[ "$GMED_DEV_MIGRATION_MODE" == "direct" ]]; then
+    echo "DEV migrations: direct application on backend startup; no database clone."
+    umask 077
+    mkdir -p "$BACKUP_DIR/database-$STAMP"
+    docker exec gmed-postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc \
+      > "$BACKUP_DIR/database-$STAMP/database-before-upgrade.dump"
+  else
+    python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py" \
+      --migrations "$STAGING_DIR/migrations" \
+      --backup-dir "$BACKUP_DIR/database-$STAMP"
+  fi
 )
 prepare_upload_volume "$STAGING_DIR"
 

@@ -122,8 +122,12 @@ async fn upload_provider_document(
     if let Err(response) = require_provider_document_upload_role(&auth) {
         return response;
     }
-    let provider_name = match sqlx::query_scalar::<_, String>(
-        "SELECT name FROM providers WHERE id = $1",
+    let (provider_name, is_hotel) = match sqlx::query_as::<_, (String, bool)>(
+        "SELECT provider.name, provider.provider_type = 'non_medical' AND EXISTS (
+            SELECT 1 FROM provider_taxonomy_assignments assignment
+            JOIN provider_taxonomy_nodes taxonomy ON taxonomy.id = assignment.taxonomy_node_id
+            WHERE assignment.provider_id = provider.id AND taxonomy.code = 'nonmedical_hotels'
+         ) AS is_hotel FROM providers provider WHERE provider.id = $1",
     )
     .bind(provider_id)
     .fetch_optional(&state.db)
@@ -183,6 +187,9 @@ async fn upload_provider_document(
     let Some((file_name, claimed_mime, data)) = file else {
         return err(StatusCode::BAD_REQUEST, "No file uploaded");
     };
+    if !provider_document_upload_scope_allowed(auth.role, is_hotel, patient_id, is_medical) {
+        return err(StatusCode::FORBIDDEN, "Concierge can upload general hotel documents only");
+    }
     if is_medical && patient_id.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -314,9 +321,32 @@ fn require_provider_document_view_role(auth: &AuthUser) -> Result<(), axum::resp
 
 #[allow(clippy::result_large_err)]
 fn require_provider_document_upload_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin, Role::Concierge])
+}
+
+fn provider_document_upload_scope_allowed(role: Role, is_hotel: bool, patient_id: Option<Uuid>, is_medical: bool) -> bool {
+    role != Role::Concierge || (is_hotel && patient_id.is_none() && !is_medical)
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
+}
+
+#[cfg(test)]
+mod hotel_access_tests {
+    use super::*;
+
+    #[test]
+    fn concierge_uploads_only_general_hotel_documents() {
+        assert!(provider_document_upload_scope_allowed(Role::Concierge, true, None, false));
+        for (hotel, patient, medical) in [
+            (false, None, false),
+            (true, Some(Uuid::nil()), false),
+            (true, None, true),
+            (true, Some(Uuid::nil()), true),
+        ] {
+            assert!(!provider_document_upload_scope_allowed(Role::Concierge, hotel, patient, medical));
+        }
+        assert!(provider_document_upload_scope_allowed(Role::PatientManager, false, Some(Uuid::nil()), true));
+    }
 }

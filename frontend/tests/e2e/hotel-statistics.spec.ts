@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { emptyBreakfast, type HotelDirectoryItem, type HotelStay } from "../../src/pages/reports/hotels/model";
 import { breakfastCopy } from "../../src/pages/reports/hotels/breakfast-copy";
 import { createHotelCopy } from "../../src/pages/reports/hotels/copy";
+import type { HotelBreakfastTerms } from "../../src/pages/reports/hotels/hotel-breakfast-terms";
 
 async function chooseBreakfast(page: Page, editor: Locator, mode: HotelStay["breakfast_mode"], lang: "ru" | "de" = "ru") {
   await editor.getByRole("combobox", { name: breakfastCopy[lang].edit, exact: true }).click();
@@ -28,11 +29,18 @@ async function setup(page: Page, lang: "ru" | "de", role = "ceo") {
   await page.clock.install({ time: new Date("2026-09-10T12:00:00Z") });
   await page.addInitScript(language => { localStorage.setItem("gmed_lang", language); localStorage.setItem("gmed_access_token", "hotel-statistics-test"); localStorage.setItem("gmed_refresh_token", "hotel-statistics-refresh"); }, lang);
   await page.routeWebSocket("**/api/**", socket => socket.close());
-  const state = { rows: fixtures(), directory: [] as HotelDirectoryItem[], fail: false, failRead: false, failTaxonomy: false, providerCreates: 0, mutations: 0, documentUploads: 0, documents: [] as { id: string; auto_name: string; original_filename: string; created_at: string; notes: string | null }[] };
+  const state = { rows: fixtures(), directory: [] as HotelDirectoryItem[], hotelTerms: {} as Record<string, HotelBreakfastTerms>, fail: false, failRead: false, failTaxonomy: false, providerCreates: 0, mutations: 0, documentUploads: 0, documents: [] as { id: string; auto_name: string; original_filename: string; created_at: string; notes: string | null }[] };
   await page.route("**/api/v1/**", async route => {
     const url = new URL(route.request().url()), path = url.pathname.replace("/api/v1", "");
     if (path === "/me") return route.fulfill({ json: { id: "tester", name: "Test Manager", email: "test@example.test", role } });
     if (path === "/stats/reports/hotels/directory") return route.fulfill({ json: state.directory });
+    if (path.endsWith("/breakfast-terms")) {
+      if (route.request().method() === "PUT") {
+        if (state.fail) return route.fulfill({ status: 500, json: { error: "Test save failed" } });
+        state.hotelTerms[path] = { ...route.request().postDataJSON(), updated_at: "2026-09-10T12:00:00Z" };
+      }
+      return route.fulfill({ json: state.hotelTerms[path] ?? {} });
+    }
     if (path === "/providers/taxonomy") {
       expect(url.searchParams.get("provider_type")).toBe("non_medical");
       if (state.failTaxonomy) return route.fulfill({ status: 503, json: { error: "Test unavailable" } });
@@ -85,13 +93,16 @@ async function setup(page: Page, lang: "ru" | "de", role = "ceo") {
 }
 
 for (const lang of ["ru", "de"] as const) {
-  test(`hotel statistics charts, shared filters, export and responsive layout in ${lang}`, async ({ page }) => {
+  test(`hotel statistics charts, compact filters, standard table and responsive layout in ${lang}`, async ({ page }) => {
     await page.setViewportSize({ width: 1720, height: 1120 });
     await setup(page, lang);
     const failures: string[] = []; page.on("pageerror", error => failures.push(error.message));
     await page.goto("/hotels");
     await expect(page.getByTestId("hotel-kpis").getByText("200", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("hotel-table").locator("tbody tr")).toHaveCount(6);
+    await expect(page.getByTestId("hotel-table").getByRole("table")).toHaveAttribute("aria-rowcount", "6");
+    await expect(page.getByRole("button", { name: lang === "ru" ? "Экспорт CSV" : "CSV exportieren", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: lang === "ru" ? "Обновить" : "Aktualisieren", exact: true })).toHaveCount(0);
+    expect((await page.getByTestId("hotel-filters").boundingBox())!.height).toBeLessThan(90);
     await expect(page.getByTestId("hotel-trend").locator(".recharts-bar-rectangle").first()).toBeVisible();
     await expect(page.getByTestId("hotel-ranking").locator(".recharts-bar-rectangle").first()).toBeVisible();
     await page.screenshot({ path: `../artifacts/design-qa/hotel-statistics-${lang}-desktop.png`, fullPage: true });
@@ -101,16 +112,10 @@ for (const lang of ["ru", "de"] as const) {
     await page.getByTestId("hotel-table").scrollIntoViewIfNeeded();
     await page.screenshot({ path: `../artifacts/design-qa/hotel-statistics-${lang}-table.png` });
     await chooseFilter(page, lang === "ru" ? "Гостиница" : "Hotel", "Hotel Lindenhof");
-    await expect(page.getByTestId("hotel-table").locator("tbody tr")).toHaveCount(1);
+    await expect(page.getByTestId("hotel-table").getByRole("table")).toHaveAttribute("aria-rowcount", "1");
     await expect(page.getByTestId("hotel-kpis").getByText("34", { exact: true })).toBeVisible();
-    const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: lang === "ru" ? "Экспорт CSV" : "CSV exportieren" }).click();
-    const download = await downloadPromise;
-    expect(download.suggestedFilename()).toBe("hotels-2026-01-01-2026-12-31-EUR.csv");
-    const stream = await download.createReadStream(); let text = ""; for await (const chunk of stream!) text += chunk.toString();
-    expect(text).toContain("Hotel Lindenhof"); expect(text).not.toContain("City Residence");
     await page.getByRole("button", { name: lang === "ru" ? "Сбросить фильтры" : "Filter zurücksetzen" }).click();
-    await expect(page.getByTestId("hotel-table").locator("tbody tr")).toHaveCount(6);
+    await expect(page.getByTestId("hotel-table").getByRole("table")).toHaveAttribute("aria-rowcount", "6");
     await chooseFilter(page, lang === "ru" ? "Валюта" : "Währung", "USD");
     await expect(page.getByTestId("hotel-kpis").getByText("1", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: lang === "ru" ? "Сбросить фильтры" : "Filter zurücksetzen" }).click();
@@ -129,10 +134,10 @@ for (const lang of ["ru", "de"] as const) {
   });
 }
 
-for (const lang of ["ru", "de"] as const) {
-  test(`header creates a hotel without bookings and retains it after reload in ${lang}`, async ({ page }) => {
+for (const [lang, role] of [["ru", "ceo"], ["de", "patient_manager"], ["ru", "concierge"]] as const) {
+  test(`header creates a hotel without bookings and retains it after reload in ${lang} as ${role}`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    const state = await setup(page, lang, lang === "ru" ? "ceo" : "patient_manager"), labels = createHotelCopy[lang];
+    const state = await setup(page, lang, role), labels = createHotelCopy[lang];
     state.rows = [];
     await page.goto("/hotels");
     await page.locator("header").getByRole("button", { name: labels.add, exact: true }).click();
@@ -171,6 +176,42 @@ for (const lang of ["ru", "de"] as const) {
   });
 }
 
+test("concierge saves general hotel breakfast terms without rewriting stays or payments", async ({ page }) => {
+  const state = await setup(page, "ru", "concierge");
+  const original = JSON.stringify(state.rows);
+  await page.goto("/hotels");
+  const hotelRow = page.getByTestId("hotel-table").getByRole("row").filter({ has: page.getByRole("button", { name: "Hotel Lindenhof", exact: true }) });
+  await hotelRow.getByRole("cell").nth(1).click();
+  const terms = page.getByTestId("hotel-breakfast-terms");
+  await terms.getByRole("button", { name: "Изменить условия", exact: true }).click();
+  await chooseFilter(page, "Условия гостиницы", "Гостиница предлагает за доплату");
+  await terms.getByRole("textbox", { name: "Цена за человека / завтрак", exact: true }).fill("12,50");
+  await terms.getByRole("textbox", { name: "Условия и примечания", exact: true }).fill("07:00–10:00, per person");
+  state.fail = true;
+  await terms.getByRole("button", { name: "Сохранить условия", exact: true }).click();
+  await expect(terms.getByRole("alert")).toBeVisible();
+  await expect(terms.getByRole("textbox", { name: "Цена за человека / завтрак", exact: true })).toHaveValue("12,50");
+  await page.getByTestId("hotel-detail-dialog").locator("footer").getByRole("button", { name: "Закрыть", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Отмена", exact: true }).click();
+  state.fail = false;
+  await terms.getByRole("button", { name: "Сохранить условия", exact: true }).click();
+  await expect(terms.getByRole("status")).toHaveText("Условия сохранены");
+  expect(state.hotelTerms["/stats/reports/hotels/hotel-0/breakfast-terms"].price_per_person).toBe("12.50");
+  expect(JSON.stringify(state.rows)).toBe(original);
+  await page.screenshot({ path: "../artifacts/design-qa/hotel-profile-breakfast-terms.png" });
+  await page.reload();
+  await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
+  await expect(terms.getByText("07:00–10:00, per person", { exact: true })).toBeVisible();
+  await terms.getByRole("button", { name: "Изменить условия", exact: true }).click();
+  await chooseFilter(page, "Условия гостиницы", "Включён в стоимость проживания");
+  await terms.getByRole("button", { name: "Сохранить условия", exact: true }).click();
+  await expect(terms.getByRole("status")).toHaveText("Условия сохранены");
+  expect(state.hotelTerms["/stats/reports/hotels/hotel-0/breakfast-terms"].price_per_person).toBeNull();
+  expect(state.hotelTerms["/stats/reports/hotels/hotel-0/breakfast-terms"].currency).toBeNull();
+  expect(JSON.stringify(state.rows)).toBe(original);
+});
+
 test("hotel creation waits for the correct provider type and recovers from taxonomy failure", async ({ page }) => {
   const state = await setup(page, "ru"); state.failTaxonomy = true;
   await page.goto("/hotels");
@@ -186,9 +227,10 @@ test("hotel creation waits for the correct provider type and recovers from taxon
 });
 
 test("room count persists, recalculates the report and a failed save stays recoverable", async ({ page }) => {
-  const state = await setup(page, "ru");
+  const state = await setup(page, "ru", "concierge");
   await page.goto("/hotels");
-  await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
+  const hotelRow = page.getByTestId("hotel-table").getByRole("row").filter({ has: page.getByRole("button", { name: "Hotel Lindenhof", exact: true }) });
+  await hotelRow.getByRole("cell").nth(1).click();
   const dialog = page.getByRole("dialog");
   const editor = dialog.getByRole("spinbutton", { name: "Номеров stay-0", exact: true });
   await editor.fill("2"); state.fail = true;
@@ -270,9 +312,9 @@ test("empty, unavailable and read-only states are explicit", async ({ page }) =>
   await page.getByTestId("hotel-detail-dialog").locator("footer").getByRole("button", { name: "Закрыть", exact: true }).click();
   await page.getByLabel("Поиск гостиницы или города", { exact: true }).fill("missing hotel");
   await expect(page.getByText("Нет бронирований по выбранным фильтрам", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Экспорт CSV" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Экспорт CSV" })).toHaveCount(0);
   state.fail = true;
-  await page.getByRole("button", { name: "Обновить", exact: true }).click();
+  await page.getByRole("button", { name: "Применить период", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Не удалось загрузить статистику гостиниц");
   await expect(page.getByTestId("hotel-kpis")).toHaveCount(0);
   await page.screenshot({ path: "../artifacts/design-qa/hotel-statistics-load-error.png" });
@@ -285,13 +327,13 @@ test("empty, unavailable and read-only states are explicit", async ({ page }) =>
 for (const lang of ["ru", "de"] as const) {
   test(`standalone hotels screen saves breakfast conditions and hotel contract files in ${lang}`, async ({ page }) => {
     await page.setViewportSize({ width: 1560, height: 1120 });
-    const state = await setup(page, lang);
+    const state = await setup(page, lang, lang === "ru" ? "concierge" : "ceo");
     const ru = lang === "ru";
     await page.goto("/reports/hotels");
     await expect(page).toHaveURL(/\/hotels$/);
     await expect(page.getByRole("link", { name: ru ? "Гостиницы" : "Hotels", exact: true })).toHaveAttribute("href", "/hotels");
     await chooseFilter(page, ru ? "Завтраки" : "Frühstück", breakfastCopy[lang].unknown);
-    await expect(page.getByTestId("hotel-table").locator("tbody tr")).toHaveCount(1);
+    await expect(page.getByTestId("hotel-table").getByRole("table")).toHaveAttribute("aria-rowcount", "1");
     await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
     const trigger = page.getByTestId("breakfast-stay-0").getByRole("button");
     const row = page.getByTestId("hotel-stays-table").locator("tbody tr:visible").first();
@@ -322,7 +364,7 @@ for (const lang of ["ru", "de"] as const) {
     expect(state.rows[0].breakfast_total).toBe("32.50"); expect(state.rows[0].breakfast_currency).toBe("EUR");
     expect(state.rows[0].actual_cost).toBeNull(); expect(state.rows[0].cost_estimate).toBe("220");
     // The modal remains open even though the saved stay no longer matches the unknown filter.
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.getByTestId("hotel-detail-dialog")).toBeVisible();
     const docs = page.getByTestId("hotel-documents");
     await docs.getByRole("button", { name: ru ? "Добавить файл" : "Datei hinzufügen", exact: true }).click();
     await docs.locator('input[type="file"]').setInputFiles({ name: "bad.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ") });

@@ -3,12 +3,12 @@
 The standalone staff screen is `/hotels`, with its own Hotels entry in the CRM
 sidebar. The earlier `/reports/hotels` address redirects to `/hotels`. It uses
 `GET /api/v1/stats/reports/hotels?from=YYYY-MM-DD&to=YYYY-MM-DD`.
-CEO, CEO assistant and Billing can read the complete report. Patient managers
+CEO, CEO assistant, Billing and Concierge can read the complete hotel report. Patient managers
 see bookings for their currently assigned patients. CEO assistant is read-only.
 
 The header's Add hotel action uses the standard provider creation API with the
 non-medical type and the active `nonmedical_hotels` taxonomy node fixed in the form.
-CEO and PatientManager may create; other reporting roles retain read-only directory
+CEO, PatientManager and Concierge may create; other reporting roles retain read-only directory
 access. The form keeps entered details after a failed save and requires a valid
 hotel taxonomy before submitting. Successful creation opens the hotel's documents.
 `GET /api/v1/stats/reports/hotels/directory` lists active hotel providers independently
@@ -70,6 +70,21 @@ task cannot create a second report identity.
 
 ## Breakfasts and contracts
 
+The hotel profile opens by clicking any table row. The hotel list uses the shared
+DataTableSurface (column controls, sorting, filtering, pagination and mobile cards).
+Page filters use compact widths and a single wrapping toolbar; the header contains
+only Add hotel. The former report refresh and summary export actions are removed.
+
+Hotel-wide breakfast terms are separate from actual stay breakfast records.
+`GET/PUT /api/v1/stats/reports/hotels/{id}/breakfast-terms` stores unknown, included,
+extra, or unavailable; optional price per person per breakfast, its currency, and
+notes. CEO, PatientManager and Concierge can edit. Reporting roles can read.
+The server requires a non-medical hotel provider, validates the mode/price/currency,
+and patches only `providers.taxonomy_attributes.hotel_breakfast_terms`, recording
+editor/time while preserving other attributes. Included/unavailable breakfast has
+no extra price. Changing hotel terms never rewrites past or future stay records,
+adds charges, or posts payments. No additional migration is needed for these terms.
+
 Migration `20260910220000_hotel_breakfast_details.sql` adds breakfast conditions to
 the same booking metadata. `PUT /api/v1/stats/reports/hotels/{service|task}/{id}/breakfast`
 uses the same source and assignment scope as room counts. It stores the arrangement
@@ -93,7 +108,12 @@ The hotel detail view attaches general contracts/tariffs through the existing
 documents have no patient association and are selected server-side using
 `general_only=true`, excluding patient and medical documents. The encrypted document
 store, file content validation, scan policy and existing role permissions apply.
-CEO/PatientManager may upload, Billing may read; CEOAssistant does not gain document
+CEO/PatientManager may upload, Billing may read; Concierge may upload and download
+general hotel contracts. The Concierge grant requires a non-medical hotel provider
+with `nonmedical_hotels` taxonomy, no patient association and a non-medical file;
+download additionally requires no lead/order/appointment association and respects
+explicit document ACLs. Other provider/medical document permissions are unchanged.
+CEOAssistant does not gain document
 access from access to statistics. A vendor-only booking needs a real provider selected
 before attaching hotel-wide documents. Hotel contracts are independent of the report
 period and shared across stays at that provider. No duplicate storage system exists.
@@ -102,6 +122,9 @@ PatientManager and Billing: exact provider-document type, existing provider link
 no patient/lead/order/appointment and non-medical. It still evaluates explicit ACLs.
 This fixes the mismatch between the provider list/upload role contract and the
 patient-assignment/internal-document download boundary.
+
+Concierge may also edit room counts and breakfast details for the complete hotel
+cohort. This hotel workflow does not grant access to other financial workspaces.
 
 ## Verification and rollout
 

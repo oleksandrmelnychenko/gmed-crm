@@ -294,7 +294,7 @@ struct CaseHistoryQuery {
     limit: Option<i64>,
 }
 
-fn gen_case_id(seq: i64) -> String {
+pub(crate) fn gen_case_id(seq: i64) -> String {
     let now = chrono::Utc::now();
     format!("C-{}-{:04}", now.format("%Y%m%d"), seq)
 }
@@ -2713,7 +2713,7 @@ async fn version_log(
     .await;
 }
 
-async fn load_case_retention_years(state: &AppState, default: i64) -> i64 {
+pub(crate) async fn load_case_retention_years(state: &AppState, default: i64) -> i64 {
     match sqlx::query(r#"SELECT value::TEXT AS value_text FROM system_settings WHERE key = $1"#)
         .bind("clinical_case_retention_years")
         .fetch_optional(&state.db)

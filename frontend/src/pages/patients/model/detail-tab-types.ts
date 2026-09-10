@@ -12,6 +12,7 @@ export type CaseItem = {
 export type OrderItem = {
   id: string;
   order_number: string;
+  intake_state?: "legacy" | "draft" | "confirmed";
   phase: string;
   status: string;
   needs_description?: string | null;

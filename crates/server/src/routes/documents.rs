@@ -9923,6 +9923,14 @@ async fn fetch_document_row(
                    AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
                    AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
                     AS general_provider_document,
+                  EXISTS (
+                    SELECT 1 FROM provider_document_links hotel_link
+                    JOIN providers hotel_provider ON hotel_provider.id = hotel_link.provider_id
+                    JOIN provider_taxonomy_assignments hotel_assignment ON hotel_assignment.provider_id = hotel_provider.id
+                    JOIN provider_taxonomy_nodes hotel_taxonomy ON hotel_taxonomy.id = hotel_assignment.taxonomy_node_id
+                    WHERE hotel_link.document_id = d.id AND hotel_provider.provider_type = 'non_medical'
+                      AND hotel_taxonomy.code = 'nonmedical_hotels'
+                  ) AS hotel_provider_link,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -10665,9 +10673,11 @@ pub(crate) fn can_view_document_row(
     // Match the provider-document view contract for general commercial files.
     // There is no patient to assign, and Billing must be able to read contracts
     // stored as internal documents. Explicit document ACLs are checked by callers.
-    if matches!(auth.role, Role::PatientManager | Role::Billing)
-        && row.try_get::<bool, _>("general_provider_document").unwrap_or(false)
-    {
+    if can_view_general_provider_document(
+        auth.role,
+        row.try_get::<bool, _>("general_provider_document").unwrap_or(false),
+        row.try_get::<bool, _>("hotel_provider_link").unwrap_or(false),
+    ) {
         return true;
     }
     let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
@@ -10699,6 +10709,27 @@ pub(crate) fn can_view_document_row(
         share_status: Some(share_status),
     })
     .allowed
+}
+
+fn can_view_general_provider_document(role: Role, general: bool, hotel: bool) -> bool {
+    general && (matches!(role, Role::PatientManager | Role::Billing) || (role == Role::Concierge && hotel))
+}
+
+#[cfg(test)]
+mod hotel_access_tests {
+    use super::*;
+
+    #[test]
+    fn concierge_contract_access_requires_general_document_and_hotel_link() {
+        assert!(can_view_general_provider_document(Role::Concierge, true, true));
+        assert!(!can_view_general_provider_document(Role::Concierge, true, false));
+        assert!(!can_view_general_provider_document(Role::Concierge, false, true));
+        for role in [Role::Patient, Role::Interpreter, Role::Sales, Role::CeoAssistant] {
+            assert!(!can_view_general_provider_document(role, true, true));
+        }
+        assert!(can_view_general_provider_document(Role::Billing, true, false));
+        assert!(can_view_general_provider_document(Role::PatientManager, true, false));
+    }
 }
 
 fn can_review_document_intake_row(
@@ -11094,7 +11125,7 @@ pub(crate) async fn persist_document_file(
                 document_date, source_person, source_institution, addressee_person,
                 addressee_institution, financial_status, payment_due_date, payment_date,
                 payment_method, version_root_document_id, replaces_document_id,
-                version_number, uploaded_by, document_number
+                version_number, uploaded_by, document_number, order_intake_context
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
                 $8, $9, $10, $11, $12, $13, $14,
@@ -11103,7 +11134,7 @@ pub(crate) async fn persist_document_file(
                 $22, $23, $24, $25,
                 $26, $27, $28, $29,
                 $30, $31, $32, $33,
-                $34, $35, $36, $37, $38, $39
+                $34, $35, $36, $37, $38, $39, $40
            )"#,
     )
     .bind(document_id)
@@ -11145,6 +11176,7 @@ pub(crate) async fn persist_document_file(
     .bind(input.version_number)
     .bind(input.uploaded_by)
     .bind(input.document_number)
+    .bind(input.generated_bindings.and_then(|bindings| bindings.get("_order_intake_context")))
     .execute(&state.db)
     .await
     {
@@ -12089,6 +12121,32 @@ async fn generate_document(
         );
     }
 
+    // Keep concurrent retries for one intake serialized until the document is
+    // stored. This is a distinct advisory lock, so PDF generation can still
+    // use its regular database connections without blocking intake row locks.
+    let mut intake_generation_guard = if let Some(id) = order_id {
+        match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM order_intakes WHERE order_id=$1)")
+            .bind(id).fetch_one(&state.db).await {
+            Ok(true) => {
+                let mut guard = match state.db.begin().await {
+                    Ok(guard) => guard,
+                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare document generation"),
+                };
+                if sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+                    .bind(format!("order-intake-pdf:{id}"))
+                    .execute(&mut *guard).await.is_err() {
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare document generation");
+                }
+                Some(guard)
+            },
+            Ok(false) => None,
+            Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order preparation"),
+        }
+    } else { None };
+    let intake_context = match super::order_intakes::document_context(&state, order_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let patient_uuid = patient_id.unwrap_or_else(Uuid::nil);
 
     let patient_row = if let Some(patient_uuid) = patient_id {
@@ -12226,6 +12284,27 @@ async fn generate_document(
         );
     }
 
+    if let (Some(context), Some(guard)) = (intake_context.as_ref(), intake_generation_guard.as_mut()) {
+        let existing = sqlx::query_scalar::<_, serde_json::Value>(
+            "SELECT jsonb_build_object('ok',true,'id',id,'document_number',document_number,
+                'auto_name',auto_name,'original_filename',original_filename,'mime_type',mime_type,
+                'file_size',file_size,'language',document_language,'generated_template_id',generated_template_id,
+                'version_number',version_number,'version_root_document_id',version_root_document_id,
+                'replaces_document_id',replaces_document_id,'reused',true)
+             FROM documents d WHERE order_id=$1 AND order_intake_context=$2
+                AND generated_template_id=$3 AND document_language=$4
+                AND status<>'archived' AND file_deleted_at IS NULL
+                AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)
+             ORDER BY created_at DESC,id DESC LIMIT 1")
+            .bind(order_id).bind(context).bind(template.id).bind(language)
+            .fetch_optional(&mut **guard).await;
+        match existing {
+            Ok(Some(document)) => return Json(document).into_response(),
+            Ok(None) => {},
+            Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to check existing document version"),
+        }
+    }
+
     let order_number = if let Some(order_uuid) = order_id {
         match sqlx::query_scalar::<_, String>("SELECT order_number FROM orders WHERE id = $1")
             .bind(order_uuid)
@@ -12337,6 +12416,42 @@ async fn generate_document(
         .map(ToOwned::to_owned);
 
     let mut bindings = body.bindings.clone().unwrap_or_default();
+    if let Some(context) = &intake_context {
+        if body.manual_text.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, "Edit order preparation before generating its documents");
+        }
+        // Order preparation is the authoritative source. Arbitrary preview
+        // overrides must not acquire a matching confirmation context.
+        bindings = DocumentBindingOverrides::default();
+        let data = &context["data"];
+        bindings.period_from = data["date_from"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok());
+        bindings.period_to = data["date_to"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok());
+        bindings.examination_purpose = data["needs_description"].as_str().map(str::to_owned);
+        if template.id == "enhanced_due_diligence" {
+            let f = &data["facts"];
+            let review = &data["aml_review"];
+            let existing = &context["aml"];
+            bindings.aml_enhanced_due_diligence = Some(AmlEnhancedDueDiligenceBindings {
+                internal_risk_analysis: existing["internalRiskAnalysis"] == true,
+                high_risk_country_transaction: existing["highRiskCountryTransaction"] == true,
+                high_risk_country_resident: existing["highRiskCountryResident"] == true,
+                unusual_complex_or_large: existing["unusualComplexOrLarge"] == true,
+                unusual_pattern: existing["unusualPattern"] == true,
+                no_lawful_purpose: existing["noLawfulPurpose"] == true,
+                individual_review: true,
+                pep_contract_partner: f["pep_contract_partner"] == true,
+                pep_beneficial_owner: f["pep_beneficial_owner"] == true,
+                pep_office_function: f["pep_office"].as_str().map(str::to_owned),
+                pep_asset_origin: f["pep_asset_origin"].as_str().map(str::to_owned),
+                risk_reason: review["risk_reason"].as_str().map(str::to_owned),
+                manager_approval_name: review["manager_approval_name"].as_str().map(str::to_owned),
+                continuous_monitoring: review["continuous_monitoring"].as_str().map(str::to_owned),
+                reviewer_name: review["reviewer_name"].as_str().map(str::to_owned),
+                review_date: review["review_date"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok()),
+                ..Default::default()
+            });
+        }
+    }
     for line in &mut bindings.service_lines {
         if let Some(items) = line.description_items.take() {
             line.description_items = match crate::service_description::normalize_items(items) {
@@ -12380,7 +12495,10 @@ async fn generate_document(
             }
         }
     }
-    let generated_bindings_snapshot = generated_binding_snapshot(&bindings);
+    let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
+    if let Some(context) = &intake_context {
+        generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] = context.clone();
+    }
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -13887,6 +14005,13 @@ async fn generate_document(
         uploaded_by: auth.user_id,
     };
 
+    if intake_context.is_some() {
+        match super::order_intakes::document_context(&state, order_id).await {
+            Ok(current) if current == intake_context => {},
+            Ok(_) => return err(StatusCode::CONFLICT, "Order changed during document generation. Generate a new version."),
+            Err(response) => return response,
+        }
+    }
     let (document_id, file_size, original_filename, storage_key) =
         match persist_document_file(&state, &pdf_bytes, &persist_input).await {
             Ok(value) => value,

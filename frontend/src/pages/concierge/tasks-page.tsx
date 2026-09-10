@@ -5,7 +5,7 @@ import { LoaderCircle, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { PageHeader } from "@/components/ui-shell";
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
@@ -46,6 +46,7 @@ const copy = {
     loading: "Aufgabenmanager wird geladen",
     loadFailed: "Der Aufgabenmanager konnte nicht geladen werden.",
     updateFailed: "Die Aufgabe konnte nicht aktualisiert werden.",
+    statusConflict: "Die Aufgabe wurde inzwischen geändert. Die Liste wird aktualisiert; versuchen Sie es erneut.",
     deleteTitle: "Aufgabe löschen?",
     deleteMessage: "Die Aufgabe wird aus dem Aufgabenmanager entfernt. Der Audit-Verlauf bleibt erhalten.",
     delete: "Löschen",
@@ -63,6 +64,7 @@ const copy = {
     loading: "Загрузка менеджера задач",
     loadFailed: "Не удалось загрузить менеджер задач.",
     updateFailed: "Не удалось обновить задачу.",
+    statusConflict: "Задача уже изменена. Обновляем список; повторите действие.",
     deleteTitle: "Удалить задачу?",
     deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
     delete: "Удалить",
@@ -122,7 +124,7 @@ export function ConciergeTaskManagerPage() {
     setVersion((current) => current + 1);
   }, []);
 
-  useTaskRealtimeRefresh(requestRefresh, { busy: submittingTask || refreshing });
+  useTaskRealtimeRefresh(requestRefresh, { busy: submittingTask || refreshing || Boolean(updatingTaskId) });
 
   useEffect(() => {
     setDetailTaskId(taskParam);
@@ -208,9 +210,9 @@ export function ConciergeTaskManagerPage() {
     setSearchParams(next, { replace: true });
   }, [detailTaskId, loading, searchParams, setSearchParams, tasks]);
 
-  async function changeTaskStatus(task: ConciergeTask, status: string) {
-    if (updatingTaskId || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return;
-    if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return;
+  async function changeTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
+    if (updatingTaskId || task.archived_at || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return labels.updateFailed;
+    if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return labels.updateFailed;
     setUpdatingTaskId(task.id);
     setError("");
     try {
@@ -223,8 +225,15 @@ export function ConciergeTaskManagerPage() {
       });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+      return null;
     } catch (updateError) {
-      setError(conciergeTaskErrorMessage(updateError, lang, labels.updateFailed));
+      const conflict = updateError instanceof ApiRequestError && updateError.status === 409;
+      const message = conflict ? labels.statusConflict
+        : !(updateError instanceof ApiRequestError) || (updateError.status ?? 500) >= 500 ? labels.updateFailed
+          : conciergeTaskErrorMessage(updateError, lang, labels.updateFailed);
+      if (conflict) requestRefresh();
+      setError(message);
+      return message;
     } finally {
       setUpdatingTaskId(null);
     }
@@ -413,6 +422,7 @@ export function ConciergeTaskManagerPage() {
 
       <ConciergeTaskManager
         tasks={tasks}
+        refreshing={refreshing}
         assignees={assignees}
         lang={lang}
         now={now}
@@ -431,7 +441,7 @@ export function ConciergeTaskManagerPage() {
         onRestore={(task) => void changeArchiveState(task, false)}
         onOpen={openTaskDetail}
         onExpense={openTaskExpense}
-        onStatusChange={(task, status) => void changeTaskStatus(task, status)}
+        onStatusChange={changeTaskStatus}
         onCreateAt={(date) => openCreateTask(date)}
       />
 

@@ -133,6 +133,35 @@ try {
   await db.query("UPDATE documents SET art='other_document' WHERE id=$1", [id(806)]);
   const projected = (await db.query(`SELECT d.id, ${generalProjection} FROM documents d ORDER BY d.id`)).rows;
   assert.deepEqual(projected.map(row => row.general_provider_document), [true,false,false,false,false,false,false,false]);
+  const hotelProjection = documentRoute.match(/EXISTS \(\s+SELECT 1 FROM provider_document_links hotel_link[\s\S]*?AS hotel_provider_link/)[0];
+  await db.query('UPDATE provider_document_links SET provider_id=$1', [id(7010)]);
+  for (const [number, provider] of [[808,7013],[809,7012]]) {
+    await db.query('INSERT INTO documents (id) VALUES ($1)', [id(number)]);
+    await db.query('INSERT INTO provider_document_links VALUES ($1,$2)', [id(number),id(provider)]);
+  }
+  const hotelAccess = (await db.query(`SELECT d.id, ${generalProjection}, ${hotelProjection} FROM documents d ORDER BY d.id`)).rows;
+  assert.deepEqual(hotelAccess.filter(row => row.general_provider_document && row.hotel_provider_link).map(row => row.id), [id(800)]);
+  const uploadRoute = await readFile(new URL('../crates/server/src/routes/provider_documents.rs', import.meta.url), 'utf8');
+  const uploadProviderSql = uploadRoute.match(/"(SELECT provider\.name,[\s\S]*?provider\.id = \$1)"/)[1];
+  for (const [provider, expected] of [[7010,true],[7012,false],[7013,false]]) {
+    assert.equal((await db.query(uploadProviderSql, [id(provider)])).rows[0].is_hotel, expected);
+  }
+  console.log('Concierge hotel contracts: real upload/download SQL excludes medical providers, non-hotels and private documents.');
+  await db.exec("ALTER TABLE providers ADD COLUMN taxonomy_attributes jsonb DEFAULT '{}'::jsonb, ADD COLUMN updated_at timestamptz DEFAULT now()");
+  await db.query('UPDATE providers SET taxonomy_attributes=$2::jsonb WHERE id=$1', [id(7010),JSON.stringify({ stars: 4, has_contract: true })]);
+  const beforeStays = JSON.stringify(await query('2026-03-01','2026-04-30'));
+  const termsSql = await readFile(new URL('../crates/server/src/routes/hotel_breakfast_terms_update.sql', import.meta.url), 'utf8');
+  const savedTerms = { mode: 'extra', price_per_person: '12.50', currency: 'EUR', notes: 'Per person', updated_by: id(1) };
+  assert.equal((await db.query(termsSql, [id(7010), JSON.stringify(savedTerms)])).rows.length,1);
+  const attributes = (await db.query('SELECT taxonomy_attributes FROM providers WHERE id=$1', [id(7010)])).rows[0].taxonomy_attributes;
+  assert.deepEqual(attributes, { stars: 4, has_contract: true, hotel_breakfast_terms: savedTerms });
+  const termsRoute = await readFile(new URL('../crates/server/src/routes/hotel_breakfast_terms.rs', import.meta.url), 'utf8');
+  const termsReadSql = termsRoute.match(/r#"([\s\S]*?)"#/)[1];
+  assert.deepEqual(Object.values((await db.query(termsReadSql, [id(7010)])).rows[0])[0], savedTerms);
+  for (const provider of [7012,7013]) assert.equal((await db.query(termsSql, [id(provider),JSON.stringify(savedTerms)])).rows.length,0);
+  await db.query(termsSql, [id(7010),JSON.stringify({ mode: 'included', price_per_person: null, currency: null, notes: null })]);
+  assert.equal(JSON.stringify(await query('2026-03-01','2026-04-30')), beforeStays);
+  console.log('Hotel breakfast terms persist independently, preserve other hotel attributes and do not change bookings or payments.');
   console.log('General contract access projection excludes patient, lead, order, appointment, medical and unlinked documents.');
   console.log('Breakfast SQL verified: source scope, update persistence, independent room metadata, included cost constraints, original currency, no payment duplication.');
   console.log('Hotel SQL verified: 250 bookings, task migration deduplication, Berlin date boundary, direct/partial/reversed/pending payments, assignment scope and room constraints.');

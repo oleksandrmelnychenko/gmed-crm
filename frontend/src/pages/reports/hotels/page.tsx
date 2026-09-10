@@ -17,9 +17,10 @@ import { breakfastCopy } from "./breakfast-copy";
 import { BreakfastEditor } from "./breakfast-editor";
 import { HotelDocuments } from "./hotel-documents";
 import { CreateHotelSheet } from "./create-hotel-sheet";
+import { HotelTable } from "./hotel-table";
+import { HotelBreakfastTermsEditor } from "./hotel-breakfast-terms";
 import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels, hotelKey, hotelsCsv, hotelStatisticsRoles, initialFilters, matchesStaySearch, monthlyCosts, stayCost, stayNights, summarizeStays, type HotelDirectoryItem, type HotelFilters, type HotelStay, type HotelWorkspace } from "./model";
 
-const selectClass = "h-9 w-full min-w-0";
 const panelClass = "rounded-xl border border-border/70 bg-card shadow-sm";
 const statusOptions = ["committed", "completed", "in_service", "future", "confirmed", "booked", "planned", "cancelled", "all"] as const;
 function berlinToday() {
@@ -66,7 +67,7 @@ export default function HotelStatisticsPage() {
   const [workspace, setWorkspace] = useState<HotelWorkspace | null>(null);
   const [directory, setDirectory] = useState<HotelDirectoryItem[]>([]), [directoryError, setDirectoryError] = useState(false), [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [version, setVersion] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null), [sort, setSort] = useState("volume"), [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
   const [selectedStayKeys, setSelectedStayKeys] = useState<string[]>([]);
   const [staySearch, setStaySearch] = useState("");
   const [dirtyRows, setDirtyRows] = useState<Set<string>>(() => new Set());
@@ -76,7 +77,7 @@ export default function HotelStatisticsPage() {
   }), []);
   const allowed = hotelStatisticsRoles.includes(user?.role ?? "");
   const editable = allowed && user?.role !== "ceo_assistant";
-  const canCreate = ["ceo", "patient_manager"].includes(user?.role ?? "");
+  const canCreate = ["ceo", "patient_manager", "concierge"].includes(user?.role ?? "");
   const today = berlinToday();
   useEffect(() => {
     if (!allowed) return;
@@ -98,11 +99,7 @@ export default function HotelStatisticsPage() {
     && filters.breakfast === "all" && ["all", "committed"].includes(filters.status)
     && (filters.hotel === "all" || filters.hotel === hotel.id) && (filters.city === "all" || filters.city === hotel.city)
     && `${hotel.name} ${hotel.city ?? ""}`.toLocaleLowerCase().includes(filters.search.trim().toLocaleLowerCase()));
-  const groups = [...reportGroups, ...unbookedHotels.map(hotel => emptyHotelGroup(hotel, today))].sort((a, b) => {
-    if (sort === "volume") return a.total === b.total ? (a.name ?? "").localeCompare(b.name ?? "") : a.total > b.total ? -1 : 1;
-    if (sort === "patients") return b.patients - a.patients;
-    return b.nights - a.nights;
-  });
+  const groups = [...reportGroups, ...unbookedHotels.map(hotel => emptyHotelGroup(hotel, today))];
   // Keep an open editor mounted if its save changes the breakfast filter match.
   const selectedDirectoryHotel = directory.find(hotel => hotel.id === selected);
   const selectedHotel = groupHotels((workspace?.rows ?? []).filter(row => selectedStayKeys.includes(`${row.source}:${row.id}`)), today).find(group => group.key === selected)
@@ -125,23 +122,13 @@ export default function HotelStatisticsPage() {
   }));
   const ranking = [...groups].sort((a, b) => b.nights - a.nights).slice(0, 6).map(group => ({ key: group.key, name: group.name || labels.noHotel, nights: group.nights }));
   const eligible = rows.filter(row => row.status !== "cancelled").length;
-  const pages = Math.max(1, Math.ceil(groups.length / 20)), currentPage = Math.min(page, pages - 1);
   function changeFilter<K extends keyof HotelFilters>(key: K, value: HotelFilters[K]) {
-    setFilters(current => ({ ...current, [key]: value })); setPage(0);
+    setFilters(current => ({ ...current, [key]: value }));
   }
   function applyPeriod() {
     const from = Date.parse(`${draftPeriod.from}T00:00:00Z`), to = Date.parse(`${draftPeriod.to}T00:00:00Z`);
     if (!Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 1096 * 86400000) { setError(labels.invalidDates); return; }
-    setPeriod({ ...draftPeriod }); setPage(0); setSelected(null);
-  }
-  function exportCsv() {
-    const headers = [labels.from, labels.to, labels.hotel, labels.city, labels.currency, labels.bookings, labels.patients, labels.nights, labels.roomNights, labels.volume, labels.actual, labels.estimated, labels.average, labels.direct, labels.company, labels.due, labels.pending, labels.missingRooms, labels.missingCost, ...breakfastModes.map(mode => `${breakfastLabels.title}: ${breakfastLabels[mode]}`), breakfastLabels.meals, breakfastLabels.hotelCost, breakfastLabels.selfCost, `${breakfastLabels.known}: ${breakfastLabels.hotel_extra}`, `${breakfastLabels.known}: ${breakfastLabels.self}`, breakfastLabels.otherCurrency];
-    const contents = hotelsCsv(headers, groups.map(row => [period.from, period.to, row.name || labels.noHotel, row.city || "", filters.currency,
-      row.bookings, row.patients, row.nights, row.roomsKnown ? row.roomNights : "", row.pricedStays ? decimal(row.total) : "",
-      decimal(row.actual), decimal(row.estimated), row.averageRoomNight === null ? "" : decimal(row.averageRoomNight), decimal(row.direct), decimal(row.company), decimal(row.due), decimal(row.pending), row.stays.filter(stay => stay.status !== "cancelled").length - row.roomsKnown, row.costsMissing,
-      ...breakfastModes.map(mode => row.breakfast.counts[mode]), row.breakfast.mealsKnown ? row.breakfast.meals : "", row.breakfast.hotelPriced ? decimal(row.breakfast.hotelCost) : "", row.breakfast.selfPriced ? decimal(row.breakfast.selfCost) : "", row.breakfast.hotelPriced, row.breakfast.selfPriced, row.breakfast.otherCurrency]));
-    const url = URL.createObjectURL(new Blob([contents], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = `hotels-${period.from}-${period.to}-${filters.currency}.csv`; anchor.click(); URL.revokeObjectURL(url);
+    setPeriod({ ...draftPeriod }); setSelected(null);
   }
   function exportStays() {
     const headers = [labels.hotel, labels.patient, labels.reference, labels.checkIn, labels.checkOut, labels.nights, labels.rooms, labels.status, labels.currency, labels.volume, labels.estimated, breakfastLabels.title, breakfastLabels.count, breakfastLabels.amount, labels.currency, breakfastLabels.payer, breakfastLabels.notes];
@@ -154,31 +141,18 @@ export default function HotelStatisticsPage() {
   }
   if (!allowed) return <p className="p-6 text-muted-foreground">{labels.readOnly}</p>;
   return <div className="space-y-4 pb-4" data-testid="hotel-statistics">
-    <PageHeader title={labels.title} actions={<>
-      <Button variant="outline" size="sm" disabled={loading} onClick={() => setVersion(value => value + 1)}><RefreshCw className="size-4" />{labels.refresh}</Button>
-      <Button variant="outline" size="sm" disabled={loading || !groups.length || Boolean(error)} onClick={exportCsv}><Download className="size-4" />{labels.export}</Button>
-      {canCreate ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />{createHotelCopy[lang].add}</Button> : null}
-    </>} />
-    <section aria-label={labels.filters} className={`${panelClass} overflow-hidden`}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-muted/20 px-4 py-3 sm:px-5">
-        <h2 className="flex items-center gap-2.5 text-sm font-semibold"><span className="size-2 shrink-0 rounded-full bg-primary" />{labels.filters}</h2>
-        <Button variant="ghost" size="sm" onClick={() => { setFilters(initialFilters); setPage(0); }}><X className="size-3.5" />{labels.reset}</Button>
-      </div>
-      <div className="space-y-4 p-4 sm:p-5">
-        <div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,.7fr)]">
-          <label className="min-w-0 space-y-1.5 text-xs font-medium text-muted-foreground">{labels.from}<Input aria-label={labels.from} type="date" value={draftPeriod.from} onChange={event => setDraftPeriod(current => ({ ...current, from: event.target.value }))} /></label>
-          <label className="min-w-0 space-y-1.5 text-xs font-medium text-muted-foreground">{labels.to}<Input aria-label={labels.to} type="date" value={draftPeriod.to} onChange={event => setDraftPeriod(current => ({ ...current, to: event.target.value }))} /></label>
-          <Button className="self-end" onClick={applyPeriod}><Check className="size-4" />{labels.apply}</Button>
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{labels.hotel}</p><NativeComboboxSelect aria-label={labels.hotel} className={selectClass} value={filters.hotel} onChange={event => changeFilter("hotel", event.target.value)}><option value="all">{labels.allHotels}</option>{hotels.map(([key, name]) => <option key={key} value={key}>{name}</option>)}</NativeComboboxSelect></div>
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{labels.city}</p><NativeComboboxSelect aria-label={labels.city} className={selectClass} value={filters.city} onChange={event => changeFilter("city", event.target.value)}><option value="all">{labels.allCities}</option>{cities.map(city => <option key={city}>{city}</option>)}</NativeComboboxSelect></div>
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{labels.currency}</p><NativeComboboxSelect aria-label={labels.currency} className={selectClass} value={filters.currency} onChange={event => changeFilter("currency", event.target.value)}>{currencies.map(currency => <option key={currency}>{currency}</option>)}</NativeComboboxSelect></div>
-        </div>
-        <div className="grid items-end gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{labels.search}</p><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="pl-9" aria-label={labels.search} placeholder={labels.search} value={filters.search} onChange={event => changeFilter("search", event.target.value)} /></div></div>
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{labels.status}</p><NativeComboboxSelect aria-label={labels.status} className={selectClass} value={filters.status} onChange={event => changeFilter("status", event.target.value)}>{statusOptions.map(status => <option key={status} value={status}>{labels[status]}</option>)}</NativeComboboxSelect></div>
-          <div className="min-w-0 space-y-1.5"><p className="text-xs font-medium text-muted-foreground">{breakfastLabels.title}</p><NativeComboboxSelect aria-label={breakfastLabels.title} className={selectClass} value={filters.breakfast} onChange={event => changeFilter("breakfast", event.target.value)}><option value="all">{breakfastLabels.all}</option>{breakfastModes.map(mode => <option key={mode} value={mode}>{breakfastLabels[mode]}</option>)}</NativeComboboxSelect></div>
-        </div>
-      </div>
+    <PageHeader title={labels.title} actions={canCreate ? <Button size="sm" onClick={() => setCreating(true)}><Plus className="size-4" />{createHotelCopy[lang].add}</Button> : undefined} />
+    <section aria-label={labels.filters} data-testid="hotel-filters" className={`${panelClass} flex flex-wrap items-end gap-2 p-3`}>
+      <label className="min-w-36 flex-1 basis-36 space-y-1 text-xs text-muted-foreground">{labels.from}<Input aria-label={labels.from} type="date" value={draftPeriod.from} onChange={event => setDraftPeriod(current => ({ ...current, from: event.target.value }))} /></label>
+      <label className="min-w-36 flex-1 basis-36 space-y-1 text-xs text-muted-foreground">{labels.to}<Input aria-label={labels.to} type="date" value={draftPeriod.to} onChange={event => setDraftPeriod(current => ({ ...current, to: event.target.value }))} /></label>
+      <Button size="icon-sm" className="shrink-0" title={labels.apply} aria-label={labels.apply} onClick={applyPeriod}><Check className="size-4" /></Button>
+      <div className="min-w-40 flex-1 basis-40 space-y-1"><p className="text-xs text-muted-foreground">{labels.hotel}</p><NativeComboboxSelect aria-label={labels.hotel} className="h-8 w-full min-w-0" value={filters.hotel} onChange={event => changeFilter("hotel", event.target.value)}><option value="all">{labels.allHotels}</option>{hotels.map(([key, name]) => <option key={key} value={key}>{name}</option>)}</NativeComboboxSelect></div>
+      <div className="min-w-28 flex-1 basis-28 space-y-1"><p className="text-xs text-muted-foreground">{labels.city}</p><NativeComboboxSelect aria-label={labels.city} className="h-8 w-full min-w-0" value={filters.city} onChange={event => changeFilter("city", event.target.value)}><option value="all">{labels.allCities}</option>{cities.map(city => <option key={city}>{city}</option>)}</NativeComboboxSelect></div>
+      <div className="w-20 shrink-0 space-y-1"><p className="text-xs text-muted-foreground">{labels.currency}</p><NativeComboboxSelect aria-label={labels.currency} className="h-8 w-full min-w-0" value={filters.currency} onChange={event => changeFilter("currency", event.target.value)}>{currencies.map(currency => <option key={currency}>{currency}</option>)}</NativeComboboxSelect></div>
+      <div className="min-w-44 flex-[1.25_1_11rem] space-y-1"><p className="text-xs text-muted-foreground">{labels.status}</p><NativeComboboxSelect aria-label={labels.status} className="h-8 w-full min-w-0" value={filters.status} onChange={event => changeFilter("status", event.target.value)}>{statusOptions.map(status => <option key={status} value={status}>{labels[status]}</option>)}</NativeComboboxSelect></div>
+      <div className="min-w-44 flex-[1.25_1_11rem] space-y-1"><p className="text-xs text-muted-foreground">{breakfastLabels.title}</p><NativeComboboxSelect aria-label={breakfastLabels.title} className="h-8 w-full min-w-0" value={filters.breakfast} onChange={event => changeFilter("breakfast", event.target.value)}><option value="all">{breakfastLabels.all}</option>{breakfastModes.map(mode => <option key={mode} value={mode}>{breakfastLabels[mode]}</option>)}</NativeComboboxSelect></div>
+      <div className="relative min-w-44 flex-[1.5_1_11rem]"><Search className="pointer-events-none absolute left-2.5 top-2 size-4 text-muted-foreground" /><Input className="h-8 pl-8" aria-label={labels.search} placeholder={labels.search} value={filters.search} onChange={event => changeFilter("search", event.target.value)} /></div>
+      <Button variant="ghost" size="icon-sm" className="shrink-0" title={labels.reset} aria-label={labels.reset} onClick={() => setFilters(initialFilters)}><X className="size-4" /></Button>
     </section>
     {error || directoryError ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive"><CircleAlert className="size-5 shrink-0" /><div className="min-w-0 flex-1">{error ? <p>{error}</p> : null}{directoryError ? <p>{createHotelCopy[lang].directoryError}</p> : null}</div>{error !== labels.invalidDates ? <Button variant="outline" size="sm" disabled={loading} onClick={() => setVersion(value => value + 1)}><RefreshCw className="size-4" />{labels.retry}</Button> : null}</div> : null}
     {loading ? <div role="status" className={`${panelClass} flex min-h-40 items-center justify-center gap-2.5 p-5 text-sm text-muted-foreground`}><LoaderCircle className="size-5 animate-spin text-primary" />{labels.loading}</div> : workspace && !error ? <>
@@ -206,16 +180,14 @@ export default function HotelStatisticsPage() {
           {summary.breakfast.otherCurrency ? <p className="mt-2 text-xs text-amber-800">{breakfastLabels.otherCurrency}: {summary.breakfast.otherCurrency}</p> : null}<p className="mt-3 text-xs leading-relaxed text-muted-foreground">{breakfastLabels.definition}</p>
         </section>
       </> : null}
-        <section className={`${panelClass} overflow-hidden`}>
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 px-4 py-3"><h2 className="flex items-center gap-2.5 text-sm font-semibold"><span className="size-2 shrink-0 rounded-full bg-primary" />{labels.table} <Badge variant="outline" className="ml-2 rounded-full border-orange-200 bg-orange-50 text-orange-700">{groups.length}</Badge></h2><NativeComboboxSelect aria-label={labels.sort} value={sort} onChange={event => { setSort(event.target.value); setPage(0); }} className={`${selectClass} sm:w-48`}><option value="volume">{labels.volume}</option><option value="patients">{labels.patients}</option><option value="nights">{labels.nights}</option></NativeComboboxSelect></div>
-          <div className="overflow-x-auto"><table className="w-full min-w-[960px] text-sm" data-testid="hotel-table"><thead className="border-y bg-muted/30 text-xs text-muted-foreground"><tr>{[labels.hotel, labels.patients, labels.bookings, labels.nights, labels.roomNights, labels.volume, labels.average, labels.direct, labels.company].map((label, index) => <th key={label} className={`px-4 py-3 font-medium ${index ? "text-right" : "text-left"}`}>{label}</th>)}</tr></thead><tbody>{groups.slice(currentPage * 20, currentPage * 20 + 20).map(group => <tr key={group.key} className="border-b border-border/60 last:border-0 even:bg-muted/15 hover:bg-muted/30"><td className="px-4 py-3"><button className="text-left font-medium text-primary hover:underline" onClick={() => openHotel(group.key)}>{group.name || labels.noHotel}<ArrowUpRight className="ml-1 inline size-3.5 text-orange-500" /></button><p className="mt-0.5 text-xs text-muted-foreground">{group.city || "—"}</p></td><td className="px-4 py-3 text-right tabular-nums">{group.patients}</td><td className="px-4 py-3 text-right tabular-nums">{group.bookings}</td><td className="px-4 py-3 text-right tabular-nums">{group.nights}</td><td className="px-4 py-3 text-right tabular-nums">{group.roomsKnown ? group.roomNights : "—"}<p className="text-[10px] text-muted-foreground">{group.roomsKnown}/{group.stays.filter(stay => stay.status !== "cancelled").length}</p></td><td className="whitespace-nowrap px-4 py-3 text-right font-medium tabular-nums">{group.pricedStays ? money(group.total) : "—"}<p className="text-[10px] font-normal text-muted-foreground">{group.estimatedStays ? `${labels.estimated}: ${money(group.estimated)}` : ""}{group.costsMissing ? ` · ${labels.partial}` : ""}</p></td><td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{group.averageRoomNight === null ? "—" : money(group.averageRoomNight)}</td><td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(group.direct)}</td><td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{money(group.company)}</td></tr>)}</tbody></table></div>
-          {pages > 1 ? <div className="flex items-center justify-end gap-3 p-3"><Button variant="outline" size="sm" disabled={!currentPage} onClick={() => setPage(currentPage - 1)}>{labels.previous}</Button><span className="text-xs">{currentPage + 1}/{pages}</span><Button variant="outline" size="sm" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>{labels.next}</Button></div> : null}
-        </section>
-      <p className="text-xs text-muted-foreground">{labels.source} · {labels.updated}: {new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { dateStyle: "short", timeStyle: "short" }).format(new Date(workspace.generated_at))}</p>
+      <HotelTable groups={groups} lang={lang} currency={filters.currency} resetKey={JSON.stringify([period, filters])} onOpen={openHotel} />
     </> : null}
     <Dialog open={Boolean(selectedHotel)} dirty={dirtyRows.size > 0} onOpenChange={open => { if (!open) setSelected(null); }}><DialogContent data-testid="hotel-detail-dialog" className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1480px] sm:pb-0"><DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14"><DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{selectedHotel?.name || labels.noHotel}</DialogTitle><DialogDescription>{labels.details} · {dateLabel(period.from, lang)} — {dateLabel(period.to, lang)}</DialogDescription></DialogHeader>
       <div className="min-h-0 space-y-4 overflow-y-auto bg-muted/10 p-4 sm:p-5">
-        {selectedHotel ? <HotelDocuments key={selectedHotel.key} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /> : null}
+        {selectedHotel ? <>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium">{selectedHotel.city || selectedDirectoryHotel?.country || "—"}</span><span className="text-muted-foreground">{labels.patients}: {selectedHotel.patients}</span><span className="text-muted-foreground">{labels.bookings}: {selectedHotel.bookings}</span><span className="text-muted-foreground">{labels.nights}: {selectedHotel.nights}</span></div>
+          <div className="grid items-start gap-4 lg:grid-cols-2"><HotelBreakfastTermsEditor key={`terms:${selectedHotel.key}`} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /><HotelDocuments key={selectedHotel.key} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /></div>
+        </> : null}
         <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
         <header className="flex flex-wrap items-center gap-3 border-b border-border/70 bg-muted/15 px-4 py-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{labels.details}<span className="rounded-full border border-border/70 bg-card px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground">{selectedHotel?.stays.length ?? 0}</span></h3><div className="flex flex-wrap items-center gap-3 sm:ml-auto">{selectedHotel?.providerId ? <StaffLink className="inline-flex items-center gap-1 text-xs text-orange-600 hover:underline" to={`/providers/${selectedHotel.providerId}`}>{labels.hotelProfile}<ArrowUpRight className="size-3.5" /></StaffLink> : null}<Button size="sm" disabled={!detailStays.length} onClick={exportStays}><Download className="size-3.5" />{labels.exportStays}</Button></div></header>
         <div className="flex flex-wrap items-center gap-3 border-b border-border/70 px-4 py-3"><div className="relative min-w-0 flex-1 basis-60"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label={labels.staySearch} placeholder={labels.staySearch} className="pl-9" value={staySearch} onChange={event => setStaySearch(event.target.value)} /></div><span className="text-xs text-muted-foreground">{labels.shown}: {detailStays.length}/{selectedHotel?.stays.length ?? 0}</span></div>
@@ -238,7 +210,7 @@ export default function HotelStatisticsPage() {
       <footer className="shrink-0 space-y-3 border-t border-border/70 bg-muted/20 px-5 py-3">{error ? <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}<Button size="sm" variant="outline" disabled={loading} onClick={() => setVersion(value => value + 1)}>{labels.refresh}</Button></div> : null}<div className="flex justify-end"><DialogClose render={<Button variant="outline" />}><X className="size-4" />{labels.close}</DialogClose></div></footer>
     </DialogContent></Dialog>
     {creating ? <CreateHotelSheet lang={lang} onClose={() => setCreating(false)} onCreated={hotel => {
-      setDirectory(current => [...current.filter(item => item.id !== hotel.id), hotel]); setCreating(false); setFilters(initialFilters); setPage(0); setSelectedStayKeys([]); setStaySearch(""); setSelected(hotel.id);
+      setDirectory(current => [...current.filter(item => item.id !== hotel.id), hotel]); setCreating(false); setFilters(initialFilters); setSelectedStayKeys([]); setStaySearch(""); setSelected(hotel.id);
     }} /> : null}
   </div>;
 }
