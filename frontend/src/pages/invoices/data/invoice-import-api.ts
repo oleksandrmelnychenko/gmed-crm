@@ -41,12 +41,14 @@ export function confirmCompanyInvoiceImport(
   documentId: string,
   fields: InvoiceImportFields,
   notes: string,
+  providerId?: string,
 ) {
   return apiFetch<{ id: string }>("/external-invoices/company", {
     method: "POST",
     body: JSON.stringify({
       source_document_id: documentId,
       supplier_name: fields.supplier_name.trim(),
+      provider_id: providerId || null,
       external_invoice_number: fields.external_invoice_number.trim(),
       invoice_date: fields.invoice_date || null,
       due_date: fields.due_date || null,
@@ -61,10 +63,12 @@ export function confirmCompanyInvoiceImport(
 
 export function confirmInvoiceImport(
   documentId: string, patientId: string, orderId: string, fields: InvoiceImportFields, notes: string,
+  providerId?: string,
 ) {
   return apiFetch<{ id: string }>(`/orders/${orderId}/external-invoices`, {
     method: "POST", body: JSON.stringify({
       patient_id: patientId, source_document_id: documentId,
+      provider_id: providerId || null, supplier_name: fields.supplier_name.trim() || null,
       external_invoice_number: fields.external_invoice_number.trim(),
       invoice_date: fields.invoice_date || null, due_date: fields.due_date || null,
       amount_net: importMoneyCents(fields.amount_net)! / 100,

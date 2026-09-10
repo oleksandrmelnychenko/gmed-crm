@@ -10,6 +10,7 @@ import {
   BrowserRouter,
   Routes,
   Route,
+  Navigate,
   useLocation,
 } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -215,6 +216,7 @@ const FeedbackPage = lazy(() =>
   })),
 );
 
+const HotelStatisticsPage = lazy(() => import("@/pages/reports/hotels/page"));
 const ReportsPage = lazy(() =>
   import("@/pages/reports").then((module) => ({
     default: module.ReportsPage,
@@ -401,6 +403,8 @@ function AppRoutes() {
             <Route path="chat" element={<ChatPage />} />
             <Route path="notes" element={<InternalNotesPage />} />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="hotels" element={<HotelStatisticsPage />} />
+            <Route path="reports/hotels" element={<Navigate to="/hotels" replace />} />
             <Route path="sops" element={<SopsPage />} />
             <Route path="leads" element={<LeadsPage />} />
             <Route path="projects" element={<ProjectsPage />} />

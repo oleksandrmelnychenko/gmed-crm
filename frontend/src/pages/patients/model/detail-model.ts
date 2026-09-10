@@ -91,6 +91,7 @@ type PatientTimelineNavigationAccess = {
 };
 
 type PatientTabAccess = {
+  canViewFinance?: boolean;
   canViewOperationalSurface: boolean;
   canViewCareHistory?: boolean;
   canViewDocuments: boolean;
@@ -286,6 +287,10 @@ export function canViewPatientInvoicesSurface(role?: string) {
   return PATIENT_INVOICE_SURFACE_ROLES.has(role ?? "");
 }
 
+export function canViewPatientFinanceSurface(role?: string) {
+  return ["ceo", "ceo_assistant", "patient_manager", "billing"].includes(role ?? "");
+}
+
 export function canViewPatientCareHistorySurface(role?: string) {
   return PATIENT_CARE_HISTORY_SURFACE_ROLES.has(role ?? "");
 }
@@ -317,6 +322,9 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
     return "profile";
   }
   if (requestedTab === "invoices" && !access.canViewInvoices) {
+    return "profile";
+  }
+  if (requestedTab === "finance" && !access.canViewFinance) {
     return "profile";
   }
   return requestedTab;

@@ -367,7 +367,17 @@ function TaskCard({
         </div>
         <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{localizeTaskTitle(task.title, lang)}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
-          <p className="flex items-start gap-1.5"><Clock3 className="mt-0.5 size-3.5 shrink-0" /><span><span className="block">{labels.begins}: {formatDateTime(interval.start, lang)}</span><span className="block">{labels.ends}: {formatDateTime(interval.end, lang)}</span></span></p>
+          <div className="flex items-start gap-1.5">
+            <Clock3 className="mt-1 size-3.5 shrink-0" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              {([[labels.begins, interval.start], [labels.ends, interval.end]] as const).map(([label, date], index) => (
+                <div key={label} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                  <span className="min-w-0">{label}:{date ? null : " —"}</span>
+                  {date ? <Badge variant="outline" className={cn("ml-auto shrink-0 rounded-full font-mono text-[10px] tabular-nums", index === 1 && overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "border-border/70 bg-background text-foreground")}><time dateTime={date.toISOString()}>{formatDateTime(date, lang).replace(/[.,]/g, "")}</time></Badge> : null}
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="flex min-w-0 items-center gap-1.5">
             <UsersRound className="size-3.5 shrink-0" />
             <Badge

@@ -15,6 +15,7 @@ pub mod company_provider_settlements;
 pub mod concierge_expenses;
 pub mod concierge_operational_items;
 pub mod concierge_services;
+pub mod hotel_statistics;
 pub mod contracts;
 pub mod custom_fields;
 pub mod datev;
@@ -85,6 +86,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(company_provider_settlements::router())
         .merge(concierge_expenses::router())
         .merge(concierge_services::router())
+        .merge(hotel_statistics::router())
         .merge(concierge_operational_items::router())
         .merge(contracts::router())
         .merge(leads::router())

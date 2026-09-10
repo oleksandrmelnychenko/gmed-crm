@@ -643,6 +643,7 @@ export const ru = {
   nav_medicine: "МЕДИЦИНА",
   nav_accounting: "Бухгалтерия",
   nav_providers: "Провайдеры",
+  nav_hotels: "Гостиницы",
 
   dash_pipeline: "Пайплайн",
   dash_daily_ops: "Ежедневные операции",

@@ -600,6 +600,8 @@ function accountStatementPayerLabel(paidBy: PatientAccountStatementItem["paid_by
 function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: string) {
   const labels: Record<PatientAccountMovement["kind"], [string, string]> = {
     invoice: ["Patientenrechnung", "Счёт пациента"],
+    credit_note: ["Gutschrift", "Кредит-нота"],
+    credit_note_reversal: ["Gutschriftstorno", "Сторно кредит-ноты"],
     payment: ["Zahlung", "Оплата"],
     payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
     refund: ["Rückzahlung", "Возврат пациенту"],

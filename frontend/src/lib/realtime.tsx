@@ -44,7 +44,9 @@ const STATS_CACHE_EVENT_PREFIXES = [
   "case.",
   "company_financial_account.",
   "concierge_expense.",
+  "concierge_operational_item.",
   "concierge_service.",
+  "crm_project.",
   "consent.",
   "document.",
   "feedback.",
@@ -132,6 +134,15 @@ function invalidateStatsCacheForEvent(event: RealtimeEvent) {
   }
 
   clearApiCache("/stats");
+
+  if (event.type.startsWith("concierge_operational_item.") || event.type.startsWith("task.")) {
+    clearApiCache("/concierge-operational-items");
+    clearApiCache("/projects");
+  }
+  if (event.type.startsWith("crm_project.")) {
+    clearApiCache("/projects");
+    clearApiCache("/concierge-operational-items");
+  }
 
   if (event.type.startsWith("patient.")) {
     clearApiCache("/patients");
@@ -332,6 +343,9 @@ export function useRealtimeConnectionStatus() {
     }
 
     window.addEventListener(REALTIME_CONNECTION_EVENT_NAME, onConnectionChange);
+    // The provider can complete its handshake between this hook's render and
+    // subscription (e.g. when returning to a cached route).
+    setSnapshot(latestConnectionSnapshot);
     return () => {
       window.removeEventListener(
         REALTIME_CONNECTION_EVENT_NAME,

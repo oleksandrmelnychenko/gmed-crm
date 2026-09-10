@@ -1,6 +1,6 @@
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, Trash2, UsersRound, Workflow, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, FolderKanban, LayoutGrid, LoaderCircle, Pencil, Plus, Search, Trash2, UsersRound, Workflow } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "@/pages/concierge/use-task-realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import { assignableConciergeTaskUsers, conciergeTaskErrorMessage, type ConciergeAssignee, type ConciergeTask } from "@/pages/concierge/model";
@@ -204,6 +204,7 @@ export function ProjectsPage() {
   const [deleteError, setDeleteError] = useState("");
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [taskSubmitting, setTaskSubmitting] = useState(false);
+  const [realtimeRequests, setRealtimeRequests] = useState(0);
   const [taskDialogError, setTaskDialogError] = useState("");
   const [taskDraftDefaults, setTaskDraftDefaults] = useState<{
     assignees: ConciergeAssignee[];
@@ -230,19 +231,15 @@ export function ProjectsPage() {
     [assignees, user?.id, user?.role],
   );
 
-  useDebouncedRealtimeSubscription([
-    "crm_project.created",
-    "crm_project.updated",
-    "crm_project.deleted",
-    "crm_project.workflow_updated",
-    "concierge_operational_item.created",
-    "concierge_operational_item.updated",
-    "concierge_operational_item.deleted",
-  ], () => {
+  useTaskRealtimeRefresh(() => {
     clearApiCache("/projects");
-    void loadProjects(true);
-    if (selectedId) void loadProjectWorkflow(selectedId);
-  }, 250);
+    setRealtimeRequests(current => current + 1);
+    void Promise.all([loadProjects(true), selectedId ? loadProjectWorkflow(selectedId) : Promise.resolve()])
+      .finally(() => setRealtimeRequests(current => current - 1));
+  }, { busy: taskSubmitting, pollingPaused: realtimeRequests > 0, eventTypes: [
+    ...TASK_REALTIME_EVENTS,
+    "crm_project.created", "crm_project.updated", "crm_project.deleted", "crm_project.workflow_updated",
+  ] });
 
   async function loadProjects(forceFresh = false) {
     setError("");
@@ -472,7 +469,7 @@ export function ProjectsPage() {
   return (
     <div className="space-y-4">
       <PageHeader title={labels.title} actions={<>
-        {canEditSelected ? <Button variant="outline" disabled={detailLoading || deleting} onClick={() => { setDeleteError(""); setDeleteCandidate(selected); }}><Trash2 />{lang === "de" ? "Projekt löschen" : "Удалить проект"}</Button> : null}
+        {canEditSelected && activeView === "workflow" ? <Button variant="outline" disabled={detailLoading || deleting} onClick={() => { setDeleteError(""); setDeleteCandidate(selected); }}><Trash2 />{lang === "de" ? "Projekt löschen" : "Удалить проект"}</Button> : null}
         <Button onClick={openCreate}><Plus />{labels.create}</Button>
       </>} />
       {error && activeView === "overview" ? <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</div> : null}
@@ -534,7 +531,15 @@ export function ProjectsPage() {
 
         <aside className="min-w-0 rounded-xl border bg-card p-4 xl:sticky xl:top-3 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
           {selected ? <>
-            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap gap-1.5"><Badge variant="outline" className={statusClass(selected.status)}>{labels[selected.status]}</Badge><Badge variant="outline" className={priorityClass(selected.priority)}>{labels[selected.priority]}</Badge></div><h2 className="mt-2 text-lg font-semibold">{selected.name}</h2><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{selected.description || "—"}</p></div><div className="flex shrink-0 gap-1">{canEditSelected ? <Button size="icon" variant="outline" disabled={detailLoading || !selected.members} aria-label={labels.edit} onClick={() => openEdit(selected)}><Pencil /></Button> : null}<Button size="icon" variant="ghost" aria-label={labels.cancel} onClick={clearSelection}><X /></Button></div></div>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap gap-1.5"><Badge variant="outline" className={statusClass(selected.status)}>{labels[selected.status]}</Badge><Badge variant="outline" className={priorityClass(selected.priority)}>{labels[selected.priority]}</Badge></div>
+              {canEditSelected ? <div className="ml-auto flex shrink-0 gap-1">
+                <Button size="icon" variant="outline" disabled={detailLoading || !selected.members} aria-label={labels.edit} onClick={() => openEdit(selected)}><Pencil /></Button>
+                <Button variant="outline" disabled={detailLoading || deleting} aria-label={lang === "de" ? "Projekt löschen" : "Удалить проект"} onClick={() => { setDeleteError(""); setDeleteCandidate(selected); }}><Trash2 />{lang === "de" ? "Löschen" : "Удалить"}</Button>
+              </div> : null}
+            </div>
+            <h2 className="mt-2 break-words text-lg font-semibold">{selected.name}</h2>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{selected.description || "—"}</p>
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm"><div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{labels.owner}</p><p className="mt-1 font-medium">{selected.owner_name}</p></div><div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{labels.deadline}</p><p className="mt-1 font-medium">{dateLabel(selected.due_on, lang) ?? labels.noDeadline}</p></div></div>
             <div className="mt-2 rounded-lg bg-muted/40 p-3 text-sm"><div className="flex items-center justify-between text-xs text-muted-foreground"><span>{labels.progress}</span><span>{selected.task_completed}/{selected.task_total}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background" role="progressbar" aria-label={labels.progress} aria-valuemin={0} aria-valuemax={selected.task_total || 1} aria-valuenow={selected.task_completed}><div className="h-full rounded-full bg-orange-500" style={{ width: `${selected.task_total ? Math.round((selected.task_completed / selected.task_total) * 100) : 0}%` }} /></div></div>
             {selected.starts_on || selected.due_on ? <div className="mt-2 rounded-lg border px-3 py-2 text-sm"><span className="text-muted-foreground">{labels.period}: </span><span className="font-medium">{dateLabel(selected.starts_on, lang) ?? "—"} – {dateLabel(selected.due_on, lang) ?? labels.noDeadline}</span></div> : null}

@@ -9,6 +9,10 @@ const patientB = "00000000-0000-0000-0000-000000000102";
 const orderA = "00000000-0000-0000-0000-000000000201";
 const orderB = "00000000-0000-0000-0000-000000000202";
 const documentId = "00000000-0000-0000-0000-000000000301";
+const netAmountLabel = /^(Сумма без НДС|Nettobetrag)$/;
+const vatAmountLabel = /^(Сумма НДС|Umsatzsteuerbetrag)$/;
+const grossAmountLabel = /^(Итого с НДС|Gesamtbetrag inkl\. USt\.)$/;
+const vatRateLabel = /^(Ставка НДС|Umsatzsteuersatz)$/;
 const invoice = { schema_version: "1.0", requires_review: true, extraction_complete: true, warnings: [], text: "Synthetic invoice R-42",
   fields: { supplier_name: "Testklinik", external_invoice_number: "R-42", invoice_date: "2026-09-01", due_date: "2026-09-15", amount_net: "100.00", amount_vat: "19.00", amount_gross: "119.00", currency: "EUR" } };
 
@@ -87,10 +91,10 @@ if (process.env.PARSER_CORPUS_DIR) {
         const preview: InvoiceImportPreview = JSON.parse(fs.readFileSync(path.join(directory, `${key}.json`), "utf8"));
         const { dialog } = await prepare(page, { scope: "company", pdf: file, preview });
         for (const [label, field] of [
-          [/Поставщик|Lieferant/, "supplier_name"], [/Номер инвойса|Rechnungsnummer/, "external_invoice_number"],
+          [/Поставщик \/ клиника|Lieferant \/ Klinik/, "supplier_name"], [/Номер инвойса|Rechnungsnummer/, "external_invoice_number"],
           [/Дата инвойса|Rechnungsdatum/, "invoice_date"], [/Оплатить до|Fällig am/, "due_date"],
-          [/^Без НДС$|^Nettobetrag$/, "amount_net"], [/^НДС$|^Umsatzsteuer$/, "amount_vat"],
-          [/^Итого$|^Bruttobetrag$/, "amount_gross"], [/Валюта|Währung/, "currency"],
+          [netAmountLabel, "amount_net"], [vatAmountLabel, "amount_vat"],
+          [grossAmountLabel, "amount_gross"], [/Валюта|Währung/, "currency"],
         ] as const) await expect(dialog.getByLabel(label)).toHaveValue(preview.fields[field] ?? "");
         const positions = dialog.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: /Позиции в документе|Positionen im Dokument/ }) }).last();
         for (const line of preview.line_items ?? []) {
@@ -108,7 +112,7 @@ test("company supplier invoice saves without a patient or order", async ({ page 
   await expect(dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ })).toHaveCount(0);
   await expect(dialog.getByText(/Клиент и заказ не требуются|Patient und Auftrag sind nicht erforderlich/)).toHaveCount(0);
   await expect(dialog.getByLabel(/Поставщик \/ клиника|Lieferant \/ Klinik/)).toHaveValue("Testklinik");
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   const save = dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ });
   await expect(save).toBeEnabled();
   await save.click();
@@ -121,6 +125,7 @@ test("company supplier invoice saves without a patient or order", async ({ page 
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({
     supplier_name: "Testklinik",
+    provider_id: null,
     external_invoice_number: "R-42",
     amount_net: 100,
     amount_vat: 19,
@@ -133,7 +138,7 @@ test("company supplier invoice saves without a patient or order", async ({ page 
 test("replace discards an unfinished uploaded original and recognizes the new file immediately", async ({ page }) => {
   const { dialog, discards } = await prepare(page, { scope: "company", saveFailsOnce: true });
   await expect(dialog.getByLabel(/Номер инвойса|Rechnungsnummer/)).toHaveValue("R-42");
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ }).click();
   await expect(dialog.getByText(/Не удалось сохранить счёт компании|Unternehmensrechnung konnte nicht gespeichert/)).toBeVisible();
 
@@ -144,7 +149,7 @@ test("replace discards an unfinished uploaded original and recognizes the new fi
   });
   await expect(dialog.getByText("replacement.png", { exact: true })).toBeVisible();
   await expect(dialog.getByLabel(/Номер инвойса|Rechnungsnummer/)).toHaveValue("R-42");
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
   expect(discards).toEqual([`/documents/${documentId}/delete`]);
 });
 
@@ -158,6 +163,146 @@ async function selectClient(page: Page, name: string, order: string) {
   await page.getByRole("option", { name: order, exact: true }).click();
   await expect(page.getByRole("listbox")).toHaveCount(0);
 }
+
+const supplierLabel = /Поставщик \/ клиника|Lieferant \/ Klinik/;
+const systemSupplierLabel = /Поставщик из системы|Anbieter aus dem System/;
+const providerA = { id: "00000000-0000-0000-0000-000000000501", name: "Testklinik", legal_name: "Medizin GmbH", address_city: "Berlin", is_active: true };
+const providerB = { ...providerA, id: "00000000-0000-0000-0000-000000000502", address_city: "München" };
+
+async function mockSuppliers(page: Page) {
+  const searches: string[] = [];
+  await page.route("**/api/v1/providers?**", async route => {
+    const params = new URL(route.request().url()).searchParams;
+    expect(params.get("active_only")).toBe("true");
+    const query = params.get("search") ?? "";
+    searches.push(query);
+    const items = [providerA, providerB, { ...providerA, id: "inactive", name: "Closed clinic", is_active: false }]
+      .filter(item => `${item.name} ${item.legal_name} ${item.address_city}`.toLowerCase().includes(query.toLowerCase()));
+    await route.fulfill({ json: items });
+  });
+  return searches;
+}
+
+for (const scope of ["company", "patient_order"] as const) {
+  test(`system supplier: ${scope} saves the selected ID, including duplicate clinic names`, async ({ page }) => {
+    const lang = scope === "company" ? "ru" : "de";
+    await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    if (lang === "de") await page.setViewportSize({ width: 390, height: 844 });
+    const { dialog, writes, uploads } = await prepare(page, { scope });
+    const searches = await mockSuppliers(page);
+    if (scope === "patient_order") await selectClient(page, "Alpha", "O-101");
+    await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+    expect(searches).toHaveLength(0);
+    const mode = dialog.getByRole("checkbox", { name: systemSupplierLabel });
+    await expect(mode).not.toBeChecked();
+    await mode.check();
+    const save = dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ });
+    await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+    await expect(save).toBeDisabled();
+    await dialog.getByRole("combobox", { name: supplierLabel }).click();
+    await expect(page.getByRole("option", { name: "Testklinik · Berlin", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Testklinik · München", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Closed clinic" })).toHaveCount(0);
+    await page.getByRole("combobox").and(page.locator("input")).fill("Medizin");
+    await expect.poll(() => searches).toContain("Medizin");
+    await page.getByRole("option", { name: "Testklinik · München", exact: true }).click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    const supplierBounds = await dialog.getByRole("combobox", { name: supplierLabel }).boundingBox();
+    expect(supplierBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(supplierBounds!.x + supplierBounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    if (process.env.INVOICE_SUPPLIER_QA) {
+      await dialog.getByRole("combobox", { name: supplierLabel }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `../artifacts/design-qa/invoice-supplier-${lang}.png` });
+    }
+    await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
+    await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(dialog).toHaveCount(0);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ provider_id: providerB.id, supplier_name: "Testklinik", ...(scope === "patient_order" ? { patient_id: patientA } : {}) });
+    expect(uploads[0]).toContain("Testklinik");
+  });
+}
+
+test("manual supplier: switching off the system checkbox clears the ID and accepts a shop", async ({ page }) => {
+  const { dialog, writes } = await prepare(page, { scope: "company" });
+  await mockSuppliers(page);
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  const mode = dialog.getByRole("checkbox", { name: systemSupplierLabel });
+  await mode.check();
+  await dialog.getByRole("combobox", { name: supplierLabel }).click();
+  await page.getByRole("option", { name: "Testklinik · Berlin", exact: true }).click();
+  await mode.uncheck();
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  await dialog.getByLabel(supplierLabel).fill("  REWE Markt  ");
+  await mode.check();
+  await expect(dialog.getByRole("combobox", { name: supplierLabel })).not.toContainText("Berlin");
+  await mode.uncheck();
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("  REWE Markt  ");
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+  await dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(writes[0]).toMatchObject({ supplier_name: "REWE Markt", provider_id: null });
+});
+
+test("system supplier: replacing the file clears its provider and confirmation", async ({ page }) => {
+  const { dialog } = await prepare(page, { scope: "company" });
+  await mockSuppliers(page);
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  const mode = dialog.getByRole("checkbox", { name: systemSupplierLabel });
+  await mode.check();
+  await dialog.getByRole("combobox", { name: supplierLabel }).click();
+  await page.getByRole("option", { name: "Testklinik · Berlin", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+  await dialog.getByLabel(/Файл инвойса|Rechnungsdatei/).setInputFiles({ name: "replacement.png", mimeType: "image/png", buffer: Buffer.from("replacement") });
+  await expect(mode).not.toBeChecked();
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
+  await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
+});
+
+test("system supplier: failed lookup permits manual entry without losing OCR data", async ({ page }) => {
+  const { dialog } = await prepare(page, { scope: "company" });
+  await page.route("**/api/v1/providers?**", route => route.fulfill({ status: 503, json: { message: "Unavailable" } }));
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  const mode = dialog.getByRole("checkbox", { name: systemSupplierLabel });
+  await mode.check();
+  await dialog.getByRole("combobox", { name: supplierLabel }).click();
+  await expect(page.getByText(/Поиск недоступен|Suche nicht verfügbar/)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await mode.uncheck();
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  await expect(dialog.getByLabel(/Номер инвойса|Rechnungsnummer/)).toHaveValue("R-42");
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+  await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeEnabled();
+});
+
+test("system supplier: an older search response cannot replace newer results", async ({ page }) => {
+  const { dialog } = await prepare(page, { scope: "company" });
+  let releaseOlder: () => void = () => {};
+  const older = new Promise<void>(resolve => { releaseOlder = resolve; });
+  let olderRequested = false;
+  await page.route("**/api/v1/providers?**", async route => {
+    const query = new URL(route.request().url()).searchParams.get("search") ?? "";
+    if (query === "Berlin") { olderRequested = true; await older; }
+    await route.fulfill({ json: query === "Berlin" ? [providerA] : [providerB] });
+  });
+  await expect(dialog.getByLabel(supplierLabel)).toHaveValue("Testklinik");
+  await dialog.getByRole("checkbox", { name: systemSupplierLabel }).check();
+  await dialog.getByRole("combobox", { name: supplierLabel }).click();
+  const search = page.getByRole("combobox").and(page.locator("input"));
+  try {
+    await search.fill("Berlin");
+    await expect.poll(() => olderRequested).toBe(true);
+    await search.fill("München");
+    await expect(page.getByRole("option", { name: "Testklinik · München", exact: true })).toBeVisible();
+  } finally {
+    releaseOlder();
+  }
+  await page.getByRole("option", { name: "Testklinik · München", exact: true }).click();
+  await expect(dialog.getByRole("combobox", { name: supplierLabel })).toContainText("München");
+});
 
 async function prepareAccountingLedger(page: Page) {
   let originalRequests = 0;
@@ -211,6 +356,99 @@ async function prepareAccountingLedger(page: Page) {
   return { originalRequestCount: () => originalRequests };
 }
 
+for (const lang of ["ru", "de"] as const) {
+  test(`VAT calculator ${lang}: net, gross, zero and custom rates save the calculated amounts`, async ({ page }) => {
+    await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+    if (lang === "de") await page.setViewportSize({ width: 390, height: 844 });
+    const { dialog, writes } = await prepare(page, { scope: "company" });
+    const rate = dialog.getByRole("combobox", { name: vatRateLabel });
+    const net = dialog.getByLabel(netAmountLabel);
+    const vat = dialog.getByLabel(vatAmountLabel);
+    const gross = dialog.getByLabel(grossAmountLabel);
+    const confirmed = dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ });
+    const save = dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ });
+    await expect(gross).toHaveValue("119.00");
+    await expect(rate).toContainText(/По документу|Laut Dokument/);
+    await confirmed.check();
+    await rate.click();
+    await page.getByRole("option", { name: "19 %", exact: true }).click();
+    await expect(confirmed).not.toBeChecked();
+    await expect(vat).toHaveAttribute("readonly", "");
+    await net.fill("100,50");
+    await expect(vat).toHaveValue("19.10");
+    await expect(gross).toHaveValue("119.60");
+    await gross.fill("119");
+    await expect(net).toHaveValue("100.00");
+    await expect(vat).toHaveValue("19.00");
+    if (process.env.INVOICE_VAT_QA) {
+      await rate.scrollIntoViewIfNeeded();
+      await expect(page.getByRole("listbox")).toHaveCount(0);
+      await page.screenshot({ path: `../artifacts/design-qa/invoice-vat-${lang}.png` });
+    }
+    await rate.click();
+    await page.getByRole("option", { name: "7 %", exact: true }).click();
+    await expect(net).toHaveValue("111.21");
+    await expect(vat).toHaveValue("7.79");
+    await rate.click();
+    await page.getByRole("option", { name: "0 %", exact: true }).click();
+    await expect(net).toHaveValue("119.00");
+    await expect(vat).toHaveValue("0.00");
+    await rate.click();
+    await page.getByRole("option", { name: /Другая ставка|Anderer Steuersatz/ }).click();
+    const custom = dialog.getByLabel(/Другая ставка НДС, %|Anderer Umsatzsteuersatz, %/);
+    await custom.fill("101");
+    await confirmed.check();
+    await expect(save).toBeDisabled();
+    await expect(custom).toHaveAttribute("aria-invalid", "true");
+    await custom.fill("8,1");
+    await expect(net).toHaveValue("110.08");
+    await expect(vat).toHaveValue("8.92");
+    await expect(confirmed).not.toBeChecked();
+    await confirmed.check();
+    await save.click();
+    await expect(dialog).toHaveCount(0);
+    expect(writes[0]).toMatchObject({ amount_net: 110.08, amount_vat: 8.92, amount_gross: 119, currency: "EUR" });
+  });
+}
+
+test("VAT calculator: mixed rates stay manual and replacing the document resets calculation", async ({ page }) => {
+  const { dialog } = await prepare(page, { scope: "company", preview: {
+    fields: { ...invoice.fields, amount_net: "200.00", amount_vat: "26.00", amount_gross: "226.00" },
+    tax_breakdown: [{ category: "S", rate: "19", amount: "19.00", base: "100" }, { category: "S", rate: "7", amount: "7.00", base: "100" }],
+  } });
+  const rate = dialog.getByRole("combobox", { name: vatRateLabel });
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226.00");
+  await expect(rate).toContainText(/По документу|Laut Dokument/);
+  await expect(dialog.getByLabel(vatAmountLabel)).toBeEditable();
+  await dialog.getByLabel(vatAmountLabel).fill("27");
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+  await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
+  await rate.click();
+  await page.getByRole("option", { name: "19 %", exact: true }).click();
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38.00");
+  await rate.click();
+  await page.getByRole("option", { name: /По документу|Laut Dokument/ }).click();
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("38.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toBeEditable();
+  await rate.click();
+  await page.getByRole("option", { name: "7 %", exact: true }).click();
+  await dialog.getByLabel(/Файл инвойса|Rechnungsdatei/).setInputFiles({ name: "new.png", mimeType: "image/png", buffer: Buffer.from("new invoice") });
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("226.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("26.00");
+  await expect(rate).toContainText(/По документу|Laut Dokument/);
+});
+
+test("VAT calculator: gross-only recognition waits for an explicit rate before deriving net and VAT", async ({ page }) => {
+  const { dialog } = await prepare(page, { scope: "company", preview: { fields: { ...invoice.fields, amount_net: null, amount_vat: null } } });
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(netAmountLabel)).toHaveValue("");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("");
+  await dialog.getByRole("combobox", { name: vatRateLabel }).click();
+  await page.getByRole("option", { name: "19 %", exact: true }).click();
+  await expect(dialog.getByLabel(netAmountLabel)).toHaveValue("100.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("19.00");
+});
+
 test("accounting ledger exposes and opens an imported invoice original", async ({ page }) => {
   const { originalRequestCount } = await prepareAccountingLedger(page);
   const invoiceNumberButton = page.getByRole("button", { name: "R-42", exact: true });
@@ -249,10 +487,10 @@ test("XML original is escaped, buyer fills client and prepaid amount does not re
   await expect(dialog.locator("iframe, img")).toHaveCount(0);
   await expect(dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ })).toContainText("Alpha");
   await expect(dialog.getByText(/К оплате по XML|Zahlbetrag laut XML/)).toContainText("99.00");
-  await expect(dialog.getByLabel(/^(Итого|Bruttobetrag)$/)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
   await dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ }).click();
   await page.getByRole("option", { name: "O-101", exact: true }).click();
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   const downloadEvent = page.waitForEvent("download");
   await dialog.getByRole("link", { name: /Скачать оригинал|Original herunterladen/ }).click();
   expect((await downloadEvent).suggestedFilename()).toBe("invoice.xml");
@@ -270,7 +508,7 @@ test("unsupported XML remains preview only even after manual confirmation", asyn
   } });
   await expect(dialog.getByText(/Этот тип документа пока|Dieser Dokumenttyp/)).toBeVisible();
   await selectClient(page, "Alpha", "O-101");
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
   expect(uploads).toHaveLength(0); expect(writes).toHaveLength(0);
 });
@@ -288,7 +526,7 @@ test("hybrid invoice shows both conflicting values and keeps XML fields for revi
     source_differences: [{ field: "amount_gross", structured: "119.00", visible: "120.00" }], warnings: ["structured_pdf_mismatch"],
   } });
   await expect(dialog.getByText(/XML 119.00 · PDF 120.00/)).toBeVisible();
-  await expect(dialog.getByLabel(/^(Итого|Bruttobetrag)$/)).toHaveValue("119.00");
+  await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
 });
 
 test("review links corrected invoice and original to selected patient, retry reuses original", async ({ page }) => {
@@ -299,16 +537,16 @@ test("review links corrected invoice and original to selected patient, retry reu
   const save = dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ });
   await expect(save).toBeDisabled();
   await selectClient(page, "Alpha", "O-101");
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await selectClient(page, "Beta", "O-102");
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
   await dialog.getByLabel(/Номер инвойса|Rechnungsnummer/).fill("R-42-checked");
-  await dialog.getByLabel(/^(Итого|Bruttobetrag)$/).fill("120");
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByLabel(grossAmountLabel).fill("120");
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await expect(save).toBeDisabled();
-  await dialog.getByLabel(/^(Итого|Bruttobetrag)$/).fill("119,00");
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByLabel(grossAmountLabel).fill("119,00");
+  await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.screenshot({ path: "../artifacts/design-qa/invoice-import-desktop.png" });
   await save.click();
   await expect(dialog.getByText(/Оригинал уже сохранён|Das Original ist beim/)).toBeVisible();
@@ -329,14 +567,14 @@ test("manual review stays available when parser is unavailable, including mobile
   await selectClient(page, "Alpha", "O-101");
   for (const [label, value] of [
     [/Номер инвойса|Rechnungsnummer/, "MANUAL-1"],
-    [/^Без НДС$|^Nettobetrag$/, "80"], [/^НДС$|^Umsatzsteuer$/, "0"], [/^Итого$|^Bruttobetrag$/, "80"], [/^Валюта$|^Währung$/, "EUR"],
+    [netAmountLabel, "80"], [vatAmountLabel, "0"], [grossAmountLabel, "80"], [/^Валюта$|^Währung$/, "EUR"],
   ] as const) await dialog.getByLabel(label).fill(value);
   // MUI date fields use editable sections; filling the hidden input bypasses them.
   await dialog.getByLabel(/Дата инвойса|Rechnungsdatum/).locator("..").getByRole("button").click();
   await page.getByRole("gridcell", { name: "1", exact: true }).click();
   await expect(dialog.getByLabel(/Дата инвойса|Rechnungsdatum/)).not.toHaveValue("");
   await dialog.getByRole("heading", { name: /Проверка входящего инвойса|Eingangsrechnung prüfen/ }).click();
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.screenshot({ path: "../artifacts/design-qa/invoice-import-mobile.png" });
   await dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ }).click();
   await expect(dialog).toHaveCount(0);
@@ -394,13 +632,13 @@ test("replacing an invoice clears the previous automatic patient and order", asy
   await dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ }).click();
   await page.getByRole("option", { name: "O-101", exact: true }).click();
   await expect(page.getByRole("listbox")).toHaveCount(0);
-  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.getByLabel(/Файл инвойса|Rechnungsdatei/).setInputFiles({ name: "replacement.png", mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/B8AAAAASUVORK5CYII=", "base64") });
   await expect(dialog.getByText(/Не удалось определить клиента по документу|Patient konnte nicht anhand des Dokuments/)).toBeVisible();
   await expect(client).not.toContainText("Alpha");
   await expect(dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ })).toBeDisabled();
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ })).not.toBeChecked();
 });
 
 test("explicit invoiced VAT and calculated due date show their sources without a false OCR failure", async ({ page }) => {
@@ -418,13 +656,13 @@ test("explicit invoiced VAT and calculated due date show their sources without a
   await expect(dialog.getByText(/Распознавание завершено|Erkennung abgeschlossen/)).toBeVisible();
   await expect(dialog.getByText(/Часть данных не распознана|Einige Angaben wurden nicht sicher/)).toHaveCount(0);
   await expect(dialog.getByText(/Заполните поля:|Bitte ergänzen:/)).toHaveCount(0);
-  await expect(dialog.getByLabel(/^(НДС|Umsatzsteuer)$/)).toHaveValue("0.00");
+  await expect(dialog.getByLabel(vatAmountLabel)).toHaveValue("0.00");
   await expect(dialog.getByText(/в самом счёте НДС не начислен|Rechnung weist keine Umsatzsteuer aus/)).toBeVisible();
   await expect(dialog.getByText(/\+30 (дней|Tage)/)).toBeVisible();
   await expect(dialog.getByText("Software-Lizenz", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/5 · (Цена|Preis): 8.50 EUR/)).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
-  await dialog.getByLabel(/^(НДС|Umsatzsteuer)$/).fill("1.00");
+  await dialog.getByLabel(vatAmountLabel).fill("1.00");
   await expect(dialog.getByText(/По фразе в счёте|Laut Rechnung: ohne Umsatzsteuer/)).toHaveCount(1);
   expect(writes).toHaveLength(0);
 });
@@ -435,10 +673,10 @@ test("missing amounts are named and collection date is distinct from payment dea
     warnings: ["generic_extraction_review_required"],
     payment: { method: "direct_debit", collection_date: "2026-09-29" },
   } });
-  await expect(dialog.getByText(/Заполните поля: Без НДС, НДС|Bitte ergänzen: Nettobetrag, Umsatzsteuer/).first()).toBeVisible();
+  await expect(dialog.getByText(/Заполните поля: Сумма без НДС, Сумма НДС|Bitte ergänzen: Nettobetrag, Umsatzsteuerbetrag/).first()).toBeVisible();
   await expect(dialog.getByText(/Автоматическое списание · 29.09.2026|Lastschrift · 29.09.2026/)).toBeVisible();
   await expect(dialog.getByLabel(/Оплатить до|Fällig am/)).toHaveValue("");
-  await dialog.getByLabel(/^(Без НДС|Nettobetrag)$/).fill("100");
-  await dialog.getByLabel(/^(НДС|Umsatzsteuer)$/).fill("19");
+  await dialog.getByLabel(netAmountLabel).fill("100");
+  await dialog.getByLabel(vatAmountLabel).fill("19");
   await expect(dialog.getByText(/Заполните поля:|Bitte ergänzen:/)).toHaveCount(0);
 });

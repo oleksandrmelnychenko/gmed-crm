@@ -73,10 +73,7 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
     </PatientFormSection>
 
     <PatientFormSection title={tx("Дозировка и схема приёма", "Dosierung und Einnahme")}>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label={tx("Дозировка", "Stärke")}><Input value={draft.staerke ?? ""} onChange={event => onChange({staerke:nullable(event.target.value)})} className={controlClass} placeholder="5 mg" /></Field>
-        <Field label={tx("Единица", "Einheit")}><Input value={draft.einheit ?? ""} onChange={event => onChange({einheit:nullable(event.target.value)})} className={controlClass} placeholder={tx("шт.", "Stück")} /></Field>
-      </div>
+      <Field label={tx("Дозировка", "Stärke")}><Input value={draft.staerke ?? ""} onChange={event => onChange({staerke:nullable(event.target.value)})} className={controlClass} placeholder="5 mg" /></Field>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {doses.map(([key, label, accessibleLabel]) => <Field key={key} label={label}>
           <Input value={draft[key] ?? ""} onChange={event => onChange({[key]:nullable(event.target.value)})} className={cn(controlClass, "text-center font-mono tabular-nums")} aria-label={accessibleLabel} />

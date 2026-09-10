@@ -15117,7 +15117,6 @@ async fn get_patient_medikationsplan_pdf(
                     value("dose_mittags"),
                     value("dose_abends"),
                     value("dose_nachts"),
-                    value("einheit"),
                     notes.join("\n"),
                     value("grund"),
                 ],

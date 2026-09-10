@@ -171,6 +171,7 @@ async fn imported_invoice_source_must_match_patient_and_order_and_cannot_be_reus
     let bearer = auth_header_for(admin_id, "ceo");
     let path = format!("/api/v1/orders/{order}/external-invoices");
     let mut payload = json!({ "patient_id": other_patient, "source_document_id": document,
+        "supplier_name": "  REWE Markt  ",
         "external_invoice_number": format!("EXT-{tag}"), "invoice_date": "2026-09-01",
         "amount_net": 100, "amount_vat": 19, "amount_gross": 119, "currency": "EUR", "status": "received" });
     let (status, _) = json_request(&app, "POST", &path, &bearer, Some(payload.clone())).await;
@@ -195,6 +196,14 @@ async fn imported_invoice_source_must_match_patient_and_order_and_cannot_be_reus
         detail["external_invoices"][0]["source_document_id"],
         json!(document)
     );
+    assert_eq!(
+        detail["external_invoices"][0]["provider_name"],
+        "REWE Markt"
+    );
+    assert!(detail["external_invoices"][0]["provider_id"].is_null());
+    let (status, listed) = json_request(&app, "GET", &path, &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed[0]["provider_name"], "REWE Markt");
     payload["external_invoice_number"] = json!(format!("EXT-{tag}-duplicate"));
     let (status, _) = json_request(&app, "POST", &path, &bearer, Some(payload)).await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -255,7 +264,7 @@ async fn company_invoice_import_does_not_require_patient_or_order() {
     let invoice_id = Uuid::parse_str(created["id"].as_str().expect("company invoice id")).unwrap();
 
     let saved = sqlx::query(
-        r#"SELECT invoice_scope, patient_id, order_id, supplier_name,
+        r#"SELECT invoice_scope, patient_id, order_id, supplier_name, provider_id,
                   amount_net, amount_vat, amount_gross, status, paid_by
            FROM external_invoices
            WHERE id = $1"#,
@@ -273,6 +282,10 @@ async fn company_invoice_import_does_not_require_patient_or_order() {
         None
     );
     assert_eq!(saved.try_get::<Option<Uuid>, _>("order_id").unwrap(), None);
+    assert_eq!(
+        saved.try_get::<Option<Uuid>, _>("provider_id").unwrap(),
+        None
+    );
     assert_eq!(
         saved.try_get::<String, _>("supplier_name").unwrap(),
         "K.B.M. GmbH"
@@ -376,6 +389,66 @@ async fn company_invoice_import_does_not_require_patient_or_order() {
         moved.is_err(),
         "Company invoice original must remain outside patient context"
     );
+}
+
+#[tokio::test]
+async fn company_invoice_import_validates_and_preserves_the_selected_provider() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("company-invoice-provider");
+    let provider_id = seed_provider(&pool, &tag).await;
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (auto_name, art, category, uploaded_by, id, version_root_document_id)
+           VALUES ($1, 'invoice_document', 'finance', $2, $3, $3)"#,
+    )
+    .bind(format!("Supplier invoice {tag}.pdf"))
+    .bind(admin_id)
+    .bind(document_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for(admin_id, "ceo");
+    let path = "/api/v1/external-invoices/company";
+    let mut payload = json!({
+        "source_document_id": document_id,
+        "supplier_name": format!("Clinic {tag}"),
+        "provider_id": Uuid::new_v4(),
+        "external_invoice_number": format!("EXT-{tag}"),
+        "invoice_date": "2026-09-01",
+        "amount_net": 100, "amount_vat": 19, "amount_gross": 119, "currency": "EUR"
+    });
+    let (status, _) = json_request(&app, "POST", path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    payload["provider_id"] = json!(provider_id);
+    let (status, created) = json_request(&app, "POST", path, &bearer, Some(payload)).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let invoice_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let saved: Option<Uuid> =
+        sqlx::query_scalar("SELECT provider_id FROM external_invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(saved, Some(provider_id));
+    let (status, position) = json_request(
+        &app,
+        "GET",
+        "/api/v1/company-financial-position?currency=EUR",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let liability = position["provider_liabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == invoice_id.to_string())
+        .unwrap();
+    assert_eq!(liability["provider_id"], provider_id.to_string());
+    assert_eq!(liability["provider_name"], format!("Clinic {tag}"));
 }
 
 #[tokio::test]

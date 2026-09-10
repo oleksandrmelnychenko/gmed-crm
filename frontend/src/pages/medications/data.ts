@@ -26,3 +26,10 @@ export function saveMedicationCatalogItem(item: MedicationCatalogItem) {
     body: JSON.stringify({ handelsname: item.handelsname, wirkstoff: item.wirkstoff, ...(!creating && { version: item.version }) }),
   });
 }
+
+export function deleteMedicationCatalogItem(item: MedicationCatalogItem) {
+  return apiFetch<void>(`/medication-name-pairs/${encodeURIComponent(item.id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ version: item.version }),
+  });
+}

@@ -3178,7 +3178,7 @@ async fn get_order(
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
-                  pr.name AS provider_name,
+                  COALESCE(pr.name, NULLIF(BTRIM(ei.supplier_name), '')) AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
@@ -6030,7 +6030,7 @@ async fn list_external_invoices(
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
-                  pr.name AS provider_name,
+                  COALESCE(pr.name, NULLIF(BTRIM(ei.supplier_name), '')) AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
                   provider_taxonomy.code AS provider_taxonomy_node_code,
                   provider_taxonomy.name_de AS provider_taxonomy_node_name_de,
@@ -6144,6 +6144,9 @@ async fn create_company_external_invoice(
             "Company invoice supplier or number is too long",
         );
     }
+    if let Err(response) = validate_provider_doctor_context(&state, body.provider_id, None).await {
+        return response;
+    }
 
     let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
         Ok(value) => value,
@@ -6244,12 +6247,12 @@ async fn create_company_external_invoice(
                external_invoice_number, invoice_date, due_date,
                amount_net, amount_vat, amount_gross, currency,
                status, paid_by, service_delivered, notes,
-               received_at, created_by
+               received_at, created_by, provider_id
            ) VALUES (
                'company', $1, $2, $3, $4, $5,
                $6, $7, $8, $9,
                'approved', 'unpaid', false, $10,
-               now(), $11
+               now(), $11, $12
            )
            RETURNING id"#,
     )
@@ -6264,6 +6267,7 @@ async fn create_company_external_invoice(
     .bind(&currency)
     .bind(notes)
     .bind(auth.user_id)
+    .bind(body.provider_id)
     .fetch_one(&state.db)
     .await
     {
@@ -6277,6 +6281,7 @@ async fn create_company_external_invoice(
                 serde_json::json!({
                     "source_document_id": source_document_id,
                     "supplier_name": supplier_name,
+                    "provider_id": body.provider_id,
                     "external_invoice_number": external_invoice_number,
                     "amount_gross": amount_gross.to_string(),
                     "currency": currency,
@@ -6291,6 +6296,7 @@ async fn create_company_external_invoice(
                 serde_json::json!({
                     "invoice_scope": "company",
                     "supplier_name": supplier_name,
+                    "provider_id": body.provider_id,
                     "external_invoice_number": external_invoice_number,
                 }),
             )
@@ -6336,6 +6342,17 @@ async fn create_external_invoice(
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "External invoice number is required",
+        );
+    }
+    let supplier_name = body
+        .supplier_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if supplier_name.is_some_and(|value| value.chars().count() > 500) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "External invoice supplier is too long",
         );
     }
     let status = body.status.as_deref().unwrap_or("expected");
@@ -6520,13 +6537,13 @@ async fn create_external_invoice(
                 external_invoice_number, invoice_date,
                 due_date, amount_net, amount_vat, amount_gross, currency, status,
                 paid_by, service_delivered, notes,
-                received_at, paid_at, created_by, source_document_id
+                received_at, paid_at, created_by, source_document_id, supplier_name
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10, $11, $12, $13, $14, $15,
                 CASE WHEN $12 IN ('received', 'approved', 'paid', 'overdue') THEN now() ELSE NULL END,
                 CASE WHEN $12 = 'paid' THEN now() ELSE NULL END,
-                $16, $17
+                $16, $17, $18
            )
            RETURNING id"#,
     )
@@ -6547,6 +6564,7 @@ async fn create_external_invoice(
     .bind(notes)
     .bind(auth.user_id)
     .bind(body.source_document_id)
+    .bind(supplier_name)
     .fetch_one(&state.db)
     .await
     {

@@ -571,12 +571,11 @@ function MedicationCandidateEditor({
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
           {tx("Схема приёма", "Einnahmeschema")}
         </p>
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {field("dose_morgens", tx("Утро", "Morgens"))}
           {field("dose_mittags", tx("День", "Mittags"))}
           {field("dose_abends", tx("Вечер", "Abends"))}
           {field("dose_nachts", tx("Ночь", "Nachts"))}
-          {field("einheit", tx("Единица", "Einheit"), { className: "col-span-2 sm:col-span-1 xl:col-span-2" })}
         </div>
         <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-sky-950">
           <input

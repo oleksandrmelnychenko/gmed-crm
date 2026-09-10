@@ -360,6 +360,19 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "main", labelKey: "nav_reports" },
   },
   {
+    id: "hotel-statistics",
+    match: "exact",
+    path: "/reports/hotels",
+    roles: ["ceo", "ceo_assistant", "billing", "patient_manager"],
+  },
+  {
+    id: "hotels",
+    match: "exact",
+    path: "/hotels",
+    roles: ["ceo", "ceo_assistant", "billing", "patient_manager"],
+    nav: { section: "crm", labelKey: "nav_hotels", after: "providers" },
+  },
+  {
     id: "recommendations",
     match: "exact",
     path: "/recommendations",

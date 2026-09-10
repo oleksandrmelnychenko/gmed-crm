@@ -29,10 +29,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import type { Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useTaskRealtimeRefresh } from "./use-task-realtime";
 import { cn } from "@/lib/utils";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
@@ -77,6 +77,7 @@ import { ConciergeTaskAttachments } from "./task-attachments";
 const copy = {
   de: {
     loading: "Aufgabe wird geladen",
+    unavailable: "Die Aufgabe wurde gelöscht oder ist nicht mehr verfügbar.",
     children: "Unteraufgaben und Termine",
     emptyChildren: "Noch keine Unteraufgaben oder Termine",
     subtask: "Unteraufgabe",
@@ -172,6 +173,7 @@ const copy = {
   },
   ru: {
     loading: "Загрузка задачи",
+    unavailable: "Задача удалена или больше недоступна.",
     children: "Подзадачи и события",
     emptyChildren: "Подзадач и событий пока нет",
     subtask: "Подзадача",
@@ -266,21 +268,6 @@ const copy = {
     deleteCommentMessage: "Комментарий будет удалён. Изменение сохранится в истории действий.",
   },
 } as const;
-
-const CHILD_REALTIME_EVENTS = [
-  "concierge_operational_item.archived",
-  "concierge_operational_item.restored",
-  "concierge_operational_item.updated",
-  "concierge_operational_item.comment_added",
-  "concierge_operational_item.comment_edited",
-  "concierge_operational_item.comment_deleted",
-  "concierge_operational_item.checklist_item_added",
-  "concierge_operational_item.checklist_item_toggled",
-  "concierge_operational_item.checklist_item_edited",
-  "concierge_operational_item.checklist_item_deleted",
-  "concierge_operational_item.attachment_added",
-  "concierge_operational_item.attachment_deleted",
-] as const;
 
 function dateTime(value: string | null, lang: Lang) {
   if (!value) return "—";
@@ -450,7 +437,7 @@ export function ConciergeTaskDetailDialog({
   const childTasks = detail ? relatedTasks.filter((task) => task.parent_task_id === detail.item.id) : [];
   const parentTask = detail ? relatedTasks.find((task) => task.id === detail.item.parent_task_id) : undefined;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     if (!open || !taskId) return;
     const sequence = ++detailLoadSequenceRef.current;
     setLoading(true);
@@ -459,21 +446,24 @@ export function ConciergeTaskDetailDialog({
       const payload = await apiFetch<ConciergeTaskDetail>(`/concierge-operational-items/${taskId}`, { forceFresh: true });
       if (sequence !== detailLoadSequenceRef.current) return;
       setDetail(payload);
-      setPendingStatus(payload.item.status);
+      if (!background) setPendingStatus("");
     } catch (loadError) {
       if (sequence === detailLoadSequenceRef.current) {
-        setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
+        if (loadError instanceof ApiRequestError && [403, 404].includes(loadError.status ?? 0)) {
+          setDetail(null);
+          setError(labels.unavailable);
+        } else setError(conciergeTaskErrorMessage(loadError, lang, labels.loading));
       }
     } finally {
       if (sequence === detailLoadSequenceRef.current) setLoading(false);
     }
-  }, [labels.loading, lang, open, taskId]);
+  }, [labels.loading, labels.unavailable, lang, open, taskId]);
 
-  const refreshFromRealtime = useCallback((event: { entity_id: string }) => {
-    if (open && taskId && event.entity_id === taskId) void load();
-  }, [load, open, taskId]);
-
-  useDebouncedRealtimeSubscription(CHILD_REALTIME_EVENTS, refreshFromRealtime, 250);
+  useTaskRealtimeRefresh(() => { void load(true); }, {
+    taskId,
+    enabled: open && Boolean(taskId),
+    busy: busy || loading || expenseDialogOpen || submittingExpense,
+  });
 
   useEffect(() => {
     if (!open) return;

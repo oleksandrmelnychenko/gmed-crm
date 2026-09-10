@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useTaskRealtimeRefresh } from "./use-task-realtime";
 
 import {
   assignableConciergeTaskUsers,
@@ -36,22 +36,6 @@ import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
 type TaskProjectOption = { id: string; name: string; status: string };
-
-const REALTIME_EVENTS = [
-  "concierge_operational_item.created",
-  "concierge_operational_item.updated",
-  "concierge_operational_item.deleted",
-  "concierge_operational_item.archived",
-  "concierge_operational_item.restored",
-  "concierge_operational_item.reminder_sent",
-  "concierge_operational_item.comment_added",
-  "concierge_operational_item.comment_edited",
-  "concierge_operational_item.comment_deleted",
-  "concierge_operational_item.checklist_item_added",
-  "concierge_operational_item.checklist_item_toggled",
-  "concierge_operational_item.checklist_item_edited",
-  "concierge_operational_item.checklist_item_deleted",
-] as const;
 
 const copy = {
   de: {
@@ -98,6 +82,7 @@ export function ConciergeTaskManagerPage() {
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
   const [assignees, setAssignees] = useState<ConciergeAssignee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
@@ -137,7 +122,7 @@ export function ConciergeTaskManagerPage() {
     setVersion((current) => current + 1);
   }, []);
 
-  useDebouncedRealtimeSubscription(REALTIME_EVENTS, requestRefresh, 250);
+  useTaskRealtimeRefresh(requestRefresh, { busy: submittingTask || refreshing });
 
   useEffect(() => {
     setDetailTaskId(taskParam);
@@ -147,6 +132,7 @@ export function ConciergeTaskManagerPage() {
     let cancelled = false;
 
     async function load() {
+      setRefreshing(true);
       if (!hasLoadedRef.current) setLoading(true);
       setError("");
       try {
@@ -202,6 +188,7 @@ export function ConciergeTaskManagerPage() {
       } finally {
         if (!cancelled) {
           hasLoadedRef.current = true;
+          setRefreshing(false);
           setLoading(false);
         }
       }

@@ -21,7 +21,10 @@ pub fn router() -> Router<AppState> {
         .route("/medication-names", get(search_names))
         .route("/medication-name-pairs", get(list_pairs).post(create_pair))
         .route("/medication-name-pairs/check", get(check_pair))
-        .route("/medication-name-pairs/{id}", patch(update_pair))
+        .route(
+            "/medication-name-pairs/{id}",
+            patch(update_pair).delete(delete_pair),
+        )
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -341,6 +344,53 @@ async fn update_pair(
         audit.set_new_value(json!(&item));
     }
     Json(item).into_response()
+}
+
+#[derive(Deserialize)]
+struct PairDelete {
+    version: i32,
+}
+
+async fn delete_pair(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    audit: Option<Extension<AuditContext>>,
+    Path(id): Path<Uuid>,
+    Json(input): Json<PairDelete>,
+) -> Response {
+    if let Err(response) = auth.require_any_role(&[Role::Ceo]) {
+        return response;
+    }
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => return catalog_db_error(error),
+    };
+    let previous = match sqlx::query_as::<_, NamePair>(
+        "SELECT id, handelsname, wirkstoff, version FROM medication_name_pairs WHERE id = $1 FOR UPDATE",
+    ).bind(id).fetch_optional(&mut *transaction).await {
+        Ok(Some(item)) => item,
+        Ok(None) => return catalog_error(StatusCode::NOT_FOUND, "medication_pair_not_found"),
+        Err(error) => return catalog_db_error(error),
+    };
+    if previous.version != input.version {
+        return catalog_error(StatusCode::CONFLICT, "medication_pair_changed");
+    }
+    if let Err(error) = sqlx::query("DELETE FROM medication_name_pairs WHERE id = $1")
+        .bind(id)
+        .execute(&mut *transaction)
+        .await
+    {
+        return catalog_db_error(error);
+    }
+    if let Err(error) = transaction.commit().await {
+        return catalog_db_error(error);
+    }
+    if let Some(Extension(audit)) = audit {
+        audit.set_action("delete_medication_name_pair");
+        audit.set_entity("medication_name_pair", previous.id);
+        audit.set_old_value(json!(&previous));
+    }
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[derive(Deserialize)]

@@ -538,6 +538,7 @@ export interface Translations
   nav_medicine: string;
   nav_accounting: string;
   nav_providers: string;
+  nav_hotels: string;
 
   dash_pipeline: string;
   dash_daily_ops: string;

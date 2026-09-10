@@ -14,6 +14,9 @@ import { confirmCompanyInvoiceImport, confirmInvoiceImport, discardInvoiceImport
 import { matchInvoicePatient, matchInvoiceRecipient } from "../model/patient-match";
 import { XmlInvoiceOriginal } from "./xml-invoice-original";
 import { StructuredInvoiceDetails } from "./structured-invoice-details";
+import { InvoiceSupplierField, type InvoiceSupplierProvider } from "./invoice-supplier-field";
+import { InvoiceImportAmounts } from "./invoice-import-amounts";
+import { defaultInvoiceVatCalculation, invoiceVatRate, validInvoiceVatRate } from "../model/import-amounts";
 
 type Props = {
   patients: PatientOption[];
@@ -35,6 +38,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   const [manualPatientId, setManualPatientId] = useState<string | null>(initialPatientId || orders.find((order) => order.id === initialOrderId)?.patient_id || null);
   const [orderId, setOrderId] = useState(initialOrderId);
   const [fields, setFields] = useState(blankImportFields);
+  const [vatCalculation, setVatCalculation] = useState(defaultInvoiceVatCalculation);
+  const [systemSupplier, setSystemSupplier] = useState(false);
+  const [supplierProvider, setSupplierProvider] = useState<InvoiceSupplierProvider | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [preview, setPreview] = useState<InvoiceImportPreview | null>(null);
@@ -74,7 +80,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   const contextReady = scope === "company"
     ? Boolean(fields.supplier_name.trim())
     : Boolean(selectedPatient && selectedOrder);
-  const ready = Boolean(invoiceSourceCanSave(file, preview) && contextReady
+  const supplierReady = !systemSupplier || Boolean(supplierProvider);
+  const vatRateValid = vatCalculation.selection === "manual" || validInvoiceVatRate(invoiceVatRate(vatCalculation));
+  const ready = Boolean(invoiceSourceCanSave(file, preview) && contextReady && supplierReady && vatRateValid
     && fields.external_invoice_number.trim() && fields.invoice_date
     && /^[A-Z]{3}$/.test(fields.currency.trim().toUpperCase()) && totalsValid && confirmed);
 
@@ -88,6 +96,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   }
 
   async function recognize(nextFile: File) {
+    setVatCalculation(defaultInvoiceVatCalculation());
+    setSupplierProvider(null);
+    setSystemSupplier(false);
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -170,8 +181,8 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
         setDocumentId(sourceId);
       }
       const created = scope === "company"
-        ? await confirmCompanyInvoiceImport(sourceId, fields, notes)
-        : await confirmInvoiceImport(sourceId, patientId, orderId, fields, notes);
+        ? await confirmCompanyInvoiceImport(sourceId, fields, notes, systemSupplier ? supplierProvider?.id : undefined)
+        : await confirmInvoiceImport(sourceId, patientId, orderId, fields, notes, systemSupplier ? supplierProvider?.id : undefined);
       onCreated({ id: created.id, scope, orderId: scope === "patient_order" ? orderId : undefined });
     } catch (failure) {
       setError(failure instanceof ApiRequestError && failure.status === 409
@@ -189,8 +200,8 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
     supplier_name: tx("Поставщик / клиника", "Lieferant / Klinik"),
     external_invoice_number: tx("Номер инвойса", "Rechnungsnummer"),
     invoice_date: tx("Дата инвойса", "Rechnungsdatum"), due_date: tx("Оплатить до", "Fällig am"),
-    amount_net: tx("Без НДС", "Nettobetrag"), amount_vat: tx("НДС", "Umsatzsteuer"),
-    amount_gross: tx("Итого", "Bruttobetrag"), currency: tx("Валюта", "Währung"),
+    amount_net: tx("Сумма без НДС", "Nettobetrag"), amount_vat: tx("Сумма НДС", "Umsatzsteuerbetrag"),
+    amount_gross: tx("Итого с НДС", "Gesamtbetrag inkl. USt."), currency: tx("Валюта", "Währung"),
   };
   const missingFields = (Object.keys(labels) as (keyof InvoiceImportFields)[])
     .filter((key) => key !== "due_date"
@@ -202,6 +213,10 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
       ? tx("Дождитесь завершения распознавания", "Erkennung abwarten")
       : !invoiceSourceCanSave(file, preview)
         ? tx("Сначала успешно распознайте документ", "Dokument zuerst erfolgreich erkennen")
+        : !supplierReady
+          ? tx("Выберите поставщика из системы или снимите отметку для ручного ввода", "Anbieter aus dem System auswählen oder Markierung für die manuelle Eingabe entfernen")
+        : !vatRateValid
+          ? tx("Укажите ставку НДС от 0 до 100 %", "Umsatzsteuersatz von 0 bis 100 % angeben")
         : missingFields.length > 0
           ? `${tx("Заполните поля", "Bitte ergänzen")}: ${missingFields.map((key) => labels[key]).join(", ")}`
           : !totalsValid
@@ -311,10 +326,14 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {preview?.warnings.includes("conflicting_tax_statement") ? <Banner tone="warning" withIcon>{tx("Текст о НДС противоречит суммам в документе. Проверьте налоговые суммы вручную.", "Der Steuerhinweis widerspricht den Beträgen im Dokument. Steuerbeträge manuell prüfen.")}</Banner> : null}
                 {preview?.warnings.includes("amount_net_derived_from_totals") ? <p className="text-xs text-muted-foreground">{tx("Сумма без НДС рассчитана как итог минус указанный НДС. Сверьте её с оригиналом.", "Netto wurde aus Brutto abzüglich der ausgewiesenen Umsatzsteuer berechnet. Mit dem Original abgleichen.")}</p> : null}
                 <fieldset disabled={parsing || saving} className="grid gap-3 sm:grid-cols-2">
-                  {(Object.keys(labels) as (keyof InvoiceImportFields)[]).map((key) => <Field key={key} label={labels[key]}>
-                    <Input aria-label={labels[key]} value={fields[key]} required={key !== "due_date" && (key !== "supplier_name" || scope === "company")} type={key.endsWith("date") ? "date" : "text"}
-                      inputMode={key.startsWith("amount_") ? "decimal" : undefined} maxLength={key === "currency" ? 3 : undefined}
-                      onChange={(event) => updateField(key, key === "currency" ? event.target.value.toUpperCase() : event.target.value)} />
+                  {(Object.keys(labels) as (keyof InvoiceImportFields)[]).filter(key => !key.startsWith("amount_") && key !== "currency").map((key) => <Field key={key} label={labels[key]}>
+                    {key === "supplier_name" ? <InvoiceSupplierField
+                      label={labels[key]} name={fields.supplier_name} system={systemSupplier} provider={supplierProvider} disabled={parsing || saving} required={scope === "company"}
+                      onNameChange={value => updateField("supplier_name", value)}
+                      onModeChange={value => { setSystemSupplier(value); setSupplierProvider(null); setConfirmed(false); }}
+                      onProviderChange={provider => { setSupplierProvider(provider); updateField("supplier_name", provider?.name ?? ""); }}
+                    /> : <Input aria-label={labels[key]} value={fields[key]} required={key !== "due_date"} type={key.endsWith("date") ? "date" : "text"}
+                      onChange={(event) => updateField(key, event.target.value)} />}
                     {preview?.field_sources?.[key] && fields[key] === preview.fields[key] ? <p className="text-xs leading-4 text-muted-foreground" title={preview.field_sources[key].text}>
                       {preview.field_sources[key].method === "document_without_vat"
                         ? tx("По фразе в счёте: «без НДС».", "Laut Rechnung: ohne Umsatzsteuer.")
@@ -322,6 +341,8 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                     </p> : null}
                   </Field>)}
                 </fieldset>
+                <InvoiceImportAmounts fields={fields} labels={labels} calculation={vatCalculation} preview={preview} disabled={parsing || saving}
+                  onChange={(nextFields, nextCalculation) => { setFields(nextFields); setVatCalculation(nextCalculation); setConfirmed(false); }} />
                 {!parsing && fields.amount_gross && !totalsValid ? <p className="text-xs text-amber-700">{tx("Укажите все суммы: без НДС + НДС должно равняться итогу. Если НДС нет, укажите 0.", "Alle Beträge angeben: Netto + Umsatzsteuer muss Brutto entsprechen. Ohne Umsatzsteuer 0 eintragen.")}</p> : null}
               </div>
               {preview?.payment && (preview.payment.terms?.length || preview.payment.method || preview.payment.amount_due != null) ? <div className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-xs shadow-sm">

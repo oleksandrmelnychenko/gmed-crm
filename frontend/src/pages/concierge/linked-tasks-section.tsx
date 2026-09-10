@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useTaskRealtimeRefresh } from "./use-task-realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
@@ -34,12 +34,6 @@ import {
 } from "./task-event-dialog";
 
 export const OPEN_PATIENT_TASK_CREATOR_EVENT = "gmed:open-patient-task-creator";
-
-const REALTIME_EVENTS = [
-  "concierge_operational_item.created",
-  "concierge_operational_item.updated",
-  "concierge_operational_item.deleted",
-] as const;
 
 const copy = {
   de: {
@@ -184,7 +178,7 @@ export function LinkedTasksSection({
   );
 
   const refresh = useCallback(() => setVersion((current) => current + 1), []);
-  useDebouncedRealtimeSubscription(REALTIME_EVENTS, refresh, 250);
+  useTaskRealtimeRefresh(refresh, { busy: submitting || loading });
 
   const openContextTaskCreator = useCallback(() => {
     if (!patientId && !providerId) return;

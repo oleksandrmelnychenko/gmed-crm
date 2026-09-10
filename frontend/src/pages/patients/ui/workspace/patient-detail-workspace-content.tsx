@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
 
 import {
   AlertTriangle,
@@ -12,16 +12,14 @@ import { StatusActionPill } from "@/components/status-action-pill";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs } from "@/components/ui/tabs";
 import type { Translations } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
 import { resolvePatientBalancePresentation } from "../../model/account-balance";
+import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
   patientLabelFormatLabel,
@@ -69,6 +67,7 @@ const loadPatientMedicationAiTab = () => import("../sections/patient-medication-
 const loadPatientDocumentsTab = () => import("../sections/patient-documents-tab");
 const loadPatientContractsTab = () => import("../sections/patient-contracts-tab");
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
+const loadPatientFinanceTab = () => import("../sections/patient-finance-tab");
 const loadPatientWorkflowTab = () => import("../sections/patient-workflow-section");
 const loadPatientTimelineTab = () => import("../sections/patient-timeline-section");
 const loadLeadWizard = () => import("@/pages/leads/ui/lead-wizard");
@@ -127,6 +126,11 @@ const LazyPatientInvoicesTab = lazy(async () => {
   return { default: mod.PatientInvoicesTab };
 });
 
+const LazyPatientFinanceTab = lazy(async () => {
+  const mod = await loadPatientFinanceTab();
+  return { default: mod.PatientFinanceTab };
+});
+
 const LazyPatientWorkflowTab = lazy(async () => {
   const mod = await loadPatientWorkflowTab();
   return { default: mod.PatientWorkflowTab };
@@ -174,6 +178,9 @@ function preloadPatientWorkspaceTab(tab: string) {
     case "invoices":
       void loadPatientInvoicesTab();
       break;
+    case "finance":
+      void loadPatientFinanceTab();
+      break;
     case "workflow":
       void loadPatientWorkflowTab();
       break;
@@ -215,10 +222,7 @@ type WorkflowChecklistGroup = {
   items: WorkflowChecklistItem[];
 };
 
-type WorkspaceTab = {
-  key: string;
-  label: string;
-};
+type WorkspaceTab = PatientNavigationItem;
 
 type PatientDetailWorkspaceContentProps = {
   activeTab: string;
@@ -249,6 +253,7 @@ type PatientDetailWorkspaceContentProps = {
   canViewContracts: boolean;
   canViewDocuments: boolean;
   canViewInvoices: boolean;
+  canViewFinance: boolean;
   complianceExportBusy: boolean;
   contractExpiringSoonCount: number;
   contractPendingCount: number;
@@ -418,6 +423,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
+    canViewFinance,
     complianceExportBusy,
     contractExpiringSoonCount,
     contractPendingCount,
@@ -557,38 +563,42 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [clinicalImports, setClinicalImports] = useState<ClinicalDocumentImportSummary[]>([]);
   const [accountStatement, setAccountStatement] = useState<PatientAccountStatement | null>(null);
   const [accountStatementLoading, setAccountStatementLoading] = useState(false);
+  const [accountRevision, setAccountRevision] = useState(0);
+  const refreshAccount = useCallback(() => setAccountRevision(value => value + 1), []);
+  useFinanceAutoRefresh(refreshAccount, accountStatementLoading, Boolean(id && canViewFinance));
   const [repeatIntakeOpen, setRepeatIntakeOpen] = useState(false);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id || !canViewInvoices) {
+    if (!id || !canViewFinance) {
       setAccountStatement(null);
       setAccountStatementLoading(false);
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setAccountStatementLoading(true);
     void apiFetch<PatientAccountStatement>(`/patients/${id}/account-statement`, {
       forceFresh: true,
+      signal: controller.signal,
     })
       .then((statement) => {
-        if (!cancelled) setAccountStatement(statement);
+        if (!controller.signal.aborted) setAccountStatement(statement);
       })
       .catch(() => {
-        if (!cancelled) setAccountStatement(null);
+        if (!controller.signal.aborted) setAccountStatement(null);
       })
       .finally(() => {
-        if (!cancelled) setAccountStatementLoading(false);
+        if (!controller.signal.aborted) setAccountStatementLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [activeTab, canViewInvoices, detail, id]);
+  }, [activeTab, accountRevision, canViewFinance, detail, id]);
 
-  const balance = resolvePatientBalancePresentation(accountStatement?.summary);
+  const balance = resolvePatientBalancePresentation(accountStatement && accountStatement.patient_id === id ? accountStatement.summary : null);
   const balanceSideLabel =
     balance?.side === "debit"
       ? lang === "de" ? "Offener Betrag" : "Долг"
@@ -604,11 +614,11 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       : accountStatementLoading ? "…" : "—";
   const balanceTitle = balance?.needsReconciliation
     ? lang === "de"
-      ? "Berechneter Saldo – Abstimmung erforderlich. Rechnungen öffnen."
-      : "Расчётное сальдо — требуется сверка. Открыть счета."
+      ? "Berechneter Saldo – Abstimmung erforderlich. Finanzübersicht öffnen."
+      : "Расчётное сальдо — требуется сверка. Открыть финансовый обзор."
     : lang === "de"
-      ? "Rechnungen öffnen"
-      : "Открыть счета";
+      ? "Finanzübersicht öffnen"
+      : "Открыть финансовый обзор";
 
   const clinicalImportAttentionCount = clinicalImports.filter((item) =>
     ["queued", "processing", "review_required", "applying"].includes(item.status),
@@ -681,13 +691,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           </div>
           <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">{detail.patient_id}</p>
         </div>
-        {canViewInvoices ? (
+        {canViewFinance ? (
           <button
             type="button"
             className="group shrink-0 rounded-md px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`${t.invoices_workspace_balance}: ${balanceValue}. ${balanceTitle}`}
             title={balanceTitle}
-            onClick={() => handleWorkspaceTabChange("invoices")}
+            onClick={() => handleWorkspaceTabChange("finance")}
           >
             <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {t.invoices_workspace_balance}
@@ -763,14 +773,15 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       /> : null}
 
       <Tabs value={activeTab} onValueChange={handleWorkspaceTabChange}>
-        <div className="border-b border-slate-200 lg:hidden overflow-x-auto">
-          <TabsList variant="line" className="min-w-max">
-            {workspaceTabs.map((tab) => (
-              <TabsTrigger key={tab.key} value={tab.key} className="px-4 py-2">
-                {tab.label}
-              </TabsTrigger>
+        <div className="rounded-xl border border-border/70 bg-card p-3 shadow-sm lg:hidden">
+          <label htmlFor="patient-workspace-section" className="mb-2 block text-xs font-medium text-muted-foreground">{lang === "de" ? "Patientenbereich" : "Раздел пациента"}</label>
+          <NativeComboboxSelect id="patient-workspace-section" value={activeTab} onChange={event => handleWorkspaceTabChange(event.target.value)}>
+            {[...new Map(workspaceTabs.map(tab => [tab.group, tab.groupLabel])).entries()].map(([group, label]) => (
+              <optgroup key={group} label={label}>
+                {workspaceTabs.filter(tab => tab.group === group).map(tab => <option key={tab.key} value={tab.key}>{tab.label}</option>)}
+              </optgroup>
             ))}
-          </TabsList>
+          </NativeComboboxSelect>
         </div>
 
         {tabActionError || tabError ? (
@@ -974,6 +985,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               formatDateTime={formatDateTime}
               isContractExpiringSoon={isContractExpiringSoon}
             />
+          ) : null}
+
+          {activeTab === "finance" && canViewFinance ? (
+            <LazyPatientFinanceTab key={detail.id} patientId={detail.id} onOpenInvoices={() => handleWorkspaceTabChange("invoices")} />
           ) : null}
 
           {activeTab === "invoices" && canViewInvoices ? (

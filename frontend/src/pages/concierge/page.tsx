@@ -27,7 +27,7 @@ import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "./use-task-realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -102,6 +102,7 @@ import type {
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 
 const REALTIME_EVENTS = [
+  ...TASK_REALTIME_EVENTS,
   "concierge_service.created",
   "concierge_service.updated",
   "concierge_service.cancelled",
@@ -116,15 +117,6 @@ const REALTIME_EVENTS = [
   "concierge_expense.posted",
   "concierge_expense.rejected",
   "concierge_expense.reversed",
-  "concierge_operational_item.created",
-  "concierge_operational_item.updated",
-  "concierge_operational_item.deleted",
-  "concierge_operational_item.archived",
-  "concierge_operational_item.restored",
-  "concierge_operational_item.reminder_sent",
-  "concierge_operational_item.comment_added",
-  "concierge_operational_item.checklist_item_added",
-  "concierge_operational_item.checklist_item_toggled",
 ] as const;
 
 const text = {
@@ -537,6 +529,7 @@ export function ConciergeWorkspacePage() {
   const [taskProviders, setTaskProviders] = useState<ConciergeProvider[]>([]);
   const [taskPatients, setTaskPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("board");
@@ -599,7 +592,7 @@ export function ConciergeWorkspacePage() {
       });
   }, [expenseServiceId, requestRefresh]);
 
-  useDebouncedRealtimeSubscription(REALTIME_EVENTS, handleRealtimeRefresh, 250);
+  useTaskRealtimeRefresh(handleRealtimeRefresh, { eventTypes: REALTIME_EVENTS, busy: refreshing });
 
   const taskListPath = useMemo(
     () => conciergeOperationalItemsListPath(user?.id, user?.role, "all"),
@@ -618,6 +611,7 @@ export function ConciergeWorkspacePage() {
     let cancelled = false;
 
     async function load() {
+      setRefreshing(true);
       if (services.length === 0) setLoading(true);
       setError("");
       try {
@@ -668,6 +662,7 @@ export function ConciergeWorkspacePage() {
         }
       } finally {
         if (!cancelled) {
+          setRefreshing(false);
           setLoading(false);
         }
       }

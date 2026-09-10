@@ -18,9 +18,7 @@ const RIGHT: f32 = 283.0;
 const TOP: f32 = 195.0;
 const BOTTOM: f32 = 29.0;
 const WIDTH: f32 = RIGHT - LEFT;
-const COLS: [f32; 11] = [
-    40.0, 36.0, 20.0, 22.0, 14.0, 14.0, 14.0, 14.0, 15.0, 48.0, 32.0,
-];
+const COLS: [f32; 10] = [44.0, 40.0, 20.0, 22.0, 14.0, 14.0, 14.0, 14.0, 55.0, 32.0];
 const FONT_SIZE: f32 = 9.0;
 const LINE_HEIGHT: f32 = 4.0;
 const PAD: f32 = 1.8;
@@ -28,8 +26,8 @@ const PAD: f32 = 1.8;
 #[derive(Clone, Default)]
 pub struct MedicationPlanEntry {
     pub category: String,
-    /// Ingredient, trade name, strength, form/route, four doses, unit, notes, reason.
-    pub cells: [String; 11],
+    /// Ingredient, trade name, strength, form/route, four doses, notes, reason.
+    pub cells: [String; 10],
 }
 
 #[derive(Default)]
@@ -312,7 +310,6 @@ impl<'a> Layout<'a> {
                 "День",
                 "Вечер",
                 "Ночь",
-                "Ед.",
                 "Указания / период приёма",
                 "Показание",
             ]
@@ -326,7 +323,6 @@ impl<'a> Layout<'a> {
                 "Mittags",
                 "Abends",
                 "Zur Nacht",
-                "Einheit",
                 "Hinweise / Einnahmezeitraum",
                 "Grund",
             ]
@@ -577,7 +573,6 @@ mod tests {
                     "0".into(),
                     "1".into(),
                     String::new(),
-                    "Stück".into(),
                     if index == 0 {
                         format!(
                             "{}\nVerordnender Arzt: Dr. Erika Beispiel\nEND-OF-LONG-NOTE",
@@ -612,6 +607,7 @@ mod tests {
                 }
                 // Table labels, footer and numbering still belong on every page.
                 assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));
+                assert!(!page.contains(ctx.tx("Ед.", "Einheit")));
                 assert!(page.contains("contact@gmed-health.com"));
                 assert!(page.contains(&format!(
                     "{} {} / {}",
@@ -628,7 +624,9 @@ mod tests {
                 );
             }
             assert!(text.contains("END-OF-LONG-NOTE"));
+            assert!(text.contains("500 mg"));
             let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(normalized.contains("Dokumentierte Indikation"));
             assert!(normalized.contains("Verordnender Arzt: Dr. Erika Beispiel"));
             assert!(!text.contains("1. Wirkstoff-00"));
             assert!(text.contains("Олена Приклад"));
@@ -673,7 +671,7 @@ mod tests {
                         .map(|(i, mut entry)| {
                             entry.category = ["dauer", "besondere", "selbst"][i].into();
                             if i == 0 {
-                                entry.cells[9].push_str("\nVerordnender Arzt: Dr. Erika Beispiel");
+                                entry.cells[8].push_str("\nVerordnender Arzt: Dr. Erika Beispiel");
                             }
                             entry
                         })

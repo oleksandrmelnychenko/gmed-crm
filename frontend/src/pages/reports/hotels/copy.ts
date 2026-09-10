@@ -1,0 +1,41 @@
+export const hotelCopy = {
+  ru: {
+    filters: "Период и фильтры", retry: "Повторить загрузку",
+    title: "Гостиницы", subtitle: "Проживания, завтраки и объём бронирований для переговоров",
+    staySearch: "Пациент или номер бронирования", reference: "Бронь", shown: "Показано", noStays: "Проживания не найдены", exportStays: "Выгрузить проживания", hotelProfile: "Карточка гостиницы",
+    from: "Заезд с", to: "Заезд по", apply: "Применить период", hotel: "Гостиница", city: "Город", currency: "Валюта", status: "Бронирования",
+    allHotels: "Все гостиницы", allCities: "Все города", search: "Поиск гостиницы или города", reset: "Сбросить фильтры",
+    committed: "Подтверждены / состоялись", all: "Все статусы", planned: "Запланировано", booked: "Запрошено", confirmed: "Подтверждено", in_service: "Проживает", completed: "Завершено", cancelled: "Отменено", future: "Будущие подтверждённые",
+    bookings: "Бронирования", patients: "Пациенты", nights: "Ночи проживания", roomNights: "Номеро-ночи", volume: "Стоимость проживаний", average: "Средняя цена за номеро-ночь",
+    roomDefinition: "1 номер × 1 ночь. Только брони с известными датами и количеством номеров.",
+    nightDefinition: "Сумма ночей по бронированиям. Количество номеров не учитывается.",
+    periodDefinition: "Период — по дате заезда (Берлин). Ночи и стоимость учитываются за всё проживание. Отменённые брони не добавляют ночей.",
+    costDefinition: "Фактическая стоимость из карточки брони; если её нет — оценка. Оплаты и остатки показаны отдельно. Это объём для гостиниц, не доход GMED.",
+    averageDefinition: "Стоимость / номеро-ночи по одним и тем же броням с заполненными данными. Включает указанные оценки.",
+    actual: "Фактическая стоимость", estimated: "Оценка стоимости", direct: "Пациент → гостиница", company: "GMED → гостиница", due: "Осталось оплатить гостиницам", pending: "На проверке",
+    payments: "Оплаты и остатки", paymentDefinition: "По проведённым расходам, связанным с выбранными бронями. Учитываются частичные оплаты и сторно; суммы на проверке не включены.",
+    trend: "Стоимость по месяцу заезда", ranking: "Объём по гостиницам", table: "Гостиницы для переговоров", known: "Заполнено", outOf: "из", noHotel: "Гостиница не указана", noData: "Нет бронирований по выбранным фильтрам", noMoney: "Стоимость ещё не заполнена", noDate: "Брони без даты заезда не включены в период", missing: "Неполные данные", details: "Проживания", rooms: "Номеров", save: "Сохранить", saved: "Сохранено", clear: "Неизвестно", close: "Закрыть", patient: "Пациент", task: "Задача", checkIn: "Заезд", checkOut: "Выезд", export: "Экспорт CSV", refresh: "Обновить", loading: "Загрузка статистики…", loadError: "Не удалось загрузить статистику гостиниц", saveError: "Не удалось сохранить количество номеров", invalidDates: "Укажите период от одного дня до трёх лет", invalidRooms: "Укажите от 1 до 1000 номеров или оставьте поле пустым", readOnly: "Только просмотр", updated: "Обновлено", sort: "Сортировка", missingRooms: "Без количества номеров", missingCost: "Без стоимости", missingDates: "Без корректной даты выезда", source: "Источник: бронирования и проведённые расходы CRM", partial: "Частичная сумма", count: "Кол-во", previous: "Назад", next: "Далее",
+  },
+  de: {
+    filters: "Zeitraum und Filter", retry: "Erneut laden",
+    title: "Hotels", subtitle: "Aufenthalte, Frühstück und Buchungsvolumen für Verhandlungen",
+    staySearch: "Patient oder Buchungsnummer", reference: "Buchung", shown: "Angezeigt", noStays: "Keine Aufenthalte gefunden", exportStays: "Aufenthalte exportieren", hotelProfile: "Hotelprofil",
+    from: "Anreise ab", to: "Anreise bis", apply: "Zeitraum anwenden", hotel: "Hotel", city: "Stadt", currency: "Währung", status: "Buchungen",
+    allHotels: "Alle Hotels", allCities: "Alle Städte", search: "Hotel oder Stadt suchen", reset: "Filter zurücksetzen",
+    committed: "Bestätigt und stattgefunden", all: "Alle Status", planned: "Geplant", booked: "Angefragt", confirmed: "Bestätigt", in_service: "Im Aufenthalt", completed: "Abgeschlossen", cancelled: "Storniert", future: "Künftige bestätigte",
+    bookings: "Buchungen", patients: "Patienten", nights: "Aufenthaltsnächte", roomNights: "Zimmernächte", volume: "Aufenthaltskosten", average: "Ø Preis pro Zimmernacht",
+    roomDefinition: "1 Zimmer × 1 Nacht. Nur Buchungen mit bekannten Daten und Zimmerzahlen.",
+    nightDefinition: "Summe der Nächte je Buchung, ohne Berücksichtigung der Zimmeranzahl.",
+    periodDefinition: "Zeitraum nach Anreisedatum (Berlin). Nächte und Kosten gelten für den gesamten Aufenthalt. Stornierungen tragen keine Nächte bei.",
+    costDefinition: "Erfasste Ist-Kosten der Buchung, sonst Schätzung. Zahlungen und Restbeträge separat. Volumen für Hotels, kein GMED-Umsatz.",
+    averageDefinition: "Kosten / Zimmernächte derselben vollständig erfassten Buchungen. Enthält erfasste Schätzungen.",
+    actual: "Ist-Kosten", estimated: "Kostenschätzung", direct: "Patient → Hotel", company: "GMED → Hotel", due: "Noch an Hotels zu zahlen", pending: "In Prüfung",
+    payments: "Zahlungen und Restbeträge", paymentDefinition: "Gebuchte Ausgaben der ausgewählten Buchungen, einschließlich Teilzahlungen und Stornos; Ausgaben in Prüfung sind nicht enthalten.",
+    trend: "Kosten nach Anreisemonat", ranking: "Volumen nach Hotel", table: "Hotels für Verhandlungen", known: "Erfasst", outOf: "von", noHotel: "Hotel fehlt", noData: "Keine Buchungen für diese Filter", noMoney: "Kosten noch nicht erfasst", noDate: "Buchungen ohne Anreise liegen außerhalb des Zeitraums", missing: "Unvollständige Daten", details: "Aufenthalte", rooms: "Zimmer", save: "Speichern", saved: "Gespeichert", clear: "Unbekannt", close: "Schließen", patient: "Patient", task: "Aufgabe", checkIn: "Anreise", checkOut: "Abreise", export: "CSV exportieren", refresh: "Aktualisieren", loading: "Hotelstatistik wird geladen…", loadError: "Hotelstatistik konnte nicht geladen werden", saveError: "Zimmerzahl konnte nicht gespeichert werden", invalidDates: "Zeitraum von einem Tag bis drei Jahren angeben", invalidRooms: "1 bis 1000 Zimmer angeben oder Feld leer lassen", readOnly: "Nur Lesen", updated: "Aktualisiert", sort: "Sortierung", missingRooms: "Ohne Zimmerzahl", missingCost: "Ohne Kosten", missingDates: "Ohne gültige Abreise", source: "Quelle: CRM-Buchungen und gebuchte Ausgaben", partial: "Teilbetrag", count: "Anzahl", previous: "Zurück", next: "Weiter",
+  },
+} as const;
+
+export const createHotelCopy = {
+  ru: { add: "Добавить гостиницу", name: "Название гостиницы", city: "Город", country: "Страна", street: "Улица и дом", zip: "Почтовый индекс", legal: "Юридическое название", phone: "Телефон", email: "Email", website: "Сайт", notes: "Условия сотрудничества и комментарии", save: "Создать гостиницу", saving: "Создание…", cancel: "Отмена", type: "Гостиница · немедицинский провайдер", error: "Не удалось создать гостиницу. Проверьте данные и повторите попытку.", taxonomyError: "Не удалось загрузить тип гостиницы. Повторите загрузку.", retry: "Повторить", hint: "Договоры и другие файлы можно прикрепить сразу после создания.", directoryError: "Не удалось загрузить список гостиниц", noPeriodStays: "В выбранном периоде нет проживаний. Гостиницы и их документы доступны ниже." },
+  de: { add: "Hotel hinzufügen", name: "Hotelname", city: "Stadt", country: "Land", street: "Straße und Hausnummer", zip: "Postleitzahl", legal: "Juristischer Name", phone: "Telefon", email: "E-Mail", website: "Website", notes: "Konditionen und Kommentare", save: "Hotel anlegen", saving: "Wird angelegt…", cancel: "Abbrechen", type: "Hotel · nichtmedizinischer Anbieter", error: "Hotel konnte nicht angelegt werden. Angaben prüfen und erneut versuchen.", taxonomyError: "Hoteltyp konnte nicht geladen werden. Erneut laden.", retry: "Erneut versuchen", hint: "Verträge und weitere Dateien können direkt nach dem Anlegen angehängt werden.", directoryError: "Hotelliste konnte nicht geladen werden", noPeriodStays: "Keine Aufenthalte im gewählten Zeitraum. Hotels und ihre Dokumente sind unten verfügbar." },
+} as const;

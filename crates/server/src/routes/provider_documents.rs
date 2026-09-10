@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
 struct ProviderDocumentQuery {
     patient_id: Option<Uuid>,
     q: Option<String>,
+    general_only: Option<bool>,
 }
 
 async fn list_provider_documents(
@@ -66,6 +67,9 @@ async fn list_provider_documents(
            LEFT JOIN patients patient ON patient.id = document.patient_id
            WHERE link.provider_id = $1
              AND document.file_deleted_at IS NULL
+             AND (NOT $4 OR (document.patient_id IS NULL AND document.lead_id IS NULL
+                  AND document.order_id IS NULL AND document.appointment_id IS NULL
+                  AND NOT document.is_medical AND document.art = 'provider_document'))
              AND ($2::uuid IS NULL OR document.patient_id = $2)
              AND ($3::text IS NULL
                   OR document.auto_name ILIKE $3
@@ -77,6 +81,7 @@ async fn list_provider_documents(
     .bind(provider_id)
     .bind(query.patient_id)
     .bind(search)
+    .bind(query.general_only.unwrap_or(false))
     .fetch_all(&state.db)
     .await
     {

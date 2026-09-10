@@ -4,7 +4,7 @@ import { Download, FileImage, FileText, LoaderCircle, Paperclip, Trash2 } from "
 import { Button } from "@/components/ui/button";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
-import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { useTaskRealtimeRefresh } from "./use-task-realtime";
 
 import { conciergeTaskErrorMessage } from "./model";
 
@@ -23,6 +23,7 @@ export const TASK_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 const allowedExtensions = new Set(["pdf", "png", "jpg", "jpeg", "webp", "doc", "docx"]);
 const ATTACHMENT_REALTIME_EVENTS = [
+  "realtime.connected", "realtime.resync_required",
   "concierge_operational_item.attachment_added",
   "concierge_operational_item.attachment_deleted",
 ] as const;
@@ -123,11 +124,8 @@ export function ConciergeTaskAttachments({
   const [error, setError] = useState("");
   const [version, setVersion] = useState(0);
 
-  const refreshFromRealtime = useCallback((event: { entity_id: string }) => {
-    if (event.entity_id === taskId) setVersion((current) => current + 1);
-  }, [taskId]);
-
-  useDebouncedRealtimeSubscription(ATTACHMENT_REALTIME_EVENTS, refreshFromRealtime, 250);
+  const refreshFromRealtime = useCallback(() => setVersion((current) => current + 1), []);
+  useTaskRealtimeRefresh(refreshFromRealtime, { taskId, busy: busy || loading, eventTypes: ATTACHMENT_REALTIME_EVENTS });
 
   useEffect(() => {
     let cancelled = false;

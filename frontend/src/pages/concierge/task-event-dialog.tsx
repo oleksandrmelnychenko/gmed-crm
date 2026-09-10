@@ -411,8 +411,14 @@ export function ConciergeTaskEventDialog({
     }
   }, [assigneeId, item?.concierge_service_id, open, serviceId, services]);
 
+  const initializedDraftRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!open) { initializedDraftRef.current = null; return; }
+    const draftKey = item?.id ?? "new";
+    // Realtime reloads the assignee/options arrays. They must not reset a
+    // half-written task (or subtask) and its selected dates/assignee.
+    if (initializedDraftRef.current === draftKey) return;
+    initializedDraftRef.current = draftKey;
     const start = initialDate ? new Date(initialDate) : new Date(Date.now() + 60 * 60_000);
     setScheduleError("");
     if (initialDate) start.setHours(9, 0, 0, 0);

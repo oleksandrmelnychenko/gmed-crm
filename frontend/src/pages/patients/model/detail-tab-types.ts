@@ -262,6 +262,8 @@ export type PatientAccountMovement = {
   id: string;
   kind:
     | "invoice"
+    | "credit_note"
+    | "credit_note_reversal"
     | "payment"
     | "payment_reversal"
     | "refund"

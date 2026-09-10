@@ -51,6 +51,7 @@ import {
   canViewPatientContractsSurface,
   canViewPatientDocumentsSurface,
   canViewPatientInvoicesSurface,
+  canViewPatientFinanceSurface,
   canViewPatientOperationalSurface,
   DEFAULT_PATIENT_LABEL_FORMAT_ID,
   normalizePatientDetailTab,
@@ -63,6 +64,7 @@ import type {
   PatientAssignment,
   PatientDetail,
 } from "./model/list-model";
+import { patientWorkspaceNavigation } from "./model/patient-navigation";
 import { usePatientDetailCoreData } from "./data/use-patient-detail-core-data";
 import {
   completePatientWorkflowChecklistItem,
@@ -1177,6 +1179,7 @@ function usePatientDetailPageContent() {
     user?.role === "billing" ||
     user?.role === "it_admin";
   const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
+  const canViewFinance = canViewPatientFinanceSurface(user?.role);
   const canManageInvoices =
     user?.role === "ceo" || user?.role === "billing" || user?.role === "it_admin";
   const canEditPatientProfile = canManagePatientProfile(user?.role);
@@ -1243,78 +1246,7 @@ function usePatientDetailPageContent() {
     usePatientInvoiceDunningEvents(invoiceManageId);
   const error =
     (actionErrorState.patientId === (id ?? "") ? actionErrorState.message : "") || coreError;
-  const workspaceTabs = [
-    {
-      key: "profile",
-      label: t.patients_profile,
-    },
-    canViewClinical
-      ? {
-          key: "clinical",
-          label: l("patients_diagnoses_medications"),
-        }
-      : null,
-    canUseMedicationAi
-      ? {
-          key: "medication-ai",
-          label: lang === "de" ? "KI-Medikationsanalyse" : "AI-анализ медикаментов",
-        }
-      : null,
-    canViewOperationalSurface
-      ? {
-          key: "relations",
-          label: t.patients_relations,
-        }
-      : null,
-    canViewCareHistory
-      ? {
-          key: "orders",
-          label: t.orders_title,
-        }
-      : null,
-    canViewCareHistory
-      ? {
-          key: "appointments",
-          label: t.appointments_title,
-        }
-      : null,
-    canViewDocuments
-      ? {
-          key: "documents",
-          label: t.documents_title,
-        }
-      : null,
-    canViewContracts
-      ? {
-          key: "contracts",
-          label: t.contracts_title,
-        }
-      : null,
-    canViewInvoices
-      ? {
-          key: "invoices",
-          label: t.invoices_title,
-        }
-      : null,
-    canViewOperationalSurface
-      ? {
-          key: "workflow",
-          label: t.patients_workflow,
-        }
-      : null,
-    canViewOperationalSurface
-      ? {
-          key: "curators",
-          label: t.patients_assign_owner,
-        }
-      : null,
-    canViewCareHistory
-      ? {
-          key: "timeline",
-          label: t.patients_timeline,
-        }
-      : null,
-  ].filter((item): item is { key: string; label: string } => Boolean(item));
+  const workspaceTabs = patientWorkspaceNavigation(user?.role, lang, t);
   const activeWorkflowAssignees = useMemo(
     () =>
       assignments.filter(
@@ -1665,6 +1597,7 @@ function usePatientDetailPageContent() {
       canViewDocuments,
       canViewContracts,
       canViewInvoices,
+      canViewFinance,
     });
 
     if (activeTab !== normalizedTab) {
@@ -1689,6 +1622,7 @@ function usePatientDetailPageContent() {
     canUseMedicationAi,
     canViewDocuments,
     canViewInvoices,
+    canViewFinance,
     canViewOperationalSurface,
     searchParams,
     setSearchParams,
@@ -2083,6 +2017,7 @@ function usePatientDetailPageContent() {
         canViewContracts={canViewContracts}
         canViewDocuments={canViewDocuments}
         canViewInvoices={canViewInvoices}
+        canViewFinance={canViewFinance}
         complianceExportBusy={complianceExportBusy}
         contractExpiringSoonCount={contractExpiringSoonCount}
         contractPendingCount={contractPendingCount}

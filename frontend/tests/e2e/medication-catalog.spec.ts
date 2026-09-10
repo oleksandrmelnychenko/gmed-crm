@@ -27,6 +27,12 @@ async function prepare(page: Page, lang: "ru" | "de" = "ru", role = "ceo") {
       const input = route.request().postDataJSON();
       writes.push({ method: route.request().method(), body: input });
       const item = items.find(item => path.endsWith(`/${item.id}`));
+      if (route.request().method() === "DELETE") {
+        if (!item) return route.fulfill({ status: 404, json: { code: "medication_pair_not_found" } });
+        if (item.version !== input.version) return route.fulfill({ status: 409, json: { code: "medication_pair_changed" } });
+        items.splice(items.indexOf(item), 1);
+        return route.fulfill({ status: 204 });
+      }
       if (item) Object.assign(item, input, { version: item.version + 1 });
       else items.unshift({ id: `created-${writes.length}`, ...input, version: 0 });
       body = item ?? items[0];
@@ -102,6 +108,55 @@ test("catalog editor remains usable on mobile", async ({ page }) => {
   await page.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect(page.getByText("Mobile Brand", { exact: true }).filter({ visible: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+for (const lang of ["ru", "de"] as const) {
+  test(`catalog confirms deletion, retains failures and recovers in ${lang}`, async ({ page }) => {
+    const { items, writes } = await prepare(page, lang);
+    const de = lang === "de", remove = de ? "Löschen" : "Удалить";
+    await expect(page.locator("#topbar-page-slot").getByRole("button", { name: de ? "Medikament hinzufügen" : "Добавить медикамент", exact: true })).toBeVisible();
+    const row = page.getByRole("row").filter({ hasText: "Brand 001" });
+    await row.getByRole("button", { name: remove, exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Substance 1");
+    await dialog.getByRole("button", { name: de ? "Abbrechen" : "Отмена", exact: true }).click();
+    expect(writes).toHaveLength(0);
+    await row.getByRole("button", { name: remove, exact: true }).click();
+    items[0].version = 1;
+    await dialog.getByRole("button", { name: remove, exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText(de ? "bereits geändert" : "уже изменена");
+    expect(items).toHaveLength(65);
+    await dialog.getByRole("button", { name: de ? "Abbrechen" : "Отмена", exact: true }).click();
+    await page.getByRole("button", { name: de ? "Aktualisieren" : "Обновить", exact: true }).click();
+    await expect(row.getByRole("button", { name: remove, exact: true })).toBeEnabled();
+    await row.getByRole("button", { name: remove, exact: true }).click();
+    await page.route("**/medication-name-pairs/medication-0", route => route.fulfill({ status: 503, json: { code: "unavailable" } }));
+    await dialog.getByRole("button", { name: remove, exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText(de ? "nicht gelöscht" : "Не удалось удалить");
+    await page.screenshot({ path: test.info().outputPath(`delete-${lang}.png`) });
+    await page.unroute("**/medication-name-pairs/medication-0");
+    await dialog.getByRole("button", { name: remove, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toHaveCount(0);
+    expect(items).toHaveLength(64);
+    expect(writes.at(-1)).toEqual({ method: "DELETE", body: { version: 1 } });
+    await page.reload();
+    await expect(page.getByText("1-50 / 64", { exact: true })).toBeVisible();
+    await expect(page.getByText("Brand 001", { exact: true }).filter({ visible: true })).toHaveCount(0);
+  });
+}
+
+test("deleting the final filtered result returns to a valid page", async ({ page }) => {
+  const { items } = await prepare(page);
+  items.splice(51);
+  await page.getByRole("button", { name: "Обновить", exact: true }).click();
+  await expect(page.getByText("1-50 / 51", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Следующая страница", exact: true }).click();
+  await expect(page.getByText("51-51 / 51", { exact: true })).toBeVisible();
+  await page.getByRole("row").filter({ hasText: "Brand 051" }).getByRole("button", { name: "Удалить", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Удалить", exact: true }).click();
+  await expect(page.getByText("1-50 / 50", { exact: true })).toBeVisible();
+  await expect(page.getByText("Brand 001", { exact: true }).filter({ visible: true })).toBeVisible();
 });
 
 test("non-clinical staff cannot open or navigate to the medication catalog", async ({ page }) => {

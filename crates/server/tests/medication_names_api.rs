@@ -325,6 +325,103 @@ async fn catalog_validates_pairs_and_rejects_duplicates_without_overwriting() {
 }
 
 #[tokio::test]
+async fn catalog_delete_checks_version_and_keeps_patient_prescriptions() {
+    let Some((suite, patient_id, bearer)) = context().await else {
+        return;
+    };
+    let (status, _) = request(
+        &suite.app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &bearer,
+        Some(json!({ "items": [reviewed_pair("Delete Brand", "Delete Substance")] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, catalog) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/medication-name-pairs",
+        &bearer,
+        None,
+    )
+    .await;
+    let item = &catalog["items"][0];
+    let path = format!(
+        "/api/v1/medication-name-pairs/{}",
+        item["id"].as_str().unwrap()
+    );
+    let version = item["version"].as_i64().unwrap();
+    let (status, error) = request(
+        &suite.app,
+        "DELETE",
+        &path,
+        &bearer,
+        Some(json!({ "version": version + 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error["code"], "medication_pair_changed");
+    let (_, catalog) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/medication-name-pairs",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 1);
+    let (status, _) = request(
+        &suite.app,
+        "DELETE",
+        &path,
+        &bearer,
+        Some(json!({ "version": version })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, catalog) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/medication-name-pairs",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(catalog["total"], 0);
+    let (_, suggestions) = request(
+        &suite.app,
+        "GET",
+        &search("handelsname", "", "Delete Substance"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(suggestions["items"], json!([]));
+    let medication: (String, String) = sqlx::query_as(
+        "SELECT handelsname, wirkstoff FROM patient_medications WHERE patient_id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        medication,
+        ("Delete Brand".into(), "Delete Substance".into())
+    );
+    let (status, error) = request(
+        &suite.app,
+        "DELETE",
+        &path,
+        &bearer,
+        Some(json!({ "version": version })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(error["code"], "medication_pair_not_found");
+}
+
+#[tokio::test]
 async fn catalog_lists_all_pages_and_searches_literal_names_and_substances() {
     let Some((suite, _, bearer)) = context().await else {
         return;
@@ -395,6 +492,11 @@ async fn catalog_rejects_unauthenticated_and_non_clinical_staff_reads_and_writes
                 "PATCH",
                 format!("/api/v1/medication-name-pairs/{}", Uuid::new_v4()),
                 Some(json!({ "handelsname": "Brand", "wirkstoff": "Substance", "version": 0 })),
+            ),
+            (
+                "DELETE",
+                format!("/api/v1/medication-name-pairs/{}", Uuid::new_v4()),
+                Some(json!({ "version": 0 })),
             ),
         ] {
             assert_eq!(

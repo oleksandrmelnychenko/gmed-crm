@@ -644,6 +644,7 @@ export const de = {
   nav_medicine: "MEDIZIN",
   nav_accounting: "Buchhaltung",
   nav_providers: "Provider",
+  nav_hotels: "Hotels",
 
   dash_pipeline: "Pipeline",
   dash_daily_ops: "Tagesbetrieb",

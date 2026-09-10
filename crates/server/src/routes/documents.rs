@@ -9919,6 +9919,10 @@ async fn fetch_document_row(
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  (d.patient_id IS NULL AND d.lead_id IS NULL AND d.order_id IS NULL
+                   AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
+                   AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
+                    AS general_provider_document,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -10658,6 +10662,14 @@ pub(crate) fn can_view_document_row(
     };
 
     let explicit_share = row.try_get::<bool, _>("shared_to_current").unwrap_or(false);
+    // Match the provider-document view contract for general commercial files.
+    // There is no patient to assign, and Billing must be able to read contracts
+    // stored as internal documents. Explicit document ACLs are checked by callers.
+    if matches!(auth.role, Role::PatientManager | Role::Billing)
+        && row.try_get::<bool, _>("general_provider_document").unwrap_or(false)
+    {
+        return true;
+    }
     let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
     let lead_id: Option<Uuid> = row.try_get("lead_id").unwrap_or_default();
     let is_assigned = if explicit_share || (lead_id.is_some() && auth.role == Role::PatientManager)
