@@ -33,7 +33,7 @@ import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { cachedNumberFormat } from "@/lib/intl-cache";
+import { cachedDateTimeFormat, cachedNumberFormat } from "@/lib/intl-cache";
 import {
   createSpecialization,
   deleteSpecialization,
@@ -164,6 +164,36 @@ function formatPriceRange(item: SpecializationWorkType, lang: Lang) {
     maximumFractionDigits: 2,
   });
   return `${formatter.format(item.min_price_eur)} - ${formatter.format(item.max_price_eur)} EUR`;
+}
+
+function WorkTypeUpdatedAt({ value, lang }: { value?: string | null; lang: Lang }) {
+  const date = value ? new Date(value) : null;
+  const validDate = date && Number.isFinite(date.getTime()) ? date : null;
+  return (
+    <p className="text-xs leading-5 text-muted-foreground">
+      <span className="block">
+        {lang === "ru" ? "Последнее обновление" : "Zuletzt aktualisiert"}
+      </span>
+      <Badge
+        variant="outline"
+        className="rounded-full border-orange-200 bg-orange-50 px-2 py-0.5 text-orange-700"
+      >
+        {validDate ? (
+          <time dateTime={validDate.toISOString()} className="tabular-nums">
+            {cachedDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(validDate)}
+          </time>
+        ) : (
+          <span>{lang === "ru" ? "Нет данных" : "Keine Angabe"}</span>
+        )}
+      </Badge>
+    </p>
+  );
 }
 
 function genericError(error: unknown, tx: Translate) {
@@ -656,9 +686,12 @@ export function SpecializationsPage() {
                             {tx("ч.", "Std.")}
                           </p>
                         </div>
-                        <span className="font-mono text-sm tabular-nums text-foreground">
-                          {formatPriceRange(item, lang)}
-                        </span>
+                        <div className="space-y-1">
+                          <p className="font-mono text-sm tabular-nums text-foreground">
+                            {formatPriceRange(item, lang)}
+                          </p>
+                          <WorkTypeUpdatedAt value={item.updated_at} lang={lang} />
+                        </div>
                         <span className="text-right font-mono text-sm tabular-nums text-muted-foreground">
                           {item.descriptions.length}
                         </span>
@@ -1204,6 +1237,7 @@ function WorkTypeSheet({
 
               {item ? (
                 <div className="space-y-4">
+                  <WorkTypeUpdatedAt value={item.updated_at} lang={lang} />
                   <FormField
                     label={tx("Специализации", "Spezialisierungen")}
                     required

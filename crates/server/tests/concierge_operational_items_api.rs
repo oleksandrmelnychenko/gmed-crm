@@ -18,6 +18,348 @@ use gmed_server::state::AppState;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
+#[tokio::test]
+async fn work_center_intervals_hold_and_children_are_persisted_and_authorized() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner = seed_user(&ctx.pool, "concierge", &format!("timeline-{tag}")).await;
+    let peer = seed_user(&ctx.pool, "concierge", &format!("peer-{tag}")).await;
+    let bearer = auth_header_for(owner, "concierge");
+    let peer_bearer = auth_header_for(peer, "concierge");
+    let base = json!({ "request_id": Uuid::new_v4(), "kind": "task", "title": "Timeline parent",
+        "assigned_to": owner, "starts_at": "2026-09-10T09:00:00Z", "due_at": "2026-09-12T17:00:00Z" });
+    let (status, mut parent) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(base.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{parent}");
+    let id = parent["id"].as_str().unwrap().to_string();
+    assert!(
+        parent["starts_at"]
+            .as_str()
+            .unwrap()
+            .starts_with("2026-09-10")
+    );
+    for next in ["in_progress", "on_hold", "in_progress"] {
+        let (status, changed) = json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/concierge-operational-items/{id}/status"),
+            &bearer,
+            Some(json!({ "status": next, "expected_updated_at": parent["updated_at"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{changed}");
+        assert_eq!(changed["status"], next);
+        assert_eq!(changed["due_at"], parent["due_at"]);
+        parent = changed;
+    }
+    let mut child_body = base.clone();
+    child_body["request_id"] = json!(Uuid::new_v4());
+    child_body["parent_task_id"] = json!(id);
+    child_body["title"] = json!("Child task");
+    let (status, child) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(child_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{child}");
+    assert_eq!(child["parent_task_id"], id);
+    let (status, replay) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(child_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["id"], child["id"]);
+    let mut different_parent = child_body.clone();
+    different_parent["parent_task_id"] = Value::Null;
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(different_parent),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    child_body["request_id"] = json!(Uuid::new_v4());
+    child_body["kind"] = json!("event");
+    child_body["ends_at"] = child_body["due_at"].take();
+    let (status, event) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(child_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{event}");
+    assert_eq!(event["parent_task_id"], id);
+    child_body["request_id"] = json!(Uuid::new_v4());
+    child_body["assigned_to"] = json!(peer);
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &peer_bearer,
+        Some(child_body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    child_body["assigned_to"] = json!(owner);
+    child_body["parent_task_id"] = event["id"].clone();
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        &bearer,
+        Some(child_body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, detail) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(detail["item"]["child_count"], 2);
+    assert!(
+        detail["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["payload"]["status"] == "on_hold")
+    );
+    // Database guard also protects non-Work-Center mutation routes.
+    assert!(
+        sqlx::query("UPDATE tasks SET parent_task_id = id WHERE id = $1")
+            .bind(Uuid::parse_str(&id).unwrap())
+            .execute(&ctx.pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE tasks SET deleted_at = now() WHERE id = $1")
+            .bind(Uuid::parse_str(&id).unwrap())
+            .execute(&ctx.pool)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn concierge_creators_can_delete_own_worked_tasks_but_not_foreign_tasks_or_children() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner = seed_user(&ctx.pool, "concierge", &format!("delete-owner-{tag}")).await;
+    let peer = seed_user(&ctx.pool, "concierge", &format!("delete-peer-{tag}")).await;
+    let bearer = auth_header_for(owner, "concierge");
+    let peer_bearer = auth_header_for(peer, "concierge");
+    let manager_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let path = "/api/v1/concierge-operational-items";
+    let (status, assigned_parent) = json_request(&ctx.app, "POST", path, &manager_bearer, Some(json!({
+        "request_id": Uuid::new_v4(), "kind": "task", "title": "Manager's task", "assigned_to": owner,
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{assigned_parent}");
+    let manager_path = format!("{path}/{}", assigned_parent["id"].as_str().unwrap());
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &manager_path, &bearer, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+
+    let (status, child) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(), "kind": "task", "title": "Personal subtask",
+            "assigned_to": owner, "parent_task_id": assigned_parent["id"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{child}");
+    assert_eq!(child["assigned_by"], owner.to_string());
+    let child_id = Uuid::parse_str(child["id"].as_str().unwrap()).unwrap();
+    let child_path = format!("{path}/{child_id}");
+    let (status, started) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{child_path}/status"),
+        &bearer,
+        Some(json!({ "status": "in_progress", "expected_updated_at": child["updated_at"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let (status, comment) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{child_path}/comments"),
+        &bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "body": "Work recorded for audit" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{comment}");
+    let (status, checklist) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{child_path}/checklist"),
+        &bearer,
+        Some(json!({ "request_id": Uuid::new_v4(), "label": "Recorded step" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let attachment_path = format!("{child_path}/attachments");
+    let (status, attachment) = multipart_file_request(
+        &ctx.app,
+        &attachment_path,
+        &bearer,
+        "audit.pdf",
+        "application/pdf",
+        b"%PDF-1.4\nAudit attachment\n%%EOF",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{attachment}");
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &child_path, &peer_bearer, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, deleted) = json_request(&ctx.app, "DELETE", &child_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{deleted}");
+    assert_eq!(
+        json_request(&ctx.app, "GET", &child_path, &bearer, None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let download_path = format!(
+        "{attachment_path}/{}/download",
+        attachment["id"].as_str().unwrap()
+    );
+    assert_eq!(
+        raw_request(&ctx.app, "GET", &download_path, &bearer)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let retained: (bool, bool, i64, i64, i64, i64) = sqlx::query_as(
+        r#"SELECT task.deleted_at IS NOT NULL, task.deleted_by = $2,
+                  (SELECT count(*) FROM concierge_operational_task_comments WHERE task_id = task.id AND deleted_at IS NULL),
+                  (SELECT count(*) FROM concierge_operational_task_checklist_items WHERE task_id = task.id AND deleted_at IS NULL),
+                  (SELECT count(*) FROM concierge_operational_task_attachments WHERE task_id = task.id AND deleted_at IS NULL),
+                  (SELECT count(*) FROM concierge_operational_task_events WHERE task_id = task.id AND event_type = 'deleted')
+           FROM tasks task WHERE task.id = $1"#,
+    ).bind(child_id).bind(owner).fetch_one(&ctx.pool).await.unwrap();
+    assert_eq!(retained, (true, true, 1, 1, 1, 1));
+    // The legacy general-task endpoints must not expose or mutate a task
+    // deleted through Work Center either.
+    let legacy_path = format!("/api/v1/tasks/{child_id}");
+    assert_eq!(
+        json_request(&ctx.app, "GET", &legacy_path, &bearer, None)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        json_request(
+            &ctx.app,
+            "POST",
+            &format!("{legacy_path}/status"),
+            &bearer,
+            Some(json!({ "status": "open" }))
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    for list_path in [path, "/api/v1/tasks"] {
+        let (status, rows) = json_request(&ctx.app, "GET", list_path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{rows}");
+        assert!(
+            !rows
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == child["id"])
+        );
+    }
+    let (_, detail) = json_request(&ctx.app, "GET", &manager_path, &bearer, None).await;
+    assert_eq!(detail["item"]["child_count"], 0);
+
+    // A regular task is owned by its creator, not its assignee. Owning the
+    // parent does not grant concierge rights to delete somebody else's child.
+    let (status, own_parent) = json_request(&ctx.app, "POST", path, &bearer, Some(json!({
+        "request_id": Uuid::new_v4(), "kind": "task", "title": "Concierge's regular task", "assigned_to": peer,
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{own_parent}");
+    let own_path = format!("{path}/{}", own_parent["id"].as_str().unwrap());
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &own_path, &peer_bearer, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, peer_child) = json_request(
+        &ctx.app,
+        "POST",
+        path,
+        &peer_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(), "kind": "task", "title": "Peer's personal subtask",
+            "assigned_to": peer, "parent_task_id": own_parent["id"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{peer_child}");
+    let peer_child_path = format!("{path}/{}", peer_child["id"].as_str().unwrap());
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &peer_child_path, &bearer, None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, blocked) = json_request(&ctx.app, "DELETE", &own_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        blocked["message"],
+        "Delete subtasks and events before deleting this task"
+    );
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &peer_child_path, &peer_bearer, None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        json_request(&ctx.app, "DELETE", &own_path, &bearer, None)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+}
+
 fn auth_header_for(user_id: Uuid, role: &str) -> String {
     let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
     format!("Bearer {token}")

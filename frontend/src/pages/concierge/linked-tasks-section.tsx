@@ -57,6 +57,7 @@ const copy = {
     openTask: "Aufgabe öffnen",
     open_status: "Offen",
     in_progress: "In Arbeit",
+    on_hold: "Pausiert",
     review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
@@ -78,6 +79,7 @@ const copy = {
     openTask: "Открыть задачу",
     open_status: "Открыта",
     in_progress: "В работе",
+    on_hold: "На паузе",
     review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
@@ -130,6 +132,7 @@ function taskStatusLabel(status: string, lang: Lang) {
   if (status === "open") return labels.open_status;
   if (status === "in_progress") return labels.in_progress;
   if (status === "review") return labels.review;
+  if (status === "on_hold") return labels.on_hold;
   if (status === "completed") return labels.completed;
   if (status === "cancelled") return labels.cancelled;
   return status;

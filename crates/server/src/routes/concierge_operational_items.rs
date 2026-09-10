@@ -134,6 +134,7 @@ struct ListAttachmentFilesQuery {
 #[serde(deny_unknown_fields)]
 struct CreateItemRequest {
     request_id: Uuid,
+    parent_task_id: Option<Uuid>,
     kind: String,
     title: String,
     note: Option<String>,
@@ -270,7 +271,8 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
               THEN t.concierge_service_id
               ELSE NULL
           END AS concierge_service_id,
-          t.task_kind, t.due_date, t.starts_at, t.ends_at,
+          t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
+          (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
@@ -359,7 +361,8 @@ async fn list_items(
                       THEN t.concierge_service_id
                       ELSE NULL
                   END AS concierge_service_id,
-                  t.task_kind, t.due_date, t.starts_at, t.ends_at,
+                  t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
+                  (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
@@ -1049,7 +1052,10 @@ async fn create_item(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let payload_fingerprint = create_item_payload_fingerprint(assigned_to, &fields);
+    let mut payload_fingerprint = create_item_payload_fingerprint(assigned_to, &fields);
+    if let Some(parent_id) = body.parent_task_id {
+        payload_fingerprint.push_str(&format!(":parent:{parent_id}"));
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -1172,14 +1178,48 @@ async fn create_item(
     {
         return response;
     }
+    if let Some(parent_id) = body.parent_task_id {
+        let parent = match sqlx::query(
+            "SELECT t.assigned_to, t.assigned_by, u.role AS creator_role, t.task_kind, t.status, t.archived_at FROM tasks t JOIN users u ON u.id = t.assigned_by WHERE t.id = $1 AND t.deleted_at IS NULL FOR UPDATE OF t",
+        ).bind(parent_id).fetch_optional(&mut *tx).await {
+            Ok(Some(parent)) => parent,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Parent task not found"),
+            Err(error) => {
+                tracing::error!(%error, "load parent task");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if !can_collaborate_on_operational_item(
+            &auth,
+            parent.get("assigned_to"),
+            parent.get("assigned_by"),
+            parent.get::<String, _>("creator_role").as_str(),
+        ) {
+            return err(StatusCode::FORBIDDEN, "No access to parent task");
+        }
+        if parent.get::<String, _>("task_kind") != "task"
+            || parent
+                .get::<Option<DateTime<Utc>>, _>("archived_at")
+                .is_some()
+            || matches!(
+                parent.get::<String, _>("status").as_str(),
+                "completed" | "cancelled"
+            )
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Parent must be an active task",
+            );
+        }
+    }
     let item_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO tasks (
                title, description, assigned_to, assigned_by, due_date, priority,
                task_scope, task_kind, concierge_service_id, starts_at, ends_at, location,
                reminder_at, task_audience, patient_id, provider_id, external_assignee_type,
-               external_assignee_name, external_assignee_phone, external_assignee_email, project_id
+               external_assignee_name, external_assignee_phone, external_assignee_email, project_id, parent_task_id
            ) VALUES ($1, $2, $3, $4, $5, $6, 'general', $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18, $19, $20)
+                     $13, $14, $15, $16, $17, $18, $19, $20, $21)
            RETURNING id"#,
     )
     .bind(&fields.title)
@@ -1202,6 +1242,7 @@ async fn create_item(
     .bind(fields.external_assignee_phone.as_deref())
     .bind(fields.external_assignee_email.as_deref())
     .bind(fields.project_id)
+    .bind(body.parent_task_id)
     .fetch_one(&mut *tx)
     .await
     {
@@ -1224,6 +1265,7 @@ async fn create_item(
         "assigned_to": assigned_to,
         "kind": fields.kind.as_str(),
         "status": "open",
+        "parent_task_id": body.parent_task_id,
         "concierge_service_id": fields.concierge_service_id,
         "reminder_at": fields.reminder_at.as_ref().map(|value| value.to_rfc3339()),
         "task_audience": fields.task_audience.as_str(),
@@ -1337,7 +1379,8 @@ async fn update_item(
         r#"SELECT task.assigned_to, task.assigned_by, task.status, task.reminder_at,
                   task.concierge_service_id,
                   task.archived_at,
-                  task.updated_at, creator.role AS assigned_by_role
+                  task.updated_at, creator.role AS assigned_by_role,
+                  EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
@@ -1376,6 +1419,12 @@ async fn update_item(
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can change this task",
+        );
+    }
+    if body.kind == "event" && existing.get::<bool, _>("has_children") {
+        return err(
+            StatusCode::CONFLICT,
+            "Task with children cannot be converted to an event",
         );
     }
     if existing
@@ -2068,6 +2117,7 @@ async fn delete_item(
                   EXISTS(SELECT 1 FROM concierge_operational_task_comments comment WHERE comment.task_id = task.id AND comment.deleted_at IS NULL) AS has_comments,
                   EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id AND checklist.deleted_at IS NULL) AS has_checklist,
                   EXISTS(SELECT 1 FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = task.id AND attachment.deleted_at IS NULL) AS has_attachments,
+                  EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children,
                   creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -2098,30 +2148,21 @@ async fn delete_item(
         .unwrap_or_default();
     let title = task.try_get::<String, _>("title").unwrap_or_default();
     let status = task.try_get::<String, _>("status").unwrap_or_default();
-    if !can_mutate_operational_item(&auth, assigned_by, &assigned_by_role) {
-        return err(
-            StatusCode::FORBIDDEN,
-            "Only the task creator or a higher role can delete this task",
-        );
-    }
-    if task
-        .try_get::<Option<DateTime<Utc>>, _>("archived_at")
-        .unwrap_or_default()
-        .is_some()
-    {
-        return err(
-            StatusCode::CONFLICT,
-            "Restore the archived task before deleting it",
-        );
-    }
-    let has_work = task.try_get::<bool, _>("has_comments").unwrap_or(true)
-        || task.try_get::<bool, _>("has_checklist").unwrap_or(true)
-        || task.try_get::<bool, _>("has_attachments").unwrap_or(true);
-    if status != "open" || has_work {
-        return err(
-            StatusCode::CONFLICT,
-            "Only an untouched open task can be deleted; cancel or archive it instead",
-        );
+    let deletion = OperationalItemDeletion {
+        assigned_by,
+        assigned_by_role: &assigned_by_role,
+        status: &status,
+        archived: task
+            .try_get::<Option<DateTime<Utc>>, _>("archived_at")
+            .unwrap_or_default()
+            .is_some(),
+        has_work: task.try_get::<bool, _>("has_comments").unwrap_or(true)
+            || task.try_get::<bool, _>("has_checklist").unwrap_or(true)
+            || task.try_get::<bool, _>("has_attachments").unwrap_or(true),
+        has_children: task.try_get::<bool, _>("has_children").unwrap_or(true),
+    };
+    if let Err((status, message)) = validate_operational_item_deletion(&auth, &deletion) {
+        return err(status, message);
     }
     if let Err(error) = sqlx::query(
         r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
@@ -2159,23 +2200,9 @@ async fn delete_item(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
-    let attachment_storage_keys = match sqlx::query_scalar::<_, String>(
-        r#"UPDATE concierge_operational_task_attachments
-           SET deleted_at = now(), deleted_by = $2
-           WHERE task_id = $1 AND deleted_at IS NULL
-           RETURNING storage_key"#,
-    )
-    .bind(item_id)
-    .bind(auth.user_id)
-    .fetch_all(&mut *tx)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(error = %error, item_id = %item_id, "soft delete operational task attachments");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
+    // Deleting a worked-on task is a soft deletion. Keep its comments,
+    // checklist, attachment metadata and blobs for audit/recovery. Access to
+    // these resources still requires a non-deleted parent task.
     let creator_notification = if auth.user_id != assigned_by {
         match insert_task_notification(
             &mut tx,
@@ -2196,9 +2223,6 @@ async fn delete_item(
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task deletion");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    for storage_key in attachment_storage_keys {
-        remove_document_blob(&storage_key).await;
     }
     state.audit_sender.try_send(audit::domain_event(
         "delete_concierge_operational_item",
@@ -3967,10 +3991,25 @@ fn validate_item_fields(
                 "due_at is only allowed for a task",
             ));
         }
-    } else if starts_at.is_some() || ends_at.is_some() {
+    } else if ends_at.is_some() {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "starts_at and ends_at are only allowed for an event",
+            "ends_at is only allowed for an event; use due_at for a task",
+        ));
+    }
+    if kind == "task"
+        && let (Some(start), Some(end)) = (starts_at.as_ref(), due_at.as_ref())
+        && end <= start
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "due_at must be after starts_at",
+        ));
+    }
+    if ends_at.is_some() && starts_at.is_none() {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "starts_at is required with ends_at",
         ));
     }
     if let (Some(start), Some(end)) = (starts_at.as_ref(), ends_at.as_ref())
@@ -4126,6 +4165,8 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
     Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").ok()?,
         "kind": row.try_get::<String, _>("task_kind").ok()?,
+        "parent_task_id": row.try_get::<Option<Uuid>, _>("parent_task_id").unwrap_or_default(),
+        "child_count": row.try_get::<i64, _>("child_count").unwrap_or_default(),
         "title": row.try_get::<String, _>("title").ok()?,
         "note": row.try_get::<Option<String>, _>("operational_note").unwrap_or_default(),
         "assigned_to": row.try_get::<Uuid, _>("assigned_to").ok()?,
@@ -4439,6 +4480,47 @@ fn can_mutate_operational_item(auth: &AuthUser, assigned_by: Uuid, assigned_by_r
     can_manage_operational_role(auth.role, assigned_by_role)
 }
 
+struct OperationalItemDeletion<'a> {
+    assigned_by: Uuid,
+    assigned_by_role: &'a str,
+    status: &'a str,
+    archived: bool,
+    has_work: bool,
+    has_children: bool,
+}
+
+fn validate_operational_item_deletion(
+    auth: &AuthUser,
+    task: &OperationalItemDeletion<'_>,
+) -> Result<(), (StatusCode, &'static str)> {
+    if !can_mutate_operational_item(auth, task.assigned_by, task.assigned_by_role) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Only the task creator or a higher role can delete this task",
+        ));
+    }
+    if task.archived {
+        return Err((
+            StatusCode::CONFLICT,
+            "Restore the archived task before deleting it",
+        ));
+    }
+    if task.has_children {
+        return Err((
+            StatusCode::CONFLICT,
+            "Delete subtasks and events before deleting this task",
+        ));
+    }
+    let concierge_creator = auth.role == Role::Concierge && auth.user_id == task.assigned_by;
+    if !concierge_creator && (task.status != "open" || task.has_work) {
+        return Err((
+            StatusCode::CONFLICT,
+            "Only an untouched open task can be deleted; cancel or archive it instead",
+        ));
+    }
+    Ok(())
+}
+
 fn operational_role_name(role: Role) -> Option<&'static str> {
     match role {
         Role::Ceo => Some("ceo"),
@@ -4514,10 +4596,17 @@ fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool 
     if from == to {
         return true;
     }
+    if matches!(
+        (from, to),
+        ("open" | "in_progress", "on_hold") | ("on_hold", "in_progress")
+    ) {
+        return true;
+    }
     if can_review {
         return matches!(
             (from, to),
             ("open", "in_progress")
+                | ("on_hold", "open" | "cancelled")
                 | ("open", "cancelled")
                 | ("in_progress", "open")
                 | ("in_progress", "review")
@@ -4598,7 +4687,7 @@ fn is_valid_priority(value: &str) -> bool {
 fn is_valid_status(value: &str) -> bool {
     matches!(
         value,
-        "open" | "in_progress" | "review" | "completed" | "cancelled"
+        "open" | "in_progress" | "on_hold" | "review" | "completed" | "cancelled"
     )
 }
 
@@ -4611,4 +4700,183 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod work_center_tests {
+    use super::*;
+
+    fn actor(user_id: Uuid, role: Role) -> AuthUser {
+        AuthUser {
+            user_id,
+            role,
+            family_id: Uuid::new_v4(),
+            access_token_jti: Uuid::new_v4(),
+            access_token_expires_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn concierge_deletion_is_creator_only_in_every_status() {
+        let creator = Uuid::new_v4();
+        let owner = actor(creator, Role::Concierge);
+        let peer_or_assignee = actor(Uuid::new_v4(), Role::Concierge);
+        for status in [
+            "open",
+            "in_progress",
+            "on_hold",
+            "review",
+            "completed",
+            "cancelled",
+        ] {
+            for has_work in [false, true] {
+                let task = OperationalItemDeletion {
+                    assigned_by: creator,
+                    assigned_by_role: "concierge",
+                    status,
+                    archived: false,
+                    has_work,
+                    has_children: false,
+                };
+                assert!(validate_operational_item_deletion(&owner, &task).is_ok());
+                assert_eq!(
+                    validate_operational_item_deletion(&peer_or_assignee, &task)
+                        .unwrap_err()
+                        .0,
+                    StatusCode::FORBIDDEN
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn task_deletion_retains_children_archive_and_other_role_guards() {
+        let creator = Uuid::new_v4();
+        let owner = actor(creator, Role::Concierge);
+        let manager = actor(Uuid::new_v4(), Role::PatientManager);
+        let mut task = OperationalItemDeletion {
+            assigned_by: creator,
+            assigned_by_role: "concierge",
+            status: "open",
+            archived: false,
+            has_work: false,
+            has_children: false,
+        };
+        assert!(validate_operational_item_deletion(&manager, &task).is_ok());
+        task.has_work = true;
+        assert_eq!(
+            validate_operational_item_deletion(&manager, &task)
+                .unwrap_err()
+                .0,
+            StatusCode::CONFLICT
+        );
+        task.has_children = true;
+        assert_eq!(
+            validate_operational_item_deletion(&owner, &task)
+                .unwrap_err()
+                .1,
+            "Delete subtasks and events before deleting this task"
+        );
+        task.has_children = false;
+        task.archived = true;
+        assert_eq!(
+            validate_operational_item_deletion(&owner, &task)
+                .unwrap_err()
+                .1,
+            "Restore the archived task before deleting it"
+        );
+    }
+
+    #[test]
+    fn concierge_can_assign_to_self_and_collaborate_on_an_assigned_parent() {
+        let concierge = actor(Uuid::new_v4(), Role::Concierge);
+        let manager = Uuid::new_v4();
+        assert!(can_assign_operational_role(concierge.role, "concierge"));
+        assert!(can_collaborate_on_operational_item(
+            &concierge,
+            concierge.user_id,
+            manager,
+            "ceo"
+        ));
+        assert!(!can_mutate_operational_item(&concierge, manager, "ceo"));
+        assert!(!can_collaborate_on_operational_item(
+            &concierge,
+            Uuid::new_v4(),
+            manager,
+            "ceo"
+        ));
+    }
+
+    #[test]
+    fn hold_transitions_preserve_approval_permissions() {
+        for can_review in [false, true] {
+            assert!(is_valid_status("on_hold"));
+            assert!(is_allowed_status_transition("open", "on_hold", can_review));
+            assert!(is_allowed_status_transition(
+                "in_progress",
+                "on_hold",
+                can_review
+            ));
+            assert!(is_allowed_status_transition(
+                "on_hold",
+                "in_progress",
+                can_review
+            ));
+            assert!(!is_allowed_status_transition(
+                "completed",
+                "on_hold",
+                can_review
+            ));
+            assert!(!is_allowed_status_transition(
+                "cancelled",
+                "on_hold",
+                can_review
+            ));
+            assert!(!is_allowed_status_transition(
+                "on_hold",
+                "completed",
+                can_review
+            ));
+        }
+        assert!(!is_allowed_status_transition("on_hold", "cancelled", false));
+        assert!(is_allowed_status_transition("on_hold", "cancelled", true));
+    }
+
+    fn valid_schedule(
+        kind: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+        due: Option<&str>,
+    ) -> bool {
+        validate_item_fields(
+            kind, "Test", None, None, due, start, end, None, "normal", None, "internal", None,
+            None, None, None, None, None, None,
+        )
+        .is_ok()
+    }
+
+    #[test]
+    fn task_intervals_validate_without_requiring_dates_on_legacy_tasks() {
+        let early = Some("2026-09-10T09:00:00Z");
+        let late = Some("2026-09-10T10:00:00Z");
+        assert!(valid_schedule("task", early, None, late));
+        assert!(valid_schedule("task", None, None, late));
+        assert!(valid_schedule("task", early, None, None));
+        assert!(valid_schedule("task", None, None, None));
+        assert!(!valid_schedule("task", early, None, early));
+        assert!(!valid_schedule("task", late, None, early));
+        assert!(!valid_schedule("task", early, late, None));
+        assert!(!valid_schedule("task", Some("bad-date"), None, late));
+    }
+
+    #[test]
+    fn event_schedule_invariants_are_preserved() {
+        let early = Some("2026-09-10T09:00:00Z");
+        let late = Some("2026-09-10T10:00:00Z");
+        assert!(valid_schedule("event", early, late, None));
+        assert!(valid_schedule("event", early, None, None));
+        assert!(!valid_schedule("event", None, late, None));
+        assert!(!valid_schedule("event", late, early, None));
+        assert!(!valid_schedule("event", early, late, late));
+    }
 }

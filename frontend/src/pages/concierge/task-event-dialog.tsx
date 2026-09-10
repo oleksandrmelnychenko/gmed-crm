@@ -69,6 +69,7 @@ const copy = {
     status: "Status",
     open: "Offen",
     in_progress: "In Arbeit",
+    on_hold: "Pausiert",
     review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
@@ -141,6 +142,7 @@ const copy = {
     status: "Статус",
     open: "Открыта",
     in_progress: "В работе",
+    on_hold: "На паузе",
     review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
@@ -311,6 +313,8 @@ export function ConciergeTaskEventDialog({
   initialProviderId = null,
   initialProjectId = null,
   initialDate = null,
+  initialKind = "task",
+  parentTask = null,
   lang,
   open,
   submitting,
@@ -319,6 +323,8 @@ export function ConciergeTaskEventDialog({
   onSave,
 }: {
   item: ConciergeTask | null;
+  initialKind?: "task" | "event";
+  parentTask?: ConciergeTask | null;
   services: ConciergeService[];
   assignees: ConciergeAssignee[];
   currentUserId: string | null;
@@ -365,6 +371,7 @@ export function ConciergeTaskEventDialog({
   const [externalEmail, setExternalEmail] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingAttachmentError, setPendingAttachmentError] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
   const [uploadingPending, setUploadingPending] = useState(false);
   const [comments, setComments] = useState<ConciergeTaskComment[]>([]);
   const currentUserRole = assignees.find((assignee) => assignee.id === currentUserId)?.role ?? null;
@@ -407,15 +414,16 @@ export function ConciergeTaskEventDialog({
   useEffect(() => {
     if (!open) return;
     const start = initialDate ? new Date(initialDate) : new Date(Date.now() + 60 * 60_000);
+    setScheduleError("");
     if (initialDate) start.setHours(9, 0, 0, 0);
     const end = new Date(start.getTime() + 60 * 60_000);
-    setKind(item?.kind ?? "task");
+    setKind(item?.kind ?? initialKind);
     setTitle(item?.title ?? initialTitle);
     setNote(item?.note ?? "");
     setServiceId(item?.concierge_service_id ?? initialServiceId ?? "");
-    setDueAt(localDateTimeValue(item?.due_at ?? start));
-    setStartsAt(localDateTimeValue(item?.starts_at ?? start));
-    setEndsAt(localDateTimeValue(item?.ends_at ?? end));
+    setDueAt(localDateTimeValue(item ? item.due_at : end));
+    setStartsAt(localDateTimeValue(item ? item.starts_at : start));
+    setEndsAt(localDateTimeValue(item ? item.ends_at : end));
     setLocation(item?.location ?? "");
     setPriority(item?.priority ?? "normal");
     setStatus(item?.status ?? "open");
@@ -429,7 +437,7 @@ export function ConciergeTaskEventDialog({
     setExternalName(item?.external_assignee_name ?? "");
     setExternalPhone(item?.external_assignee_phone ?? "");
     setExternalEmail(item?.external_assignee_email ?? "");
-  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialPatientId, initialProjectId, initialProviderId, initialServiceId, initialTitle, item, open]);
+  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialKind, initialPatientId, initialProjectId, initialProviderId, initialServiceId, initialTitle, item, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -496,6 +504,12 @@ export function ConciergeTaskEventDialog({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (uploadingPending) return;
+    const endValue = kind === "task" ? dueAt : endsAt;
+    if (startsAt && endValue && new Date(endValue) <= new Date(startsAt)) {
+      setScheduleError(lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.");
+      return;
+    }
+    setScheduleError("");
     setUploadingPending(true);
     setPendingAttachmentError("");
     try {
@@ -522,7 +536,7 @@ export function ConciergeTaskEventDialog({
             ? selectedServiceId
             : item?.concierge_service_id ?? null,
           due_at: kind === "task" ? toIso(dueAt) : null,
-          starts_at: kind === "event" ? toIso(startsAt) : null,
+          starts_at: toIso(startsAt),
           ends_at: kind === "event" ? toIso(endsAt) : null,
           location: location.trim() || null,
           priority,
@@ -570,6 +584,7 @@ export function ConciergeTaskEventDialog({
         <form className="flex min-h-0 flex-col" onSubmit={(event) => void submit(event)}>
           <ConciergeDialogBody>
             {error ? <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+            {scheduleError ? <p role="alert" className="mb-4 text-sm text-destructive">{scheduleError}</p> : null}
             <div className="space-y-4">
               <div className="grid items-start gap-4 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.1fr)]">
                 <div className="space-y-4">
@@ -577,7 +592,7 @@ export function ConciergeTaskEventDialog({
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/70 bg-muted/40 p-1">
                         {(["task", "event"] as const).map((value) => (
-                          <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} onClick={() => setKind(value)}>
+                          <Button key={value} type="button" size="sm" className="h-8 rounded-md text-xs" variant={kind === value ? "default" : "ghost"} aria-pressed={kind === value} disabled={value === "event" && (item?.child_count ?? 0) > 0} onClick={() => setKind(value)}>
                             {labels[value]}
                           </Button>
                         ))}
@@ -661,16 +676,15 @@ export function ConciergeTaskEventDialog({
                 </ConciergeDialogSection>
                 <ConciergeDialogSection title={labels.planningSection} dot>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {kind === "task" ? (
-                      <ConciergeField label={labels.dueAt} className="sm:col-span-2">
-                        <Input className="bg-field" type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
-                      </ConciergeField>
-                    ) : (
-                      <>
-                        <ConciergeField label={labels.startsAt}><Input className="bg-field" type="datetime-local" value={startsAt} required onChange={(event) => setStartsAt(event.target.value)} /></ConciergeField>
-                        <ConciergeField label={labels.endsAt}><Input className="bg-field" type="datetime-local" value={endsAt} min={startsAt || undefined} onChange={(event) => setEndsAt(event.target.value)} /></ConciergeField>
-                      </>
-                    )}
+                    {parentTask ? (
+                      <p className="min-w-0 rounded-md border border-[var(--brand)]/20 bg-[var(--brand)]/5 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground sm:col-span-2">
+                        {lang === "ru" ? "Основная задача" : "Übergeordnete Aufgabe"}: <span className="break-words font-medium text-foreground">{localizeTaskTitle(parentTask.title, lang)}</span>
+                      </p>
+                    ) : null}
+                    <ConciergeField label={labels.startsAt}><Input aria-label={labels.startsAt} className="bg-field" type="datetime-local" value={startsAt} required={kind === "event"} onChange={(event) => setStartsAt(event.target.value)} /></ConciergeField>
+                    <ConciergeField label={kind === "task" ? `${labels.endsAt} / ${labels.dueAt}` : labels.endsAt}>
+                      <Input aria-label={labels.endsAt} className="bg-field" type="datetime-local" value={kind === "task" ? dueAt : endsAt} min={startsAt || undefined} onChange={(event) => kind === "task" ? setDueAt(event.target.value) : setEndsAt(event.target.value)} />
+                    </ConciergeField>
                     <ConciergeField label={labels.location} className="sm:col-span-2">
                       <Input className="bg-field" value={location} maxLength={500} placeholder={labels.locationPlaceholder} onChange={(event) => setLocation(event.target.value)} />
                     </ConciergeField>

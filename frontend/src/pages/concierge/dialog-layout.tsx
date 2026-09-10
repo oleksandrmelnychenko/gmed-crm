@@ -6,7 +6,7 @@ import { DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/di
 import { cn } from "@/lib/utils";
 
 export const conciergeDialogContentClassName =
-  "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 [&_input]:!text-foreground [&_select]:!text-foreground [&_textarea]:!text-foreground [&_input:disabled]:!opacity-100 [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!opacity-100 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
+  "grid max-h-[calc(100dvh-1rem)] w-auto max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-xl p-0 motion-reduce:animate-none! [&_input]:!text-foreground [&_select]:!text-foreground [&_textarea]:!text-foreground [&_input:disabled]:!opacity-100 [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!opacity-100 sm:max-h-[90vh] sm:w-full sm:max-w-5xl";
 
 type DialogTone = "amber" | "dot" | "indigo" | "orange" | "plain" | "slate";
 

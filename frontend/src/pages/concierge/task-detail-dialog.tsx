@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArchiveRestore,
+  ArrowLeft,
   Building2,
+  CalendarClock,
   Cake,
   Check,
   ChevronDown,
@@ -15,6 +18,7 @@ import {
   ReceiptText,
   Save,
   Trash2,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -33,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
 import type {
+  ConciergeTask,
   ConciergeTaskChecklistItem,
   ConciergeTaskComment,
   ConciergeTaskDetail,
@@ -72,6 +77,17 @@ import { ConciergeTaskAttachments } from "./task-attachments";
 const copy = {
   de: {
     loading: "Aufgabe wird geladen",
+    children: "Unteraufgaben und Termine",
+    emptyChildren: "Noch keine Unteraufgaben oder Termine",
+    subtask: "Unteraufgabe",
+    event: "Termin",
+    parentTask: "Zur übergeordneten Aufgabe",
+    title: "Titel",
+    period: "Zeitraum",
+    start: "Beginn",
+    end: "Ende / Frist",
+    noDate: "Ohne Termin",
+    noAssignee: "Nicht zugewiesen",
     checklist: "Checkliste",
     addChecklist: "Checklistenpunkt hinzufügen",
     checklistPlaceholder: "Nächster Arbeitsschritt",
@@ -99,6 +115,7 @@ const copy = {
     externalAssignee: "Externer Ausführender",
     open: "Offen",
     in_progress: "In Arbeit",
+    on_hold: "Pausiert",
     review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
@@ -122,6 +139,9 @@ const copy = {
     attachment_added: "Anhang hinzugefügt",
     attachment_deleted: "Anhang entfernt",
     archived: "Aufgabe archiviert",
+    archiveAction: "Archivieren",
+    archivedStatus: "Archiviert",
+    restoreAction: "Wiederherstellen",
     restored: "Aufgabe wiederhergestellt",
     delete: "Löschen",
     deleteTitle: "Aufgabe löschen?",
@@ -152,6 +172,17 @@ const copy = {
   },
   ru: {
     loading: "Загрузка задачи",
+    children: "Подзадачи и события",
+    emptyChildren: "Подзадач и событий пока нет",
+    subtask: "Подзадача",
+    event: "Событие",
+    parentTask: "К основной задаче",
+    title: "Название",
+    period: "Период",
+    start: "Начало",
+    end: "Окончание / срок",
+    noDate: "Без срока",
+    noAssignee: "Не назначен",
     checklist: "Чек-лист",
     addChecklist: "Добавить пункт",
     checklistPlaceholder: "Следующий операционный шаг",
@@ -179,6 +210,7 @@ const copy = {
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
     in_progress: "В работе",
+    on_hold: "На паузе",
     review: "На проверке",
     completed: "Выполнена",
     cancelled: "Отменена",
@@ -202,6 +234,9 @@ const copy = {
     attachment_added: "Файл прикреплён",
     attachment_deleted: "Файл удалён",
     archived: "Задача перемещена в архив",
+    archiveAction: "В архив",
+    archivedStatus: "В архиве",
+    restoreAction: "Восстановить",
     restored: "Задача восстановлена из архива",
     delete: "Удалить",
     deleteTitle: "Удалить задачу?",
@@ -233,6 +268,8 @@ const copy = {
 } as const;
 
 const CHILD_REALTIME_EVENTS = [
+  "concierge_operational_item.archived",
+  "concierge_operational_item.restored",
   "concierge_operational_item.updated",
   "concierge_operational_item.comment_added",
   "concierge_operational_item.comment_edited",
@@ -290,25 +327,39 @@ function taskAudienceClassName(audience: string) {
     : "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
+function taskStatusClassName(status: ConciergeTask["status"]) {
+  switch (status) {
+    case "open": return "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300";
+    case "in_progress": return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300";
+    case "on_hold": return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300";
+    case "review": return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300";
+    case "completed": return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300";
+    case "cancelled": return "border-border bg-muted text-muted-foreground";
+  }
+}
+
 function TaskDetailSection({
   title,
+  count,
   action,
   className,
   children,
 }: {
   title: ReactNode;
+  count?: number;
   action?: ReactNode;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <section className={cn("overflow-hidden rounded-lg border border-border/70 bg-card", className)}>
-      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-3 py-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/70 bg-muted/20 px-3.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           <h3 className="min-w-0 break-words text-[13px] font-semibold tracking-tight text-foreground">{title}</h3>
+          {count !== undefined ? <Badge variant="secondary" className="tabular-nums">{count}</Badge> : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {action ? <div className="flex max-w-full flex-wrap items-center gap-2">{action}</div> : null}
       </div>
       {children}
     </section>
@@ -329,6 +380,9 @@ export function ConciergeTaskDetailDialog({
   lang,
   open,
   openExpenseOnLoad = false,
+  relatedTasks = [],
+  onCreateChild,
+  onOpenRelated,
   onOpenChange,
   onChanged,
 }: {
@@ -336,6 +390,9 @@ export function ConciergeTaskDetailDialog({
   lang: Lang;
   open: boolean;
   openExpenseOnLoad?: boolean;
+  relatedTasks?: ConciergeTask[];
+  onCreateChild?: (parent: ConciergeTask, kind: "task" | "event") => void;
+  onOpenRelated?: (task: ConciergeTask) => void;
   onOpenChange: (open: boolean) => void;
   onChanged: () => void;
 }) {
@@ -389,6 +446,9 @@ export function ConciergeTaskDetailDialog({
   const checklistDirty = Boolean(editingChecklistId && checklistDraft.trim() !== detail?.checklist.find((item) => item.id === editingChecklistId)?.label);
   const commentDirty = Boolean(editingCommentId && commentDraft.trim() !== detail?.comments.find((item) => item.id === editingCommentId)?.body);
   const statusDirty = Boolean(detail && pendingStatus && pendingStatus !== detail.item.status);
+  const hasUnsavedChanges = statusDirty || checklistDirty || commentDirty || Boolean(comment.trim() || checklistLabel.trim());
+  const childTasks = detail ? relatedTasks.filter((task) => task.parent_task_id === detail.item.id) : [];
+  const parentTask = detail ? relatedTasks.find((task) => task.id === detail.item.parent_task_id) : undefined;
 
   const load = useCallback(async () => {
     if (!open || !taskId) return;
@@ -700,7 +760,7 @@ export function ConciergeTaskDetailDialog({
   }
 
   async function deleteTask() {
-    if (!taskId || busy) return;
+    if (!taskId || !canDelete || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -719,6 +779,10 @@ export function ConciergeTaskDetailDialog({
 
   async function changeStatus() {
     if (!taskId || !detail || !canChangeStatus || busy || !pendingStatus || pendingStatus === detail.item.status) return;
+    if (pendingStatus === "archive") {
+      await changeArchiveState(true);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -734,6 +798,25 @@ export function ConciergeTaskDetailDialog({
       onChanged();
     } catch (statusError) {
       setError(conciergeTaskErrorMessage(statusError, lang, labels.status));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeArchiveState(archive: boolean) {
+    if (!taskId || !detail || !canModify || busy) return;
+    if (archive ? detail.item.status !== "completed" || Boolean(detail.item.archived_at) : !detail.item.archived_at) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${taskId}/${archive ? "archive" : "restore"}`, { method: "POST" });
+      setDetail((current) => current?.item.id === updated.id ? { ...current, item: updated } : current);
+      setPendingStatus(updated.status);
+      clearApiCache("/concierge-operational-items");
+      onChanged();
+      await load();
+    } catch (archiveError) {
+      setError(conciergeTaskErrorMessage(archiveError, lang, archive ? labels.archiveAction : labels.restoreAction));
     } finally {
       setBusy(false);
     }
@@ -792,7 +875,7 @@ export function ConciergeTaskDetailDialog({
     <>
       <Dialog
         open={open && !openExpenseOnLoad && !expenseDialogOpen}
-        dirty={statusDirty || checklistDirty || commentDirty || Boolean(comment.trim() || checklistLabel.trim())}
+        dirty={hasUnsavedChanges}
         onOpenChange={onOpenChange}
       >
       <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
@@ -800,36 +883,96 @@ export function ConciergeTaskDetailDialog({
           icon={ListChecks}
           tone="dot"
           title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
           {loading && !detail ? <div className="flex items-center justify-center py-20 text-sm text-muted-foreground"><LoaderCircle className="mr-2 animate-spin" />{labels.loading}</div> : null}
           {detail ? (
             <div className="space-y-3">
+              {onOpenRelated && parentTask ? (
+                <Button type="button" variant="outline" size="sm" className="max-w-full" disabled={busy || hasUnsavedChanges} onClick={() => onOpenRelated(parentTask)}>
+                  <ArrowLeft />{labels.parentTask}
+                </Button>
+              ) : null}
+              {detail.item.kind === "task" && (onCreateChild || childTasks.length > 0) ? (
+                <TaskDetailSection
+                  title={labels.children}
+                  count={childTasks.length}
+                  action={onCreateChild && canCollaborate && !detail.item.archived_at && !["completed", "cancelled"].includes(detail.item.status) ? (
+                    <>
+                      <Button type="button" size="sm" className="h-8" disabled={busy || hasUnsavedChanges} onClick={() => onCreateChild(detail.item, "task")}><Plus />{labels.subtask}</Button>
+                      <Button type="button" size="sm" className="h-8" disabled={busy || hasUnsavedChanges} onClick={() => onCreateChild(detail.item, "event")}><Plus />{labels.event}</Button>
+                    </>
+                  ) : undefined}
+                >
+                  {childTasks.length === 0 ? (
+                    <p className="px-3.5 py-5 text-center text-xs text-muted-foreground">{labels.emptyChildren}</p>
+                  ) : (
+                    <div>
+                      <div aria-hidden="true" className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,1.1fr)_7rem] gap-3 border-b border-border/60 bg-muted/10 px-3.5 py-2 text-xs text-muted-foreground sm:grid">
+                        <span>{labels.title}</span><span>{labels.assignee}</span><span>{labels.period}</span><span>{labels.status}</span>
+                      </div>
+                      <div className="divide-y divide-border/60">
+                        {childTasks.map((task) => {
+                          const end = task.kind === "event" ? task.ends_at : task.due_at;
+                          const KindIcon = task.kind === "event" ? CalendarClock : ListChecks;
+                          return (
+                            <button key={task.id} type="button" className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3.5 py-3 text-left text-sm enabled:cursor-pointer enabled:hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default sm:grid-cols-[minmax(0,1.4fr)_minmax(0,0.85fr)_minmax(0,1.1fr)_7rem]" disabled={!onOpenRelated || busy || hasUnsavedChanges} onClick={() => onOpenRelated?.(task)}>
+                              <span className="col-span-2 flex min-w-0 items-start gap-2.5 sm:col-span-1">
+                                <KindIcon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", task.kind === "event" ? "text-sky-600 dark:text-sky-400" : "text-[var(--brand)]")} />
+                                <span className="min-w-0">
+                                  <span className="block break-words font-medium leading-snug">{localizeTaskTitle(task.title, lang)}</span>
+                                  <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground"><span className="font-mono">{conciergeTaskCode(task)}</span><span>{task.kind === "event" ? labels.event : labels.subtask}</span></span>
+                                </span>
+                              </span>
+                              <span className="flex min-w-0 items-start gap-1.5 text-xs text-muted-foreground"><UserRound aria-hidden="true" className="size-3.5 shrink-0 sm:hidden" /><span className="break-words">{task.assigned_to_name || labels.noAssignee}</span></span>
+                              <span className="col-span-2 row-start-3 grid min-w-0 gap-1 text-xs tabular-nums text-muted-foreground sm:col-span-1 sm:row-auto">
+                                {task.starts_at ? <span className="break-words"><span>{labels.start}: </span>{dateTime(task.starts_at, lang)}</span> : null}
+                                {end ? <span className="break-words"><span>{labels.due}: </span>{dateTime(end, lang)}</span> : null}
+                                {!task.starts_at && !end ? labels.noDate : null}
+                              </span>
+                              <Badge variant="outline" className={cn("col-start-2 row-start-2 max-sm:justify-self-end sm:col-auto sm:row-auto", task.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(task.status))}>{task.archived_at ? labels.archivedStatus : labels[task.status]}</Badge>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </TaskDetailSection>
+              ) : null}
               <TaskDetailSection title={labels.overview}>
                 <div className="divide-y divide-border/60">
                   <TaskDetailRow label={labels.assignee} value={detail.item.assigned_to_name} />
-                  <TaskDetailRow label={labels.due} value={dateTime(detail.item.kind === "event" ? detail.item.starts_at : detail.item.due_at, lang)} />
+                  <TaskDetailRow label={labels.start} value={dateTime(detail.item.starts_at, lang)} />
+                  <TaskDetailRow label={labels.end} value={dateTime(detail.item.kind === "event" ? detail.item.ends_at : detail.item.due_at, lang)} />
                   <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at, lang)} />
                   <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{localizeTaskNote(detail.item.note, lang) || "—"}</p>} />
                   <TaskDetailRow label={labels.location} value={detail.item.location || "—"} />
                   <TaskDetailRow
                     label={labels.status}
-                    value={canChangeStatus ? (
+                    value={detail.item.archived_at ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="rounded-full">{labels.archivedStatus}</Badge>
+                        {canModify ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void changeArchiveState(false)}><ArchiveRestore />{labels.restoreAction}</Button> : null}
+                      </div>
+                    ) : canChangeStatus ? (
                       <SelectField
                         className="h-9 min-w-40"
                         value={pendingStatus || detail.item.status}
                         disabled={busy || Boolean(detail.item.archived_at)}
                         aria-label={labels.status}
-                        options={availableConciergeTaskStatuses(detail.item, user?.id, user?.role).map((status) => ({
-                          value: status,
-                          label: labels[status],
-                        }))}
+                        options={[
+                          ...availableConciergeTaskStatuses(detail.item, user?.id, user?.role).map((status) => ({
+                            value: status,
+                            label: labels[status],
+                          })),
+                          ...(detail.item.status === "completed" && canModify ? [{ value: "archive", label: labels.archiveAction }] : []),
+                        ]}
                         onValueChange={setPendingStatus}
                       />
                     ) : (
-                      <Badge variant="outline" className="rounded-full">{labels[detail.item.status as keyof typeof labels] ?? detail.item.status}</Badge>
+                      <Badge variant="outline" className={taskStatusClassName(detail.item.status)}>{labels[detail.item.status]}</Badge>
                     )}
                   />
                   <TaskDetailRow label={labels.priority} value={<Badge variant="outline" className={cn("rounded-full", taskPriorityClassName(detail.item.priority))}>{labels[detail.item.priority as keyof typeof labels] ?? detail.item.priority}</Badge>} />

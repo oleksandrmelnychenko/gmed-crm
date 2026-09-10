@@ -67,6 +67,7 @@ const copy = {
     taskOpen: "Offen",
     taskProgress: "In Arbeit",
     taskReview: "Zur Prüfung",
+    taskHold: "Pausiert",
     taskCompleted: "Erledigt",
     taskCancelled: "Storniert",
     priorityUrgent: "Dringend",
@@ -136,6 +137,7 @@ const copy = {
     taskOpen: "Открыта",
     taskProgress: "В работе",
     taskReview: "На проверке",
+    taskHold: "На паузе",
     taskCompleted: "Выполнена",
     taskCancelled: "Отменена",
     priorityUrgent: "Срочно",
@@ -223,6 +225,7 @@ function taskStatusLabel(status: string, lang: Lang) {
   if (status === "open") return labels.taskOpen;
   if (status === "in_progress") return labels.taskProgress;
   if (status === "review") return labels.taskReview;
+  if (status === "on_hold") return labels.taskHold;
   if (status === "completed") return labels.taskCompleted;
   if (status === "cancelled") return labels.taskCancelled;
   return status.replaceAll("_", " ");

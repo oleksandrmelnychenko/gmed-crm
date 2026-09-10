@@ -23,6 +23,7 @@ export type SpecializationWorkType = {
   sort_order: number;
   is_active: boolean;
   descriptions: WorkTypeDescription[];
+  updated_at?: string | null;
 };
 
 export type SpecializationLinkedProvider = {
@@ -36,7 +37,7 @@ export type SpecializationLinkedProvider = {
 
 export type WorkTypeUpsertPayload = Omit<
   SpecializationWorkType,
-  "id" | "specialization_id" | "specialization_ids" | "code"
+  "id" | "specialization_id" | "specialization_ids" | "code" | "updated_at"
 > & {
   code?: string;
   specialization_ids?: string[];

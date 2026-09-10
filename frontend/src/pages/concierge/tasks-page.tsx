@@ -106,6 +106,8 @@ export function ConciergeTaskManagerPage() {
   const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
+  const [parentTask, setParentTask] = useState<ConciergeTask | null>(null);
+  const [initialKind, setInitialKind] = useState<"task" | "event">("task");
   const [submittingTask, setSubmittingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
   const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
@@ -242,6 +244,8 @@ export function ConciergeTaskManagerPage() {
   }
 
   function openCreateTask(date: Date | null = null) {
+    setParentTask(null);
+    setInitialKind("task");
     setTaskError("");
     setEditingTask(null);
     createTaskRequestIdRef.current = crypto.randomUUID();
@@ -253,6 +257,7 @@ export function ConciergeTaskManagerPage() {
     if (!canModifyConciergeTask(task, user?.id, user?.role)) return;
     setTaskError("");
     setEditingTask(task);
+    setParentTask(tasks.find((parent) => parent.id === task.parent_task_id) ?? null);
     setInitialTaskDate(null);
     setTaskDialogOpen(true);
   }
@@ -281,6 +286,12 @@ export function ConciergeTaskManagerPage() {
         || task.assigned_to === user.id
         || task.assigned_by === user.id),
     );
+  }
+
+  function createChildTask(parent: ConciergeTask, kind: "task" | "event") {
+    openCreateTask();
+    setParentTask(parent);
+    setInitialKind(kind);
   }
 
   function openTaskExpense(task: ConciergeTask) {
@@ -316,6 +327,7 @@ export function ConciergeTaskManagerPage() {
             body: JSON.stringify({
               ...fields,
               request_id: createRequestId,
+              ...(parentTask ? { parent_task_id: parentTask.id } : {}),
             }),
           });
       clearApiCache("/concierge-operational-items");
@@ -342,6 +354,7 @@ export function ConciergeTaskManagerPage() {
       await apiFetch<void>(`/concierge-operational-items/${task.id}`, { method: "DELETE" });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.filter((item) => item.id !== task.id));
+      requestRefresh();
       setPendingDeleteTask(null);
       if (detailTaskId === task.id) {
         setDetailTaskId(null);
@@ -437,6 +450,9 @@ export function ConciergeTaskManagerPage() {
 
       <ConciergeTaskEventDialog
         item={editingTask}
+        parentTask={parentTask}
+        initialKind={initialKind}
+        initialAssigneeId={user?.role === "concierge" ? user.id : parentTask?.assigned_to ?? null}
         services={services}
         assignees={assignees}
         currentUserId={user?.id ?? null}
@@ -446,9 +462,9 @@ export function ConciergeTaskManagerPage() {
         patients={patients}
         providers={providers}
         projects={projects}
-        initialPatientId={searchParams.get("patient")}
-        initialProviderId={searchParams.get("provider")}
-        initialProjectId={searchParams.get("project")}
+        initialPatientId={parentTask?.patient_id ?? searchParams.get("patient")}
+        initialProviderId={parentTask?.provider_id ?? searchParams.get("provider")}
+        initialProjectId={parentTask?.project_id ?? searchParams.get("project")}
         initialDate={initialTaskDate}
         lang={lang}
         open={taskDialogOpen}
@@ -457,6 +473,7 @@ export function ConciergeTaskManagerPage() {
         onOpenChange={(open) => {
           setTaskDialogOpen(open);
           if (!open) {
+            requestRefresh();
             setTaskError("");
             setEditingTask(null);
             setInitialTaskDate(null);
@@ -474,8 +491,11 @@ export function ConciergeTaskManagerPage() {
 
       <ConciergeTaskDetailDialog
         taskId={detailTaskId}
+        relatedTasks={tasks}
+        onCreateChild={createChildTask}
+        onOpenRelated={openTaskDetail}
         lang={lang}
-        open={Boolean(detailTaskId)}
+        open={Boolean(detailTaskId) && !taskDialogOpen}
         openExpenseOnLoad={detailExpenseRequested}
         onOpenChange={(open) => {
           if (open) return;

@@ -130,10 +130,12 @@ export type ApplyPartnerQuoteResponse = {
   applied_by_name: string;
 };
 
-export type ConciergeTaskStatus = "open" | "in_progress" | "review" | "completed" | "cancelled";
+export type ConciergeTaskStatus = "open" | "in_progress" | "on_hold" | "review" | "completed" | "cancelled";
 
 export type ConciergeTask = {
   id: string;
+  parent_task_id?: string | null;
+  child_count?: number;
   kind: "task" | "event";
   title: string;
   note: string | null;
@@ -311,15 +313,17 @@ export function availableConciergeTaskStatuses(
   const canReview = canModifyConciergeTask(task, actorId, actorRole);
   const transitions: Record<ConciergeTaskStatus, ConciergeTaskStatus[]> = canReview
     ? {
-        open: ["in_progress", "cancelled"],
-        in_progress: ["open", "review", "completed", "cancelled"],
+        open: ["in_progress", "on_hold", "cancelled"],
+        in_progress: ["open", "on_hold", "review", "completed", "cancelled"],
+        on_hold: ["in_progress", "open", "cancelled"],
         review: ["in_progress", "completed", "cancelled"],
         completed: ["in_progress"],
         cancelled: ["open"],
       }
     : {
-        open: ["in_progress"],
-        in_progress: ["review"],
+        open: ["in_progress", "on_hold"],
+        in_progress: ["on_hold", "review"],
+        on_hold: ["in_progress"],
         review: ["in_progress"],
         completed: [],
         cancelled: [],
@@ -328,13 +332,16 @@ export function availableConciergeTaskStatuses(
 }
 
 export function canDeleteConciergeTask(
-  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number },
+  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number; child_count?: number },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
-  return canModifyConciergeTask(task, actorId, actorRole)
-    && task.status === "open"
-    && !task.archived_at
+  if (!canModifyConciergeTask(task, actorId, actorRole)
+    || task.archived_at
+    || (task.child_count ?? 0) > 0) return false;
+  // Concierge ownership comes from the creator, never from the assignee.
+  if (actorRole === "concierge" && task.assigned_by === actorId) return true;
+  return task.status === "open"
     && task.comment_count === 0
     && task.checklist_total === 0
     && (task.attachment_count ?? 0) === 0;
@@ -383,8 +390,33 @@ export function conciergeTaskErrorMessage(
 
   if (message === TASK_DELETE_ERROR) {
     return lang === "ru"
-      ? "Удалить можно только ошибочно созданную открытую задачу без комментариев, чек-листа и файлов."
-      : "Nur eine irrtümlich erstellte offene Aufgabe ohne Kommentare, Checkliste und Dateien kann gelöscht werden.";
+      ? "Удалить можно только открытую задачу без комментариев, чек-листа, файлов, подзадач и событий."
+      : "Nur eine offene Aufgabe ohne Kommentare, Checkliste, Dateien, Unteraufgaben und Termine kann gelöscht werden.";
+  }
+
+  if (message === "Delete subtasks and events before deleting this task") {
+    return lang === "ru"
+      ? "Сначала удалите подзадачи и связанные события. Чужие подзадачи может удалить только их автор или руководитель."
+      : "Löschen Sie zuerst die Unteraufgaben und verknüpften Termine. Fremde Unteraufgaben dürfen nur deren Ersteller oder Vorgesetzte löschen.";
+  }
+
+  if (message === "Restore the archived task before deleting it") {
+    return lang === "ru"
+      ? "Перед удалением восстановите задачу из архива."
+      : "Stellen Sie die Aufgabe vor dem Löschen aus dem Archiv wieder her.";
+  }
+
+  if (message === "Parent must be an active task" || message === "Parent task not found") {
+    return lang === "ru" ? "Основная задача недоступна или уже завершена. Обновите список задач." : "Die übergeordnete Aufgabe ist nicht verfügbar oder bereits abgeschlossen. Aktualisieren Sie die Aufgabenliste.";
+  }
+  if (message === "No access to parent task") {
+    return lang === "ru" ? "Нет доступа к основной задаче." : "Kein Zugriff auf die übergeordnete Aufgabe.";
+  }
+  if (message === "Task with children cannot be converted to an event") {
+    return lang === "ru" ? "Задачу с подзадачами нельзя преобразовать в событие." : "Eine Aufgabe mit Unteraufgaben kann nicht in einen Termin umgewandelt werden.";
+  }
+  if (message === "due_at must be after starts_at" || message === "ends_at must be after starts_at") {
+    return lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.";
   }
 
   if (message === TASK_ACCESS_ERROR || message === "Forbidden") {
@@ -616,7 +648,7 @@ export function isConciergeServiceToday(service: ConciergeService, now: Date): b
 }
 
 export function isConciergeTaskOverdue(task: ConciergeTask, now: Date): boolean {
-  const dueAt = validDate(task.kind === "event" ? task.starts_at : task.due_at);
+  const dueAt = validDate(task.kind === "event" ? task.ends_at ?? task.starts_at : task.due_at);
   return Boolean(dueAt && dueAt < now && !TERMINAL_STATUSES.has(task.status));
 }
 
@@ -772,6 +804,22 @@ export function conciergeTaskScheduledAt(task: ConciergeTask): Date | null {
   return validDate(task.kind === "event" ? task.starts_at : task.due_at);
 }
 
+/** Planned dates, not creation/completion timestamps. Tasks keep due_at as their deadline. */
+export function conciergeTaskInterval(task: Pick<ConciergeTask, "kind" | "starts_at" | "ends_at" | "due_at">) {
+  return { start: validDate(task.starts_at), end: validDate(task.kind === "event" ? task.ends_at : task.due_at) };
+}
+
+export const COMPLETED_TASK_VISIBLE_DAYS = 7;
+
+export function isConciergeTaskPastCompletedVisibility(
+  task: Pick<ConciergeTask, "status" | "completed_at">,
+  now: Date,
+) {
+  const completedAt = validDate(task.completed_at);
+  return task.status === "completed" && completedAt !== null
+    && now.getTime() - completedAt.getTime() >= COMPLETED_TASK_VISIBLE_DAYS * 24 * 60 * 60 * 1000;
+}
+
 export function filterConciergeTasks(
   tasks: ConciergeTask[],
   filters: ConciergeTaskFilters,
@@ -781,6 +829,10 @@ export function filterConciergeTasks(
   return tasks.filter((task) => {
     if (filters.archive === "active" && task.archived_at) return false;
     if (filters.archive === "archived" && !task.archived_at) return false;
+    // Hide old completions only in the everyday view. Explicit history/status
+    // filters and search keep them discoverable without changing the record.
+    if (filters.archive === "active" && filters.status === "all" && !query
+      && isConciergeTaskPastCompletedVisibility(task, now)) return false;
     if (filters.assignee !== "all" && task.assigned_to !== filters.assignee) return false;
     if (filters.status !== "all" && task.status !== filters.status) return false;
     if (filters.priority !== "all" && task.priority !== filters.priority) return false;

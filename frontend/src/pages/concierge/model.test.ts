@@ -108,7 +108,7 @@ describe("filterConciergeTaskAssignees", () => {
         "ru",
         "fallback",
       ),
-    ).toBe("Удалить можно только ошибочно созданную открытую задачу без комментариев, чек-листа и файлов.");
+    ).toBe("Удалить можно только открытую задачу без комментариев, чек-листа, файлов, подзадач и событий.");
     expect(conciergeTaskErrorMessage(null, "ru", "fallback")).toBe("fallback");
     expect(
       conciergeTaskErrorMessage(
@@ -169,6 +169,7 @@ describe("filterConciergeTaskAssignees", () => {
     expect(availableConciergeTaskStatuses(assignedTask, "assignee", "concierge")).toEqual([
       "open",
       "in_progress",
+      "on_hold",
     ]);
     expect(availableConciergeTaskStatuses(
       task({ status: "review", assigned_by: "creator", assigned_by_role: "concierge" }),
@@ -177,11 +178,39 @@ describe("filterConciergeTaskAssignees", () => {
     )).toEqual(["review", "in_progress", "completed", "cancelled"]);
   });
 
-  it("deletes only untouched open tasks", () => {
-    const untouched = task({ assigned_by: "creator", assigned_by_role: "concierge" });
-    expect(canDeleteConciergeTask(untouched, "creator", "concierge")).toBe(true);
-    expect(canDeleteConciergeTask({ ...untouched, status: "completed" }, "creator", "concierge")).toBe(false);
-    expect(canDeleteConciergeTask({ ...untouched, comment_count: 1 }, "creator", "concierge")).toBe(false);
+  it("lets concierge creators delete their own tasks and subtasks after work has started", () => {
+    for (const parent_task_id of [null, "manager-task"]) {
+      for (const status of ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const) {
+        const own = task({ assigned_by: "creator", assigned_by_role: "concierge", parent_task_id, status,
+          comment_count: 2, checklist_total: 3, attachment_count: 1 });
+        expect(canDeleteConciergeTask(own, "creator", "concierge")).toBe(true);
+      }
+    }
+  });
+
+  it("never grants concierge deletion rights from assignment or a shared role", () => {
+    for (const assigned_by_role of ["concierge", "ceo", "patient_manager"]) {
+      const foreign = task({ assigned_by: "other", assigned_by_role, assigned_to: "actor" });
+      expect(canDeleteConciergeTask(foreign, "actor", "concierge")).toBe(false);
+      expect(canDeleteConciergeTask(foreign, null, "concierge")).toBe(false);
+    }
+  });
+
+  it("retains child and archive protections and the existing policy for other roles", () => {
+    const own = task({ assigned_by: "creator", assigned_by_role: "concierge" });
+    expect(canDeleteConciergeTask({ ...own, child_count: 1 }, "creator", "concierge")).toBe(false);
+    expect(canDeleteConciergeTask({ ...own, archived_at: "2026-09-10T09:00:00Z" }, "creator", "concierge")).toBe(false);
+    expect(canDeleteConciergeTask(own, "manager", "patient_manager")).toBe(true);
+    expect(canDeleteConciergeTask({ ...own, status: "completed" }, "manager", "patient_manager")).toBe(false);
+    expect(canDeleteConciergeTask({ ...own, comment_count: 1 }, "manager", "ceo")).toBe(false);
+    expect(canDeleteConciergeTask({ ...own, status: "in_progress" }, "creator", "interpreter")).toBe(false);
+  });
+
+  it("explains why a parent cannot be deleted without cascading into children", () => {
+    expect(conciergeTaskErrorMessage("Delete subtasks and events before deleting this task", "ru", "Error"))
+      .toContain("Сначала удалите подзадачи");
+    expect(conciergeTaskErrorMessage("Delete subtasks and events before deleting this task", "de", "Error"))
+      .toContain("Unteraufgaben");
   });
 });
 
@@ -391,6 +420,41 @@ describe("concierge workspace model", () => {
     expect(filterConciergeTasks(rows, { ...filters, archive: "active" }, now).map((item) => item.id)).toEqual(["active"]);
     expect(filterConciergeTasks(rows, { ...filters, archive: "archived" }, now).map((item) => item.id)).toEqual(["archived"]);
     expect(filterConciergeTasks(rows, { ...filters, archive: "all" }, now).map((item) => item.id)).toEqual(["active", "archived"]);
+  });
+
+  it("hides completed tasks at seven days using completion time rather than last edit", () => {
+    const now = new Date("2026-09-10T12:00:00Z");
+    const filters = { query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all" as const, archive: "active" as const };
+    const rows = [
+      task({ id: "recent", status: "completed", completed_at: "2026-09-03T12:00:00.001Z" }),
+      task({ id: "boundary", status: "completed", completed_at: "2026-09-03T12:00:00Z" }),
+      task({ id: "old-edited-today", status: "completed", completed_at: "2026-08-20T12:00:00Z", updated_at: now.toISOString() }),
+      task({ id: "no-completion-date", status: "completed", completed_at: null }),
+      task({ id: "invalid-date", status: "completed", completed_at: "invalid" }),
+      task({ id: "future-date", status: "completed", completed_at: "2026-09-11T12:00:00Z" }),
+      task({ id: "reopened", status: "in_progress", completed_at: "2026-08-20T12:00:00Z" }),
+      task({ id: "cancelled", status: "cancelled", completed_at: null }),
+    ];
+    expect(filterConciergeTasks(rows, filters, now).map(row => row.id)).toEqual([
+      "recent", "no-completion-date", "invalid-date", "future-date", "reopened", "cancelled",
+    ]);
+    expect(filterConciergeTasks(rows, filters, new Date(now.getTime() + 1)).map(row => row.id)).not.toContain("recent");
+    expect(rows[1].archived_at).toBeNull();
+  });
+
+  it("keeps old completions accessible through search, completed status and all records", () => {
+    const now = new Date("2026-09-10T12:00:00Z");
+    const old = task({ id: "old", title: "Finished handover", status: "completed", completed_at: "2026-08-20T12:00:00Z" });
+    const archived = task({ ...old, id: "archived", archived_at: "2026-08-25T12:00:00Z", archived_by: "manager-1" });
+    const filters = { query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all" as const, archive: "active" as const };
+    const rows = [old, archived];
+    expect(filterConciergeTasks(rows, filters, now)).toEqual([]);
+    expect(filterConciergeTasks(rows, { ...filters, query: "handover" }, now)).toEqual([old]);
+    expect(filterConciergeTasks(rows, { ...filters, query: "TASK-OLD" }, now)).toEqual([old]);
+    expect(filterConciergeTasks(rows, { ...filters, status: "completed" }, now)).toEqual([old]);
+    expect(filterConciergeTasks(rows, { ...filters, archive: "all" }, now)).toEqual(rows);
+    expect(filterConciergeTasks(rows, { ...filters, archive: "archived" }, now)).toEqual([archived]);
+    expect(filterConciergeTasks(rows, { ...filters, status: "completed", assignee: "someone-else" }, now)).toEqual([]);
   });
 
   it("calculates manager workload for each Concierge", () => {

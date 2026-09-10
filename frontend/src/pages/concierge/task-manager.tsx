@@ -13,6 +13,9 @@ import {
   ListChecks,
   MessageSquareText,
   Pencil,
+  Pause,
+  Play,
+  ChartNoAxesGantt,
   ReceiptText,
   Search,
   Trash2,
@@ -31,10 +34,12 @@ import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
 import {
+  COMPLETED_TASK_VISIBLE_DAYS,
   conciergeTaskCode,
-  conciergeTaskScheduledAt,
+  conciergeTaskInterval,
   conciergeTaskWorkload,
   filterConciergeTasks,
+  isConciergeTaskPastCompletedVisibility,
   isConciergeTaskOverdue,
   sortConciergeTasks,
   type ConciergeAssignee,
@@ -46,10 +51,12 @@ import {
   isoWeekNumber,
   taskCalendarDays,
   taskCalendarWeeks,
+  taskOccursOnDay,
   type TaskCalendarScale,
 } from "./task-calendar";
+import { TaskTimeline } from "./task-timeline";
 
-type TaskView = "board" | "list" | "calendar";
+type TaskView = "board" | "list" | "calendar" | "timeline";
 type CalendarScale = TaskCalendarScale;
 
 const copy = {
@@ -77,6 +84,14 @@ const copy = {
     month: "Monat",
     open: "Offen",
     in_progress: "In Arbeit",
+    on_hold: "Pausiert",
+    pause: "Pausieren",
+    resume: "Fortsetzen",
+    start: "Starten",
+    begins: "Beginn",
+    ends: "Ende",
+    timeline: "Zeitplan",
+    child: "Unteraufgabe",
     review: "Zur Prüfung",
     completed: "Erledigt",
     cancelled: "Storniert",
@@ -115,6 +130,8 @@ const copy = {
     archive: "Archivieren",
     restore: "Wiederherstellen",
     archived: "Archiviert",
+    completedVisibilityHint: "Seit mindestens {days} Tagen erledigte Aufgaben sind ausgeblendet: {count}.",
+    showCompleted: "Erledigte anzeigen",
     calendarWeekShort: "KW",
   },
   ru: {
@@ -141,6 +158,14 @@ const copy = {
     month: "Месяц",
     open: "Открыто",
     in_progress: "В работе",
+    on_hold: "На паузе",
+    pause: "На паузу",
+    resume: "Продолжить",
+    start: "Начать",
+    begins: "Начало",
+    ends: "Окончание",
+    timeline: "Таймлайн",
+    child: "Подзадача",
     review: "На проверке",
     completed: "Выполнено",
     cancelled: "Отменено",
@@ -179,11 +204,13 @@ const copy = {
     archive: "В архив",
     restore: "Восстановить",
     archived: "В архиве",
+    completedVisibilityHint: "Выполненные {days} и более дней назад задачи скрыты: {count}.",
+    showCompleted: "Показать выполненные",
     calendarWeekShort: "Нед.",
   },
 } as const;
 
-const statuses = ["open", "in_progress", "review", "completed", "cancelled"] as const;
+const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -207,6 +234,16 @@ function priorityTone(priority: string) {
   if (priority === "high") return "border-orange-200 bg-orange-50 text-orange-700";
   if (priority === "low") return "border-slate-200 bg-slate-50 text-slate-600";
   return "border-sky-200 bg-sky-50 text-sky-700";
+}
+
+function CalendarTaskButton({ task, lang, onOpen }: { task: ConciergeTask; lang: Lang; onOpen: (task: ConciergeTask) => void }) {
+  const labels = copy[lang];
+  const { start, end } = conciergeTaskInterval(task);
+  const period = `${labels.begins}: ${formatDateTime(start, lang)} · ${labels.ends}: ${formatDateTime(end, lang)}`;
+  return <button type="button" className={cn("block w-full rounded border px-1.5 py-1 text-left text-[10px]", task.status === "on_hold" ? "border-dashed border-amber-400 bg-amber-50 text-amber-800" : task.kind === "event" ? "border-transparent bg-violet-100 text-violet-800" : "border-transparent bg-muted text-foreground")} title={`${localizeTaskTitle(task.title, lang)} · ${period} · ${labels[task.status]}`} onClick={() => onOpen(task)}>
+    <span className="block truncate font-medium">{task.status === "on_hold" ? <Pause className="mr-1 inline size-3" /> : null}{localizeTaskTitle(task.title, lang)}</span>
+    <span className="block truncate">{formatDateTime(start, lang)} — {formatDateTime(end, lang)}</span>
+  </button>;
 }
 
 function taskAccent(priority: string) {
@@ -272,7 +309,7 @@ function TaskCard({
   onStatusChange: (task: ConciergeTask, status: string) => void;
 }) {
   const labels = copy[lang];
-  const scheduled = conciergeTaskScheduledAt(task);
+  const interval = conciergeTaskInterval(task);
   const overdue = isConciergeTaskOverdue(task, now);
   const archived = Boolean(task.archived_at);
   const terminal = task.status === "completed" || task.status === "cancelled";
@@ -281,6 +318,7 @@ function TaskCard({
       <button type="button" className={cn("min-w-0 w-full max-w-full overflow-hidden text-left", compact && "col-span-2 sm:col-span-1")} onClick={() => onOpen(task)}>
         <div className={cn("flex flex-wrap items-center gap-1.5", !compact && "pr-36")}>
           <Badge variant="outline" className="rounded-full font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(task)}</Badge>
+          {task.parent_task_id ? <Badge variant="outline" className="rounded-full text-[10px]">↳ {task.kind === "event" ? labels.event : labels.child}</Badge> : null}
           <Badge variant="outline" className={cn("rounded-full text-[10px]", priorityTone(task.priority))}>{labels[task.priority as keyof typeof labels] ?? task.priority}</Badge>
           <Badge variant="secondary" className="rounded-full text-[10px]">{task.kind === "event" ? labels.event : labels.task}</Badge>
           <Badge variant="outline" className={cn("rounded-full text-[10px]", task.task_audience === "external" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-700")}>{task.task_audience === "external" ? labels.external : labels.internal}</Badge>
@@ -329,7 +367,7 @@ function TaskCard({
         </div>
         <h3 className="mt-2 min-w-0 max-w-full whitespace-normal break-words text-sm font-semibold leading-snug text-foreground [overflow-wrap:anywhere]">{localizeTaskTitle(task.title, lang)}</h3>
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
-          <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{scheduled ? formatDateTime(scheduled, lang) : labels.unplanned}</p>
+          <p className="flex items-start gap-1.5"><Clock3 className="mt-0.5 size-3.5 shrink-0" /><span><span className="block">{labels.begins}: {formatDateTime(interval.start, lang)}</span><span className="block">{labels.ends}: {formatDateTime(interval.end, lang)}</span></span></p>
           <div className="flex min-w-0 items-center gap-1.5">
             <UsersRound className="size-3.5 shrink-0" />
             <Badge
@@ -358,14 +396,28 @@ function TaskCard({
         {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
       <div className={cn("space-y-1.5", compact && "col-span-2 sm:col-span-1")}>
+        {!archived && ["open", "in_progress", "on_hold"].includes(task.status) ? (
+          <Button type="button" size="sm" variant={task.status === "in_progress" ? "outline" : "default"} className="h-8 w-full text-xs" disabled={!canChangeStatus || updating || deleting || archiving || !availableStatuses.includes(task.status === "in_progress" ? "on_hold" : "in_progress")} onClick={() => onStatusChange(task, task.status === "in_progress" ? "on_hold" : "in_progress")}>
+            {task.status === "in_progress" ? <Pause /> : <Play />}{task.status === "in_progress" ? labels.pause : task.status === "on_hold" ? labels.resume : labels.start}
+          </Button>
+        ) : null}
         <SelectField
           className="h-8 min-w-[130px] rounded-md bg-background text-xs"
-          value={task.status}
+          value={archived ? "archived" : task.status}
           disabled={archived || !canChangeStatus || updating || deleting || archiving}
           title={canChangeStatus ? labels.moveTo : labels.noStatusPermission}
           aria-label={labels.moveTo}
-          options={availableStatuses.map((status) => ({ value: status, label: labels[status] }))}
-          onValueChange={(status) => onStatusChange(task, status)}
+          options={archived
+            ? [{ value: "archived", label: labels.archived }]
+            : [
+                ...availableStatuses.map((status) => ({ value: status, label: labels[status] })),
+                ...(task.status === "completed" && canModify ? [{ value: "archive", label: labels.archive }] : []),
+              ]}
+          onValueChange={(status) => {
+            if (status === "archive") {
+              if (task.status === "completed" && canModify) onArchive(task);
+            } else onStatusChange(task, status);
+          }}
         />
         {!archived && canAddExpense ? (
           <Button
@@ -442,6 +494,11 @@ export function ConciergeTaskManager({
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
+  const hiddenCompletedCount = useMemo(() => {
+    if (filters.archive !== "active" || filters.status !== "all" || filters.query.trim()) return 0;
+    return filterConciergeTasks(tasks, { ...filters, status: "completed" }, effectiveNow)
+      .filter((task) => isConciergeTaskPastCompletedVisibility(task, effectiveNow)).length;
+  }, [effectiveNow, filters, tasks]);
   const workload = useMemo(() => conciergeTaskWorkload(tasks, assignees, effectiveNow), [assignees, effectiveNow, tasks]);
   const assigneeRoles = useMemo(() => new Map(assignees.map((assignee) => [assignee.id, assignee.role])), [assignees]);
   const days = useMemo(() => taskCalendarDays(calendarScale, focusDate), [calendarScale, focusDate]);
@@ -465,14 +522,9 @@ export function ConciergeTaskManager({
   );
   const tasksByDay = useMemo(() => {
     const result = new Map<string, ConciergeTask[]>();
-    filtered.forEach((task) => {
-      const date = conciergeTaskScheduledAt(task);
-      if (!date) return;
-      const key = dateKey(date);
-      result.set(key, [...(result.get(key) ?? []), task]);
-    });
+    days.forEach((day) => result.set(dateKey(day), filtered.filter((task) => taskOccursOnDay(task, day))));
     return result;
-  }, [filtered]);
+  }, [days, filtered]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
@@ -576,14 +628,23 @@ export function ConciergeTaskManager({
         <SelectField aria-label={labels.allTiming} className="h-10 min-w-0 text-xs 2xl:h-8" value={filters.timing} options={[{ value: "all", label: labels.allTiming }, { value: "today", label: labels.today }, { value: "overdue", label: labels.overdue }, { value: "upcoming", label: labels.upcoming }]} onValueChange={(timing) => setFilters((current) => ({ ...current, timing: timing as ConciergeTaskFilters["timing"] }))} />
       </div>
 
-      <div className="mx-auto grid w-full grid-cols-3 gap-1 sm:flex sm:w-fit">
-        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} aria-pressed={view === value} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
+      {hiddenCompletedCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
+          <p>{labels.completedVisibilityHint.replace("{days}", String(COMPLETED_TASK_VISIBLE_DAYS)).replace("{count}", String(hiddenCompletedCount))}</p>
+          <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setFilters((current) => ({ ...current, status: "completed" }))}>
+            {labels.showCompleted}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="mx-auto grid w-full grid-cols-2 gap-1 sm:flex sm:w-fit">
+        {([ ["board", ListChecks, labels.board], ["list", List, labels.list], ["calendar", CalendarDays, labels.calendar], ["timeline", ChartNoAxesGantt, labels.timeline] ] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={view === value ? "default" : "ghost"} aria-pressed={view === value} className="h-9 min-w-0 rounded-md px-2 text-xs sm:h-8 sm:px-3" onClick={() => setView(value)}><Icon />{label}</Button>)}
       </div>
 
       {filtered.length === 0 && view !== "calendar" ? <div className="rounded-lg border border-dashed bg-card px-6 py-16 text-center text-sm text-muted-foreground">{hasCustomFilters ? labels.noTasks : labels.noActiveTasks}</div> : null}
 
       {filtered.length > 0 && view === "board" ? (
-        <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-5")}>
+        <div className={cn("grid items-start gap-3 md:grid-cols-2", visibleStatuses.length > 2 && "xl:grid-cols-3 2xl:grid-cols-6")}>
           {visibleStatuses.map((status) => {
             const rows = filtered.filter((task) => task.status === status);
             return <section key={status} className="min-w-0 rounded-lg border border-border/70 bg-muted/30 p-2"><div className="mb-2 flex items-center justify-between px-1"><h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{labels[status]}</h3><Badge variant="secondary" className="rounded-full">{rows.length}</Badge></div><div className="space-y-2">{rows.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div></section>;
@@ -592,6 +653,8 @@ export function ConciergeTaskManager({
       ) : null}
 
       {filtered.length > 0 && view === "list" ? <div className="space-y-2">{filtered.map((task) => <TaskCard key={task.id} task={task} assignedToRole={assigneeRoles.get(task.assigned_to)} lang={lang} now={effectiveNow} compact updating={updatingTaskId === task.id} deleting={deletingTaskId === task.id} archiving={archivingTaskId === task.id} canModify={canModifyTask(task)} canDelete={canDeleteTask(task)} canChangeStatus={canChangeTaskStatus(task)} canAddExpense={canAddExpenseToTask(task)} availableStatuses={availableStatusesForTask(task)} onOpen={onOpen} onEdit={onEdit} onDelete={onDelete} onArchive={onArchive} onRestore={onRestore} onExpense={onExpense} onStatusChange={onStatusChange} />)}</div> : null}
+
+      {view === "timeline" ? <TaskTimeline tasks={filtered} lang={lang} now={effectiveNow} onOpen={onOpen} onStatusChange={onStatusChange} availableStatusesForTask={availableStatusesForTask} updatingTaskId={updatingTaskId} /> : null}
 
       {view === "calendar" ? (
         <div className="rounded-lg border border-border/70 bg-card shadow-sm">
@@ -620,7 +683,7 @@ export function ConciergeTaskManager({
                       </button>
                       <div className="space-y-1">
                         {visibleRows.map((task) => (
-                          <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={localizeTaskTitle(task.title, lang)} onClick={() => onOpen(task)}>{localizeTaskTitle(task.title, lang)}</button>
+                          <CalendarTaskButton key={task.id} task={task} lang={lang} onOpen={onOpen} />
                         ))}
                         {hiddenCount > 0 ? (
                           <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>
@@ -658,7 +721,7 @@ export function ConciergeTaskManager({
                           </button>
                           <div className="space-y-1">
                             {visibleRows.map((task) => (
-                              <button key={task.id} type="button" className={cn("block w-full truncate rounded px-1.5 py-1 text-left text-[10px]", task.kind === "event" ? "bg-violet-100 text-violet-800" : "bg-sky-100 text-sky-800")} title={localizeTaskTitle(task.title, lang)} onClick={() => onOpen(task)}>{localizeTaskTitle(task.title, lang)}</button>
+                              <CalendarTaskButton key={task.id} task={task} lang={lang} onOpen={onOpen} />
                             ))}
                             {hiddenCount > 0 ? (
                               <button type="button" className="block w-full rounded px-1.5 py-1 text-left text-[10px] font-semibold text-primary hover:bg-primary/5" aria-expanded={expanded} onClick={() => toggleCalendarDay(key)}>
