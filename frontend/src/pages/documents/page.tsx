@@ -4713,7 +4713,7 @@ function StaffDocumentsPage({
                 <DocumentSheetSection title={t.documents_section_document}>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field label={t.operations_document_type}>
-                      <Input
+                      <NativeComboboxSelect
                         value={uploadForm.art}
                         onChange={(event) =>
                           setUploadForm((current) => ({
@@ -4721,10 +4721,15 @@ function StaffDocumentsPage({
                             art: event.target.value,
                           }))
                         }
-                        list="documents-art-options"
-                        className={shellInputClassName}
-                        placeholder={t.documents_auto_classification_optional}
-                      />
+                        className={selectClassName}
+                      >
+                        <option value="">{t.documents_auto_classification_optional}</option>
+                        {arts.map((art) => (
+                          <option key={art} value={art}>
+                            {localizeDocumentCode(art, l)}
+                          </option>
+                        ))}
+                      </NativeComboboxSelect>
                     </Field>
                     <Field label={t.documents_category}>
                       <NativeComboboxSelect

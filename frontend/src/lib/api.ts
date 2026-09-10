@@ -469,9 +469,25 @@ export function clearApiCache(pathPrefix?: string) {
   }
 }
 
+async function readApiErrorBody(res: Response): Promise<ApiErrorBody | null> {
+  const raw = await res.text().catch(() => "");
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as ApiErrorBody;
+    }
+  } catch {
+    // Axum's JSON extractor returns validation failures as plain text.
+  }
+  if (res.status === 422 && res.headers.get("content-type")?.startsWith("text/plain") && raw.trim()) {
+    return { error: "invalid_request", message: raw.trim().slice(0, 1000) };
+  }
+  return null;
+}
+
 async function readApiJsonResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const body = await res.json().catch(() => null) as ApiErrorBody | null;
+    const body = await readApiErrorBody(res);
     const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
     if (res.status === 429) {
       throw new ApiRequestError(

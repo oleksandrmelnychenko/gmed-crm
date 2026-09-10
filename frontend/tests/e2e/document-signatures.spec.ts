@@ -3,6 +3,26 @@ import { readFileSync, readdirSync } from "node:fs";
 
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
 
+test("document upload offers searchable localized types and automatic classification", async ({ page }) => {
+  await prepare(page);
+  await page.addInitScript(() => localStorage.setItem("gmed_lang", "ru"));
+  await page.route("**/api/v1/documents/meta/categories", route => route.fulfill({
+    json: { categories: [], arts: ["passport", "lab_results"] },
+  }));
+  await page.goto("/documents");
+  await page.getByRole("button", { name: "Загрузить", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Загрузить", exact: true });
+  const type = dialog.getByRole("combobox", { name: "Тип документа", exact: true });
+  await expect(type).toContainText("Автоматически");
+  await type.click();
+  await page.getByRole("option", { name: "Паспорт", exact: true }).click();
+  await expect(type).toContainText("Паспорт");
+  await type.click();
+  await page.getByRole("option", { name: "Автоматически", exact: true }).click();
+  await expect(type).toContainText("Автоматически");
+  await expect(dialog.getByPlaceholder("Необязательно. Оставьте пустым для автоклассификации.")).toHaveCount(0);
+});
+
 for (const prefix of ["ADMIN-DSGVO-", "ADMIN-Schweigepflichtsentbindung"]) {
   test(`signature preview renders the stored ${prefix} document`, async ({page}) => {
     await prepare(page);

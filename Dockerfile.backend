@@ -20,11 +20,16 @@ COPY migrations ./migrations
 COPY .sqlx ./.sqlx
 COPY docs/comparison/fonts ./docs/comparison/fonts
 
+ARG GMED_CARGO_PROFILE=release
+ARG GMED_CARGO_BUILD_JOBS=
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --locked --release -p gmed-server --bin gmed-server \
-    && cp target/release/gmed-server /tmp/gmed-server
+    case "$GMED_CARGO_PROFILE" in release|dev-fast) ;; *) exit 1 ;; esac \
+    && if [ -n "$GMED_CARGO_BUILD_JOBS" ]; then export CARGO_BUILD_JOBS="$GMED_CARGO_BUILD_JOBS"; fi \
+    && cargo build --locked --profile "$GMED_CARGO_PROFILE" -p gmed-server --bin gmed-server \
+    && cp "target/$GMED_CARGO_PROFILE/gmed-server" /tmp/gmed-server
 
 FROM debian:bookworm-slim AS runtime
 

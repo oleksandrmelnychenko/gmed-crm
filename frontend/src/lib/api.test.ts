@@ -54,6 +54,31 @@ afterEach(() => {
   Reflect.deleteProperty(globalThis, "localStorage");
 });
 
+describe("API validation errors", () => {
+  it("preserves the field validation detail from an Axum plain-text 422", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    const detail = "Failed to deserialize the JSON body into the target type: assigned_to: invalid UUID";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(detail, {
+      status: 422, headers: { "Content-Type": "text/plain; charset=utf-8" },
+    })));
+    const { apiFetch } = await loadApiModule();
+    await expect(apiFetch("/concierge-operational-items", { method: "POST", body: "{}" }))
+      .rejects.toMatchObject({ message: detail, status: 422, code: "invalid_request" });
+  });
+
+  it("does not display a gateway HTML page as a validation message", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>private proxy detail</html>", {
+      status: 422, statusText: "Unprocessable Entity", headers: { "Content-Type": "text/html" },
+    })));
+    const { apiFetch } = await loadApiModule();
+    await expect(apiFetch("/concierge-operational-items", { method: "POST", body: "{}" }))
+      .rejects.toMatchObject({ message: "422 Unprocessable Entity", status: 422 });
+  });
+});
+
 describe("API URL builders", () => {
   it("keeps HTTP API paths relative when no dedicated API origin is configured", async () => {
     setWindowOrigin("http://app.local:4173");

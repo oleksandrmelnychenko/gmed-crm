@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
 
 
@@ -57,6 +58,45 @@ class ReleaseImageCoverageTests(unittest.TestCase):
         self.assertIn("\n  invoice-parser:\n", workflow)
         self.assertIn("working-directory: services/invoice-parser", workflow)
         self.assertIn("run: python -m pytest -q", workflow)
+
+    def test_fast_dev_profile_preserves_production_optimizations(self):
+        cargo = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+        self.assertEqual(cargo["profile"]["release"], {
+            "opt-level": "s", "lto": True, "codegen-units": 1, "strip": "symbols",
+        })
+        self.assertEqual(cargo["profile"]["dev-fast"], {
+            "inherits": "release", "opt-level": 1, "lto": "off",
+            "codegen-units": 16, "incremental": False,
+        })
+        dockerfile = (ROOT / "Dockerfile.backend").read_text(encoding="utf-8")
+        self.assertIn("ARG GMED_CARGO_PROFILE=release\n", dockerfile)
+        self.assertIn("ARG GMED_CARGO_BUILD_JOBS=\n", dockerfile)
+        self.assertIn('cargo build --locked --profile "$GMED_CARGO_PROFILE"', dockerfile)
+        self.assertIn('cp "target/$GMED_CARGO_PROFILE/gmed-server"', dockerfile)
+        self.assertIn('export CARGO_BUILD_JOBS="$GMED_CARGO_BUILD_JOBS"', dockerfile)
+
+    def test_only_source_dev_deployment_selects_fast_profile(self):
+        dev = (ROOT / "docker-compose.dev-hetzner.yml").read_text(encoding="utf-8")
+        self.assertIn('GMED_CARGO_PROFILE: "dev-fast"', dev)
+        self.assertIn('GMED_CARGO_BUILD_JOBS: "1"', dev)
+        for name in (
+            "docker-compose.yml", "docker-compose.release.yml",
+            "docker-compose.prod-hetzner.yml", ".github/workflows/release.yml",
+        ):
+            with self.subTest(file=name):
+                self.assertNotIn("dev-fast", (ROOT / name).read_text(encoding="utf-8"))
+
+    def test_both_dev_deployment_paths_rehearse_migrations_before_swap(self):
+        script = (ROOT / "scripts/deploy-dev-current.sh").read_text(encoding="utf-8")
+        branch_end = script.index("  unset COMPOSE_BAKE\nfi\n")
+        preflight = script.index('python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py"')
+        prepare = script.index('prepare_upload_volume "$STAGING_DIR"')
+        swap = script.index('mv "$REPO_DIR" "$BACKUP_PATH"')
+        self.assertLess(branch_end, preflight)
+        self.assertLess(preflight, prepare)
+        self.assertLess(prepare, swap)
+        self.assertEqual(script.count('scripts/preflight-prod-migrations.py"'), 1)
+        self.assertIn('--backup-dir "$BACKUP_DIR/database-$STAMP"', script)
 
 
 if __name__ == "__main__":

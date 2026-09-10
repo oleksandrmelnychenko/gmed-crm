@@ -7,7 +7,7 @@
 # startup or the external health check fails. This path is intentionally DEV
 # only; production continues to use signed, digest-pinned release images.
 # An optional second argument supplies four signed DEV image pins instead of
-# building on the host. This mode rehearses migrations on a backup clone first.
+# building on the host. Both modes rehearse migrations on a backup clone first.
 # The publisher runs this entire script under /home/gmed/deploy/deploy.lock.
 # Direct callers must acquire that same lock before building shared image tags.
 
@@ -24,8 +24,8 @@ CADDY_HOSTNAME_VALUE="${CADDY_HOSTNAME_VALUE:-console-dev.gmed-health.com}"
 GMED_CORS_ORIGIN_VALUE="${GMED_CORS_ORIGIN_VALUE:-https://console-dev.gmed-health.com,https://localhost,capacitor://localhost}"
 HEALTH_URL="${HEALTH_URL:-https://console-dev.gmed-health.com/health}"
 LOG_FILE="${LOG_FILE:-$DEPLOY_DIR/deploy-dev-current.log}"
-# Rust release/LTO reached roughly 5.5 GiB on the 8 GiB DEV host. Keep OCR
-# workers from taking the remaining headroom, and cancel before SSH/API stall.
+# DEV uses dev-fast with one Cargo job instead of release/LTO. Retain the RAM
+# guard and OCR recovery even with the lower-memory compiler profile.
 BUILD_MEMORY_HEADROOM_MB="${BUILD_MEMORY_HEADROOM_MB:-6144}"
 BUILD_MEMORY_ABORT_MB="${BUILD_MEMORY_ABORT_MB:-768}"
 BUILD_PID=""
@@ -364,15 +364,6 @@ tag_running_image gmed-crm-invoice-parser-1 "gmed-dev-rollback-invoice-parser:$S
 if [[ -n "$IMAGE_PINS_FILE" ]]; then
   echo "Pulling four verified DEV images; no server-side build..."
   compose "$STAGING_DIR" pull backend frontend clinical-document-parser invoice-parser
-  (
-    export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
-    POSTGRES_USER="$(docker exec gmed-postgres printenv POSTGRES_USER)"
-    POSTGRES_PASSWORD="$(docker exec gmed-postgres printenv POSTGRES_PASSWORD)"
-    POSTGRES_DB="$(docker exec gmed-postgres printenv POSTGRES_DB)"
-    python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py" \
-      --migrations "$STAGING_DIR/migrations" \
-      --backup-dir "$BACKUP_DIR/database-$STAMP"
-  )
 else
   echo "Building DEV images with the host Docker cache..."
   export COMPOSE_BAKE=true
@@ -381,6 +372,18 @@ else
   build_with_memory_guard "$STAGING_DIR" frontend clinical-document-parser invoice-parser
   unset COMPOSE_BAKE
 fi
+
+# Always rehearse against a fresh backup, including the fast source-build path.
+# The live database is changed only by the new backend after this succeeds.
+(
+  export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+  POSTGRES_USER="$(docker exec gmed-postgres printenv POSTGRES_USER)"
+  POSTGRES_PASSWORD="$(docker exec gmed-postgres printenv POSTGRES_PASSWORD)"
+  POSTGRES_DB="$(docker exec gmed-postgres printenv POSTGRES_DB)"
+  python3 "$STAGING_DIR/scripts/preflight-prod-migrations.py" \
+    --migrations "$STAGING_DIR/migrations" \
+    --backup-dir "$BACKUP_DIR/database-$STAMP"
+)
 prepare_upload_volume "$STAGING_DIR"
 
 BACKUP_PATH="$BACKUP_DIR/gmed-crm.before-$STAMP"

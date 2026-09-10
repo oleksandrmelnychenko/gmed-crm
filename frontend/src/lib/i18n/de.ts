@@ -1493,7 +1493,7 @@ export const de = {
   documents_upload_teamlead_hint:
     "Diese Datei wird als internes Dokument gespeichert. Teamlead-Dateien zeigen hier keine vollständigen Dokumentverwaltungs-Steuerungen.",
   documents_auto_classification_optional:
-    "Optional. Leer lassen für automatische Klassifizierung.",
+    "Automatisch",
   documents_popup_blocked:
     "Pop-up-Fenster zulassen, um die Dokumentvorschau zu öffnen.",
   documents_failed_load_documents: "Dokumente konnten nicht geladen werden.",

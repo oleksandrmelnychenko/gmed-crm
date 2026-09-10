@@ -29,6 +29,10 @@ services:
         VITE_RELEASE_CHANNEL: "dev"
 
   backend:
+    build:
+      args:
+        GMED_CARGO_PROFILE: "dev-fast"
+        GMED_CARGO_BUILD_JOBS: "1"
     environment:
       INVOICE_PARSER_URL: "http://invoice-parser:8091"
       INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the DEV invoice parser service key}"
