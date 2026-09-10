@@ -2342,9 +2342,21 @@ pub(crate) async fn ensure_created_order_state(
     order_id: Uuid,
     actor_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let preparing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')")
-        .bind(order_id).fetch_one(&state.db).await.map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to initialize order"))?;
-    if preparing {return Ok(());}
+    let preparing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to initialize order",
+        )
+    })?;
+    if preparing {
+        return Ok(());
+    }
     ensure_order_planning_preparation_state(state, order_id).await?;
     ensure_order_execution_flow_state(state, order_id).await?;
     ensure_order_followup_flow_state(state, order_id).await?;
@@ -9277,12 +9289,22 @@ async fn can_access_order(
     order_id: Uuid,
     patient_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
-    let preparing: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')")
-        .bind(order_id).fetch_one(&state.db).await.map_err(|e| {
-            tracing::error!(error=%e,"check order preparation");
-            err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to validate order access")
-        })?;
-    if preparing { return Ok(false); }
+    let preparing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error=%e,"check order preparation");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })?;
+    if preparing {
+        return Ok(false);
+    }
     if matches!(auth.role, Role::Ceo | Role::Billing) {
         return Ok(true);
     }

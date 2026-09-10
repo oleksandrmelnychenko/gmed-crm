@@ -197,9 +197,21 @@ pub(crate) async fn ensure_default_order_workflow(
     order_id: Uuid,
     fallback_user_id: Option<Uuid>,
 ) -> Result<(), axum::response::Response> {
-    let preparing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')")
-        .bind(order_id).fetch_one(&state.db).await.map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load order preparation"))?;
-    if preparing {return Ok(());}
+    let preparing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM orders WHERE id=$1 AND intake_state='draft')",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order preparation",
+        )
+    })?;
+    if preparing {
+        return Ok(());
+    }
     let context = load_order_scope_context(state, order_id).await?;
     for item in ORDER_WORKFLOW_TEMPLATE {
         let Some(phase) = item.phase else {

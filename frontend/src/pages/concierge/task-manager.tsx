@@ -395,11 +395,11 @@ function TaskCard({
         <div className="mt-2 space-y-1.5 rounded-md bg-muted/35 p-2.5 text-xs text-muted-foreground">
           <div className="flex items-start gap-1.5">
             <Clock3 className="mt-1 size-3.5 shrink-0" />
-            <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="@container/task-times min-w-0 flex-1 space-y-1.5">
               {([[labels.begins, interval.start], [labels.ends, interval.end]] as const).map(([label, date], index) => (
-                <div key={label} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                <div key={label} className="grid grid-cols-1 items-center gap-x-2 gap-y-1 @[12rem]/task-times:grid-cols-[minmax(0,1fr)_auto]">
                   <span className="min-w-0">{label}:{date ? null : " —"}</span>
-                  {date ? <Badge variant="outline" className={cn("ml-auto shrink-0 rounded-full font-mono text-[10px] tabular-nums", index === 1 && overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "border-border/70 bg-background text-foreground")}><time dateTime={date.toISOString()}>{formatDateTime(date, lang).replace(/[.,]/g, "")}</time></Badge> : null}
+                  {date ? <Badge variant="outline" className={cn("shrink-0 justify-self-start rounded-full font-mono text-[10px] tabular-nums @[12rem]/task-times:justify-self-end", index === 1 && overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "border-border/70 bg-background text-foreground")}><time dateTime={date.toISOString()}>{formatDateTime(date, lang).replace(/[.,]/g, "")}</time></Badge> : null}
                 </div>
               ))}
             </div>

@@ -10675,8 +10675,10 @@ pub(crate) fn can_view_document_row(
     // stored as internal documents. Explicit document ACLs are checked by callers.
     if can_view_general_provider_document(
         auth.role,
-        row.try_get::<bool, _>("general_provider_document").unwrap_or(false),
-        row.try_get::<bool, _>("hotel_provider_link").unwrap_or(false),
+        row.try_get::<bool, _>("general_provider_document")
+            .unwrap_or(false),
+        row.try_get::<bool, _>("hotel_provider_link")
+            .unwrap_or(false),
     ) {
         return true;
     }
@@ -10712,7 +10714,9 @@ pub(crate) fn can_view_document_row(
 }
 
 fn can_view_general_provider_document(role: Role, general: bool, hotel: bool) -> bool {
-    general && (matches!(role, Role::PatientManager | Role::Billing) || (role == Role::Concierge && hotel))
+    general
+        && (matches!(role, Role::PatientManager | Role::Billing)
+            || (role == Role::Concierge && hotel))
 }
 
 #[cfg(test)]
@@ -10721,14 +10725,39 @@ mod hotel_access_tests {
 
     #[test]
     fn concierge_contract_access_requires_general_document_and_hotel_link() {
-        assert!(can_view_general_provider_document(Role::Concierge, true, true));
-        assert!(!can_view_general_provider_document(Role::Concierge, true, false));
-        assert!(!can_view_general_provider_document(Role::Concierge, false, true));
-        for role in [Role::Patient, Role::Interpreter, Role::Sales, Role::CeoAssistant] {
+        assert!(can_view_general_provider_document(
+            Role::Concierge,
+            true,
+            true
+        ));
+        assert!(!can_view_general_provider_document(
+            Role::Concierge,
+            true,
+            false
+        ));
+        assert!(!can_view_general_provider_document(
+            Role::Concierge,
+            false,
+            true
+        ));
+        for role in [
+            Role::Patient,
+            Role::Interpreter,
+            Role::Sales,
+            Role::CeoAssistant,
+        ] {
             assert!(!can_view_general_provider_document(role, true, true));
         }
-        assert!(can_view_general_provider_document(Role::Billing, true, false));
-        assert!(can_view_general_provider_document(Role::PatientManager, true, false));
+        assert!(can_view_general_provider_document(
+            Role::Billing,
+            true,
+            false
+        ));
+        assert!(can_view_general_provider_document(
+            Role::PatientManager,
+            true,
+            false
+        ));
     }
 }
 
@@ -11176,7 +11205,11 @@ pub(crate) async fn persist_document_file(
     .bind(input.version_number)
     .bind(input.uploaded_by)
     .bind(input.document_number)
-    .bind(input.generated_bindings.and_then(|bindings| bindings.get("_order_intake_context")))
+    .bind(
+        input
+            .generated_bindings
+            .and_then(|bindings| bindings.get("_order_intake_context")),
+    )
     .execute(&state.db)
     .await
     {
@@ -12125,24 +12158,47 @@ async fn generate_document(
     // stored. This is a distinct advisory lock, so PDF generation can still
     // use its regular database connections without blocking intake row locks.
     let mut intake_generation_guard = if let Some(id) = order_id {
-        match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM order_intakes WHERE order_id=$1)")
-            .bind(id).fetch_one(&state.db).await {
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM order_intakes WHERE order_id=$1)",
+        )
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        {
             Ok(true) => {
                 let mut guard = match state.db.begin().await {
                     Ok(guard) => guard,
-                    Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare document generation"),
+                    Err(_) => {
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to prepare document generation",
+                        );
+                    }
                 };
                 if sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
                     .bind(format!("order-intake-pdf:{id}"))
-                    .execute(&mut *guard).await.is_err() {
-                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare document generation");
+                    .execute(&mut *guard)
+                    .await
+                    .is_err()
+                {
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to prepare document generation",
+                    );
                 }
                 Some(guard)
-            },
+            }
             Ok(false) => None,
-            Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order preparation"),
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load order preparation",
+                );
+            }
         }
-    } else { None };
+    } else {
+        None
+    };
     let intake_context = match super::order_intakes::document_context(&state, order_id).await {
         Ok(value) => value,
         Err(response) => return response,
@@ -12284,7 +12340,9 @@ async fn generate_document(
         );
     }
 
-    if let (Some(context), Some(guard)) = (intake_context.as_ref(), intake_generation_guard.as_mut()) {
+    if let (Some(context), Some(guard)) =
+        (intake_context.as_ref(), intake_generation_guard.as_mut())
+    {
         let existing = sqlx::query_scalar::<_, serde_json::Value>(
             "SELECT jsonb_build_object('ok',true,'id',id,'document_number',document_number,
                 'auto_name',auto_name,'original_filename',original_filename,'mime_type',mime_type,
@@ -12300,8 +12358,13 @@ async fn generate_document(
             .fetch_optional(&mut **guard).await;
         match existing {
             Ok(Some(document)) => return Json(document).into_response(),
-            Ok(None) => {},
-            Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to check existing document version"),
+            Ok(None) => {}
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to check existing document version",
+                );
+            }
         }
     }
 
@@ -12417,15 +12480,26 @@ async fn generate_document(
 
     let mut bindings = body.bindings.clone().unwrap_or_default();
     if let Some(context) = &intake_context {
-        if body.manual_text.as_deref().is_some_and(|value| !value.trim().is_empty()) {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "Edit order preparation before generating its documents");
+        if body
+            .manual_text
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Edit order preparation before generating its documents",
+            );
         }
         // Order preparation is the authoritative source. Arbitrary preview
         // overrides must not acquire a matching confirmation context.
         bindings = DocumentBindingOverrides::default();
         let data = &context["data"];
-        bindings.period_from = data["date_from"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok());
-        bindings.period_to = data["date_to"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok());
+        bindings.period_from = data["date_from"]
+            .as_str()
+            .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
+        bindings.period_to = data["date_to"]
+            .as_str()
+            .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
         bindings.examination_purpose = data["needs_description"].as_str().map(str::to_owned);
         if template.id == "enhanced_due_diligence" {
             let f = &data["facts"];
@@ -12447,7 +12521,9 @@ async fn generate_document(
                 manager_approval_name: review["manager_approval_name"].as_str().map(str::to_owned),
                 continuous_monitoring: review["continuous_monitoring"].as_str().map(str::to_owned),
                 reviewer_name: review["reviewer_name"].as_str().map(str::to_owned),
-                review_date: review["review_date"].as_str().and_then(|v|NaiveDate::parse_from_str(v,"%Y-%m-%d").ok()),
+                review_date: review["review_date"]
+                    .as_str()
+                    .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok()),
                 ..Default::default()
             });
         }
@@ -12497,7 +12573,8 @@ async fn generate_document(
     }
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     if let Some(context) = &intake_context {
-        generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] = context.clone();
+        generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
+            context.clone();
     }
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
@@ -14007,8 +14084,13 @@ async fn generate_document(
 
     if intake_context.is_some() {
         match super::order_intakes::document_context(&state, order_id).await {
-            Ok(current) if current == intake_context => {},
-            Ok(_) => return err(StatusCode::CONFLICT, "Order changed during document generation. Generate a new version."),
+            Ok(current) if current == intake_context => {}
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Order changed during document generation. Generate a new version.",
+                );
+            }
             Err(response) => return response,
         }
     }

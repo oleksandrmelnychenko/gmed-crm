@@ -266,11 +266,12 @@ async fn overview(
             .unwrap_or(0);
     let leads = sqlx::query_scalar!(r#"SELECT COUNT(*) AS "c!" FROM leads WHERE qualification_status NOT IN ('archived', 'converted')"#)
         .fetch_one(&state.db).await.unwrap_or(0);
-    let orders =
-        sqlx::query_scalar::<_,i64>("SELECT COUNT(*) FROM orders WHERE status = 'active' AND intake_state <> 'draft'")
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(0);
+    let orders = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM orders WHERE status = 'active' AND intake_state <> 'draft'",
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
     let appointments = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "c!" FROM appointments WHERE status IN ('planned', 'confirmed')"#
     )
@@ -1219,10 +1220,10 @@ async fn orders_by_phase(
         return e;
     }
 
-    match sqlx::query_as::<_,(String,i64)>(
+    match sqlx::query_as::<_, (String, i64)>(
         "SELECT phase, COUNT(*)
          FROM orders WHERE status = 'active' AND intake_state <> 'draft'
-         GROUP BY phase ORDER BY 2 DESC"
+         GROUP BY phase ORDER BY 2 DESC",
     )
     .fetch_all(&state.db)
     .await

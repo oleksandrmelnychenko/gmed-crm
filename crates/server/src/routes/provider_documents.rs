@@ -188,7 +188,10 @@ async fn upload_provider_document(
         return err(StatusCode::BAD_REQUEST, "No file uploaded");
     };
     if !provider_document_upload_scope_allowed(auth.role, is_hotel, patient_id, is_medical) {
-        return err(StatusCode::FORBIDDEN, "Concierge can upload general hotel documents only");
+        return err(
+            StatusCode::FORBIDDEN,
+            "Concierge can upload general hotel documents only",
+        );
     }
     if is_medical && patient_id.is_none() {
         return err(
@@ -321,10 +324,20 @@ fn require_provider_document_view_role(auth: &AuthUser) -> Result<(), axum::resp
 
 #[allow(clippy::result_large_err)]
 fn require_provider_document_upload_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin, Role::Concierge])
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::ItAdmin,
+        Role::Concierge,
+    ])
 }
 
-fn provider_document_upload_scope_allowed(role: Role, is_hotel: bool, patient_id: Option<Uuid>, is_medical: bool) -> bool {
+fn provider_document_upload_scope_allowed(
+    role: Role,
+    is_hotel: bool,
+    patient_id: Option<Uuid>,
+    is_medical: bool,
+) -> bool {
     role != Role::Concierge || (is_hotel && patient_id.is_none() && !is_medical)
 }
 
@@ -338,15 +351,30 @@ mod hotel_access_tests {
 
     #[test]
     fn concierge_uploads_only_general_hotel_documents() {
-        assert!(provider_document_upload_scope_allowed(Role::Concierge, true, None, false));
+        assert!(provider_document_upload_scope_allowed(
+            Role::Concierge,
+            true,
+            None,
+            false
+        ));
         for (hotel, patient, medical) in [
             (false, None, false),
             (true, Some(Uuid::nil()), false),
             (true, None, true),
             (true, Some(Uuid::nil()), true),
         ] {
-            assert!(!provider_document_upload_scope_allowed(Role::Concierge, hotel, patient, medical));
+            assert!(!provider_document_upload_scope_allowed(
+                Role::Concierge,
+                hotel,
+                patient,
+                medical
+            ));
         }
-        assert!(provider_document_upload_scope_allowed(Role::PatientManager, false, Some(Uuid::nil()), true));
+        assert!(provider_document_upload_scope_allowed(
+            Role::PatientManager,
+            false,
+            Some(Uuid::nil()),
+            true
+        ));
     }
 }

@@ -47,6 +47,7 @@ describe("company invoice import", () => {
       body: JSON.stringify({
         source_document_id: "document-1",
         supplier_name: "K.B.M. GmbH",
+        provider_id: null,
         external_invoice_number: "RE 2026-086",
         invoice_date: "2026-05-10",
         due_date: "2026-05-24",

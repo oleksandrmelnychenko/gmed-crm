@@ -240,7 +240,6 @@ async fn returning_patient_intake_preserves_history_and_guards_every_transition(
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{blocked}");
     let (status, next) = save(&ctx.app, &token, &ws, &draft, "prepare").await;
     assert_eq!(status, StatusCode::OK, "{next}");
-    ws = next;
     let (status, signed) = request(
         &ctx.app,
         &token,
