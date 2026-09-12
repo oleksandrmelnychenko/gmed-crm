@@ -242,6 +242,7 @@ def parse_xml_invoice(data: bytes) -> dict:
     text = "\n".join([f"{key}: {value}" for key, value in fields.items() if value is not None]
                      + ([f"Rechnungsempfänger: {recipient}"] if recipient else []) + terms)
     return {"schema_version": "1.0", "status": "needs_review", "requires_review": True,
+            "document_kind": "invoice",
             "fields": fields, "warnings": list(dict.fromkeys(warnings)), "missing_fields": missing,
             "line_items": items, "tax_breakdown": taxes, "field_sources": {}, "recipient": {"name": recipient},
             "payment": {"terms": terms, "amount_due": amount_due, "prepaid": prepaid, "rounding": rounding},

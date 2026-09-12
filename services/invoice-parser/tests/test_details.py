@@ -137,3 +137,64 @@ def test_row_period_does_not_leak_into_following_undated_positions():
     result = parse(BASE + "Pos. 1 Service 01.04.30 - 30.04.30 EUR 20,00\nPos. 2 Einrichtung EUR 22,50")
     assert result["line_items"][0]["service_period"] == "01.04.30 - 30.04.30"
     assert "service_period" not in result["line_items"][1]
+
+
+def test_goae_rows_and_explicit_tax_exemption_are_supported():
+    result = parse(BASE.replace("Gesamtbetrag EUR 42,50", "Gesamtbetrag EUR 30,83") + """
+Datum Ziffer Leistung / Begründung Anzahl Faktor Betrag
+20.04.26 3 Eingehende Beratung mind. 10 min 1 2,3 20,11 €
+5 Untersuchung, symptombezogen 1 2,3 10,72 €
+Ärztliche Leistungen sind gemäß §4 Nr. 14 UStG von der Umsatzsteuer befreit.
+""")
+    assert result["fields"]["amount_net"] == "30.83"
+    assert result["fields"]["amount_vat"] == "0.00"
+    assert [(item["position"], item["price_subtotal"]) for item in result["line_items"]] == [
+        ("3", "20.11"), ("5", "10.72")]
+    assert result["line_items"][0]["service_date"] == "2026-04-20"
+
+
+def test_english_estimate_table_and_service_list_extract_positions():
+    estimate = parse("""LMU Klinikum
+Cost estimate
+total amount: 11.852,36 EUR
+preliminary calculation  description  quantity  per diem rate  sum
+DRG lump sum  M01B  1  9.603,06 EUR  9.603,06 EUR
+Care costs  10  224,93 EUR  2.249,30 EUR
+""")
+    assert [(item["name"], item["price_subtotal"]) for item in estimate["line_items"]] == [
+        ("DRG lump sum", "9603.06"), ("Care costs", "2249.30")]
+
+    services = parse(BASE + """
+Die folgenden Aufträge sind jetzt erledigt und dafür berechnen wir:
+09.06.2030 Transfer zum Flughafen 130,00 EUR
+Wartezeit: 1 Std. 65,00 EUR
+Summe Netto 195,00 EUR
+""")
+    assert [item["price_subtotal"] for item in services["line_items"]] == ["130.00", "65.00"]
+
+
+def test_rental_summary_rows_are_not_items_and_trailing_discount_is_negative():
+    result = parse("""Sixt GmbH & Co. Autovermietung KG
+INVOICE
+Document: 9504815592/00/M/00/N
+Pullach, 02.04.2024
+NUMBER -- SINGLE PRICE
+Rental days 3 1 x 194.23 194.23 EUR A1
+Discount 0.00 % 50.00- EUR
+Subtotal 144.23 EUR
+A1 VAT 19.00% 27.40 EUR
+Total 171.63 EUR
+""")
+    assert [item["price_subtotal"] for item in result["line_items"]] == ["194.23", "-50.00"]
+    assert "line_items_total_mismatch" not in result["warnings"]
+
+
+def test_goae_amount_before_description_uses_last_amount_before_separator():
+    result = parse(BASE.replace("42,50", "51,61") + """
+Datum Ziffer Anzahl Einfach Faktor Betrag | Leistungstext und Begründung
+10.03.2030 | 651A 1 14,75 3,50 51,61 | große Bioimpedanzanalyse
+""")
+    assert result["line_items"] == [{
+        "name": "große Bioimpedanzanalyse", "position": "651A",
+        "price_subtotal": "51.61", "page": 1, "service_date": "2030-03-10",
+    }]

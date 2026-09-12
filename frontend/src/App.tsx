@@ -10,7 +10,6 @@ import {
   BrowserRouter,
   Routes,
   Route,
-  Navigate,
   useLocation,
 } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -404,7 +403,7 @@ function AppRoutes() {
             <Route path="notes" element={<InternalNotesPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="hotels" element={<HotelStatisticsPage />} />
-            <Route path="reports/hotels" element={<Navigate to="/hotels" replace />} />
+            <Route path="reports/hotels" element={<StaffRouteRedirect to="/hotels" replace />} />
             <Route path="sops" element={<SopsPage />} />
             <Route path="leads" element={<LeadsPage />} />
             <Route path="projects" element={<ProjectsPage />} />
@@ -462,12 +461,12 @@ function AppRoutes() {
   );
 }
 
-function StaffRouteRedirect({ to }: { to: string }) {
+function StaffRouteRedirect({ to, replace = false }: { to: string; replace?: boolean }) {
   const { staffGo } = useStaffNavigate();
 
   useEffect(() => {
-    staffGo(to);
-  }, [staffGo, to]);
+    staffGo(to, { replace });
+  }, [staffGo, to, replace]);
 
   return null;
 }

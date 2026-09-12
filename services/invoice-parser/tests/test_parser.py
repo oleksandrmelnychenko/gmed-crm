@@ -23,6 +23,7 @@ def test_english_invoice_and_line_items():
     assert result["line_items"] == [{"name": "Consultation", "qty": "1", "price_subtotal": "100.00"}]
     assert result["warnings"] == []
     assert result["requires_review"] is True
+    assert result["document_kind"] == "invoice"
 
 
 def test_german_invoice_decimal_comma_and_dates():
@@ -42,7 +43,7 @@ Waehrung: EUR
 
 
 def test_unknown_and_ambiguous_templates_do_not_guess():
-    result = parse(templates=[])
+    result = parse("Purchase request\nReference: DEMO-2026-001\nAmount: 119.00 EUR", templates=[])
     assert all(value is None for value in result["fields"].values())
     assert "template_not_found" in result["warnings"]
     templates = load_templates(ROOT / "examples/templates")

@@ -2835,10 +2835,18 @@ async fn create_quote(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
         }
     };
-    let intake = match sqlx::query_scalar::<_,Uuid>("SELECT order_id FROM order_intakes WHERE order_id=$1 FOR UPDATE")
-        .bind(order_id).fetch_optional(&mut *tx).await {
+    let intake = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT order_id FROM order_intakes WHERE order_id=$1 FOR UPDATE",
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
         Ok(value) => value.is_some(),
-        Err(e) => { tracing::error!(%e,"lock order intake quote"); return err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to prepare quote"); }
+        Err(e) => {
+            tracing::error!(%e,"lock order intake quote");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+        }
     };
     let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
         Ok(items) if !items.is_empty() => items,
@@ -2880,8 +2888,11 @@ async fn create_quote(
             .fetch_optional(&mut *tx).await;
         match replay {
             Ok(Some(value)) => return Json(value).into_response(),
-            Ok(None) => {},
-            Err(e) => { tracing::error!(%e,"find prepared quote"); return err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to prepare quote"); }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!(%e,"find prepared quote");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+            }
         }
     }
 

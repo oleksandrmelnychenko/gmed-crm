@@ -22,4 +22,8 @@ function Fixture() {
       onClose={() => setOpen(false)} onCreated={() => setOpen(false)} />}
   </LocalizationProvider>;
 }
-createRoot(document.getElementById("root")!).render(<MemoryRouter><AuthProvider><Fixture /></AuthProvider></MemoryRouter>);
+// Vite can reload the fixture entry with a timestamp after a dependency update.
+// Reuse its root so the previous dialog portal is unmounted normally.
+const host = window as typeof window & { orderWizardQaRoot?: ReturnType<typeof createRoot> };
+host.orderWizardQaRoot ??= createRoot(document.getElementById("root")!);
+host.orderWizardQaRoot.render(<MemoryRouter><AuthProvider><Fixture /></AuthProvider></MemoryRouter>);

@@ -1,20 +1,9 @@
 """Document facts and arithmetical suggestions, never accounting tax decisions."""
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 import re
 
-from .generic import CURRENCY, DATE, MONEY, german_date
-
-
-def decimal_amount(value: str) -> str | None:
-    value = re.sub(r"[. '\u00a0]", "", value).replace(",", ".")
-    try:
-        amount = Decimal(value)
-        if amount.is_finite() and abs(amount) <= Decimal("999999999999.99"):
-            return format(amount, ".2f")
-    except InvalidOperation:
-        pass
-    return None
+from .generic import CURRENCY, DATE, DOCUMENT_MARKERS, MONEY, decimal_amount, german_date
 
 
 def compact(value: str) -> str:
@@ -23,7 +12,7 @@ def compact(value: str) -> str:
 
 def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
     """Enrich a draft in place only when the document supplies clear evidence."""
-    if not re.search(r"\bRechnung(?:snummer)?\b|\bRechn\.", text, re.I):
+    if not DOCUMENT_MARKERS.search(text):
         return {}
     sources = {}
     payment = {}
@@ -36,6 +25,15 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
         r"(?:Der\s+)?Rechnung(?:sausweis)?\s+(?:erfolgt|wird|ist)\b[^.!?]{0,120}?"
         r"(?:ohne\s+(?:Ausweis\s+(?:von\s+)?)?(?:Umsatzsteuer|Mehrwertsteuer|MwSt)|"
         r"keine\s+(?:Umsatzsteuer|Mehrwertsteuer|MwSt))[^.!?]{0,180}", flat, re.I)
+    if not no_vat:
+        no_vat = re.search(
+            r"(?:steuerfreie\s+Leistung.{0,100}?§\s*4.{0,100}|"
+            r"Umsatzsteuerbefreiung.{0,160}|"
+            r"(?:Leistung(?:en)?|Behandlung|Rechnung).{0,180}?"
+            r"(?:von\s+der\s+Umsatzsteuer\s+befreit|keine\s+USt\.?\s+berechnet(?:\s+und\s+ausgewiesen)?))",
+            flat,
+            re.I,
+        )
     positive_tax = re.search(r"(?:inkl\.?|einschl\.?|zuzüglich|zzgl\.?)\s*(?:\d+(?:,\d+)?\s*%\s*)?"
                              r"(?:Umsatzsteuer|Mehrwertsteuer|MwSt)", flat, re.I)
     if no_vat and not positive_tax and fields.get("amount_gross") and fields.get("currency"):
@@ -113,7 +111,12 @@ def extract_line_items(text: str) -> list[dict]:
     page = 1
     tail = re.compile(rf"(?:(?:{CURRENCY})\s*)?({MONEY})\s*(?:{CURRENCY})?\s*(?:(\d+(?:,\d+)?)\s*%)?\s*$", re.I)
     number = re.compile(rf"(?<![\w\d.,]){MONEY}(?![\d.,])")
-    summary = re.compile(r"^(?:Netto(?:betrag|summe)|Umsatzsteuer|MwSt|USt\.|Gesamt(?:betrag|summe)|Rechnungsbetrag|Endbetrag|Total|Summe Betrag)\b", re.I)
+    summary = re.compile(
+        r"^(?:davon\b|Netto(?:betrag|summe)|Gesamtnettobetrag|Bruttogesamtbetrag|Offener Betrag|Zwischensumme|Umsatzsteuer|MwSt|USt\.|"
+        r"Gesamt(?:er\s+Zahlbetrag|betrag|summe)|Rechnungsbetrag|Rechnungssumme|"
+        r"Endbetrag|Endsumme|Final amount|Subtotal|Total(?: amount)?|Summe(?: Betrag| Netto)|[A-Z0-9]+\s+VAT)\b",
+        re.I,
+    )
     for original in text.splitlines(keepends=True):
         page += original.count("\f")
         line = original.replace("\f", "").strip()
@@ -139,6 +142,10 @@ def extract_line_items(text: str) -> list[dict]:
             table = "quantity"
             pending = None
             continue
+        if re.search(r"preliminary calculation.*description.*quantity.*(?:rate|price).*sum", line, re.I):
+            table = "estimate"
+            pending = None
+            continue
         if re.search(r"Pos\..*(?:Bezeichnung|Beschreibung).*(?:Preis|Betrag)", line, re.I):
             table = "position_table"
             pending = None
@@ -147,13 +154,106 @@ def extract_line_items(text: str) -> list[dict]:
             table = "numbered"
             pending = None
             continue
+        if re.search(r"Datum.*(?:Ziffer|GOÄ|GOA).*(?:Betrag|Gesamt).*(?:Leistung|Text)", line, re.I):
+            table = "goae_amount_first"
+            pending = None
+            continue
+        if re.search(r"Datum.*(?:Ziffer|GOÄ|GOA).*(?:Leistung|Text).*(?:Betrag|Gesamt|Honorar)", line, re.I):
+            table = "goae"
+            pending = None
+            continue
+        if re.search(r"(?:NUMBER.*SINGLE PRICE|Leistungsbeschreibung.*Anzahl.*(?:Netto|Betrag)|beschreibung.*preis.*Netto.*code)", line, re.I):
+            table = "rental"
+            pending = None
+            continue
+        if re.search(r"folgenden (?:Aufträge|Leistungen).*(?:berechnen|verrechnen)", line, re.I):
+            table = "services"
+            pending = None
+            continue
+
+        if table == "estimate":
+            cells = [compact(cell) for cell in re.split(r"\t+|\s{2,}", line) if compact(cell)]
+            amounts = list(number.finditer(line))
+            if not amounts or not cells or not re.search(r"[A-Za-zÄÖÜäöüß]", cells[0]):
+                continue
+            subtotal = decimal_amount(amounts[-1][0])
+            name = cells[0].strip("*'0123456789. ")
+            if subtotal is None or not name:
+                continue
+            item = {"name": name[:1000], "price_subtotal": subtotal, "page": page}
+            if len(amounts) > 1:
+                item["unit_price"] = decimal_amount(amounts[-2][0])
+            simple_quantity = next((cell for cell in cells[1:-1] if re.fullmatch(r"\d+(?:[.,]\d+)?", cell)), None)
+            if simple_quantity:
+                item["qty"] = simple_quantity.replace(",", ".")
+            items.append(item)
+            previous_item = item
+            continue
+
+        if table == "rental":
+            amounts = list(number.finditer(line))
+            if not amounts:
+                continue
+            subtotal = decimal_amount(amounts[-1][0])
+            name_part = line[:amounts[0].start()].strip()
+            quantity = re.search(r"\s+(\d+(?:[.,]\d+)?)\s*(?:\d+\s*x\s*)?$", name_part, re.I)
+            if quantity:
+                name_part = name_part[:quantity.start()].strip()
+            if subtotal is None or not re.search(r"[A-Za-zÄÖÜäöüß]", name_part):
+                continue
+            item = {"name": compact(name_part)[:1000], "price_subtotal": subtotal, "page": page}
+            if quantity:
+                item["qty"] = quantity[1].replace(",", ".")
+            if len(amounts) > 1:
+                item["unit_price"] = decimal_amount(amounts[-2][0])
+            items.append(item)
+            previous_item = item
+            continue
+
+        if table == "services":
+            ending = tail.search(line)
+            if not ending:
+                continue
+            amount = decimal_amount(ending[1])
+            name = re.sub(rf"^{DATE}[ \t]+", "", line[:ending.start()].strip())
+            if amount is not None and re.search(r"[A-Za-zÄÖÜäöüß]", name):
+                item = {"name": compact(name)[:1000], "price_subtotal": amount, "page": page}
+                items.append(item)
+                previous_item = item
+            continue
+
+        if table == "goae_amount_first":
+            amount_first = re.match(
+                rf"^(?:({DATE})\s*[|\t ]+)?([A-Za-z]?\d{{1,5}}[A-Za-z]?)"
+                rf"\s+(.+?)\s*\|\s*(.+)$",
+                line,
+                re.I,
+            )
+            if amount_first:
+                row_amounts = list(number.finditer(amount_first[3]))
+                amount = decimal_amount(row_amounts[-1][0]) if row_amounts else None
+                name = compact(amount_first[4])
+                if amount is not None and re.search(r"[A-Za-zÄÖÜäöüß]", name):
+                    item = {"name": name[:1000], "position": amount_first[2], "price_subtotal": amount, "page": page}
+                    if amount_first[1]:
+                        item["service_date"] = german_date(amount_first[1])
+                    items.append(item)
+                    previous_item = item
+            continue
         explicit = re.match(r"Pos\.?\s*(\d+)\s+(.+)$", line, re.I)
         numbered = re.match(r"(\d+)\.\s+(.+)$", line) if table == "numbered" else None
         row = re.match(r"(\d+(?:,\d+)?)\s{2,}(.+)$", line) if table in {"quantity", "position_table"} else None
-        if explicit or numbered or row:
-            marker = explicit or numbered or row
+        goae = re.match(rf"(?:({DATE})\s+)?([A-Za-z]?\d{{1,5}}[A-Za-z]?)\s+(.+)$", line, re.I) if table == "goae" else None
+        if explicit or numbered or row or goae:
+            marker = explicit or numbered or row or goae
+            marker_index = 2 if goae else 1
+            body_index = 3 if goae else 2
             pending = {"marker": marker[1], "body": marker[2], "page": page,
-                       "kind": "position" if explicit or numbered else table, "lines": 1}
+                       "kind": "goae" if goae else ("position" if explicit or numbered else table), "lines": 1}
+            pending["marker"] = marker[marker_index]
+            pending["body"] = marker[body_index]
+            if goae and marker[1]:
+                pending["service_date"] = german_date(marker[1])
         elif pending and pending["lines"] < 4:
             pending["body"] += "  " + line
             pending["lines"] += 1
@@ -193,6 +293,10 @@ def extract_line_items(text: str) -> list[dict]:
                 item["position"] = pending["marker"]
         else:
             item["position"] = pending["marker"]
+            if pending["kind"] == "goae":
+                name = re.sub(rf"(?:\s+(?:{MONEY}|\d+(?:[.,]\d+)?|x\d+)){{1,5}}\s*$", "", name, flags=re.I)
+                if pending.get("service_date"):
+                    item["service_date"] = pending["service_date"]
             # A service period is metadata, not part of its title.
             row_period = re.search(r"\s+(\d{2}\.\d{2}\.\d{2,4}\s*-\s*\d{2}\.\d{2}\.\d{2,4})\s*$", name)
             if row_period:

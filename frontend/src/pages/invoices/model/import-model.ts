@@ -14,6 +14,7 @@ export type InvoiceImportScope = "company" | "patient_order";
 export type InvoiceImportPreview = {
   schema_version: string;
   requires_review: true;
+  document_kind?: "invoice" | "receipt" | "cost_estimate" | "fee_agreement" | "booking_confirmation" | null;
   fields: Partial<Record<keyof InvoiceImportFields, string | null>>;
   warnings: string[];
   text: string;

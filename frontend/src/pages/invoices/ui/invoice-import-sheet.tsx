@@ -235,6 +235,14 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
     : preview.warnings.includes("low_ocr_confidence")
       ? tx("Часть текста распознана с низкой уверенностью. Проверьте данные по оригиналу.", "Ein Teil des Textes wurde unsicher erkannt. Angaben mit dem Original abgleichen.")
       : tx("Распознавание завершено. Сверьте реквизиты с оригиналом перед сохранением.", "Erkennung abgeschlossen. Angaben vor dem Speichern mit dem Original abgleichen.");
+  const documentKindMessage = preview?.document_kind && preview.document_kind !== "invoice"
+    ? ({
+        receipt: tx("Распознан чек или кассовый документ. Проверьте реквизиты перед сохранением как расход.", "Beleg oder Kassendokument erkannt. Angaben vor dem Speichern als Ausgabe prüfen."),
+        cost_estimate: tx("Распознана предварительная смета, а не финальный инвойс. Проверьте, нужно ли сохранять её как расход.", "Kostenvoranschlag statt Schlussrechnung erkannt. Prüfen, ob er als Ausgabe gespeichert werden soll."),
+        fee_agreement: tx("Распознано соглашение о гонораре, а не финальный инвойс. Проверьте документ вручную.", "Honorarvereinbarung statt Schlussrechnung erkannt. Dokument manuell prüfen."),
+        booking_confirmation: tx("Распознано подтверждение бронирования, а не финальный инвойс. Проверьте документ вручную.", "Buchungsbestätigung statt Schlussrechnung erkannt. Dokument manuell prüfen."),
+      } as const)[preview.document_kind]
+    : null;
 
   return (
     <Dialog open dirty={Boolean(file)} onOpenChange={(open) => { if (!open && !saveInProgress.current) onClose(); }}>
@@ -316,6 +324,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {parsing ? <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 p-3 text-xs" role="status"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" />{tx("Распознаём документ…", "Dokument wird erkannt…")}</span><Button variant="ghost" size="sm" type="button" onClick={() => { generation.current += 1; request.current?.abort(); setParsing(false); }}>{tx("Заполнить вручную", "Manuell ausfüllen")}</Button></div> : null}
                 {parseError ? <Banner tone="warning" withIcon>{parseError}</Banner> : null}
                 {preview && !parsing && !preview.structured ? <div className="rounded-lg border bg-muted/30 p-3 text-xs" role="status">{recognitionMessage}</div> : null}
+                {documentKindMessage && !parsing ? <Banner tone="warning" withIcon>{documentKindMessage}</Banner> : null}
                 {preview && !parsing ? <StructuredInvoiceDetails preview={preview} labels={labels} /> : null}
                 {preview && !parsing && missingFields.length > 0 ? <Banner tone="warning" withIcon>{tx("Заполните поля", "Bitte ergänzen")}: {missingFields.map((key) => labels[key]).join(", ")}.</Banner> : null}
                 {preview?.warnings.includes("tax_treatment_requires_review") ? <Banner tone="warning" withIcon>{preview.structured

@@ -27,6 +27,7 @@ from app.extraction import (
     _run_tesseract,
     _scale_paddle_outcome,
     _select_ocr_languages,
+    _assess_text_quality,
     extract_document,
     extract_text,
 )
@@ -193,6 +194,28 @@ class ExtractionLimitsTest(unittest.TestCase):
         rendered_page.render.assert_not_called()
         ocr.assert_not_called()
 
+    def test_caller_can_prefer_ocr_for_pdf_with_scan_image_and_text_layer(self) -> None:
+        native_text = "Rechnung Nr. 12345\nGesamtbetrag 119,00 EUR\n" + ("Position 10,00 EUR\n" * 12)
+        rendered_page = FakeRenderedPage()
+        ocr = Mock(return_value=(
+            "Sixt GmbH Rechnung Nr. 12345 Gesamtbetrag 119,00 EUR\n"
+            + ("Rental day service 10,00 EUR\n" * 12)
+        ))
+
+        with (
+            patch("app.extraction._page_has_scan_like_image", return_value=True),
+            mocked_pdf_modules([FakeNativePage(native_text)], [rendered_page], ocr),
+        ):
+            result = extract_document(
+                b"%PDF-image-with-text",
+                "application/pdf",
+                prefer_ocr_for_scan_pdf=True,
+            )
+
+        self.assertTrue(result.metadata.used_ocr)
+        self.assertEqual(result.metadata.pages[0].source, "ocr")
+        rendered_page.render.assert_called_once()
+
     def test_layout_mode_falls_back_if_it_loses_native_glyphs(self) -> None:
         class DualModePage:
             def extract_text(self, *, extraction_mode: str | None = None) -> str:
@@ -214,6 +237,21 @@ class ExtractionLimitsTest(unittest.TestCase):
             result = extract_document(b"%PDF-noisy-native", "application/pdf")
 
         self.assertEqual(result.text, "Diagnose\nArterielle Hypertonie")
+        self.assertTrue(result.metadata.used_ocr)
+        self.assertEqual(result.metadata.pages[0].source, "ocr")
+        rendered_page.render.assert_called_once()
+
+    def test_vertical_character_text_layer_is_routed_to_ocr(self) -> None:
+        native_text = "\n".join("RENTALINVOICE" * 12)
+        quality = _assess_text_quality(native_text)
+        self.assertFalse(quality.reliable)
+        self.assertEqual(quality.reason, "native_text_has_fragmented_vertical_lines")
+
+        rendered_page = FakeRenderedPage()
+        ocr = Mock(return_value="Sixt GmbH Rechnung Nr. 12345 Gesamtbetrag 119,00 EUR")
+        with mocked_pdf_modules([FakeNativePage(native_text)], [rendered_page], ocr):
+            result = extract_document(b"%PDF-vertical-text", "application/pdf")
+
         self.assertTrue(result.metadata.used_ocr)
         self.assertEqual(result.metadata.pages[0].source, "ocr")
         rendered_page.render.assert_called_once()

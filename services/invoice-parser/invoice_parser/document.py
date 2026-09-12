@@ -64,7 +64,13 @@ def parse_document(data: bytes, mime: str, templates: list) -> dict:
     if mime == "application/pdf":
         structured, reader, warnings = embedded_invoice(data)
     if structured is None:
-        result = parse_invoice(extract_document(data, mime), templates)
+        # Invoice PDFs commonly contain a full-page scan plus a superficially
+        # readable but badly ordered hidden text layer. Prefer the visible page
+        # for those PDFs so monetary columns and line items stay aligned.
+        result = parse_invoice(
+            extract_document(data, mime, prefer_ocr_for_scan_pdf=True),
+            templates,
+        )
         result["source_format"] = "ocr" if result["extraction"]["used_ocr"] else "pdf_text"
         result["warnings"] = list(dict.fromkeys(result["warnings"] + warnings))
         return result

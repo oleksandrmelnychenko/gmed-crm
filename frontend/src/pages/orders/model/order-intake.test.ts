@@ -17,5 +17,6 @@ describe("repeat patient order", () => {
   it("rounds VAT on each service before summing", () => {
     const line = { id: "a", description: "Service", quantity: "3", unit_price: "0.33", vat_rate: "19", agency_service_id: null, agency_service_price_version_id: null };
     expect(intakeTotal([line, { ...line, id: "b" }])).toBe(2.36);
+    expect(intakeTotal([{ ...line, quantity: "1,5", unit_price: "100" }])).toBe(178.5);
   });
 });

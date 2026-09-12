@@ -11,7 +11,7 @@ import yaml
 from invoice2data.extract.invoice_template import InvoiceTemplate
 from invoice2data.extract.loader import prepare_template
 from invoice2data.input import text as text_reader
-from .generic import extract_german_fields
+from .generic import document_kind, extract_german_fields
 from .details import extract_details
 
 
@@ -211,7 +211,8 @@ def parse_invoice(extraction: Any, templates: list) -> dict:
         warnings.append("missing_required_fields")
     return {
         "schema_version": "1.0", "status": "needs_review", "requires_review": True,
-        "template": template_name, "fields": fields, "line_items": lines,
+        "template": template_name, "document_kind": document_kind(extraction.text),
+        "fields": fields, "line_items": lines,
         "missing_fields": missing, "warnings": warnings,
         "extraction_complete": not incomplete, "extraction": asdict(metadata),
         "text": extraction.text,

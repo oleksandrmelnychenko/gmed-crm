@@ -195,7 +195,11 @@ def extract_text(data: bytes, mime_type: str | None, existing_text: str | None =
 
 
 def extract_document(
-    data: bytes, mime_type: str | None, existing_text: str | None = None
+    data: bytes,
+    mime_type: str | None,
+    existing_text: str | None = None,
+    *,
+    prefer_ocr_for_scan_pdf: bool = False,
 ) -> ExtractionResult:
     """Extract text plus routing and confidence metadata.
 
@@ -234,7 +238,7 @@ def extract_document(
             )
 
     if is_pdf:
-        return _extract_pdf(data)
+        return _extract_pdf(data, prefer_ocr_for_scan_pdf=prefer_ocr_for_scan_pdf)
     if mime.startswith("image/"):
         outcome = _ocr_image(data, time.monotonic() + OCR_DOCUMENT_TIMEOUT_SECONDS)
         text = _checked_extracted_text(outcome.text)
@@ -260,7 +264,7 @@ def extract_document(
     )
 
 
-def _extract_pdf(data: bytes) -> ExtractionResult:
+def _extract_pdf(data: bytes, *, prefer_ocr_for_scan_pdf: bool = False) -> ExtractionResult:
     from pypdf import PdfReader
 
     native_pages: list[str] | None = None
@@ -304,7 +308,10 @@ def _extract_pdf(data: bytes) -> ExtractionResult:
     if native_pages is not None and native_qualities is not None:
         reliable = [
             quality.reliable
-            and not (scan_hint and quality.char_count < SCAN_SPARSE_TEXT_CHARS)
+            and not (
+                scan_hint
+                and (prefer_ocr_for_scan_pdf or quality.char_count < SCAN_SPARSE_TEXT_CHARS)
+            )
             for quality, scan_hint in zip(native_qualities, scan_image_hints or [], strict=True)
         ]
         if all(reliable):
@@ -322,7 +329,13 @@ def _extract_pdf(data: bytes) -> ExtractionResult:
             )
             return _make_result(text, len(native_pages), pages)
 
-    return _ocr_weak_pdf_pages(data, native_pages, native_qualities, scan_image_hints)
+    return _ocr_weak_pdf_pages(
+        data,
+        native_pages,
+        native_qualities,
+        scan_image_hints,
+        prefer_ocr_for_scan_pdf=prefer_ocr_for_scan_pdf,
+    )
 
 
 def _extract_native_page_text(page: object) -> str:
@@ -395,6 +408,8 @@ def _ocr_weak_pdf_pages(
     native_pages: list[str] | None,
     native_qualities: list[_TextQuality] | None,
     scan_image_hints: list[bool] | None,
+    *,
+    prefer_ocr_for_scan_pdf: bool = False,
 ) -> ExtractionResult:
     import pypdfium2 as pdfium
 
@@ -437,7 +452,8 @@ def _ocr_weak_pdf_pages(
                 and scan_image_hints[page_number]
             )
             if native_quality.reliable and not (
-                scan_hint and native_quality.char_count < SCAN_SPARSE_TEXT_CHARS
+                scan_hint
+                and (prefer_ocr_for_scan_pdf or native_quality.char_count < SCAN_SPARSE_TEXT_CHARS)
             ):
                 extracted_chars += len(native_text)
                 _check_extracted_text_limit(extracted_chars)
@@ -459,7 +475,9 @@ def _ocr_weak_pdf_pages(
             bitmap = None
             image = None
             route_reason = (
-                "scan_like_page_with_sparse_text_layer"
+                "scan_like_page_prefer_visual_ocr"
+                if scan_hint and prefer_ocr_for_scan_pdf
+                else "scan_like_page_with_sparse_text_layer"
                 if scan_hint and native_quality.char_count < SCAN_SPARSE_TEXT_CHARS
                 else native_quality.reason
             )
@@ -485,7 +503,13 @@ def _ocr_weak_pdf_pages(
                 _close_resource(bitmap)
                 _close_resource(page)
 
-            if outcome is not None and _prefer_ocr(native_quality, outcome):
+            prefer_visual_result = bool(
+                prefer_ocr_for_scan_pdf
+                and scan_hint
+                and outcome is not None
+                and outcome.text_quality.reliable
+            )
+            if outcome is not None and (prefer_visual_result or _prefer_ocr(native_quality, outcome)):
                 page_text = outcome.text
                 page_metadata.append(
                     _metadata_for_ocr(page_number + 1, route_reason, native_text, outcome)
@@ -1922,6 +1946,16 @@ def _assess_text_quality(text: str) -> _TextQuality:
     words = _WORD_PATTERN.findall(normalized)
     word_count = len(words)
     very_long_words = sum(len(word) > 40 for word in words)
+    line_lengths = [
+        sum(not character.isspace() for character in line)
+        for line in normalized.splitlines()
+        if line.strip()
+    ]
+    fragmented_line_ratio = (
+        sum(length <= 2 for length in line_lengths) / len(line_lengths)
+        if line_lengths else 0.0
+    )
+    vertical_character_soup = len(line_lengths) >= 20 and fragmented_line_ratio >= 0.55
 
     alnum_ratio = alnum_count / visible_count
     letter_ratio = letter_count / visible_count
@@ -1932,7 +1966,10 @@ def _assess_text_quality(text: str) -> _TextQuality:
     word_score = min(1.0, word_count / 16.0)
     alnum_score = min(1.0, alnum_ratio / 0.62)
     letter_score = min(1.0, letter_ratio / 0.55)
-    cleanliness_score = max(0.0, 1.0 - corruption_ratio * 20.0 - long_word_ratio)
+    cleanliness_score = max(
+        0.0,
+        1.0 - corruption_ratio * 20.0 - long_word_ratio - (0.8 if vertical_character_soup else 0.0),
+    )
     score = round(
         0.22 * length_score
         + 0.22 * word_score
@@ -1950,9 +1987,12 @@ def _assess_text_quality(text: str) -> _TextQuality:
         and letter_ratio >= 0.38
         and corruption_ratio <= 0.01
         and long_word_ratio <= 0.20
+        and not vertical_character_soup
         and score >= 0.57
     )
-    if corruption_ratio > 0.01:
+    if vertical_character_soup:
+        reason = "native_text_has_fragmented_vertical_lines"
+    elif corruption_ratio > 0.01:
         reason = "native_text_contains_corrupt_glyphs"
     elif alnum_ratio < 0.48 or letter_ratio < 0.38:
         reason = "native_text_has_low_readable_character_ratio"

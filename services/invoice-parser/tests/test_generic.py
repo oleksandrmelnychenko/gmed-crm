@@ -107,3 +107,128 @@ def test_supplier_excludes_service_heading_prefix_and_deduplicates_same_entity()
     result = parse("Demo GmbH\nRechnung Nr. DEMO-22\nLeistungen der Demo GmbH\nRechnungsbetrag 10,00 EUR")
     assert result["fields"]["supplier_name"] == "Demo GmbH"
     assert "invalid_or_ambiguous_supplier_name" not in result["warnings"]
+
+
+def test_english_rental_invoice_labels_decimal_dot_and_split_legal_name():
+    result = parse("""Sixt GmbH & Co.
+Autovermietung KG
+INVOICE (COPY)
+Document: 9504815592/00/M/00/N
+Pullach, 02.04.2024
+Subtotal 397.11 EUR
+A1 VAT 19.00% 75.45 EUR
+Final amount 472.56 EUR
+""")
+    assert result["document_kind"] == "invoice"
+    assert result["fields"] == {
+        "supplier_name": "Sixt GmbH & Co. Autovermietung KG",
+        "external_invoice_number": "9504815592/00/M/00/N",
+        "invoice_date": "2024-04-02",
+        "due_date": None,
+        "amount_net": "397.11",
+        "amount_vat": "75.45",
+        "amount_gross": "472.56",
+        "currency": "EUR",
+    }
+
+
+def test_receipt_number_two_digit_date_and_tax_breakdown_are_supported():
+    result = parse("""Kanne Cafe GmbH
+RECHNUNG
+Beleg-Nr. 0252
+Datum 26.05.26 09:52 Uhr
+Zu zahlen EUR 2,40
+MwSt-Summe 19.00% 0,34
+Nettosumme MwSt 19.00% 1,76
+MwSt-Summe 7.00% 0,02
+Nettosumme MwSt 7.00% 0,28
+""")
+    assert result["fields"]["external_invoice_number"] == "0252"
+    assert result["fields"]["invoice_date"] == "2026-05-26"
+    assert result["fields"]["amount_gross"] == "2.40"
+    assert result["fields"]["amount_net"] == "2.04"
+    assert result["fields"]["amount_vat"] == "0.36"
+    assert "amount_net_aggregated_from_tax_breakdown" in result["warnings"]
+    assert "amount_vat_aggregated_from_tax_breakdown" in result["warnings"]
+
+
+def test_cost_estimate_is_parsed_but_explicitly_classified_for_review():
+    result = parse("""TUM Universitätsklinikum
+München, den 06.05.2025
+vorläufige Kostenschätzung Nr. 2025-309
+Gesamtbetrag: 20.000,00 €
+""")
+    assert result["document_kind"] == "cost_estimate"
+    assert result["fields"]["supplier_name"] == "TUM Universitätsklinikum"
+    assert result["fields"]["external_invoice_number"] == "2025-309"
+    assert result["fields"]["invoice_date"] == "2025-05-06"
+    assert result["fields"]["amount_gross"] == "20000.00"
+    assert "document_kind_cost_estimate" in result["warnings"]
+
+
+def test_invoice_number_wins_over_embedded_card_receipt_number():
+    result = parse("""MCLINIC Muenchen
+KUNDENBELEG
+Beleg-Nr. 0252
+Rechnungs-Nr.: 26063 Pat Nr: 998
+Rechnungsdatum: 03.07.26
+Rechnungsbetrag: EUR 155,26
+""")
+    assert result["document_kind"] == "invoice"
+    assert result["fields"]["external_invoice_number"] == "26063"
+    assert result["fields"]["amount_gross"] == "155.26"
+
+
+def test_receipt_without_invoice_word_is_detected_from_explicit_total_label():
+    result = parse("""Wittelsbacher Apotheke
+24.09.2026 54280
+Gesamter Zahlbetrag EUR 15,27
+MwSt 19% aus 15,27 2,44
+""")
+    assert result["document_kind"] == "receipt"
+    assert result["fields"]["amount_gross"] == "15.27"
+    assert result["fields"]["amount_vat"] == "2.44"
+
+
+def test_ocr_variants_for_estimate_number_liquidation_date_and_transfer_total():
+    estimate = parse("""TUM Klinikum
+München, den 06.05.2025
+vorlaufige Kostenschatzung Nr. 2025-309 geplante Abteilung: SPORT
+Gesamtbetrag: 20.000,00 EUR
+""")
+    assert estimate["fields"]["external_invoice_number"] == "2025-309"
+
+    liquidation = parse("""Dr. Meindl u. Partner Verrechnungsstelle GmbH
+2604732 Liquidation vom 06.11.2024 für
+Rechnungssumme, EUR: 400,00 EUR
+""")
+    assert liquidation["fields"]["invoice_date"] == "2024-11-06"
+
+    transfer = parse("""PRIVATPRAXIS NEUBIBERG
+Rechnung Nr. 2026-02-08-I-031-de
+zu iiberweisender GESAMTBETRAG EUR 1.650,26
+""")
+    assert transfer["fields"]["amount_gross"] == "1650.26"
+
+
+def test_ocr_ascii_medical_brand_and_parenthesized_payment_note():
+    result = parse("""Frauendarzte Funf Hofe
+07.03.2026
+Rechnungsnummer: 70187/26 (Bei Uberweisung bitte unbedingt angeben!)
+Rechnungsbetrag: 227.32 EUR
+""")
+    assert result["fields"]["supplier_name"] == "Frauendarzte Funf Hofe"
+    assert result["fields"]["external_invoice_number"] == "70187/26"
+
+
+def test_medical_subtotal_plus_expenses_is_not_misclassified_as_net_and_vat():
+    result = parse("""PRIVATPRAXIS NEUBIBERG
+Rechnung Nr. 2026-02-08-I-031-de
+Zwischensumme EUR 600,00
+Auslagen EUR 1.050,26
+zu überweisender GESAMTBETRAG EUR 1.650,26
+""")
+    assert result["fields"]["amount_gross"] == "1650.26"
+    assert result["fields"]["amount_net"] is None
+    assert result["fields"]["amount_vat"] is None
+    assert "amount_vat_derived_from_totals" not in result["warnings"]

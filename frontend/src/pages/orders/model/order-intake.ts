@@ -1,3 +1,4 @@
+import { money } from "./order-service-presentation";
 import type { ContractItem } from "@/pages/contracts/model/types";
 
 export type IntakeFacts = {
@@ -16,6 +17,14 @@ export type IntakeDraft = {
   step: number; facts: IntakeFacts; needs_description: string;
   date_from: string | null; date_to: string | null; case_id: string | null; contract_id: string | null;
   lines: IntakeLine[]; prepayment_required: boolean; prepayment_amount: string; prepayment_due_at: string | null;
+  specialization_ids?: string[];
+  selected_work_type_ids?: string[];
+  cost_estimate_additional_language?: "" | "ru" | "en" | "es";
+  catalog_snapshot?: {
+    specializations: import("@/pages/providers/model/types").SpecializationItem[];
+    work_types: import("@/pages/specializations/data/specialization-work-types-api").SpecializationWorkType[];
+    services: import("@/pages/contracts/model/types").AgencyServiceItem[];
+  };
   aml_review: { risk_reason: string; manager_approval_name: string; continuous_monitoring: string; reviewer_name: string; review_date: string | null };
 };
 export type IntakeCheck = { key: string; status: "passed" | "warning" | "blocked"; step: number };
@@ -43,8 +52,8 @@ export function formatIntakeDate(value: string | null | undefined) {
 }
 export function intakeTotal(lines: IntakeLine[]) {
   return lines.reduce((sum, line) => {
-    const net = Math.round(Number(line.quantity) * Number(line.unit_price) * 100);
-    return sum + (Number.isFinite(net) ? net + Math.round(net * Number(line.vat_rate) / 100) : 0);
+    const net = Math.round(money(line.quantity) * money(line.unit_price) * 100);
+    return sum + (Number.isFinite(net) ? net + Math.round(net * money(line.vat_rate) / 100) : 0);
   }, 0) / 100;
 }
 export function changedFacts(before: IntakeFacts, after: IntakeFacts) {

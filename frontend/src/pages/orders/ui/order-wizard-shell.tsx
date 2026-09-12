@@ -26,17 +26,23 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
   const panelRef = useRef<HTMLElement>(null);
   useEffect(() => {
     panelRef.current?.scrollTo({ top: 0 });
-    const active = tabsRef.current?.querySelector<HTMLElement>(`[data-step="${step}"]`);
     const nav = navRef.current;
-    if (!active || !nav) return;
-    nav.scrollTo({ left: nav.scrollLeft + active.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - active.offsetWidth) / 2 });
+    if (!nav) return;
+    const revealActiveStep = () => {
+      const active = tabsRef.current?.querySelector<HTMLElement>(`[data-step="${step}"]`);
+      if (active) nav.scrollTo({ left: nav.scrollLeft + active.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - active.offsetWidth) / 2 });
+    };
+    revealActiveStep();
+    const observer = new ResizeObserver(revealActiveStep);
+    observer.observe(nav);
+    return () => observer.disconnect();
   }, [step, lang]);
 
   return <Dialog open dirty={!busy && dirty} onOpenChange={(open, details) => {
     if (!open && busy) { details.cancel(); return; }
     if (!open) onClose();
   }}>
-    <DialogContent data-testid="order-wizard" showCloseButton={!busy} className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0">
+    <DialogContent data-testid="order-wizard" showCloseButton={!busy} className="flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 pb-0 sm:h-[min(92dvh,55rem)] sm:w-[94vw] sm:max-w-[1440px] sm:pb-0">
       <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
         <div className="min-w-0">
           <DialogTitle className="truncate text-base font-semibold text-foreground">{title}</DialogTitle>
@@ -44,7 +50,7 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
         </div>
       </header>
       <nav ref={navRef} aria-label={lang === "ru" ? "Этапы заказа" : "Auftragsschritte"} className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="flex w-max min-w-full justify-center px-4 py-2.5">
+        <div className="flex w-max min-w-full px-3 py-2 sm:px-4">
           <div ref={tabsRef} className="t-tabs lead-wizard-step-tabs" role="tablist">
             {steps.map((label, index) => {
               const Icon = STEP_ICONS[index];
@@ -63,8 +69,8 @@ export function OrderWizardShell({ title, description, lang, steps, step, disabl
           </div>
         </div>
       </nav>
-      <main ref={panelRef} id="order-wizard-step-panel" role="tabpanel" aria-labelledby={`order-wizard-tab-${step}`} aria-busy={loading || busy} tabIndex={-1} className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto px-4 py-5 outline-none sm:px-5">{children}</main>
-      <footer className="shrink-0 border-t border-border bg-muted/50 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+      <main ref={panelRef} id="order-wizard-step-panel" role="tabpanel" aria-labelledby={`order-wizard-tab-${step}`} aria-busy={loading || busy} tabIndex={-1} className="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-muted/20 p-3 outline-none sm:p-4">{children}</main>
+      <footer className="shrink-0 border-t border-border bg-popover px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
         {error ? <div role="alert" className="mb-3 flex max-h-28 items-start gap-2 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"><CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" /><span>{error}</span></div> : null}
         {footer}
       </footer>

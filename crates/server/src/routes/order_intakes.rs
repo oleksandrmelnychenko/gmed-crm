@@ -18,6 +18,14 @@ use uuid::Uuid;
 
 type ApiResult = Result<Json<Value>, Response>;
 
+#[path = "order_intake_catalog.rs"]
+mod catalog;
+
+pub(crate) fn catalog_description(template: &str, data: &Value) -> String {
+    catalog::resolve_description(template, data)
+}
+
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -88,6 +96,14 @@ struct Draft {
     case_id: Option<Uuid>,
     contract_id: Option<Uuid>,
     lines: Vec<Line>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    specialization_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    selected_work_type_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    cost_estimate_additional_language: String,
+    #[serde(skip_serializing_if = "Value::is_null")]
+    catalog_snapshot: Value,
     prepayment_required: bool,
     prepayment_amount: String,
     prepayment_due_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -302,9 +318,14 @@ fn money(value: &str) -> Result<Decimal, Response> {
 fn validate(d: &Draft, complete: bool) -> Result<(), Response> {
     if d.step > 5
         || d.lines.len() > 100
+        || d.specialization_ids.len() > 100
+        || d.selected_work_type_ids.len() > 100
         || serde_json::to_vec(d).unwrap_or_default().len() > 100_000
     {
         return Err(invalid("Order preparation is too large"));
+    }
+    if !matches!(d.cost_estimate_additional_language.as_str(), "" | "ru" | "en" | "es") {
+        return Err(invalid("Invalid cost estimate language"));
     }
     if d.date_from.zip(d.date_to).is_some_and(|(a, b)| b < a) {
         return Err(invalid("Invalid order period"));
@@ -515,6 +536,9 @@ async fn save(
             "Confirm current patient details before preparing documents",
         ));
     }
+    body.data.catalog_snapshot = catalog::snapshot(
+        &mut tx, &body.data, matches!(body.action, Action::Prepare | Action::Confirm),
+    ).await?;
     sqlx::query(
         "UPDATE order_intakes SET data=$2,revision=revision+1,updated_at=now() WHERE order_id=$1",
     )
@@ -646,25 +670,33 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
         }
         if let Some(version) = l.agency_service_price_version_id {
             let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agency_service_price_versions WHERE id=$1 AND agency_service_id=$2
-                AND unit_price=$3 AND vat_rate=$4 AND upper(currency)='EUR' AND valid_from<=$5 AND (valid_to IS NULL OR valid_to>=$5))")
-                .bind(version).bind(l.agency_service_id).bind(price).bind(vat).bind(d.date_from)
+                AND unit_price=$3 AND vat_rate=$4 AND upper(currency)='EUR')")
+                .bind(version).bind(l.agency_service_id).bind(price).bind(vat)
                 .fetch_one(&mut *conn).await.map_err(db_error)?;
             if !valid {
                 return Err(invalid(
-                    "Price version does not match the service, amount or order date",
+                    "Price version does not match the service or amount",
                 ));
             }
         }
         let line_net = (qty * price).round_dp(2);
         total += line_net + (line_net * vat / Decimal::from(100)).round_dp(2);
         let key = format!("order-intake:{id}:{}", l.id);
-        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1)) ON CONFLICT(order_id,client_reference)
+        let note = d.catalog_snapshot["services"].as_array().into_iter().flatten()
+            .find(|service| l.agency_service_id.is_some_and(|id| service["id"] == id.to_string()))
+            .and_then(|service| {
+                let items = service["description_items"].as_array().into_iter().flatten()
+                    .filter_map(|item| item["text"].as_str()).collect::<Vec<_>>().join("\n\n");
+                let template = if items.is_empty() { service["description"].as_str().unwrap_or_default() } else { &items };
+                (!template.is_empty()).then(|| catalog_description(template, &json!(d)))
+            });
+        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9) ON CONFLICT(order_id,client_reference)
             DO UPDATE SET description=EXCLUDED.description,quantity=EXCLUDED.quantity,unit_price=EXCLUDED.unit_price,vat_rate=EXCLUDED.vat_rate,
-                agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id
+                agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id,notes=EXCLUDED.notes
             RETURNING id")
             .bind(id).bind(l.description.trim()).bind(qty).bind(price).bind(vat).bind(key)
-            .bind(l.agency_service_id).bind(l.agency_service_price_version_id)
+            .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note)
             .fetch_one(&mut *conn).await.map_err(db_error)?;
         ids.push(service_id);
     }
