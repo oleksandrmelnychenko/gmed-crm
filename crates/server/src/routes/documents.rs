@@ -12503,7 +12503,7 @@ async fn generate_document(
             .as_str()
             .and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok());
         bindings.examination_purpose = data["needs_description"].as_str().map(str::to_owned);
-        intake_documents::apply(&mut bindings, data, &template.id);
+        intake_documents::apply(&mut bindings, data, template.id);
         if template.id == "enhanced_due_diligence" {
             let f = &data["facts"];
             let review = &data["aml_review"];
