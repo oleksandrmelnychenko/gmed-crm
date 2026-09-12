@@ -25,7 +25,6 @@ pub(crate) fn catalog_description(template: &str, data: &Value) -> String {
     catalog::resolve_description(template, data)
 }
 
-
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -324,7 +323,10 @@ fn validate(d: &Draft, complete: bool) -> Result<(), Response> {
     {
         return Err(invalid("Order preparation is too large"));
     }
-    if !matches!(d.cost_estimate_additional_language.as_str(), "" | "ru" | "en" | "es") {
+    if !matches!(
+        d.cost_estimate_additional_language.as_str(),
+        "" | "ru" | "en" | "es"
+    ) {
         return Err(invalid("Invalid cost estimate language"));
     }
     if d.date_from.zip(d.date_to).is_some_and(|(a, b)| b < a) {
@@ -537,8 +539,11 @@ async fn save(
         ));
     }
     body.data.catalog_snapshot = catalog::snapshot(
-        &mut tx, &body.data, matches!(body.action, Action::Prepare | Action::Confirm),
-    ).await?;
+        &mut tx,
+        &body.data,
+        matches!(body.action, Action::Prepare | Action::Confirm),
+    )
+    .await?;
     sqlx::query(
         "UPDATE order_intakes SET data=$2,revision=revision+1,updated_at=now() WHERE order_id=$1",
     )
@@ -682,12 +687,27 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
         let line_net = (qty * price).round_dp(2);
         total += line_net + (line_net * vat / Decimal::from(100)).round_dp(2);
         let key = format!("order-intake:{id}:{}", l.id);
-        let note = d.catalog_snapshot["services"].as_array().into_iter().flatten()
-            .find(|service| l.agency_service_id.is_some_and(|id| service["id"] == id.to_string()))
+        let note = d.catalog_snapshot["services"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|service| {
+                l.agency_service_id
+                    .is_some_and(|id| service["id"] == id.to_string())
+            })
             .and_then(|service| {
-                let items = service["description_items"].as_array().into_iter().flatten()
-                    .filter_map(|item| item["text"].as_str()).collect::<Vec<_>>().join("\n\n");
-                let template = if items.is_empty() { service["description"].as_str().unwrap_or_default() } else { &items };
+                let items = service["description_items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|item| item["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                let template = if items.is_empty() {
+                    service["description"].as_str().unwrap_or_default()
+                } else {
+                    &items
+                };
                 (!template.is_empty()).then(|| catalog_description(template, &json!(d)))
             });
         let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes)
