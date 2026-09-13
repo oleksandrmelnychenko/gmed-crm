@@ -13,6 +13,7 @@ export type OrderItem = {
   id: string;
   order_number: string;
   intake_state?: "legacy" | "draft" | "confirmed";
+  repeat_lead_id?: string | null;
   phase: string;
   status: string;
   needs_description?: string | null;

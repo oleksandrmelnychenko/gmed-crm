@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, LoaderCircle, Plus, RefreshCw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,10 @@ import { OrderWizardShell } from "./order-wizard-shell";
 import { OrderWizardChecksTable, OrderWizardDocumentsTable, OrderWizardLinesTable, OrderWizardSection } from "./order-wizard-tables";
 import { OrderIntakeWorkTypes, intakeSpecializationName, useIntakeWorkTypes } from "./order-intake-work-types";
 import { SelectedWorkTypesSummary } from "./order-work-types-summary";
+import { OrderExistingContractsTable, OrderPatientDocumentReview } from "./order-patient-document-review";
+import { fetchPatientOrderRecheck } from "../data/order-api";
+import type { PatientOrderRecheck } from "../model/types";
+import { contractValidity, CONTRACT_VALIDITY_LABELS } from "../model/order-document-review";
 import { createOrderIntake, fetchIntakeFacts, fetchOrderIntake, saveOrderIntake } from "../data/order-intake-api";
 import { changedFacts, contractCoversOrder, emptyIntake, formatIntakeDate, intakeTotal } from "../model/order-intake";
 import type { IntakeAction, IntakeDraft, IntakeFacts, IntakeWorkspace } from "../model/order-intake";
@@ -47,9 +51,9 @@ const DOC_KINDS = [
 ] as const;
 type CaseOption = { id: string; case_id: string; hauptanfragegrund?: string | null };
 
-export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
+export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, clinicalContent }: {
   patient: PatientDetail; orderId?: string; onClose: () => void;
-  onCreated: (orderId: string) => void; onSaved?: () => void;
+  onCreated: (orderId: string) => void; onSaved?: () => void; clinicalContent?: ReactNode;
 }) {
   const { lang } = useLang();
   const { staffGo } = useStaffNavigate();
@@ -64,12 +68,14 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
   const [contracts, setContracts] = useState<ContractItem[]>([]);
   const [catalog, setCatalog] = useState<AgencyServiceItem[]>([]);
   const [cases, setCases] = useState<CaseOption[]>([]);
+  const [readiness, setReadiness] = useState<PatientOrderRecheck | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [autoFailed, setAutoFailed] = useState(false);
+  const [clinicalOpen, setClinicalOpen] = useState(false);
   const [editingFacts, setEditingFacts] = useState(false);
   const [newContractFrom, setNewContractFrom] = useState("");
   const [newContractTo, setNewContractTo] = useState("");
@@ -81,6 +87,17 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
     workspaceRef.current = next;
     baseline.current = next.baseline_facts;
     setWorkspace(next); setData(next.data); setSavedKey(JSON.stringify(next.data));
+    setReadiness(current => {
+      if (!current) return current;
+      const updated = { ...current, requires_recheck: true };
+      for (const key of ["compliance_ready", "confidentiality_release_ready", "identity_ready", "document_pack_ready"] as const) {
+        const check = next.checks.find(item => item.key === key);
+        if (check) updated[key] = check.status === "passed";
+      }
+      const passport = next.checks.find(check => check.key === "passport");
+      if (passport && "expiry" in passport) updated.passport_expiry = passport.expiry;
+      return updated;
+    });
   }, []);
 
   useEffect(() => {
@@ -92,11 +109,12 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
       fetchAgencyServices("/agency-services?active_only=true"),
       apiFetch<CaseOption[]>(`/patients/${patient.id}/cases`, { forceFresh: true }),
       fetchDocuments(`/documents?patient_id=${patient.id}`),
-    ]).then(([initial, nextContracts, services, nextCases, docs]) => {
+      fetchPatientOrderRecheck(patient.id, { forceFresh: true }),
+    ]).then(([initial, nextContracts, services, nextCases, docs, recheck]) => {
       if (cancelled) return;
       if ("order_id" in initial) apply(initial);
       else { baseline.current = initial.facts; const draft = emptyIntake(initial.facts); setData(draft); setSavedKey(JSON.stringify(draft)); }
-      setContracts(nextContracts); setCatalog(services); setCases(nextCases); setDocuments(docs);
+      setContracts(nextContracts); setCatalog(services); setCases(nextCases); setDocuments(docs); setReadiness(recheck);
     }).catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load order preparation"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -105,8 +123,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
   const run = useCallback(async (operation: () => Promise<void>) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError(null);
-    try { await operation(); setAutoFailed(false); }
-    catch (e) { setError(e instanceof Error ? e.message : "Failed to save order preparation"); setAutoFailed(true); }
+    try { await operation(); setAutoFailed(false); return true; }
+    catch (e) { setError(e instanceof Error ? e.message : "Failed to save order preparation"); setAutoFailed(true); return false; }
     finally { busyRef.current = false; setBusy(false); }
   }, []);
 
@@ -137,8 +155,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
     if (data) patch({ facts: { ...data.facts, [key]: value } });
   }
   async function refreshDocuments() {
-    const [docs, nextContracts] = await Promise.all([fetchDocuments(`/documents?patient_id=${patient.id}`), fetchContracts(`/framework-contracts?patient_id=${patient.id}`)]);
-    setDocuments(docs); setContracts(nextContracts);
+    const [docs, nextContracts, recheck] = await Promise.all([fetchDocuments(`/documents?patient_id=${patient.id}`), fetchContracts(`/framework-contracts?patient_id=${patient.id}`), fetchPatientOrderRecheck(patient.id, { forceFresh: true })]);
+    setDocuments(docs); setContracts(nextContracts); setReadiness(recheck);
     if (workspaceRef.current) apply(await fetchOrderIntake(workspaceRef.current.order_id));
   }
   async function prepare(draft: IntakeDraft) {
@@ -177,7 +195,6 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
   const periodLabel = data?.date_from || data?.date_to ? `${formatIntakeDate(data.date_from)} – ${formatIntakeDate(data.date_to)}` : tx("Период не указан", "Zeitraum nicht angegeben");
   const pep = data?.facts.pep_contract_partner === true || data?.facts.pep_beneficial_owner === true;
   const selectedContract = contracts.find(contract => contract.id === data?.contract_id);
-  const matchingContracts = data ? contracts.filter(contract => contractCoversOrder(contract, data.date_from, data.date_to)) : [];
   const factsChanged = data && workspace ? changedFacts(workspace.baseline_facts, data.facts) : [];
   const prettyFact = (key: keyof IntakeFacts, value: string | boolean | null) => {
     if (value === null || value === "") return tx("Не указано", "Nicht angegeben");
@@ -200,6 +217,16 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
     }
     await refreshDocuments();
   });
+  const patientDocuments = data && readiness ? <OrderPatientDocumentReview readiness={readiness} documents={documents} dateTo={data.date_to} lang={lang} busy={busy}
+    onRefresh={reviewEvidence}
+    onOpenDocuments={() => void run(async () => { await persist(data); onClose(); staffGo(`/patients/${patient.id}?tab=documents`); })}
+    onSaveExpiry={expiry => run(async () => {
+      if (dirty) await persist(data);
+      await apiFetch(`/patients/${patient.id}/update`, { method: "POST", body: JSON.stringify({ passport_expiry: expiry }) });
+      await refreshDocuments();
+      onSaved?.();
+    })} /> : null;
+  const existingContracts = data ? <OrderExistingContractsTable contracts={contracts} dateFrom={data.date_from} dateTo={data.date_to} selectedId={data.contract_id} lang={lang} busy={busy} onSelect={contract_id => patch({ contract_id })} /> : null;
 
   return <OrderWizardShell dirty={dirty} busy={busy} loading={loading} disabled={busy || loading || !data}
     onClose={onClose} lang={lang} step={step} steps={STEPS.map(labels => labels[language])}
@@ -227,6 +254,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
       <Button type="button" variant="outline" onClick={() => setRetry(v => v + 1)}><RefreshCw className="size-4" />{tx("Повторить загрузку", "Erneut laden")}</Button> :
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-75">
         {step === 0 ? <>
+          {patientDocuments}
+          <OrderWizardSection flush title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
           <OrderWizardSection title={tx("Что изменилось с прошлого обращения?", "Was hat sich seit dem letzten Aufenthalt geändert?")}>
             <p className="text-xs text-muted-foreground">{tx("Проверьте сохранённые сведения. Изменения попадут в карточку пациента после подтверждения.", "Prüfen Sie die gespeicherten Angaben. Änderungen werden nach Bestätigung in die Patientenakte übernommen.")}</p>
             <dl className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -263,7 +292,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
             <div className="sm:col-span-2"><Field label={tx("Клинический эпизод", "Behandlungsfall")}><NativeComboboxSelect aria-label={tx("Клинический эпизод", "Behandlungsfall")} disabled={busy} className="h-9 w-full text-xs" value={data.case_id ?? ""} onChange={event => patch({ case_id: event.target.value || null })}><option value="">{tx("Новый эпизод при оформлении", "Neuer Fall bei Bestätigung")}</option>{cases.map(item => <option key={item.id} value={item.id}>{item.case_id} · {item.hauptanfragegrund}</option>)}</NativeComboboxSelect></Field></div>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">{tx("История лечения, диагнозы и медикаменты доступны в медицинской карточке.", "Behandlungshistorie, Diagnosen und Medikation stehen in der Patientenakte zur Verfügung.")}</p>
-          <Button type="button" variant="outline" className="mt-2" onClick={() => void run(async () => { await persist(data); onClose(); staffGo(`/patients/${patient.id}?tab=clinical`); })}>{tx("Открыть медицинские данные", "Medizinische Daten öffnen")}</Button>
+          {clinicalContent ? <><Button type="button" variant="outline" className="mt-2" aria-expanded={clinicalOpen} onClick={() => setClinicalOpen(value => !value)}>{tx("Медицинские данные и история", "Medizinische Daten und Verlauf")}</Button>{clinicalOpen ? <div className="mt-3 min-w-0">{clinicalContent}</div> : null}</> : <Button type="button" variant="outline" className="mt-2" onClick={() => void run(async () => { await persist(data); onClose(); staffGo(`/patients/${patient.id}?tab=clinical`); })}>{tx("Открыть медицинские данные", "Medizinische Daten öffnen")}</Button>}
         </OrderWizardSection>
           <OrderIntakeWorkTypes data={data} {...workCatalog} lang={lang} disabled={busy} onChange={patch} />
         </> : null}
@@ -282,8 +311,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
 
         {step === 3 ? <OrderWizardSection title={tx("Договор для этого периода", "Vertrag für diesen Zeitraum")}>
           <Badge variant="outline" className="border-primary/20 bg-primary/10 text-primary">{periodLabel}</Badge>
-          <Field label={tx("Рамочный договор", "Rahmenvertrag")}><NativeComboboxSelect aria-label={tx("Рамочный договор", "Rahmenvertrag")} disabled={busy} className="h-9 w-full text-xs" value={data.contract_id ?? ""} onChange={event => patch({ contract_id: event.target.value || null })}><option value="">{tx("Выберите договор", "Vertrag auswählen")}</option>{contracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contract_number} · {formatIntakeDate(contract.valid_from)} – {formatIntakeDate(contract.valid_to)} · {contractCoversOrder(contract, data.date_from, data.date_to) ? tx("Подходит", "Geeignet") : contract.status}</option>)}</NativeComboboxSelect></Field>
-          {!data.contract_id && matchingContracts.length === 1 ? <Button type="button" variant="outline" className="mt-3" onClick={() => patch({ contract_id: matchingContracts[0].id })}>{tx("Использовать подходящий договор", "Passenden Vertrag verwenden")}: {matchingContracts[0].contract_number}</Button> : null}
+          <Field label={tx("Рамочный договор", "Rahmenvertrag")}><NativeComboboxSelect aria-label={tx("Рамочный договор", "Rahmenvertrag")} disabled={busy} className="h-9 w-full text-xs" value={data.contract_id ?? ""} onChange={event => patch({ contract_id: event.target.value || null })}><option value="">{tx("Выберите договор", "Vertrag auswählen")}</option>{contracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contract_number} · {formatIntakeDate(contract.valid_from)} – {formatIntakeDate(contract.valid_to)} · {contractCoversOrder(contract, data.date_from, data.date_to) ? tx("Подходит", "Geeignet") : CONTRACT_VALIDITY_LABELS[contractValidity(contract)]?.[language] ?? tx("Проверьте статус", "Status prüfen")}</option>)}</NativeComboboxSelect></Field>
+          {existingContracts}
           {selectedContract ? <p className={`mt-3 text-sm ${contractCoversOrder(selectedContract, data.date_from, data.date_to) ? "text-emerald-700" : "text-amber-700"}`}>{contractCoversOrder(selectedContract, data.date_from, data.date_to) ? tx("Договор подписан и покрывает весь период заказа.", "Der unterzeichnete Vertrag deckt den gesamten Auftragszeitraum ab.") : tx("Проверьте подпись и срок: этот договор пока не покрывает весь период заказа.", "Unterschrift und Gültigkeit prüfen: Dieser Vertrag deckt den gesamten Zeitraum noch nicht ab.")}</p> : null}
           <details className="mt-5 rounded-lg border p-4"><summary className="cursor-pointer font-medium">{tx("Создать новый рамочный договор", "Neuen Rahmenvertrag erstellen")}</summary><div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label={tx("Действует с", "Gültig ab")}><Input type="date" value={newContractFrom || data.date_from || ""} onChange={event => setNewContractFrom(event.target.value)} /></Field><Field label={tx("Действует до (необязательно)", "Gültig bis (optional)")}><Input type="date" value={newContractTo} onChange={event => setNewContractTo(event.target.value)} /></Field></div><Button type="button" className="mt-3" onClick={() => void run(async () => {
             const from = newContractFrom || data.date_from; if (!from || (newContractTo && newContractTo < from)) throw new Error(tx("Проверьте период договора", "Vertragszeitraum prüfen"));
@@ -295,6 +324,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
         </OrderWizardSection> : null}
 
         {step === 4 ? <>
+          {patientDocuments}
+          <OrderWizardSection flush title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>{existingContracts}</OrderWizardSection>
           {pep ? <OrderWizardSection title={tx("Актуальная проверка PEP", "Aktuelle PEP-Prüfung")}><div className="grid gap-3 sm:grid-cols-2">{([
             ["risk_reason", "Причина проверки", "Prüfungsgrund"], ["manager_approval_name", "Согласовал руководитель", "Freigabe durch Führungskraft"],
             ["continuous_monitoring", "Порядок дальнейшего контроля", "Laufende Überwachung"], ["reviewer_name", "Проверил", "Geprüft von"],
@@ -318,7 +349,6 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved }: {
               })}
             />
           </OrderWizardSection>
-          <OrderWizardSection title={tx("Существующие документы пациента", "Vorhandene Patientendokumente")}><p className="text-sm text-muted-foreground">{tx("Общие документы используются из карточки пациента. Их актуальность проверяется перед оформлением.", "Allgemeine Dokumente werden aus der Patientenakte verwendet. Ihre Gültigkeit wird vor Abschluss geprüft.")}</p><Button type="button" variant="outline" className="mt-3" onClick={() => void run(async () => { await persist(data); onClose(); staffGo(`/patients/${patient.id}?tab=documents`); })}>{tx("Открыть документы пациента", "Patientendokumente öffnen")}</Button></OrderWizardSection>
         </> : null}
 
         {step === 5 ? <OrderWizardSection title={tx("Проверка перед оформлением", "Prüfung vor Abschluss")}>

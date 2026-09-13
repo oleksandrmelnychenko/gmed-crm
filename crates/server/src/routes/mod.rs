@@ -8,6 +8,7 @@ pub mod auth;
 pub mod bmp_imports;
 pub mod cases;
 pub mod clinical_document_imports;
+mod clinical_edits;
 pub mod company_financial_account_transfers;
 pub mod company_financial_accounts;
 pub mod company_financials;

@@ -462,7 +462,6 @@ function ProfileRecordShell({
 
 type PatientProfileTabProps = {
   profileControls: {
-    canCreateOrders: boolean;
     canCreateTasks: boolean;
     canEditPatientProfile: boolean;
     canExportPatientCompliance: boolean;
@@ -491,7 +490,6 @@ type PatientProfileTabProps = {
   notesSheetOpen: boolean;
   onLegalStatusSheetOpenChange: ToggleHandler;
   onOpenTab: (tab: "orders" | "documents" | "contracts" | "invoices") => void;
-  onCreateOrder: () => void;
   onNotesSheetOpenChange: ToggleHandler;
   openProfileEditor: () => void;
   patientDetailStatusLabel: StatusLabelFn;
@@ -519,7 +517,6 @@ function usePatientProfileTabContent({
   onLegalStatusSheetOpenChange,
   onNotesSheetOpenChange,
   onOpenTab,
-  onCreateOrder,
   openProfileEditor,
   patientDetailStatusLabel,
   reload,
@@ -528,7 +525,6 @@ function usePatientProfileTabContent({
   tr,
 }: PatientProfileTabProps) {
   const {
-    canCreateOrders,
     canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
@@ -1083,13 +1079,6 @@ function usePatientProfileTabContent({
         ) : null}
 
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
-          {canCreateOrders && id ? (
-            <ProfileActionCard
-              title={t.orders_create_title}
-              description={t.orders_create_description}
-              onClick={onCreateOrder}
-            />
-          ) : null}
           {canCreateTasks && id ? (
             <ProfileActionCard
               title={l("patients_create_task_for_this_patient")}

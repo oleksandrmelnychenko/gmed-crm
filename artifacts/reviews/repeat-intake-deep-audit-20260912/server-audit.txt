@@ -1,0 +1,15 @@
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 3.61s
+     Running tests/repeat_deep_audit.rs (target/debug/deps/repeat_deep_audit-6ace5029df60c945)
+
+running 4 tests
+test deep_audit_changed_period_keeps_old_document_readiness ... AUDIT CONFIRMED: program period changed after prepared/signed commercial data; old order document and estimate still satisfy readiness
+ok
+test deep_audit_clinical_merge_retry_and_delete ... AUDIT CONFIRMED: same new warning/diagnosis merge payload saved twice creates two records; merge with empty items does not delete existing entries
+ok
+test deep_audit_repeat_bootstrap_duplicate_and_archive ... AUDIT CONFIRMED: identical create requests -> 2 leads / 2 cases / 2 active legacy orders; 0 orders visible in patient; payment-tracking and planning exist before completion; archive keeps order active
+ok
+test deep_audit_unassigned_patient_attach_grants_access ... AUDIT CONFIRMED: unassigned PM denied patient GET, then explicit attach assigns self and GET succeeds
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 27.25s

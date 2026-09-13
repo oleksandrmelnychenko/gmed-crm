@@ -3000,6 +3000,7 @@ function useLeadsPageContent() {
           )}
         >
           <LeadWizard
+            entryPoint="lead"
             leadId={wizardLeadId}
             open
             createMode={newLeadWizardOpen}

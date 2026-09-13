@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { RepeatIntakePicker } from "../../../src/pages/patients/ui/workspace/repeat-intake-picker";
+import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
@@ -15,11 +16,19 @@ const patient = {
 } as PatientDetail;
 
 function Harness() {
+  const [repeat, setRepeat] = useState(true);
+  const [picker, setPicker] = useState(false);
+  const [creationKey, setCreationKey] = useState<string>();
   const [open, setOpen] = useState(false);
   const [leadId, setLeadId] = useState<string | null>(null);
+  const pick = useCallback((id: string | null, key?: string) => {
+    setPicker(false); setRepeat(true); setLeadId(id); setCreationKey(key); setOpen(true);
+  }, []);
   return <>
-    <button onClick={() => { setLeadId(null); setOpen(true); }}>Repeat intake</button>
-    {open && <LeadWizard open createMode={!leadId} leadId={leadId} existingPatient={patient}
+    <button onClick={() => { setPicker(true); }}>Repeat intake</button>
+    <button onClick={() => { setRepeat(false); setLeadId("00000000-0000-0000-0000-000000000222"); setOpen(true); }}>Lead intake</button>
+    {picker && <RepeatIntakePicker patientId={patient.id} lang={localStorage.getItem("gmed_lang") ?? "ru"} onPick={pick} onClose={() => setPicker(false)} />}
+    {open && <LeadWizard creationKey={creationKey} open entryPoint={repeat ? "repeat-patient" : "lead"} createMode={!leadId} leadId={leadId} existingPatient={repeat ? patient : undefined}
       onCreated={setLeadId} onOpenChange={setOpen} />}
   </>;
 }

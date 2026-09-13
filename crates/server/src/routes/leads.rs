@@ -58,6 +58,10 @@ pub fn public_router() -> Router<AppState> {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route(
+            "/patients/{patient_id}/repeat-intakes",
+            get(list_repeat_intakes),
+        )
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/referrer-patients", get(list_lead_referrer_patients))
         .route(
@@ -158,6 +162,8 @@ pub(crate) fn normalize_intake_language(
 
 #[derive(Deserialize)]
 struct CreateLeadRequest {
+    creation_key: Option<Uuid>,
+    repeat_patient_id: Option<Uuid>,
     first_name: String,
     last_name: String,
     email: Option<String>,
@@ -1290,7 +1296,7 @@ fn evaluate_lead_conversion_readiness(
     }
 }
 
-fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversionReadiness {
+fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversionReadinessInput {
     let country = row
         .try_get::<Option<String>, _>("country")
         .unwrap_or_default();
@@ -1308,7 +1314,7 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
     let quote_matches_order = !readiness_line_signatures(&quote_line_items).is_empty()
         && readiness_line_signatures(&quote_line_items)
             == readiness_line_signatures(&order_service_line_items);
-    evaluate_lead_conversion_readiness(&LeadConversionReadinessInput {
+    LeadConversionReadinessInput {
         qualification_status: row.try_get("qualification_status").unwrap_or_default(),
         compliance_status: row.try_get("compliance_status").unwrap_or_default(),
         converted_patient_id: row.try_get("converted_patient_id").unwrap_or_default(),
@@ -1355,7 +1361,7 @@ fn build_lead_conversion_readiness(row: &sqlx::postgres::PgRow) -> LeadConversio
         // separate readiness checks. A later catalog-price change invalidates
         // the quote, but it must not make money already received disappear.
         prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
-    })
+    }
 }
 
 async fn load_lead_conversion_readiness(
@@ -1563,7 +1569,84 @@ async fn load_lead_conversion_readiness(
         )
     })?;
 
-    Ok(row.as_ref().map(build_lead_conversion_readiness))
+    let Some(row) = row else { return Ok(None) };
+    let mut input = lead_conversion_readiness_input(&row);
+    apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
+    Ok(Some(evaluate_lead_conversion_readiness(&input)))
+}
+
+// Reuse the patient's current confirmations and the contract selected on this
+// repeat order. An old signed flag alone never proves coverage of the new period.
+async fn apply_repeat_patient_readiness(
+    state: &AppState,
+    lead_id: Uuid,
+    input: &mut LeadConversionReadinessInput,
+) -> Result<(), axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT p.id AS patient_id, p.legal_status,
+                  fc.patient_id AS contract_patient_id, fc.lead_id AS contract_lead_id,
+                  fc.status AS contract_status, fc.signed_at,
+                  fc.valid_from, fc.valid_to, o.date_from, o.date_to
+           FROM leads l
+           JOIN patients p ON p.id = l.prospect_patient_id
+           LEFT JOIN orders o ON o.source_lead_id = l.id
+           LEFT JOIN framework_contracts fc ON fc.id = o.contract_id
+           WHERE l.id = $1 AND l.intake_model = 'patient_first'
+             AND p.lifecycle_status IN ('active', 'inactive')"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "load repeat patient document checks");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to check patient documents",
+        )
+    })?;
+    let Some(row) = row else { return Ok(()) };
+    let legal: Value = row.try_get("legal_status").unwrap_or_else(|_| json!({}));
+    input.identity_document_verified |= legal["identity_verified"] == true;
+    input.dsgvo_document_signed |= legal["dsgvo_signed"] == true;
+    input.confidentiality_release_signed |= legal["confidentiality_release_signed"] == true;
+    if legal["compliance_completed"] == true {
+        input.compliance_status = "signed".to_string();
+    }
+    let patient_id: Uuid = row.try_get("patient_id").unwrap_or_default();
+    let inherited = row
+        .try_get::<Option<Uuid>, _>("contract_patient_id")
+        .ok()
+        .flatten()
+        == Some(patient_id);
+    let own_contract = row
+        .try_get::<Option<Uuid>, _>("contract_lead_id")
+        .ok()
+        .flatten()
+        == Some(lead_id);
+    let signed_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("signed_at").ok().flatten();
+    input.contract_signed = (inherited || own_contract)
+        && signed_at.is_some()
+        && super::order_intakes::covers_period(
+            &row.try_get::<String, _>("contract_status")
+                .unwrap_or_default(),
+            row.try_get("valid_from").ok().flatten(),
+            row.try_get("valid_to").ok().flatten(),
+            row.try_get("date_from").ok().flatten(),
+            row.try_get("date_to").ok().flatten(),
+        );
+    let document_state: (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
+                EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
+         FROM orders o WHERE o.source_lead_id=$1")
+        .bind(lead_id).fetch_optional(&state.db).await
+        .map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to check current order documents"))?.unwrap_or((false,false));
+    input.order_document_generated = document_state.0;
+    input.order_cost_estimate_document_generated = document_state.1;
+    // A pre-existing signed framework contract does not need a new PDF for each visit.
+    if inherited && input.contract_signed {
+        input.framework_document_generated = true;
+    }
+    Ok(())
 }
 
 async fn load_lead_lifecycle(
@@ -1625,6 +1708,99 @@ fn lead_gate_err(
         .into_response()
 }
 
+async fn list_repeat_intakes(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    auth.require_any_role(&[Role::PatientManager])?;
+    require_repeat_patient_access(&state, &auth, patient_id).await?;
+    let rows = sqlx::query("SELECT id,created_at,updated_at,primary_concern_text FROM leads WHERE repeat_patient_id=$1 AND converted_patient_id IS NULL AND failed_outcome_status='none' ORDER BY updated_at DESC,id")
+        .bind(patient_id).fetch_all(&state.db).await.map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load repeat intakes"))?;
+    Ok(Json(rows.iter().map(|row| json!({"id":row.get::<Uuid,_>("id"),"created_at":row.get::<chrono::DateTime<chrono::Utc>,_>("created_at"),"updated_at":row.get::<chrono::DateTime<chrono::Utc>,_>("updated_at"),"concern":row.get::<Option<String>,_>("primary_concern_text")})).collect()))
+}
+
+async fn create_repeat_intake(
+    state: &AppState,
+    auth: &AuthUser,
+    patient: Uuid,
+    key: Option<Uuid>,
+) -> Result<Uuid, axum::response::Response> {
+    auth.require_any_role(&[Role::PatientManager])?;
+    require_repeat_patient_access(state, auth, patient).await?;
+    let key =
+        key.ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "Creation key is required"))?;
+    let failed = |_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create repeat intake",
+        )
+    };
+    let mut tx = state.db.begin().await.map_err(failed)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!("repeat:{}:{}", auth.user_id, key))
+        .execute(&mut *tx)
+        .await
+        .map_err(failed)?;
+    if let Some((id, owner)) = sqlx::query_as::<_, (Uuid, Option<Uuid>)>(
+        "SELECT id,repeat_patient_id FROM leads WHERE created_by=$1 AND creation_key=$2",
+    )
+    .bind(auth.user_id)
+    .bind(key)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(failed)?
+    {
+        if owner != Some(patient) {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "Creation key belongs to another intake",
+            ));
+        }
+        return Ok(id);
+    }
+    let id: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO leads(first_name,last_name,email,phone,source,country,primary_language,date_of_birth,legal_sex,street_address,city,zip_code,created_by,intake_source,intake_model,creation_key,repeat_patient_id,prospect_patient_id)
+         SELECT first_name,last_name,email,phone_primary,'manual',COALESCE(address_country,residence_country),languages[1],birth_date,gender,address_street,address_city,address_zip,$2,'staff_wizard','patient_first',$3,id,id
+         FROM patients WHERE id=$1 AND lifecycle_status IN ('active','inactive') RETURNING id")
+        .bind(patient).bind(auth.user_id).bind(key).fetch_optional(&mut *tx).await.map_err(failed)?;
+    let id = id.ok_or_else(|| {
+        err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient is not available for repeat intake",
+        )
+    })?;
+    let retention = super::patients::load_patient_clinical_retention_years(state, 30).await;
+    let (case_id, _) = ensure_prospect_case(&mut tx, id, patient, auth.user_id, "", "", retention)
+        .await
+        .map_err(failed)?;
+    let seq: i64 = sqlx::query_scalar("SELECT nextval('order_number_seq')")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(failed)?;
+    sqlx::query("INSERT INTO orders(order_number,patient_id,source_lead_id,case_id,created_by,intake_state) VALUES($1,$2,$3,$4,$5,'draft')")
+        .bind(super::orders::gen_order_number(seq)).bind(patient).bind(id).bind(case_id).bind(auth.user_id).execute(&mut *tx).await.map_err(failed)?;
+    sqlx::query("INSERT INTO workflow_lifecycle_events(entity_type,entity_id,to_stage,transition_kind,changed_by,metadata) VALUES('lead',$1,'new','created',$2,$3)")
+        .bind(id).bind(auth.user_id).bind(json!({"intake_source":"staff_wizard","repeat_patient_id":patient})).execute(&mut *tx).await.map_err(failed)?;
+    tx.commit().await.map_err(failed)?;
+    crate::realtime::publish_lead_event(
+        state,
+        Some(auth.user_id),
+        "lead.created",
+        id,
+        json!({"intake_source":"staff_wizard","repeat_patient_id":patient}),
+    )
+    .await;
+    state.audit_sender.try_send(audit::domain_event(
+        "create_repeat_intake",
+        Some(auth.user_id),
+        "lead",
+        Some(id),
+        json!({"patient_id":patient,"case_id":case_id}),
+    ));
+    Ok(id)
+}
+
 async fn create_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1634,16 +1810,25 @@ async fn create_lead(
         return e;
     }
 
+    if let Some(patient_id) = body.repeat_patient_id {
+        return match create_repeat_intake(&state, &auth, patient_id, body.creation_key).await {
+            Ok(id) => (StatusCode::CREATED, Json(json!({"id": id}))).into_response(),
+            Err(response) => response,
+        };
+    }
+
     if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
 
-    match sqlx::query_scalar::<_, Uuid>(
+    match sqlx::query_as::<_, (Uuid, bool)>(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
-                notes, created_by, intake_source
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual')
-           RETURNING id"#,
+                notes, created_by, intake_source, creation_key
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9)
+           ON CONFLICT(created_by,creation_key) WHERE creation_key IS NOT NULL
+           DO UPDATE SET creation_key=EXCLUDED.creation_key
+           RETURNING id, (xmax = 0)"#,
     )
     .bind(body.first_name.trim())
     .bind(body.last_name.trim())
@@ -1653,10 +1838,14 @@ async fn create_lead(
     .bind(body.country.as_deref())
     .bind(body.notes.as_deref())
     .bind(auth.user_id)
+    .bind(body.creation_key)
     .fetch_one(&state.db)
     .await
     {
-        Ok(id) => {
+        Ok((id, inserted)) => {
+            if !inserted {
+                return Json(json!({"id":id,"idempotent_replay":true})).into_response();
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "create_lead",
                 Some(auth.user_id),
@@ -3326,6 +3515,21 @@ fn prospect_case_response(
     .into_response()
 }
 
+async fn require_repeat_patient_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    if super::patients::has_patient_edit_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "Insufficient permissions for this patient",
+        ))
+    }
+}
+
 async fn create_prospect_patient(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3334,6 +3538,12 @@ async fn create_prospect_patient(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
+    }
+
+    if let Some(patient_id) = body.attach_patient_id
+        && let Err(response) = require_repeat_patient_access(&state, &auth, patient_id).await
+    {
+        return response;
     }
 
     let retention_years =
@@ -3423,6 +3633,9 @@ async fn create_prospect_patient(
         .ok()
         .flatten()
     {
+        if let Err(response) = require_repeat_patient_access(&state, &auth, existing).await {
+            return response;
+        }
         let patient =
             match sqlx::query("SELECT patient_id, lifecycle_status FROM patients WHERE id = $1")
                 .bind(existing)
@@ -3565,11 +3778,13 @@ async fn create_prospect_patient(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
-        if let Err(error) = sqlx::query("UPDATE leads SET prospect_patient_id = $2 WHERE id = $1")
-            .bind(lead_id)
-            .bind(attach_id)
-            .execute(&mut *tx)
-            .await
+        if let Err(error) = sqlx::query(
+            "UPDATE leads SET prospect_patient_id = $2, repeat_patient_id = $2 WHERE id = $1",
+        )
+        .bind(lead_id)
+        .bind(attach_id)
+        .execute(&mut *tx)
+        .await
         {
             tracing::error!(error = %error, lead_id = %lead_id, "attach prospect patient");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -3967,6 +4182,19 @@ async fn convert_lead(
         return err(
             StatusCode::CONFLICT,
             "Failed leads cannot be converted into patients",
+        );
+    }
+
+    // Freeze the order while validating and confirming this intake.
+    if sqlx::query("SELECT id FROM orders WHERE source_lead_id=$1 FOR UPDATE")
+        .bind(lead_id)
+        .fetch_all(&mut *tx)
+        .await
+        .is_err()
+    {
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to lock order for confirmation",
         );
     }
 
@@ -4652,6 +4880,7 @@ async fn convert_lead(
            ), moved_orders AS (
                UPDATE orders
                SET patient_id = $2,
+                   intake_state = CASE WHEN intake_state='draft' THEN 'confirmed' ELSE intake_state END,
                    case_id = COALESCE(
                        case_id,
                        (SELECT mc.id FROM moved_cases mc LIMIT 1)
@@ -4825,6 +5054,11 @@ async fn convert_lead(
         }
     };
     for order_id in order_ids {
+        if let Err(response) =
+            super::orders::ensure_created_order_state(&state, order_id, auth.user_id).await
+        {
+            tracing::error!(order_id=%order_id, status=%response.status(), "failed to initialize converted order");
+        }
         if crate::routes::workflow_checklists::ensure_default_order_workflow(
             &state,
             order_id,
@@ -5024,7 +5258,7 @@ async fn resolve_failed_lead(
                    failed_note = $4,
                    failed_processed_at = now(),
                    failed_processed_by = $5
-               WHERE id = $1"#,
+               WHERE id = $1 AND converted_patient_id IS NULL AND failed_outcome_status='none'"#,
         )
         .bind(lead_id)
         .bind(current_status.clone())

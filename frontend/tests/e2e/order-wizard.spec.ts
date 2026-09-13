@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { passportReviewStatus } from "../../src/pages/orders/model/order-document-review";
 import { emptyIntake, type IntakeFacts, type IntakeWorkspace } from "../../src/pages/orders/model/order-intake";
 
 const facts: IntakeFacts = { insurance_type: "private", insurance_provider: "Existing insurer", insurance_number: "1234",
@@ -6,7 +7,10 @@ const facts: IntakeFacts = { insurance_type: "private", insurance_provider: "Exi
   address_zip: "10000", address_country: "DE", pep_contract_partner: null, pep_beneficial_owner: null,
   pep_office: "", pep_asset_origin: "", representative_name: "", representative_phone: "", representative_authority: "" };
 async function setup(page: Page, language: "ru" | "de", resume = false, failLoad = false) {
-  const state = { creates: 0, actions: [] as string[], generated: [] as string[], signed: [] as string[], failSave: false, failLoad, workspace: {
+  await page.clock.setFixedTime(new Date("2026-09-12T12:00:00Z"));
+  const state = { passportExpiry: "2026-08-31" as string | null, patientWrites: [] as unknown[], failPassportSave: false,
+    contracts: [{ id: "contract-qa", patient_id: "patient-intake-qa", lead_id: null, contract_number: "FC-OLD", status: "signed", signed_at: "2026-01-01T12:00:00Z", valid_from: "2026-01-01", valid_to: "2026-12-31" as string | null }],
+    creates: 0, actions: [] as string[], generated: [] as string[], signed: [] as string[], failSave: false, failLoad, workspace: {
     order_id: "intake-qa", patient_id: "patient-intake-qa", order_number: "ORD-TEST-1", intake_state: "draft",
     revision: 0, data: emptyIntake(structuredClone(facts)), baseline_facts: structuredClone(facts), current_facts: structuredClone(facts),
     confirmed_facts: null, facts_confirmed_at: null, checks: [{ key: "single_order", status: "blocked", step: 4 }], current_document_ids: ["doc-current", "doc-signed"],
@@ -35,7 +39,15 @@ async function setup(page: Page, language: "ru" | "de", resume = false, failLoad
       if (body.action === "confirm_facts") { state.workspace.current_facts = body.data.facts; state.workspace.baseline_facts = body.data.facts; state.workspace.confirmed_facts = body.data.facts; state.workspace.facts_confirmed_at = "2026-09-10T12:00:00Z"; }
       return route.fulfill({ json: state.workspace });
     }
-    if (path === "/framework-contracts") return route.fulfill({ json: [{ id: "contract-qa", contract_number: "FC-OLD", status: "signed", valid_from: "2026-01-01", valid_to: "2026-12-31" }] });
+    if (path.endsWith("/recheck")) return route.fulfill({ json: { requires_recheck: true, passport_expiry: state.passportExpiry,
+      compliance_ready: true, confidentiality_release_ready: true, identity_ready: true, document_pack_ready: false,
+      document_alerts: { missing_count: 1, missing_documents: [{ key: "passport_copy", label: "Passkopie / Копия паспорта" }] } } });
+    if (path === "/patients/patient-intake-qa/update") {
+      if (state.failPassportSave) return route.fulfill({ status: 500, json: { message: "Passport save failed" } });
+      const body = route.request().postDataJSON(); state.patientWrites.push(body); state.passportExpiry = body.passport_expiry;
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (path === "/framework-contracts") return route.fulfill({ json: state.contracts });
     if (path === "/providers/specializations") return route.fulfill({ json: [{ id: "specialty-qa", code: "urology", name_de: "Urologie", name_ru: "Урология", name_en: "Urology", is_active: true }] });
     if (path.includes("/specializations/specialty-qa/work-types")) return route.fulfill({ json: [{ id: "work-qa", specialization_id: "specialty-qa", specialization_ids: ["specialty-qa"], code: "surgery", name_de: "Operation", name_ru: "Операция", name_en: "Surgery", name_es: "", min_price_eur: 28000, max_price_eur: 35000, duration_hours: 15, sort_order: 1, is_active: true, descriptions: [] }] });
     if (path === "/agency-services") return route.fulfill({ json: [{
@@ -193,7 +205,7 @@ for (const lang of ["ru", "de"] as const) {
     await page.screenshot({ path: `../artifacts/design-qa/order-wizard-${lang}-services-mobile.png` });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await steps.nth(4).click();
-    const docs = dialog.getByRole("table");
+    const docs = dialog.locator("section").filter({ has: page.getByText(tx("Документы этого заказа", "Dokumente dieses Auftrags"), { exact: true }) }).getByRole("table");
     await expect(docs).toHaveAttribute("aria-rowcount", "3");
     const outdated = docs.getByRole("row").filter({ hasText: tx("Нужна новая версия", "Neue Version erforderlich") });
     await expect(outdated.getByRole("button", { name: /Privacy QA/ })).toBeDisabled();
@@ -227,3 +239,70 @@ for (const lang of ["ru", "de"] as const) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const lang of ["ru", "de"] as const) {
+  test(`repeat order reviews existing documents and updates only passport expiry ${lang}`, async ({ page }) => {
+    const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    const state = await setup(page, lang);
+    const dialog = page.getByTestId("order-wizard");
+    await expect(dialog.getByText(tx("Паспорт просрочен", "Reisepass abgelaufen"), { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(dialog.getByText(/31.08.2026/).filter({ visible: true })).toBeVisible();
+    await expect(dialog.getByText("FC-OLD", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(dialog.getByText(/Passkopie/)).toBeVisible();
+    expect(state.creates).toBe(0);
+    expect(state.patientWrites).toEqual([]);
+    await dialog.getByRole("button", { name: tx("Обновить срок", "Gültigkeit ändern"), exact: true }).click();
+    const dateField = dialog.getByRole("group", { name: tx("Паспорт действителен до", "Reisepass gültig bis"), exact: true });
+    const segments = dateField.getByRole("spinbutton");
+    await segments.nth(0).fill("15");
+    await segments.nth(1).fill("05");
+    await segments.nth(2).fill("2030");
+    await segments.nth(2).press("Tab");
+    const save = dialog.getByRole("button", { name: tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern"), exact: true });
+    state.failPassportSave = true;
+    await save.click();
+    await expect(dialog.getByRole("alert")).toContainText("Passport save failed");
+    expect(state.patientWrites).toEqual([]);
+    await expect(dateField).toBeVisible();
+    state.failPassportSave = false;
+    await save.click();
+    await expect(dialog.getByText(tx("Паспорт действителен", "Reisepass gültig"), { exact: true }).filter({ visible: true })).toBeVisible();
+    expect(state.patientWrites).toEqual([{ passport_expiry: "2030-05-15" }]);
+    expect(state.creates).toBe(0);
+    expect(state.workspace.current_facts).toEqual(facts);
+    await expect(dialog.getByText(tx("Паспорт действителен", "Reisepass gültig"), { exact: true }).filter({ visible: true })).toHaveClass(/border-emerald-200/);
+    await page.screenshot({ path: `../artifacts/design-qa/repeat-order-documents-${lang}-desktop.png`, animations: "disabled" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await expect(dialog.getByRole("button", { name: tx("Далее", "Weiter"), exact: true })).toBeInViewport();
+    await page.screenshot({ path: `../artifacts/design-qa/repeat-order-documents-${lang}-mobile.png`, animations: "disabled" });
+  });
+}
+
+test("repeat order reuses the inherited contract and flags passport expiry during a future visit", async ({ page }) => {
+  const state = await setup(page, "ru");
+  state.passportExpiry = "2027-05-01";
+  state.workspace.data.step = 3;
+  state.workspace.data.date_from = "2027-04-25";
+  state.workspace.data.date_to = "2027-05-10";
+  state.contracts.push({ ...state.contracts[0], id: "contract-inherited", contract_number: "FC-FROM-LEAD", valid_to: null });
+  await page.goto("/__order-wizard-qa?order=intake-qa");
+  const dialog = page.getByTestId("order-wizard");
+  const expiredRow = dialog.getByRole("row").filter({ hasText: "FC-OLD" });
+  await expect(expiredRow).toContainText("Нужен другой / новый договор");
+  await expect(expiredRow.getByRole("button")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Использовать договор: FC-FROM-LEAD", exact: true }).click();
+  await expect.poll(() => state.workspace.data.contract_id).toBe("contract-inherited");
+  expect(state.generated).toEqual([]);
+  expect(state.creates).toBe(0);
+  const steps = dialog.getByRole("navigation").getByRole("tab");
+  await steps.nth(4).click();
+  await expect(dialog.getByText("Истекает до окончания заказа", { exact: true }).filter({ visible: true })).toBeVisible();
+  expect(state.signed).toEqual([]);
+  const reason = passportReviewStatus(state.passportExpiry, state.workspace.data.date_to, "2026-09-12");
+  state.workspace.checks.push({ key: "passport", status: "warning", step: 0, reason, expiry: state.passportExpiry });
+  await steps.nth(5).click();
+  await expect(dialog.getByText("Истекает до окончания заказа · 01.05.2027", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Оформить заказ", exact: true })).toBeDisabled();
+});

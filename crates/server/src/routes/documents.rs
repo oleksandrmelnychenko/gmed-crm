@@ -10906,7 +10906,9 @@ async fn validate_document_context(
 
     if let Some(order_id_value) = order_id {
         let row = sqlx::query(
-            "SELECT patient_id, source_lead_id FROM orders WHERE id = $1",
+            "SELECT o.patient_id, o.source_lead_id,
+                    COALESCE(l.converted_patient_id IS NULL AND l.repeat_patient_id=o.patient_id,false) AS repeat_draft
+             FROM orders o LEFT JOIN leads l ON l.id=o.source_lead_id WHERE o.id=$1",
         )
             .bind(order_id_value)
             .fetch_optional(&state.db)
@@ -10929,7 +10931,21 @@ async fn validate_document_context(
                     "Order and patient context do not match",
                 ));
             }
+        } else if lead_id.is_some() && row.try_get::<bool, _>("repeat_draft").unwrap_or(false) {
+            if lead_id != order_lead_id {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Order and lead context do not match",
+                ));
+            }
+            // Keep the unconverted repeat's documents in its wizard until completion.
         } else if order_patient_id.is_some() {
+            if lead_id.is_some() && lead_id != order_lead_id {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Order and lead context do not match",
+                ));
+            }
             patient_id = order_patient_id;
             lead_id = None;
         } else if let Some(existing) = lead_id {
@@ -12161,7 +12177,7 @@ async fn generate_document(
     // use its regular database connections without blocking intake row locks.
     let mut intake_generation_guard = if let Some(id) = order_id {
         match sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM order_intakes WHERE order_id=$1)",
+            "SELECT EXISTS(SELECT 1 FROM order_intakes WHERE order_id=$1) OR repeat_order_document_context($1) IS NOT NULL",
         )
         .bind(id)
         .fetch_one(&state.db)
@@ -12204,6 +12220,23 @@ async fn generate_document(
     let intake_context = match super::order_intakes::document_context(&state, order_id).await {
         Ok(value) => value,
         Err(response) => return response,
+    };
+    let repeat_context = if matches!(template.id, "single_order" | "order_cost_estimate") {
+        match sqlx::query_scalar::<_, Option<Value>>("SELECT repeat_order_document_context($1)")
+            .bind(order_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(value) => value,
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load current repeat-order context",
+                );
+            }
+        }
+    } else {
+        None
     };
     let patient_uuid = patient_id.unwrap_or_else(Uuid::nil);
 
@@ -12342,9 +12375,10 @@ async fn generate_document(
         );
     }
 
-    if let (Some(context), Some(guard)) =
-        (intake_context.as_ref(), intake_generation_guard.as_mut())
-    {
+    if let (Some(context), Some(guard)) = (
+        intake_context.as_ref().or(repeat_context.as_ref()),
+        intake_generation_guard.as_mut(),
+    ) {
         let existing = sqlx::query_scalar::<_, serde_json::Value>(
             "SELECT jsonb_build_object('ok',true,'id',id,'document_number',document_number,
                 'auto_name',auto_name,'original_filename',original_filename,'mime_type',mime_type,
@@ -12481,6 +12515,19 @@ async fn generate_document(
         .map(ToOwned::to_owned);
 
     let mut bindings = body.bindings.clone().unwrap_or_default();
+    if let Some(context) = &repeat_context {
+        if body
+            .manual_text
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Edit the repeat order before generating its documents",
+            );
+        }
+        bindings = intake_documents::repeat_bindings(context);
+    }
     if let Some(context) = &intake_context {
         if body
             .manual_text
@@ -12575,7 +12622,7 @@ async fn generate_document(
         }
     }
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
-    if let Some(context) = &intake_context {
+    if let Some(context) = intake_context.as_ref().or(repeat_context.as_ref()) {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
             context.clone();
     }
@@ -13365,6 +13412,8 @@ async fn generate_document(
             };
             let manual_totals = if let Some(context) = &intake_context {
                 intake_documents::totals(&context["data"])
+            } else if let Some(context) = &repeat_context {
+                intake_documents::totals(&json!({"lines": context["services"]}))
             } else if uses_quote_lines {
                 None
             } else {
@@ -14100,6 +14149,28 @@ async fn generate_document(
                 );
             }
             Err(response) => return response,
+        }
+    }
+    if let Some(expected) = &repeat_context {
+        let current =
+            sqlx::query_scalar::<_, Option<Value>>("SELECT repeat_order_document_context($1)")
+                .bind(order_id)
+                .fetch_one(&state.db)
+                .await;
+        match current {
+            Ok(Some(current)) if &current == expected => {}
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Order changed during document generation. Generate a new version.",
+                );
+            }
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to verify repeat-order context",
+                );
+            }
         }
     }
     let (document_id, file_size, original_filename, storage_key) =

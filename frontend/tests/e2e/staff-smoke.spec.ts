@@ -2561,12 +2561,12 @@ test.describe("lead onboarding wizard", () => {
       window.localStorage.setItem("gmed_lang", "de");
     });
     await installStaffApiMocks(page, {
-      role: "patient_manager",
-      email: "pm@gmed.de",
-      name: "PM GMED",
-      userId: "00000000-0000-0000-0000-000000000003",
+      role: "ceo",
+      email: "ceo@gmed.de",
+      name: "CEO GMED",
+      userId: "00000000-0000-0000-0000-000000000001",
     });
-    await loginAsStaff(page, "pm@gmed.de");
+    await loginAsStaff(page, "ceo@gmed.de");
   });
 
   test("lead table omits the inline actions column", async ({
@@ -2751,16 +2751,21 @@ test.describe("lead onboarding wizard", () => {
     ).toHaveAttribute("aria-current", "step");
     expect(createRequests).toBe(1);
 
-    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
-    await navigation.getByRole("button", { name: /Personendaten/i }).click();
-    await navigation.getByRole("button", { name: /Servicehistorie/i }).click();
-    await expect(medicalStep).toHaveAttribute("aria-current", "step");
-    await expect(
-      wizard.getByRole("button", {
-        name: "Medizinische Merkmale: Anliegen: Pflichtfeld",
-        exact: true,
-      }),
-    ).toBeVisible();
+    expect(request.postDataJSON().repeat_patient_id).toBeUndefined();
+    expect(request.postDataJSON().creation_key).toMatch(/^[0-9a-f-]{36}$/);
+    await wizard.locator('[data-step="master_data"]').click();
+    await expect(firstName).toHaveValue("Neue");
+    await expect(wizard.locator("#lead-wizard-last-name")).toHaveValue("Person");
+    await expect(wizard.getByText("Daten gespeichert", { exact: true })).toBeVisible();
+    await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
+    await expect(wizard).toBeHidden();
+    await expect(page.getByRole("table").getByText("Neue Person", { exact: true })).toBeVisible();
+    await page.getByRole("table").getByText("Neue Person", { exact: true }).click();
+    await expect(wizard).toBeVisible();
+    await wizard.locator('[data-step="master_data"]').click();
+    await expect(wizard.locator("#lead-wizard-first-name")).toHaveValue("Neue");
+    expect(createRequests).toBe(1);
+
   });
 
   test("wizard localizes backend errors in German and Russian", async ({ page }) => {
@@ -4031,4 +4036,63 @@ test.describe("responsive staff workspace", () => {
     ).toBeEnabled();
     releaseQuoteReload();
   });
+});
+
+
+test("repeat examination is the single patient entry to the order wizard", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("gmed_lang", "de"));
+  await page.routeWebSocket("**/api/**", socket => socket.close());
+  await installStaffApiMocks(page);
+  await loginAsStaff(page, "admin@gmed.de");
+  const patientId = "00000000-0000-0000-0000-000000000301";
+  const writes: string[] = [];
+  page.on("request", request => { if (request.method() === "POST") writes.push(new URL(request.url()).pathname); });
+  await page.route(`**/api/v1/patients/${patientId}/repeat-intakes`, route => json(route, []));
+  await page.route(`**/api/v1/patients/${patientId}/clinical`, route => json(route, { narrative: { id: "narrative-test", anamnese_aktuelle: "Synthetic follow-up history", is_active: true } }));
+  await page.route(`**/api/v1/patients/${patientId}/medication-import-history*`, route => json(route, { items: [], total: 0 }));
+  await page.route(`**/api/v1/patients/${patientId}/recheck`, route => json(route, { passport_expiry: null, document_alerts: { missing_count: 0, missing_documents: [] } }));
+  await page.route("**/api/v1/framework-contracts?**", route => json(route, []));
+  await page.route("**/api/v1/documents?**", route => json(route, []));
+  await page.goto(`/patients/${patientId}`);
+  await expect(page.getByRole("button", { name: "Auftrag anlegen", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Erneute Anfrage", exact: true }).click();
+  const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme", exact: true });
+  await expect(wizard.getByRole("tab")).toHaveCount(7);
+  await expect(wizard.getByRole("tab", { name: /Dokumentenprüfung/ })).toBeVisible();
+  await expect(wizard.getByRole("tab", { name: /Medizinische/ })).toBeVisible();
+  await wizard.getByRole("button", { name: "Schließen", exact: true }).click();
+  await expect(wizard).toBeHidden();
+  await page.goto(`/patients/${patientId}?tab=orders`);
+  await expect(page.getByRole("button", { name: "Erneute Anfrage", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Auftrag anlegen", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Erneute Anfrage", exact: true }).click();
+  await expect(wizard.getByRole("tab")).toHaveCount(7);
+  expect(writes.filter(path => /order-intakes|leads|prospect/.test(path))).toEqual([]);
+});
+
+
+test("leads page hides patient document review for an unconverted lead linked to an active patient", async ({page}) => {
+  await page.addInitScript(() => localStorage.setItem("gmed_lang", "ru"));
+  await page.routeWebSocket("**/api/**", socket => socket.close());
+  await installStaffApiMocks(page);
+  await loginAsStaff(page, "admin@gmed.de");
+  const leadId = "00000000-0000-0000-0000-000000000902";
+  const patientId = "00000000-0000-0000-0000-000000000301";
+  const reviewReads: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/recheck")) reviewReads.push(request.url()); });
+  await page.route(`**/api/v1/leads/${leadId}`, route => json(route, {
+    id: leadId, first_name: "Ready", last_name: "Lead", qualification_status: "in_progress", compliance_status: "pending",
+    intake_model: "patient_first", prospect_patient_id: patientId, prospect_patient_lifecycle: "active", converted_patient_id: null,
+    wizard_state: {}, services: [], attachments: [], readiness: {conversion_ready: false, blocking_reasons: [], steps: [], checks: []},
+  }));
+  await page.goto(`/leads?lead=${leadId}&view=wizard`);
+  const wizard = page.getByRole("dialog", {name: "Оформление обращения", exact: true});
+  await expect(wizard.getByRole("tab")).toHaveCount(7);
+  await expect(wizard.getByRole("tab", {name: /Проверка документов/})).toHaveCount(0);
+  await wizard.getByRole("tab", {name: /Документы/}).click();
+  await expect(wizard.getByText("Проверка документов пациента", {exact: true})).toHaveCount(0);
+  await expect(wizard.getByText("Сохранённые договоры пациента", {exact: true})).toHaveCount(0);
+  await expect(wizard.getByRole("heading", {name: "Согласие на использование и передачу персональных и медицинских данных", exact: true})).toBeVisible();
+  expect(reviewReads).toEqual([]);
+  await page.screenshot({path: "../artifacts/design-qa/leads-linked-patient-documents-ru.png", animations: "disabled"});
 });

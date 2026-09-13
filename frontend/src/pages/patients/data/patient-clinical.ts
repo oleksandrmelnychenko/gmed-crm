@@ -7,8 +7,12 @@ import type {
 type JsonPayload = Record<string, unknown>;
 export type ClinicalSaveMode = "replace" | "merge";
 
-function clinicalSavePath(path: string, mode: ClinicalSaveMode) {
-  return mode === "merge" ? `${path}?mode=merge` : path;
+export type ClinicalEditGuard = { expected_revision: number; operation_id: string; remove_ids?: string };
+function clinicalSavePath(path: string, mode: ClinicalSaveMode, guard?: ClinicalEditGuard) {
+  const params = new URLSearchParams();
+  if (mode === "merge") params.set("mode", mode);
+  if (guard) Object.entries(guard).forEach(([key, value]) => params.set(key, String(value)));
+  return params.size ? `${path}?${params}` : path;
 }
 
 function postJson<T = unknown>(path: string, payload?: JsonPayload) {
@@ -266,6 +270,7 @@ export type PatientImpfstatus = {
 };
 
 export type PatientClinicalProfile = {
+  revision?: number;
   diagnoses: ClinicalDiagnosis[];
   medications: ClinicalMedication[];
   examinations: ClinicalExamination[];
@@ -421,16 +426,18 @@ export function savePatientDiagnoses(
   patientId: string,
   items: ClinicalDiagnosis[],
   mode: ClinicalSaveMode = "replace",
+  guard?: ClinicalEditGuard,
 ) {
-  return postJson(clinicalSavePath(`/patients/${patientId}/diagnoses`, mode), { items });
+  return postJson(clinicalSavePath(`/patients/${patientId}/diagnoses`, mode, guard), { items });
 }
 
 export function savePatientMedications(
   patientId: string,
   items: ClinicalMedication[],
   mode: ClinicalSaveMode = "replace",
+  guard?: ClinicalEditGuard,
 ) {
-  return postJson(clinicalSavePath(`/patients/${patientId}/medications`, mode), { items });
+  return postJson(clinicalSavePath(`/patients/${patientId}/medications`, mode, guard), { items });
 }
 
 export function savePatientExaminations(patientId: string, items: ClinicalExamination[]) {
@@ -446,9 +453,10 @@ export function savePatientClinicalWarnings(
   kind: ClinicalWarningKind,
   items: ClinicalWarning[],
   mode: ClinicalSaveMode = "replace",
+  guard?: ClinicalEditGuard,
 ) {
   return postJson(
-    clinicalSavePath(`/patients/${patientId}/clinical-warnings`, mode),
+    clinicalSavePath(`/patients/${patientId}/clinical-warnings`, mode, guard),
     { kind, items },
   );
 }
@@ -484,9 +492,9 @@ export function patientNarrativePayload(narrative: ClinicalNarrative): JsonPaylo
   };
 }
 
-export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative) {
+export function savePatientNarrative(patientId: string, narrative: ClinicalNarrative, guard?: ClinicalEditGuard) {
   return postJson<ClinicalNarrative>(
-    `/patients/${patientId}/narrative`,
+    clinicalSavePath(`/patients/${patientId}/narrative`, guard ? "merge" : "replace", guard),
     patientNarrativePayload(narrative),
   );
 }

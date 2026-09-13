@@ -1,3 +1,4 @@
+import { RepeatIntakePicker } from "./repeat-intake-picker";
 import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
 
 import {
@@ -566,10 +567,15 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   const [accountRevision, setAccountRevision] = useState(0);
   const refreshAccount = useCallback(() => setAccountRevision(value => value + 1), []);
   useFinanceAutoRefresh(refreshAccount, accountStatementLoading, Boolean(id && canViewFinance));
+  const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
   const [repeatIntakeOpen, setRepeatIntakeOpen] = useState(false);
+  const [repeatPickerOpen, setRepeatPickerOpen] = useState(false);
+  const [repeatCreationKey, setRepeatCreationKey] = useState<string>();
+  const openRepeatIntake = useCallback((leadId: string | null, creationKey?: string) => {
+    setRepeatPickerOpen(false); setRepeatIntakeLeadId(leadId); setRepeatCreationKey(creationKey); setRepeatIntakeOpen(true);
+  }, []);
   const [createOrderOpen, setCreateOrderOpen] = useState(false);
   const [intakeOrderId, setIntakeOrderId] = useState<string | undefined>();
-  const [repeatIntakeLeadId, setRepeatIntakeLeadId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id || !canViewFinance) {
@@ -748,8 +754,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             onMouseEnter={() => void loadLeadWizard()}
             onFocus={() => void loadLeadWizard()}
             onClick={() => {
-              setRepeatIntakeLeadId(null);
-              setRepeatIntakeOpen(true);
+              setRepeatPickerOpen(true);
             }}
           >
             <Plus className="size-3.5" />
@@ -805,7 +810,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               />
               <LazyPatientProfileTab
               profileControls={{
-                canCreateOrders,
                 canCreateTasks,
                 canEditPatientProfile,
                 canExportPatientCompliance,
@@ -831,7 +835,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onLegalStatusSheetOpenChange={onLegalStatusSheetOpenChange}
               onNotesSheetOpenChange={onNotesSheetOpenChange}
               onOpenTab={handleWorkspaceTabChange}
-              onCreateOrder={() => setCreateOrderOpen(true)}
               openProfileEditor={onOpenProfileEditor}
               patientDetailStatusLabel={patientDetailStatusLabel}
               reload={reload}
@@ -881,11 +884,13 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <LazyPatientOrdersTab
               emptyLabel={emptyOrdersLabel}
               formatDate={formatDate}
-              onCreateOrder={canCreateOrders && id
-                ? () => setCreateOrderOpen(true)
-                : undefined}
               onOpenOrder={(orderId) => {
-                if (orders.find(order => order.id === orderId)?.intake_state === "draft" && canCreateOrders) {
+                const selected = orders.find(order => order.id === orderId);
+                if (selected?.status === "cancelled" && selected.repeat_lead_id && canViewLeads) {
+                  staffGo(`/leads?lead=${encodeURIComponent(selected.repeat_lead_id)}`);
+                } else if (selected?.intake_state === "draft" && selected.status !== "cancelled" && canCreateOrders && selected.repeat_lead_id) {
+                  openRepeatIntake(selected.repeat_lead_id);
+                } else if (selected?.intake_state === "draft" && selected.status !== "cancelled" && canCreateOrders) {
                   setIntakeOrderId(orderId); setCreateOrderOpen(true);
                 } else { onOpenOrder(orderId); }
               }}
@@ -1117,6 +1122,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         </Suspense>
       ) : null}
 
+      {repeatPickerOpen ? <RepeatIntakePicker patientId={detail.id} lang={lang} onPick={openRepeatIntake} onClose={() => setRepeatPickerOpen(false)} /> : null}
       {repeatIntakeOpen ? (
         <Suspense
           fallback={(
@@ -1131,11 +1137,16 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           )}
         >
           <LazyLeadWizard
+            entryPoint="repeat-patient"
+            creationKey={repeatCreationKey}
             leadId={repeatIntakeLeadId}
             open
             createMode={repeatIntakeLeadId === null}
             existingPatient={detail}
-            onCreated={setRepeatIntakeLeadId}
+            onCreated={(leadId) => {
+              setRepeatIntakeLeadId(leadId);
+              try { localStorage.removeItem(`gmed:repeat-intake:pending:${detail.id}`); } catch { /* Storage is optional. */ }
+            }}
             onOpenChange={(open) => {
               if (open) return;
               setRepeatIntakeOpen(false);
@@ -1153,7 +1164,12 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               setRepeatIntakeLeadId(null);
               reload();
             }}
-            onOrderCreated={(orderId) => staffGo(`/orders/${orderId}`)}
+            onOrderCreated={(orderId) => {
+              setRepeatIntakeOpen(false);
+              setRepeatIntakeLeadId(null);
+              reload();
+              onOpenOrder(orderId);
+            }}
           />
         </Suspense>
       ) : null}

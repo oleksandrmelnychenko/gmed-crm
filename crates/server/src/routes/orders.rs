@@ -554,7 +554,7 @@ async fn list_orders(
                     .try_get::<Option<Uuid>, _>("source_lead_id")
                     .unwrap_or_default();
 
-                match can_access_order(&state, &auth, order_id, patient_id).await {
+                match if query.lead_id.is_some() { can_access_order_preparation(&state, &auth, order_id, patient_id).await } else { can_access_order(&state, &auth, order_id, patient_id).await } {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(resp) => return resp,
@@ -2556,7 +2556,7 @@ async fn create_order(
         };
         if let Some(row) = existing {
             let order_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            match can_access_order(&state, &auth, order_id, None).await {
+            match can_access_order_preparation(&state, &auth, order_id, None).await {
                 Ok(true) => {}
                 Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
                 Err(resp) => return resp,
@@ -2662,7 +2662,20 @@ async fn create_order(
             .unwrap_or_default();
         let belongs_to_subject = match patient_id {
             Some(patient_id) => contract_patient_id == Some(patient_id),
-            None => contract_lead_id == source_lead_id,
+            None => {
+                (source_lead_id.is_some() && contract_lead_id == source_lead_id)
+                    || match can_reuse_patient_contract(
+                        &state,
+                        &auth,
+                        source_lead_id,
+                        contract_patient_id,
+                    )
+                    .await
+                    {
+                        Ok(allowed) => allowed,
+                        Err(response) => return response,
+                    }
+            }
         };
         if !belongs_to_subject {
             return err(
@@ -2718,6 +2731,31 @@ async fn create_order(
         Err(resp) => return resp,
     };
 
+    let repeat_patient: Option<Uuid> = if let Some(lead_id) = source_lead_id {
+        match sqlx::query_scalar(
+            "SELECT repeat_patient_id FROM leads WHERE id=$1 AND converted_patient_id IS NULL",
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(value) => value.flatten(),
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load repeat intake",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(patient_id) = repeat_patient
+        && let Err(response) = ensure_patient_access(&state, &auth, patient_id).await
+    {
+        return response;
+    }
+
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('order_number_seq') AS \"v!\"")
         .fetch_one(&state.db)
         .await
@@ -2741,14 +2779,14 @@ async fn create_order(
                case_id,
                date_from,
                date_to,
-               created_by
+               created_by, intake_state
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL DO NOTHING
            RETURNING id, order_number, created_at"#,
     )
     .bind(num)
-    .bind(patient_id)
+    .bind(patient_id.or(repeat_patient))
     .bind(contract_id)
     .bind(needs_description)
     .bind(source_lead_id)
@@ -2756,6 +2794,11 @@ async fn create_order(
     .bind(date_from)
     .bind(date_to)
     .bind(auth.user_id)
+    .bind(if repeat_patient.is_some() {
+        "draft"
+    } else {
+        "legacy"
+    })
     .fetch_optional(&state.db)
     .await
     {
@@ -2974,7 +3017,7 @@ async fn get_order(
         .try_get::<Option<String>, _>("p_pid")
         .unwrap_or_default();
 
-    match can_access_order(&state, &auth, order_db_id, patient_id).await {
+    match can_access_order_preparation(&state, &auth, order_db_id, patient_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -3180,6 +3223,30 @@ async fn get_order(
             "external_document_auto_name": l.try_get::<Option<String>, _>("external_document_auto_name").unwrap_or_default(),
             "external_document_filename": l.try_get::<Option<String>, _>("external_document_filename").unwrap_or_default(),
         }));
+    }
+
+    let preparing =
+        match sqlx::query_scalar::<_, bool>("SELECT intake_state='draft' FROM orders WHERE id=$1")
+            .bind(order_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(%error, %order_id, "load order preparation state");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order");
+            }
+        };
+    if preparing {
+        return Json(serde_json::json!({
+            "id":order_db_id,"order_number":order_number,"patient_id":patient_id,
+            "lead_id":source_lead_id,"source_lead_id":source_lead_id,"contract_id":contract_id,
+            "case_id":case_id,"case_code":case_code,"patient_name":patient_name,"patient_pid":patient_pid,
+            "phase":phase,"status":status,"intake_state":"draft","needs_description":needs_description,
+            "date_from":order_date_from,"date_to":order_date_to,"signed_patient":signed_patient,"signed_agency":signed_agency,
+            "total_estimated":total_estimated,"total_actual":total_actual,"currency":order_currency,
+            "leistungen":leist_json,"external_invoices":[],"created_at":created_at,"updated_at":updated_at
+        })).into_response();
     }
 
     let external_invoice_rows = match sqlx::query(
@@ -3928,7 +3995,12 @@ async fn update_order_commercial_basis(
 
     let order = match sqlx::query(
         r#"SELECT patient_id, source_lead_id, date_from, date_to,
-                  total_estimated, prepayment_amount
+                  total_estimated, prepayment_amount,
+                  intake_state = 'draft' AND EXISTS (
+                      SELECT 1 FROM leads l WHERE l.id = orders.source_lead_id
+                      AND l.repeat_patient_id = orders.patient_id AND l.converted_patient_id IS NULL
+                      AND l.failed_outcome_status = 'none'
+                  ) AS repeat_draft
            FROM orders
            WHERE id = $1"#,
     )
@@ -3961,10 +4033,36 @@ async fn update_order_commercial_basis(
     let current_prepayment_amount = order
         .try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount")
         .unwrap_or_default();
-    match can_access_order(&state, &auth, order_id, order_patient_id).await {
+    match can_access_order_preparation(&state, &auth, order_id, order_patient_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
+    }
+
+    if order.get::<bool, _>("repeat_draft")
+        && (body.signed_patient == Some(true) || body.signed_agency == Some(true))
+    {
+        let current_document = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=$1
+             AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL
+             AND d.order_intake_context=repeat_order_document_context($1)
+             AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))")
+            .bind(order_id).fetch_one(&state.db).await;
+        match current_document {
+            Ok(true) => {}
+            Ok(false) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Generate the current order document before confirming its signatures",
+                );
+            }
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to verify signed order version",
+                );
+            }
+        }
     }
 
     let total_estimated = match body.total_estimated.as_deref() {
@@ -4065,8 +4163,27 @@ async fn update_order_commercial_basis(
             .try_get::<Option<Uuid>, _>("lead_id")
             .unwrap_or_default();
         let belongs_to_subject = match order_patient_id {
-            Some(patient_id) => contract_patient_id == Some(patient_id),
-            None => contract_lead_id == order_lead_id,
+            Some(patient_id) => {
+                contract_patient_id == Some(patient_id)
+                    || (order.get::<bool, _>("repeat_draft")
+                        && contract_patient_id.is_none()
+                        && order_lead_id.is_some()
+                        && contract_lead_id == order_lead_id)
+            }
+            None => {
+                (order_lead_id.is_some() && contract_lead_id == order_lead_id)
+                    || match can_reuse_patient_contract(
+                        &state,
+                        &auth,
+                        order_lead_id,
+                        contract_patient_id,
+                    )
+                    .await
+                    {
+                        Ok(allowed) => allowed,
+                        Err(response) => return response,
+                    }
+            }
         };
         if !belongs_to_subject {
             return err(
@@ -7051,7 +7168,7 @@ async fn list_leistungen(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
         return e;
     }
-    match can_access_order(&state, &auth, order_id, None).await {
+    match can_access_order_preparation(&state, &auth, order_id, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -7166,7 +7283,7 @@ async fn add_leistung(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match can_access_order(&state, &auth, order_id, None).await {
+    match can_access_order_preparation(&state, &auth, order_id, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -7575,7 +7692,7 @@ async fn sync_lead_wizard_leistungen(
     if let Err(resp) = auth.require_any_role(&[Role::PatientManager]) {
         return resp;
     }
-    match can_access_order(&state, &auth, order_id, None).await {
+    match can_access_order_preparation(&state, &auth, order_id, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -9260,6 +9377,40 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
 }
 
+// A repeat intake may reuse only its attached patient's contract. Lead/order access
+// does not replace the patient authorization check.
+async fn can_reuse_patient_contract(
+    state: &AppState,
+    auth: &AuthUser,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    let (Some(lead_id), Some(patient_id)) = (lead_id, patient_id) else {
+        return Ok(false);
+    };
+    let linked: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM leads l
+            JOIN patients p ON p.id = l.prospect_patient_id
+            WHERE l.id = $1 AND p.id = $2
+              AND l.intake_model = 'patient_first'
+              AND p.lifecycle_status IN ('active', 'inactive')
+        )"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, lead_id = %lead_id, "validate repeat intake contract owner");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate contract owner")
+    })?;
+    if linked {
+        ensure_patient_access(state, auth, patient_id).await?;
+    }
+    Ok(linked)
+}
+
 async fn ensure_patient_access(
     state: &AppState,
     auth: &AuthUser,
@@ -9281,6 +9432,29 @@ async fn ensure_patient_access(
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
+}
+
+/// Only preparation endpoints may access a repeat draft. Operational endpoints keep
+/// using can_access_order, which refuses every draft even for CEO/Billing.
+async fn can_access_order_preparation(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    patient_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    let repeat_patient = sqlx::query_scalar::<_,Uuid>(
+        "SELECT o.patient_id FROM orders o JOIN leads l ON l.id=o.source_lead_id
+         WHERE o.id=$1 AND o.intake_state='draft' AND o.status='active'
+           AND l.repeat_patient_id=o.patient_id AND l.converted_patient_id IS NULL AND l.failed_outcome_status='none'")
+        .bind(order_id).fetch_optional(&state.db).await
+        .map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to validate repeat preparation access"))?;
+    if let Some(patient) = repeat_patient {
+        if !matches!(auth.role, Role::Ceo | Role::PatientManager) {
+            return Ok(false);
+        }
+        return super::patients::has_patient_edit_access(state, auth, patient).await;
+    }
+    can_access_order(state, auth, order_id, patient_id).await
 }
 
 async fn can_access_order(

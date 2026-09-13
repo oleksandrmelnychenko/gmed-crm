@@ -35,11 +35,11 @@ type LeadMedicalIntakeFormProps = {
   providers: ProviderSummary[];
   allDoctors: AllDoctorOption[];
   specializations: SpecializationItem[];
-  onNarrativeChange: (value: ClinicalNarrative) => void | Promise<void>;
-  onDiagnosesChange: (value: ClinicalDiagnosis[]) => void | Promise<void>;
-  onMedicationsChange: (value: ClinicalMedication[]) => void | Promise<void>;
-  onAllergiesChange: (value: ClinicalWarning[]) => void | Promise<void>;
-  onCavesChange: (value: ClinicalWarning[]) => void | Promise<void>;
+  onNarrativeChange: (value: ClinicalNarrative) => ClinicalNarrative | Promise<ClinicalNarrative>;
+  onDiagnosesChange: (value: ClinicalDiagnosis[]) => ClinicalDiagnosis[] | Promise<ClinicalDiagnosis[]>;
+  onMedicationsChange: (value: ClinicalMedication[]) => ClinicalMedication[] | Promise<ClinicalMedication[]>;
+  onAllergiesChange: (value: ClinicalWarning[]) => ClinicalWarning[] | Promise<ClinicalWarning[]>;
+  onCavesChange: (value: ClinicalWarning[]) => ClinicalWarning[] | Promise<ClinicalWarning[]>;
 };
 
 function yesNoValue(value: boolean | null | undefined, tx: Tx) {
@@ -99,8 +99,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          await onAllergiesChange(next);
-          return next;
+          return await onAllergiesChange(next);
         }}
       />
       <PatientClinicalWarningSection
@@ -109,8 +108,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          await onCavesChange(next);
-          return next;
+          return await onCavesChange(next);
         }}
       />
       <DiagnosisTreeSection
@@ -121,8 +119,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          await onDiagnosesChange(next);
-          return next;
+          return await onDiagnosesChange(next);
         }}
       />
       <div id={anamneseId} tabIndex={-1} className="rounded-xl outline-none">
@@ -133,8 +130,7 @@ export function LeadMedicalIntakeForm({
           lang={lang}
           requireCurrent
           onSave={async (next) => {
-            await onNarrativeChange(next);
-            return next;
+            return await onNarrativeChange(next);
           }}
           loadHistory={async () => lead.prospect_patient_id
             ? fetchNarrativeHistory(lead.prospect_patient_id)
@@ -147,8 +143,7 @@ export function LeadMedicalIntakeForm({
         canManage
         lang={lang}
         onSave={async (next) => {
-          await onMedicationsChange(next);
-          return next;
+          return await onMedicationsChange(next);
         }}
       />
     </section>

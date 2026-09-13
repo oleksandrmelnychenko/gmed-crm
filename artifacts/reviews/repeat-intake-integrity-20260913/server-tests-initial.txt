@@ -1,0 +1,190 @@
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 3.90s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 1 test
+test repeat_order_document_changes_require_current_documents_before_confirmation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 7.82s
+
+    Finished `test` profile [unoptimized] target(s) in 0.30s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 36 tests
+test convert_lead_requires_patient_manager ... ok
+test convert_lead_requires_qualified ... ok
+test converted_lead_is_absent_from_registry_but_detail_remains_auditable ... ok
+test create_and_get_lead ... ok
+test create_lead_requires_name ... ok
+test failed_lead_purges_only_unconverted_prospect_and_preserves_attached_patient ... ok
+test full_lead_lifecycle ... ok
+test get_nonexistent_lead_returns_404 ... ok
+test lead_can_convert_with_the_newest_accepted_quote_while_awaiting_prepayment ... ok
+test lead_order_draft_is_idempotent_before_patient_conversion ... ok
+test lead_readiness_normalizes_cost_passthrough_vat ... ok
+test leads_list_forbidden_for_billing ... ok
+test leads_list_forbidden_for_interpreter ... ok
+test leads_list_ok_for_ceo ... ok
+test leads_list_ok_for_patient_manager ... ok
+test leads_list_ok_for_sales ... ok
+test leads_list_requires_auth ... ok
+test list_leads_exposes_conversion_ready_field ... ok
+test patient_first_conversion_activates_the_prospect_and_keeps_case_provenance ... ok
+test public_lead_intake_stores_contact_form_submissions_as_leads ... ok
+test public_lead_intake_stores_wizard_submissions_as_questionnaire_leads ... ok
+test qualify_lead_flow ... ok
+test qualify_lead_invalid_status_rejected ... ok
+test ready_lead_conversion_atomically_transfers_onboarding_artifacts ... ok
+test repeat_clinical_retry_conflict_and_explicit_removal_preserve_integrity ... ok
+test repeat_intake_creation_is_atomic_replayable_visible_and_archivable ... ok
+test repeat_intake_requires_existing_patient_access_before_assignment ... ok
+test repeat_order_document_changes_require_current_documents_before_confirmation ... ok
+test returning_patient_attach_reuses_identity_without_overwriting_master_data ... ok
+test stats_forbidden_for_interpreter ... ok
+test stats_leads_by_status_returns_array ... ok
+test stats_leads_monthly_returns_array ... ok
+test stats_leads_returns_data ... ok
+test wizard_convert_requires_identity_basics ... ok
+test wizard_convert_uses_the_full_readiness_gate ... ok
+test wizard_lead_fields_round_trip_through_update ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 300.10s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 05s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 1 test
+test routes::order_intakes::document_review_tests::passport_checks_current_and_planned_validity_without_blocking ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 315 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized] target(s) in 0.29s
+     Running unittests src/lib.rs (target/debug/deps/gmed_server-2ea22f305f381169)
+
+running 26 tests
+test routes::leads::auto_purge_tests::active_patient_is_never_purged ... ok
+test routes::leads::auto_purge_tests::already_anonymized_sentinel_name_is_skipped ... ok
+test routes::leads::auto_purge_tests::already_marked_delete_anonymized_is_skipped ... ok
+test routes::leads::auto_purge_tests::archived_within_retention_is_kept ... ok
+test routes::leads::auto_purge_tests::boundary_at_exactly_retention_days_is_purged ... ok
+test routes::leads::auto_purge_tests::archived_older_than_retention_is_purged ... ok
+test routes::leads::auto_purge_tests::deleted_patient_is_never_purged_again ... ok
+test routes::leads::auto_purge_tests::converted_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::in_progress_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::inactive_patient_is_never_purged ... ok
+test routes::leads::auto_purge_tests::new_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::not_qualified_older_than_retention_is_purged ... ok
+test routes::leads::auto_purge_tests::prospect_of_converted_lead_is_never_purged ... ok
+test routes::leads::auto_purge_tests::prospect_of_unconverted_lead_is_purged ... ok
+test routes::leads::lead_conversion_readiness_tests::address_is_not_required_before_healthcare_consent ... ok
+test routes::leads::lead_conversion_readiness_tests::conversion_readiness_is_true_for_fully_ready_qualified_lead ... ok
+test routes::leads::lead_conversion_readiness_tests::complete_address_is_required_after_healthcare_consent ... ok
+test routes::leads::lead_conversion_readiness_tests::enhanced_due_diligence_country_detection_covers_blacklist_and_high_risk ... ok
+test routes::leads::lead_conversion_readiness_tests::converted_patient_id_forces_conversion_ready_false ... ok
+test routes::leads::lead_conversion_readiness_tests::order_cost_estimate_document_is_required_for_conversion ... ok
+test routes::leads::lead_conversion_readiness_tests::enhanced_due_diligence_document_is_required_for_risk_country ... ok
+test routes::leads::lead_conversion_readiness_tests::signed_confidentiality_release_is_required_for_conversion ... ok
+test routes::leads::questionnaire_mapping_tests::intake_language_uses_supported_code_or_locale_fallback ... ok
+test routes::leads::lead_conversion_readiness_tests::signed_lead_can_convert_while_awaiting_prepayment ... ok
+test routes::leads::questionnaire_mapping_tests::questionnaire_country_codes_become_patient_country_names ... ok
+test routes::leads::questionnaire_mapping_tests::questionnaire_contacts_are_deduplicated_and_keep_whatsapp_context ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 290 filtered out; finished in 0.01s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 4.54s
+     Running tests/patient_clinical_api.rs (target/debug/deps/patient_clinical_api-b178ae0c2bb089fa)
+
+running 6 tests
+test billing_cannot_access_patient_clinical_routes ... ok
+test patient_clinical_master_round_trip_with_provider_doctor ... ok
+test patient_clinical_merge_preserves_rows_omitted_by_returning_patient_intake ... ok
+test patient_clinical_narrative_upserts ... ok
+test patient_clinical_pdf_export_returns_pdf ... ok
+test patient_clinical_rejects_invalid_provider_doctor_attribution ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 34 filtered out; finished in 100.99s
+
+    Finished `test` profile [unoptimized] target(s) in 0.28s
+     Running tests/patient_clinical_api.rs (target/debug/deps/patient_clinical_api-b178ae0c2bb089fa)
+
+running 1 test
+test clinical_edits_preserve_ocr_document_provenance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 39 filtered out; finished in 6.90s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 2.15s
+     Running tests/order_intakes_api.rs (target/debug/deps/order_intakes_api-9847f6214d96bf06)
+
+running 1 test
+test returning_patient_intake_preserves_history_and_guards_every_transition ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.81s
+
+    Checking tokio v1.52.3
+    Checking tokio-util v0.7.18
+    Checking h2 v0.4.16
+    Checking hyper v1.9.0
+    Checking hyper-util v0.1.20
+    Checking tower v0.5.3
+    Checking tokio-stream v0.1.18
+    Checking tokio-tungstenite v0.29.0
+    Checking axum v0.8.9
+    Checking sqlx-core v0.8.6
+    Checking sqlx-postgres v0.8.6
+    Checking tower-http v0.6.10
+    Checking hyper-timeout v0.5.2
+    Checking tokio-rustls v0.26.4
+    Checking unicase v2.9.0
+   Compiling gmed-db v0.1.0 (/app/crates/db)
+    Checking mime_guess v2.0.5
+    Checking tonic v0.14.5
+    Checking hyper-rustls v0.27.9
+    Checking sqlx v0.8.6
+    Checking reqwest v0.13.3
+    Checking axum-prometheus v0.10.0
+    Checking tower_governor v0.8.0
+    Checking gmed-server v0.1.0 (/app/crates/server)
+error: this `if` statement can be collapsed
+    --> crates/server/src/routes/leads.rs:3543:5
+     |
+3543 | /     if let Some(patient_id) = body.attach_patient_id {
+3544 | |         if let Err(response) = require_repeat_patient_access(&state, &auth, patient_id).await {
+3545 | |             return response;
+3546 | |         }
+3547 | |     }
+     | |_____^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+     = note: `-D clippy::collapsible-if` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+     |
+3543 ~     if let Some(patient_id) = body.attach_patient_id
+3544 ~         && let Err(response) = require_repeat_patient_access(&state, &auth, patient_id).await {
+3545 |             return response;
+3546 ~         }
+     |
+
+error: this `if` statement can be collapsed
+    --> crates/server/src/routes/orders.rs:2753:5
+     |
+2753 | /     if let Some(patient_id) = repeat_patient {
+2754 | |         if let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+2755 | |             return response;
+2756 | |         }
+2757 | |     }
+     | |_____^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+2753 ~     if let Some(patient_id) = repeat_patient
+2754 ~         && let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+2755 |             return response;
+2756 ~         }
+     |
+
+error: could not compile `gmed-server` (lib) due to 2 previous errors

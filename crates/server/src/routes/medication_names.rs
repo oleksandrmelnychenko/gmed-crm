@@ -43,7 +43,7 @@ struct CatalogQuery {
     page_size: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct PairInput {
     handelsname: String,
     wirkstoff: String,

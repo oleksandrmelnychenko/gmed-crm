@@ -2848,6 +2848,25 @@ async fn create_quote(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
         }
     };
+    let repeat_intake = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT o.id FROM orders o JOIN leads l ON l.id=o.source_lead_id
+         WHERE o.id=$1 AND o.intake_state='draft' AND o.status='active'
+           AND l.repeat_patient_id=o.patient_id AND l.converted_patient_id IS NULL
+           AND l.failed_outcome_status='none' FOR UPDATE OF o",
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(value) => value.is_some(),
+        Err(_) => {
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to prepare repeat quote",
+            );
+        }
+    };
+    let intake = intake || repeat_intake;
     let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
         Ok(items) if !items.is_empty() => items,
         Ok(_) => {

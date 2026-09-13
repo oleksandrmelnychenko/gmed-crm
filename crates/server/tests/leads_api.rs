@@ -326,7 +326,10 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
            ) VALUES (
                 $1, $2, $3, 'Coordinate orthopedic treatment',
                 true, true, now(), now(), now(), true, 119, $4
-           ) RETURNING id"#,
+           ) ON CONFLICT(source_lead_id) WHERE source_lead_id IS NOT NULL DO UPDATE
+             SET contract_id=EXCLUDED.contract_id,needs_description=EXCLUDED.needs_description,
+                 prepayment_required=true,total_estimated=119
+           RETURNING id"#,
     )
     .bind(format!("A-ONBOARD-{tag}"))
     .bind(contract_id)
@@ -398,6 +401,9 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         document_ids.push(document_id);
     }
 
+    sqlx::query("UPDATE orders SET signed_patient=true,signed_agency=true,signed_at=now(),signed_patient_at=now(),signed_agency_at=now() WHERE id=$1").bind(order_id).execute(pool).await.unwrap();
+    sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE order_id=$1")
+        .bind(order_id).execute(pool).await.unwrap();
     SeededOnboardingArtifacts {
         case_id,
         document_ids,
@@ -1705,6 +1711,12 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     .fetch_one(pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$2)")
+        .bind(patient_id)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, country, primary_language,
@@ -1790,6 +1802,63 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
 
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
     assert_eq!(artifacts.case_id, case_id);
+    // Reuse previous patient confirmations and the signed framework for the whole new visit.
+    sqlx::query("UPDATE patients SET legal_status = $2 WHERE id = $1")
+        .bind(patient_id)
+        .bind(json!({"identity_verified": true, "dsgvo_signed": true,
+            "confidentiality_release_signed": true, "compliance_completed": true}))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE documents SET patient_id = $2, lead_id = NULL WHERE lead_id = $1 AND compliance_kind IN ('identity', 'dsgvo', 'confidentiality_release')")
+        .bind(lead_id).bind(patient_id).execute(pool).await.unwrap();
+    sqlx::query("UPDATE framework_contracts SET patient_id = $2, lead_id = NULL, valid_from = DATE '2030-01-01', valid_to = DATE '2030-12-31' WHERE id = $1")
+        .bind(artifacts.contract_id).bind(patient_id).execute(pool).await.unwrap();
+    let contract_path = format!("/api/v1/orders/{}/commercial-basis", artifacts.order_id);
+    let (status, response) = json_request(&app, "POST", &contract_path, &pm,
+        Some(json!({"contract_id": artifacts.contract_id, "date_from": "2030-09-01", "date_to": "2030-09-15"}))).await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE order_id=$1")
+        .bind(artifacts.order_id).execute(pool).await.unwrap();
+    let other_patient: Uuid = sqlx::query_scalar("INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, lifecycle_status, created_by) VALUES ($1, 'Other', 'Patient', DATE '1985-01-01', 'female', 'active', $2) RETURNING id")
+        .bind(format!("P-OTHER-{tag}")).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+    let other_contract: Uuid = sqlx::query_scalar("INSERT INTO framework_contracts (patient_id, contract_number, signed_at, status, created_by) VALUES ($1, $2, now(), 'signed', $3) RETURNING id")
+        .bind(other_patient).bind(format!("FC-OTHER-{tag}")).bind(app.patient_manager_id).fetch_one(pool).await.unwrap();
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &contract_path,
+        &pm,
+        Some(json!({"contract_id": other_contract})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    // Expiry during the visit fails even if the stored status still says signed.
+    for (contract_status, end) in [("signed", "2030-09-14"), ("expired", "2030-12-31")] {
+        sqlx::query(
+            "UPDATE framework_contracts SET status = $2, valid_to = $3::text::date WHERE id = $1",
+        )
+        .bind(artifacts.contract_id)
+        .bind(contract_status)
+        .bind(end)
+        .execute(pool)
+        .await
+        .unwrap();
+        let (status, checked) =
+            json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{checked}");
+        assert_eq!(checked["readiness"]["conversion_ready"], false, "{checked}");
+        let contract_check = checked["readiness"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "contract_signed")
+            .unwrap();
+        assert_eq!(contract_check["passed"], false, "{contract_check}");
+    }
+    sqlx::query("UPDATE framework_contracts SET status = 'signed', valid_to = DATE '2030-12-31' WHERE id = $1")
+        .bind(artifacts.contract_id).execute(pool).await.unwrap();
+
     let (status, lead) =
         json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{lead}");
@@ -1936,6 +2005,13 @@ async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_pat
     .fetch_one(pool)
     .await
     .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)")
+        .bind(active_patient_id)
+        .bind(app.patient_manager_id)
+        .bind(app.ceo_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let (status, attached) = json_request(
         &app,
         "POST",
@@ -2862,4 +2938,463 @@ async fn wizard_lead_fields_round_trip_through_update() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+async fn seed_repeat_patient(app: &TestApp, assigned: bool) -> Uuid {
+    let patient: Uuid=sqlx::query_scalar("INSERT INTO patients(patient_id,first_name,last_name,birth_date,gender,lifecycle_status,created_by,languages) VALUES($1,'Repeat','Regression',DATE '1982-04-03','female','active',$2,ARRAY['de']) RETURNING id")
+        .bind(format!("P-REPEAT-{}",Uuid::new_v4())).bind(app.ceo_id).fetch_one(&app.suite.pool).await.unwrap();
+    if assigned {
+        sqlx::query(
+            "INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$3)",
+        )
+        .bind(patient)
+        .bind(app.patient_manager_id)
+        .bind(app.ceo_id)
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    }
+    patient
+}
+#[tokio::test]
+async fn repeat_intake_creation_is_atomic_replayable_visible_and_archivable() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let patient = seed_repeat_patient(&app, true).await;
+    let key = Uuid::new_v4();
+    let body = json!({"first_name":"Repeat","last_name":"Regression","repeat_patient_id":patient,"creation_key":key});
+    let (a, b) = tokio::join!(
+        json_request(&app, "POST", "/api/v1/leads", &pm, Some(body.clone())),
+        json_request(&app, "POST", "/api/v1/leads", &pm, Some(body.clone()))
+    );
+    assert!(a.0.is_success(), "{:?}", a);
+    assert!(b.0.is_success(), "{:?}", b);
+    assert_eq!(a.1["id"], b.1["id"]);
+    let lead = Uuid::parse_str(a.1["id"].as_str().unwrap()).unwrap();
+    let (cases,orders):(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM cases WHERE source_lead_id=$1),(SELECT count(*) FROM orders WHERE source_lead_id=$1)").bind(lead).fetch_one(&app.suite.pool).await.unwrap();
+    assert_eq!((cases, orders), (1, 1));
+    let (order, state): (Uuid, String) =
+        sqlx::query_as("SELECT id,intake_state FROM orders WHERE source_lead_id=$1")
+            .bind(lead)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(state, "draft");
+    for path in [
+        format!("/api/v1/orders/{order}"),
+        format!("/api/v1/orders?lead_id={lead}"),
+    ] {
+        let (s, b) = json_request(&app, "GET", &path, &pm, None).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm,
+        Some(json!({"source_lead_id":lead})),
+    )
+    .await;
+    assert!(s.is_success(), "{b}");
+    assert_eq!(b["id"], order.to_string());
+    let (s, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order}"),
+        &app.auth_header("billing"),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order}/phase"),
+        &pm,
+        Some(json!({"phase":"planning"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let tracking: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_payment_tracking WHERE order_id=$1")
+            .bind(order)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(tracking, 0);
+    let planning: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_planning_preparation WHERE order_id=$1")
+            .bind(order)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(planning, 0);
+    for path in [
+        format!("/api/v1/patients/{patient}/orders"),
+        format!("/api/v1/patients/{patient}/repeat-intakes"),
+    ] {
+        let (s, b) = json_request(&app, "GET", &path, &pm, None).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        assert_eq!(b.as_array().unwrap().len(), 1);
+    }
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/failed-flow"),
+        &pm,
+        Some(json!({"resolution":"archive","reason":"not_our_lead"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id=$1")
+        .bind(order)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "cancelled");
+    let (_, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/repeat-intakes"),
+        &pm,
+        None,
+    )
+    .await;
+    assert!(list.as_array().unwrap().is_empty());
+    let (s, b) = json_request(&app, "POST", "/api/v1/leads", &pm, Some(body)).await;
+    assert!(s.is_success());
+    assert_eq!(b["id"], lead.to_string());
+}
+#[tokio::test]
+async fn repeat_intake_requires_existing_patient_access_before_assignment() {
+    let Some(app) = test_app().await else { return };
+    let patient = seed_repeat_patient(&app, false).await;
+    let pm = app.auth_header("patient_manager");
+    let (s,_)=json_request(&app,"POST","/api/v1/leads",&pm,Some(json!({"first_name":"Repeat","last_name":"Regression","repeat_patient_id":patient,"creation_key":Uuid::new_v4()}))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let lead:Uuid=sqlx::query_scalar("INSERT INTO leads(first_name,last_name,date_of_birth,legal_sex,intake_model,created_by) VALUES('Repeat','Regression',DATE '1982-04-03','female','patient_first',$1) RETURNING id").bind(app.patient_manager_id).fetch_one(&app.suite.pool).await.unwrap();
+    for existing in [false, true] {
+        if existing {
+            sqlx::query("UPDATE leads SET prospect_patient_id=$2 WHERE id=$1")
+                .bind(lead)
+                .bind(patient)
+                .execute(&app.suite.pool)
+                .await
+                .unwrap();
+        }
+        let (s, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead}/prospect"),
+            &pm,
+            Some(json!({"attach_patient_id":patient})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::FORBIDDEN);
+    }
+    let grants: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_assignments WHERE patient_id=$1 AND user_id=$2",
+    )
+    .bind(patient)
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(grants, 0);
+}
+#[tokio::test]
+async fn repeat_clinical_retry_conflict_and_explicit_removal_preserve_integrity() {
+    let Some(app) = test_app().await else { return };
+    let patient = seed_repeat_patient(&app, true).await;
+    let ceo = app.auth_header("ceo");
+    let (_, initial) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/clinical"),
+        &ceo,
+        None,
+    )
+    .await;
+    let revision = initial["revision"].as_i64().unwrap();
+    let key = Uuid::new_v4();
+    let path = format!(
+        "/api/v1/patients/{patient}/clinical-warnings?mode=merge&expected_revision={revision}&operation_id={key}"
+    );
+    let body =
+        json!({"kind":"allergie","items":[{"label":"Synthetic allergy","reaction":"Initial"}]});
+    for _ in 0..2 {
+        let (s, b) = json_request(&app, "POST", &path, &ceo, Some(body.clone())).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({"kind":"allergie","items":[{"label":"Different content"}]})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "A replay key cannot acknowledge another payload"
+    );
+    let (_, current) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/clinical"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(current["allergien"].as_array().unwrap().len(), 1);
+    let stale = format!(
+        "/api/v1/patients/{patient}/clinical-warnings?mode=merge&expected_revision={revision}&operation_id={}",
+        Uuid::new_v4()
+    );
+    let (s, _) = json_request(&app, "POST", &stale, &ceo, Some(body)).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let id = current["allergien"][0]["id"].as_str().unwrap();
+    let rev = current["revision"].as_i64().unwrap();
+    let remove = format!(
+        "/api/v1/patients/{patient}/clinical-warnings?mode=merge&expected_revision={rev}&operation_id={}&remove_ids={id}",
+        Uuid::new_v4()
+    );
+    for _ in 0..2 {
+        let (s, b) = json_request(
+            &app,
+            "POST",
+            &remove,
+            &ceo,
+            Some(json!({"kind":"allergie","items":[]})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+    let (_, current) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/clinical"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert!(current["allergien"].as_array().unwrap().is_empty());
+    let rev = current["revision"].as_i64().unwrap();
+    let path = format!(
+        "/api/v1/patients/{patient}/diagnoses?mode=merge&expected_revision={rev}&operation_id={}",
+        Uuid::new_v4()
+    );
+    for _ in 0..2 {
+        let (s, b) = json_request(
+            &app,
+            "POST",
+            &path,
+            &ceo,
+            Some(json!({"items":[{"kind":"main","label":"Synthetic diagnosis"}]})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_diagnoses WHERE patient_id=$1")
+            .bind(patient)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn repeat_order_document_changes_require_current_documents_before_confirmation() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let ceo = app.auth_header("ceo");
+    let pool = &app.suite.pool;
+    let patient = seed_repeat_patient(&app, true).await;
+    sqlx::query("UPDATE patients SET email='repeat@example.test',phone_primary='+4915111111111',address_country='DE',passport_expiry=DATE '2035-01-01',legal_status=$2 WHERE id=$1")
+        .bind(patient).bind(json!({"identity_verified":true,"dsgvo_signed":true,"confidentiality_release_signed":true,"compliance_completed":true})).execute(pool).await.unwrap();
+    let (s,created)=json_request(&app,"POST","/api/v1/leads",&pm,Some(json!({"first_name":"Repeat","last_name":"Regression","repeat_patient_id":patient,"creation_key":Uuid::new_v4()}))).await;
+    assert_eq!(s, StatusCode::CREATED, "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let seeded = seed_complete_lead_onboarding(&app, lead).await;
+    let order = seeded.order_id;
+    let path = format!("/api/v1/orders/{order}/commercial-basis");
+    let (s,b)=json_request(&app,"POST",&path,&pm,Some(json!({"contract_id":seeded.contract_id,"date_from":"2030-09-01","date_to":"2030-09-15"}))).await;
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "New lead-owned contract must bind to this patient's repeat draft: {b}"
+    );
+    assert_eq!(
+        b["signed_patient"], false,
+        "A changed period must invalidate existing signatures"
+    );
+    let (_, checked) = json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(checked["readiness"]["conversion_ready"], false, "{checked}");
+    let (s, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/wizard-convert"),
+        &pm,
+        Some(json!({"confirmed":true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    let (s, _) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"signed_patient":true})),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "Old documents cannot be signed as the current order"
+    );
+    for template in ["single_order", "order_cost_estimate"] {
+        let payload = json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de","status":"active","bindings":{"period_from":"1999-01-01","estimate_total":"1 EUR"}});
+        let (s, generated) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            Some(payload.clone()),
+        )
+        .await;
+        assert!(s.is_success(), "{generated}");
+        let id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+        let (owner, bindings): (Option<Uuid>, Value) =
+            sqlx::query_as("SELECT lead_id,generated_bindings FROM documents WHERE id=$1")
+                .bind(id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            owner,
+            Some(lead),
+            "The document must stay visible in the repeat lead wizard"
+        );
+        assert_eq!(bindings["period_from"], "2030-09-01");
+        assert_ne!(bindings["estimate_total"], "1 EUR");
+        let (s, replayed) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            Some(payload),
+        )
+        .await;
+        assert!(s.is_success(), "{replayed}");
+        assert_eq!(generated["id"], replayed["id"]);
+    }
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"signed_patient":true,"signed_agency":true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let(s,b)=json_request(&app,"POST",&format!("/api/v1/orders/{order}/leistungen"),&pm,Some(json!({
+        "description":"Initial orthopedic coordination","quantity":1,"unit_price":100,"vat_rate":19,
+        "client_reference":format!("lead-onboarding:{lead}:service:1")
+    }))).await;
+    assert!(s.is_success(), "{b}");
+    assert_eq!(b["id"], seeded.service_id.to_string());
+    let signed: bool = sqlx::query_scalar("SELECT signed_patient FROM orders WHERE id=$1")
+        .bind(order)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        signed,
+        "Saving unchanged service facts must preserve signatures"
+    );
+    // A service edit with the same price also invalidates old confirmations.
+    sqlx::query(
+        "UPDATE order_leistungen SET description='Updated synthetic coordination' WHERE id=$1",
+    )
+    .bind(seeded.service_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let signed: bool = sqlx::query_scalar("SELECT signed_patient FROM orders WHERE id=$1")
+        .bind(order)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(!signed);
+    for template in ["single_order", "order_cost_estimate"] {
+        let(s,b)=json_request(&app,"POST","/api/v1/documents/generate",&ceo,Some(json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de","status":"active"}))).await;
+        assert!(s.is_success(), "{b}");
+    }
+    // Concurrent retries of the same prepared estimate produce one current quote.
+    let quote_path = format!("/api/v1/orders/{order}/quotes");
+    let (first, retry) = tokio::join!(
+        json_request(&app, "POST", &quote_path, &pm, Some(json!({}))),
+        json_request(&app, "POST", &quote_path, &pm, Some(json!({})))
+    );
+    assert!(first.0.is_success(), "{:?}", first);
+    assert!(retry.0.is_success(), "{:?}", retry);
+    assert_eq!(first.1["id"], retry.1["id"]);
+    let quote_id = first.1["id"].as_str().unwrap();
+    let (status, accepted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm,
+        Some(json!({"status":"accepted"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"signed_patient":true,"signed_agency":true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    let (status, qualified) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/qualify"),
+        &pm,
+        Some(json!({"status":"qualified"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{qualified}");
+    let (_, ready) = json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(ready["readiness"]["conversion_ready"], true, "{ready}");
+    let (s, b) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/wizard-convert"),
+        &pm,
+        Some(json!({"confirmed":true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b}");
+    assert_eq!(b["patient_id"], patient.to_string());
+    let (state,count):(String,i64)=sqlx::query_as("SELECT intake_state,(SELECT count(*) FROM orders WHERE source_lead_id=$2) FROM orders WHERE id=$1").bind(order).bind(lead).fetch_one(pool).await.unwrap();
+    assert_eq!(state, "confirmed");
+    assert_eq!(count, 1);
+    let (s, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead}/failed-flow"),
+        &pm,
+        Some(json!({"resolution":"archive","reason":"not_our_lead"})),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "A converted repeat must not archive an operational order"
+    );
 }

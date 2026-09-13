@@ -15,13 +15,15 @@
 2. Текстові файли мають бути з `LF`, бінарні артефакти маркуються в `.gitattributes`.
 
 3. Кожен merge у `main` має проходити:
-   - `cargo fmt --all`
-   - `cargo clippy --workspace --all-targets`
-   - `cargo test --workspace`
+   - `cargo fmt --all -- --check`
+   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
+   - `cargo test --workspace --locked`
    - `npm --prefix frontend run lint -- --max-warnings 0`
    - `npm --prefix frontend run test`
    - `npm --prefix frontend run build`
    - `python scripts/check_repo_hygiene.py`
+
+   Це повний набір перевірок перед merge, а не обов'язкова послідовність після кожної локальної правки. Додаткові CI-перевірки визначені в [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml).
 
 ## Архітектурні правила
 
@@ -38,12 +40,11 @@
 
 ## Локальна перевірка
 
-```bash
-python scripts/check_repo_hygiene.py
-cargo fmt --all
-cargo clippy --workspace --all-targets
-cargo test --workspace
-npm --prefix frontend run lint -- --max-warnings 0
-npm --prefix frontend run test
-npm --prefix frontend run build
-```
+Під час реалізації обирайте перевірки за зміненим кодом і ризиком:
+
+- Документація та інструкції: перевірка змісту, посилань і формату; для skills — валідатор навички.
+- Текст або стилі UI: перевірка відповідного екрана; для змін поведінки — цільові unit/E2E-тести та перевірка типів за потреби.
+- Backend: форматування зміненого коду та тести відповідного модуля; зміни спільних контрактів, доступів або міграцій потребують перевірки залежних сценаріїв.
+- Тести з БД запускайте на одноразовій тестовій базі. Для повного Rust gate на Bash/Docker-хості є [`scripts/run-rust-tests-isolated.sh`](../../scripts/run-rust-tests-isolated.sh).
+
+Після виправлення повторюйте перевірки, яких стосується зміна. Розширюйте набір за новими помилками або залежностями; успішні локальні перевірки не замінюють повний gate перед merge.

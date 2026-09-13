@@ -210,8 +210,8 @@ export async function fetchOrderDirectory(): Promise<OrderDirectory> {
   return { patients, providers, taxonomyNodes: taxonomy.nodes };
 }
 
-export async function fetchPatientOrderRecheck(patientId: string) {
-  const payload = await apiFetch<unknown>(`/patients/${patientId}/recheck`);
+export async function fetchPatientOrderRecheck(patientId: string, options: { forceFresh?: boolean } = {}) {
+  const payload = await apiFetch<unknown>(`/patients/${patientId}/recheck`, options);
   return normalizePatientOrderRecheck(payload);
 }
 

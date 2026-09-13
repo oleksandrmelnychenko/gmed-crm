@@ -1,0 +1,66 @@
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1m 59s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 1 test
+test repeat_order_document_changes_require_current_documents_before_confirmation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 8.23s
+
+    Finished `test` profile [unoptimized] target(s) in 1.21s
+     Running tests/leads_api.rs (target/debug/deps/leads_api-abc2b077f53d1470)
+
+running 1 test
+test repeat_intake_creation_is_atomic_replayable_visible_and_archivable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 6.74s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 2.68s
+     Running tests/contracts_quotes_api.rs (target/debug/deps/contracts_quotes_api-9a156f687dc5693e)
+
+running 19 tests
+test agency_service_catalog_supports_create_read_only_visibility_and_update ... ok
+test billing_can_accept_an_unpaid_quote_but_interpreter_cannot_access_quote ... ok
+test ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes ... ok
+test ceo_can_manage_contracts_and_quotes_without_patient_assignment ... ok
+test create_order_rejects_contract_from_other_patient ... ok
+test framework_contract_can_be_completed_for_lead_without_creating_patient ... ok
+test framework_contract_create_list_and_sign_flow_work ... ok
+test framework_contract_create_returns_user_facing_patient_validation_errors ... ok
+test lead_order_and_service_are_idempotent_without_creating_patient ... ok
+test order_service_can_select_an_explicit_catalog_price_version ... ok
+test order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived ... ok
+test patient_contract_status_is_derived_across_multiple_framework_contracts ... ok
+test quote_commercial_invariants_use_persisted_order_lines ... ok
+test quote_creation_from_order_services_computes_totals_and_updates_order ... ok
+test quote_versions_capture_initial_and_status_update_snapshots ... ok
+test sales_and_concierge_cannot_access_agency_service_catalog ... ok
+test sales_and_concierge_cannot_access_contracts_or_quotes_workspaces ... ok
+test service_group_can_select_an_explicit_catalog_price_version ... ok
+test unused_agency_service_can_be_deleted ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 125.01s
+
+   Compiling gmed-server v0.1.0 (/app/crates/server)
+    Finished `test` profile [unoptimized] target(s) in 1.94s
+     Running tests/patient_repeat_intake_api.rs (target/debug/deps/patient_repeat_intake_api-b77f8219d3def7f5)
+
+running 1 test
+test repeat_intake_is_retired_and_cannot_create_duplicate_leads ... FAILED
+
+failures:
+
+---- repeat_intake_is_retired_and_cannot_create_duplicate_leads stdout ----
+
+thread 'repeat_intake_is_retired_and_cannot_create_duplicate_leads' (251) panicked at crates/server/tests/support/mod.rs:94:13:
+failed to provision integration database: create database gmed_test_250_0e80c3100546427881d568af7b17bdc6: error returned from database: could not create directory "base/194102": No space left on device
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    repeat_intake_is_retired_and_cannot_create_duplicate_leads
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+error: test failed, to rerun pass `-p gmed-server --test patient_repeat_intake_api`

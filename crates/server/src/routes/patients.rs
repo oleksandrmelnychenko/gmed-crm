@@ -6744,7 +6744,8 @@ async fn list_patient_orders(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT id, order_number, phase, status, intake_state, needs_description, created_at,
+        r#"SELECT id, order_number, phase, status, intake_state,
+                  CASE WHEN EXISTS(SELECT 1 FROM leads l WHERE l.id=orders.source_lead_id AND l.repeat_patient_id=$1) THEN source_lead_id END AS repeat_lead_id, needs_description, created_at,
                   total_estimated, total_actual, currency, date_from, date_to,
                   signed_patient, signed_agency, signed_at
            FROM orders
@@ -6768,6 +6769,7 @@ async fn list_patient_orders(
             serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                "repeat_lead_id": row.try_get::<Option<Uuid>,_>("repeat_lead_id").unwrap_or_default(),
                 "intake_state": row.try_get::<String, _>("intake_state").unwrap_or_else(|_| "legacy".into()),
                 "phase": row.try_get::<String, _>("phase").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -11035,23 +11037,16 @@ async fn delete_patient(
 // Add future clinical roles here only when their workspace is enabled globally.
 const PATIENT_CLINICAL_ROLES: &[Role] = &[Role::Ceo];
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientClinicalItems<T> {
     items: Vec<T>,
 }
 
-#[derive(Default, Deserialize)]
-struct PatientClinicalSaveQuery {
-    mode: Option<String>,
-}
+use super::clinical_edits::{
+    PatientClinicalSaveQuery, guard_clinical_edit, remove_clinical_entries,
+};
 
-impl PatientClinicalSaveQuery {
-    fn merge_only(&self) -> bool {
-        self.mode.as_deref() == Some("merge")
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientDiagnosisInput {
     #[serde(default)]
     id: Option<String>,
@@ -11105,7 +11100,7 @@ struct PatientDiagnosisInput {
     treating_none: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientMedicationInput {
     /// Explicit review of this exact pair; absent for imported or unreviewed names.
     #[serde(default)]
@@ -11521,6 +11516,17 @@ async fn get_patient_clinical(
         )
     };
 
+    let mut snapshot = state.db.begin().await.map_err(|_| load_fail())?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *snapshot)
+        .await
+        .map_err(|_| load_fail())?;
+    let revision: i64 = sqlx::query_scalar("SELECT clinical_revision FROM patients WHERE id=$1")
+        .bind(patient_uuid)
+        .fetch_one(&mut *snapshot)
+        .await
+        .map_err(|_| load_fail())?;
+
     let diag_rows = sqlx::query(
         r#"SELECT d.id, d.case_id, d.parent_id, d.kind, d.label, d.icd_code, d.ops_code, d.grade, d.laterality,
                   d.status, d.certainty, d.chronifizierung, d.diagnosed_on, d.note, d.red_flags,
@@ -11559,7 +11565,7 @@ async fn get_patient_clinical(
            ORDER BY d.sort_order, d.created_at"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient diagnoses");
@@ -11588,7 +11594,7 @@ async fn get_patient_clinical(
            ORDER BY m.sort_order, m.created_at"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient medications");
@@ -11628,7 +11634,7 @@ async fn get_patient_clinical(
            ORDER BY e.sort_order, e.created_at"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient examinations");
@@ -11773,7 +11779,7 @@ async fn get_patient_clinical(
            ORDER BY p2.sort_order, p2.created_at"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient procedures");
@@ -11808,7 +11814,7 @@ async fn get_patient_clinical(
            ORDER BY kind, sort_order, created_at"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient clinical warnings");
@@ -11850,7 +11856,7 @@ async fn get_patient_clinical(
            ORDER BY v.occurred_on ASC NULLS LAST, v.created_at, v.sort_order"#,
     )
     .bind(patient_uuid)
-    .fetch_all(&state.db)
+    .fetch_all(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient verlauf");
@@ -11895,7 +11901,7 @@ async fn get_patient_clinical(
            LIMIT 1"#,
     )
     .bind(patient_uuid)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *snapshot)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_uuid, "load patient narrative");
@@ -11907,7 +11913,7 @@ async fn get_patient_clinical(
     let impfstatus_row =
         sqlx::query("SELECT status_text, updated_at FROM patient_impfstatus WHERE patient_id = $1")
             .bind(patient_uuid)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *snapshot)
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, patient_id = %patient_uuid, "load patient impfstatus");
@@ -11921,6 +11927,7 @@ async fn get_patient_clinical(
     });
 
     Ok(Json(json!({
+        "revision": revision,
         "diagnoses": diagnoses,
         "medications": medications,
         "examinations": examinations,
@@ -12229,6 +12236,21 @@ async fn save_patient_diagnoses(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    match guard_clinical_edit(
+        &mut tx,
+        &query,
+        patient_uuid,
+        auth.user_id,
+        "diagnoses",
+        &body,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return Json(json!({ "ok": true, "idempotent_replay": true })).into_response(),
+        Err(response) => return response,
+    }
+
     let old_value = match load_patient_section_snapshot(
         &mut tx,
         patient_uuid,
@@ -12242,6 +12264,10 @@ async fn save_patient_diagnoses(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if let Err(response) = remove_clinical_entries(&mut tx, &query, patient_uuid, "diagnoses").await
+    {
+        return response;
+    }
     let merge_only = query.merge_only();
     let existing_provenance = match sqlx::query(
         "SELECT id, source_document_id, source_import_id, source_candidate_id
@@ -12635,6 +12661,21 @@ async fn save_patient_medications(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    match guard_clinical_edit(
+        &mut tx,
+        &query,
+        patient_uuid,
+        auth.user_id,
+        "medications",
+        &body,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return Json(json!({ "ok": true, "idempotent_replay": true })).into_response(),
+        Err(response) => return response,
+    }
+
     let old_value = match load_patient_section_snapshot(
         &mut tx,
         patient_uuid,
@@ -12648,6 +12689,11 @@ async fn save_patient_medications(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if let Err(response) =
+        remove_clinical_entries(&mut tx, &query, patient_uuid, "medications").await
+    {
+        return response;
+    }
     let existing_ids = match sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM patient_medications WHERE patient_id = $1 AND superseded_at IS NULL",
     )
@@ -13107,7 +13153,7 @@ async fn save_patient_examinations(
     Json(json!({ "ok": true, "count": saved })).into_response()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientNarrativeInput {
     /// Target version. `None`/empty → insert a new version; otherwise update the
     /// matching row (scoped to this patient).
@@ -13139,7 +13185,7 @@ struct PatientNarrativeInput {
     is_active: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientNarrativeSpecializationInput {
     #[serde(default, alias = "id")]
     specialization_id: Option<String>,
@@ -13153,6 +13199,7 @@ async fn save_patient_narrative(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
+    Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientNarrativeInput>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
@@ -13164,7 +13211,7 @@ async fn save_patient_narrative(
         Err(resp) => return resp,
     }
 
-    let target_id = match clinical_parse_uuid(body.id) {
+    let target_id = match clinical_parse_uuid(body.id.clone()) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -13182,12 +13229,12 @@ async fn save_patient_narrative(
         },
         None => chrono::Utc::now(),
     };
-    let aktuelle = clinical_opt_text(body.anamnese_aktuelle);
-    let vorgeschichte = clinical_opt_text(body.anamnese_vorgeschichte);
-    let vegetative = clinical_opt_text(body.anamnese_vegetative);
-    let sozial = clinical_opt_text(body.anamnese_sozial);
-    let beurteilung = clinical_opt_text(body.beurteilung);
-    let red_flags = clinical_opt_text(body.red_flags);
+    let aktuelle = clinical_opt_text(body.anamnese_aktuelle.clone());
+    let vorgeschichte = clinical_opt_text(body.anamnese_vorgeschichte.clone());
+    let vegetative = clinical_opt_text(body.anamnese_vegetative.clone());
+    let sozial = clinical_opt_text(body.anamnese_sozial.clone());
+    let beurteilung = clinical_opt_text(body.beurteilung.clone());
+    let red_flags = clinical_opt_text(body.red_flags.clone());
 
     let retention_years = load_patient_clinical_retention_years(&state, 30).await;
     let mut tx = match state.db.begin().await {
@@ -13197,6 +13244,21 @@ async fn save_patient_narrative(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+
+    match guard_clinical_edit(
+        &mut tx,
+        &query,
+        patient_uuid,
+        auth.user_id,
+        "narrative",
+        &body,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return Json(json!({ "ok": true, "idempotent_replay": true })).into_response(),
+        Err(response) => return response,
+    }
 
     // Serialize concurrent narrative saves for this patient: without this, two
     // simultaneous "set active" saves could each deactivate-then-insert and both
@@ -13949,7 +14011,7 @@ struct PatientProcedureInput {
 /// One Allergie/CAVE entry from the replace-all clinical-warnings save. `kind`
 /// is taken from the request body (not per item); `reaction`/`severity` are
 /// allergy-only and ignored for CAVE rows.
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientClinicalWarningInput {
     #[serde(default)]
     id: Option<String>,
@@ -13965,7 +14027,7 @@ struct PatientClinicalWarningInput {
 
 /// Body for POST /patients/:id/clinical-warnings: replace-all for a single
 /// `kind` ("allergie" | "cave").
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 struct PatientClinicalWarningsBody {
     #[serde(default)]
     kind: Option<String>,
@@ -14129,7 +14191,7 @@ async fn save_patient_clinical_warnings(
         Err(resp) => return resp,
     }
 
-    let Some(kind) = clinical_one_of(body.kind, &["allergie", "cave"]) else {
+    let Some(kind) = clinical_one_of(body.kind.clone(), &["allergie", "cave"]) else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid kind");
     };
     let is_allergie = kind == "allergie";
@@ -14142,6 +14204,21 @@ async fn save_patient_clinical_warnings(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    match guard_clinical_edit(
+        &mut tx,
+        &query,
+        patient_uuid,
+        auth.user_id,
+        kind.as_str(),
+        &body,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => return Json(json!({ "ok": true, "idempotent_replay": true })).into_response(),
+        Err(response) => return response,
+    }
+
     let old_value = match load_patient_section_snapshot(
         &mut tx,
         patient_uuid,
@@ -14155,6 +14232,11 @@ async fn save_patient_clinical_warnings(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if let Err(response) =
+        remove_clinical_entries(&mut tx, &query, patient_uuid, kind.as_str()).await
+    {
+        return response;
+    }
     let merge_only = query.merge_only();
     let existing_ids: HashSet<Uuid> = match sqlx::query_scalar(
         "SELECT id FROM patient_clinical_warnings WHERE patient_id = $1 AND kind = $2",

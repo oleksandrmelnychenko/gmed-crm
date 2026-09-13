@@ -1,3 +1,6 @@
+import { OrderPatientDocumentReview, OrderExistingContractsTable } from "@/pages/orders/ui/order-patient-document-review";
+import { contractCoversOrder, formatIntakeDate } from "@/pages/orders/model/order-intake";
+import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
@@ -63,7 +66,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { clearApiCache } from "@/lib/api";
+import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -92,6 +95,7 @@ import {
   createContract,
   createQuote,
   fetchAgencyServices,
+  fetchContract,
   fetchContracts,
   fetchQuotes,
   updateContractStatus,
@@ -189,6 +193,8 @@ type LeadWizardProps = {
   leadId: string | null;
   open: boolean;
   createMode?: boolean;
+  entryPoint: "lead" | "repeat-patient";
+  creationKey?: string;
   existingPatient?: PatientDetail | null;
   onOpenChange: (open: boolean) => void;
   onCreated?: (leadId: string) => void;
@@ -285,6 +291,7 @@ type Draft = {
   programDateFrom: string;
   programDateTo: string;
   contractEffectiveDate: string;
+  frameworkContractId: string;
   costThreshold: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
@@ -779,6 +786,7 @@ function autosavePayload(
       program_date_from: draft.programDateFrom,
       program_date_to: draft.programDateTo,
       contract_effective_date: draft.contractEffectiveDate,
+      framework_contract_id: draft.frameworkContractId || null,
       cost_threshold: draft.costThreshold,
       registration_country: draft.registrationCountry,
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
@@ -1414,6 +1422,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
     contractEffectiveDate: inputString(lead.wizard_state?.["contract_effective_date"]),
+    frameworkContractId: inputString(lead.wizard_state?.["framework_contract_id"]),
     costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
@@ -1466,6 +1475,7 @@ function blankDraft(): Draft {
     programDateFrom: "",
     programDateTo: "",
     contractEffectiveDate: "",
+    frameworkContractId: "",
     costThreshold: "",
     privacyConsent: false,
     healthcareConsent: false,
@@ -1491,6 +1501,7 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
   const insuranceProvider = patient.insurance_provider?.trim() ?? "";
   const insuranceNumber = patient.insurance_number?.trim() ?? "";
   const insuranceType = patient.insurance_type?.trim() ?? "";
+  const legal = asRecord(patient.legal_status);
 
   return {
     ...draft,
@@ -1506,6 +1517,7 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     country: patient.address_country?.trim() || patient.residence_country?.trim() || "",
     language: normalizedLanguageCode(patient.languages?.[0]),
     hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
+    privacyConsent: legal?.dsgvo_signed === true,
     insuranceType,
     insuranceProvider,
     insuranceNumber,
@@ -1863,6 +1875,9 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
 }
 
 function errorText(error: unknown, tx: Tx): string {
+  if (error instanceof Error && error.message === "Generate the current order document before confirming its signatures") {
+    return tx("Сначала создайте актуальную версию документа заказа, затем подтвердите подписи", "Erstellen Sie zuerst die aktuelle Auftragsversion und bestätigen Sie anschließend die Unterschriften");
+  }
   return leadErrorMessage(error, tx);
 }
 
@@ -2070,6 +2085,7 @@ function documentsValidationIssues(
   draft: Draft | null,
   documents: Record<WizardDocumentKind, DocumentItem[]>,
   tx: Tx,
+  existingChecks?: Map<string, boolean>,
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
@@ -2089,7 +2105,7 @@ function documentsValidationIssues(
       fieldId: HEALTHCARE_CONSENT_ID,
     });
   }
-  if (!documents.confidentiality_release.some((document) => (
+  if (!existingChecks?.get("confidentiality_release_signed") && !documents.confidentiality_release.some((document) => (
     document.signed_at && document.compliance_kind === "confidentiality_release"
   ))) {
     issues.push({
@@ -2099,7 +2115,7 @@ function documentsValidationIssues(
       fieldId: CONFIDENTIALITY_RELEASE_ID,
     });
   }
-  if (!documents.privacy_consents.some((document) => (
+  if (!existingChecks?.get("dsgvo_document_signed") && !documents.privacy_consents.some((document) => (
     document.signed_at && document.compliance_kind === "dsgvo"
   ))) {
     issues.push({
@@ -2109,7 +2125,7 @@ function documentsValidationIssues(
       fieldId: PRIVACY_DOCUMENT_ID,
     });
   }
-  if (!documents.identity.some((document) => (
+  if (!existingChecks?.get("identity_document_verified") && !documents.identity.some((document) => (
     document.signed_at && document.compliance_kind === "identity"
   ))) {
     issues.push({
@@ -2363,25 +2379,39 @@ function WizardDocumentRows({
   );
 }
 
+async function fetchWizardContracts(lead: LeadDetail): Promise<ContractItem[]> {
+  const contracts = await fetchContracts(`/framework-contracts?lead_id=${encodeURIComponent(lead.id)}`);
+  const selectedId = inputString(lead.wizard_state?.["framework_contract_id"]);
+  if (!selectedId || contracts.some(item => item.id === selectedId)) return contracts;
+  // Keep an already selected agreement when the same intake is reopened from Leads.
+  // Loading this agreement does not start a patient-wide document review.
+  const selected = await fetchContract(selectedId).catch(() => null);
+  return selected ? [...contracts, selected] : contracts;
+}
+
 export function LeadWizard({
   leadId: requestedLeadId,
   open,
   createMode = false,
+  entryPoint,
+  creationKey,
   existingPatient = null,
   onOpenChange,
   onCreated,
   onConverted,
   onArchived,
   onShowDetails,
+  onOrderCreated,
 }: LeadWizardProps) {
   const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
-  const isRepeatIntake = Boolean(existingPatient?.id
-    || lead?.prospect_patient_lifecycle === "active"
-    || lead?.prospect_patient_lifecycle === "inactive");
+  // A linked active patient does not change the wizard opened from the leads registry.
+  const isRepeatIntake = entryPoint === "repeat-patient";
+  const repeatPatientId = open && isRepeatIntake ? existingPatient?.id ?? lead?.prospect_patient_id ?? null : null;
+  const patientReview = useRepeatPatientReview(repeatPatientId);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [referrerSearch, setReferrerSearch] = useState("");
   const deferredReferrerSearch = useDeferredValue(referrerSearch);
@@ -2461,6 +2491,23 @@ export function LeadWizard({
   const currentAutosaveSignatureRef = useRef("");
   const lastSavedAutosaveSignatureRef = useRef("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const creationKeyRef = useRef(creationKey ?? crypto.randomUUID());
+  const clinicalBaselineRef = useRef<PatientClinicalProfile | null>(null);
+  const [clinicalAccessDenied, setClinicalAccessDenied] = useState(false);
+  const pendingClinicalEditsRef = useRef(new Map<string, { expected_revision: number; operation_id: string; remove_ids?: string }>());
+  const loadPatientClinical = useCallback(async (patientId: string) => {
+    try {
+      const profile = await fetchPatientClinical(patientId);
+      clinicalBaselineRef.current = profile;
+      setClinicalAccessDenied(false);
+      return profile;
+    } catch (cause) {
+      if (entryPoint !== "repeat-patient" || !(cause instanceof ApiRequestError) || cause.status !== 403) throw cause;
+      setClinicalAccessDenied(true);
+      clinicalBaselineRef.current = null;
+      return { diagnoses: [], medications: [], examinations: [], procedures: [], verlauf: [], narrative: null, allergien: [], cave: [] } satisfies PatientClinicalProfile;
+    }
+  }, [entryPoint]);
   const medicalSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const stepNavigationInFlightRef = useRef(false);
   const commercialGenerationInFlightRef = useRef(false);
@@ -2468,6 +2515,9 @@ export function LeadWizard({
   const caseIdRef = useRef<string | null>(null);
   const prospectPatientIdRef = useRef<string | null>(null);
   const prospectMergeOnlyRef = useRef(false);
+  const hydrateClinicalDraft = useCallback((value: Draft, profile: PatientClinicalProfile, caseId: string) => (
+    prospectMergeOnlyRef.current ? applyPersistedClinicalProfile(value, profile) : mergePatientClinicalDraft(value, profile, caseId)
+  ), []);
   const [prospectCandidates, setProspectCandidates] = useState<
     ProspectDuplicateCandidate[] | null
   >(null);
@@ -2734,7 +2784,7 @@ export function LeadWizard({
         leadPromise,
         documentsPromise,
         fetchCases("/cases?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
-        fetchContracts("/framework-contracts?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
+        leadPromise.then(fetchWizardContracts).catch(() => []),
         ordersPromise,
         fetchQuotes("/quotes?lead_id=" + encodeURIComponent(leadId)).catch(() => []),
       ]);
@@ -2769,7 +2819,7 @@ export function LeadWizard({
           ? fetchOrder(nextOrder.id).catch(() => null)
           : Promise.resolve(null),
         prospectId && hydrateDraft
-          ? fetchPatientClinical(prospectId).catch(() => null)
+          ? loadPatientClinical(prospectId).catch(() => null)
           : Promise.resolve(null),
       ]);
       if (!isCurrentReload()) return;
@@ -2790,8 +2840,9 @@ export function LeadWizard({
         concern: nextCaseDetail?.hauptanfragegrund || leadDraft.concern,
         referrer: nextCaseDetail?.zuweiser || leadDraft.referrer,
       };
+      prospectMergeOnlyRef.current = nextLead.prospect_patient_lifecycle === "active" || nextLead.prospect_patient_lifecycle === "inactive";
       const nextDraft = prospectClinical && prospectCaseId
-        ? mergePatientClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
+        ? hydrateClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
         : caseDraft;
       const nextStep: StepId = "master_data";
       const nextLines = preferPersistedCommercialLines(
@@ -2860,7 +2911,7 @@ export function LeadWizard({
     } finally {
       if (isCurrentReload()) setLoading(false);
     }
-  }, [leadId, replaceDocumentPreview, showWizardError, tx]);
+  }, [hydrateClinicalDraft, leadId, loadPatientClinical, replaceDocumentPreview, showWizardError, tx]);
 
   const refreshLeadState = useCallback(async () => {
     if (!leadId) return null;
@@ -2876,19 +2927,22 @@ export function LeadWizard({
     const [nextLead, nextDocuments] = await Promise.all([
       fetchLeadDetail(leadId),
       fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)),
+      patientReview.refresh(),
     ]);
     if (hydrated.current !== leadId) return;
     setLead(nextLead);
     setDocuments(nextDocuments);
-  }, [leadId]);
+  }, [leadId, patientReview.refresh]);
 
   const refreshCommercialState = useCallback(async () => {
     if (!leadId) return [];
     const targetLeadId = leadId;
+    const signatureVersions = { ...commercialFlagRequestVersionRef.current };
+    const leadPromise = fetchLeadDetail(targetLeadId);
     const [nextLead, nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
-      fetchLeadDetail(targetLeadId),
+      leadPromise,
       fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`),
-      fetchContracts(`/framework-contracts?lead_id=${encodeURIComponent(targetLeadId)}`),
+      leadPromise.then(fetchWizardContracts),
       fetchOrders(`/orders?lead_id=${encodeURIComponent(targetLeadId)}`),
       fetchQuotes(`/quotes?lead_id=${encodeURIComponent(targetLeadId)}`),
     ]);
@@ -2899,6 +2953,10 @@ export function LeadWizard({
     setOrders(nextOrders);
     setQuotes(nextQuotes);
     const nextOrderId = nextOrders[0]?.id;
+    if (prospectMergeOnlyRef.current && nextOrders[0]) {
+      if (signatureVersions.signed_patient === commercialFlagRequestVersionRef.current.signed_patient) setSignedPatient(Boolean(nextOrders[0].signed_patient));
+      if (signatureVersions.signed_agency === commercialFlagRequestVersionRef.current.signed_agency) setSignedAgency(Boolean(nextOrders[0].signed_agency));
+    }
     const nextQuote = nextQuotes.find((item) => !nextOrderId || item.order_id === nextOrderId);
     setPaidAmount(nextQuote ? String(nextQuote.paid_amount ?? "") : "");
     return nextDocuments;
@@ -2969,6 +3027,9 @@ export function LeadWizard({
     caseIdRef.current = null;
     prospectPatientIdRef.current = null;
     prospectMergeOnlyRef.current = false;
+    clinicalBaselineRef.current = null;
+    pendingClinicalEditsRef.current.clear();
+    setClinicalAccessDenied(false);
     initialServiceOptionsRef.current = [];
   }, [createMode, existingPatient, leadId, open]);
 
@@ -3034,6 +3095,9 @@ export function LeadWizard({
     caseIdRef.current = null;
     prospectPatientIdRef.current = null;
     prospectMergeOnlyRef.current = false;
+    clinicalBaselineRef.current = null;
+    pendingClinicalEditsRef.current.clear();
+    setClinicalAccessDenied(false);
     lastPersistedLeadIdRef.current = null;
     initialServiceOptionsRef.current = [];
   }, [open, replaceDocumentPreview]);
@@ -3095,7 +3159,13 @@ export function LeadWizard({
   }, [open, step]);
 
   const order = orders[0] ?? null;
-  const contract = contracts.find((item) => item.status !== "terminated") ?? null;
+  const contract = draft?.frameworkContractId
+    ? [...contracts, ...patientReview.contracts].find(item => item.id === draft.frameworkContractId) ?? null
+    : contracts.find((item) => item.status !== "terminated") ?? null;
+  const attachedPatientId = existingPatient?.id ?? lead?.prospect_patient_id;
+  const inheritedContract = Boolean(contract?.patient_id && contract.patient_id === attachedPatientId);
+  const currentPatientEvidence = useMemo(() => patientReview.documents.filter(item => item.is_latest_version && item.status === "active" && !item.file_deleted_at
+    && ["identity", "confidentiality_release", "privacy_information", "privacy_consents"].includes(wizardDocumentKind(item) ?? "")), [patientReview.documents]);
   const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
   const orderQuotes = useMemo(
     () => quotes.filter((item) => !order || item.order_id === order.id),
@@ -3123,13 +3193,13 @@ export function LeadWizard({
       privacy_consents: [],
       enhanced_due_diligence: [],
     };
-    documents.forEach((item) => {
+    [...currentPatientEvidence, ...documents].forEach((item) => {
       if (item.file_deleted_at || item.has_stored_file === false) return;
       const kind = wizardDocumentKind(item);
       if (kind) grouped[kind].push(item);
     });
     return grouped;
-  }, [documents]);
+  }, [documents, currentPatientEvidence]);
   const commercialDocuments = useMemo(() => {
     const grouped: Record<CommercialDocumentKind, DocumentItem[]> = {
       framework_contract: [],
@@ -3153,7 +3223,7 @@ export function LeadWizard({
     )),
     [documents],
   );
-  const previewedDocument = documents.find((item) => item.id === documentPreview?.id);
+  const previewedDocument = [...currentPatientEvidence, ...documents].find((item) => item.id === documentPreview?.id);
   const previewComplianceKind = previewedDocument ? wizardDocumentComplianceKind(previewedDocument) : null;
   const previewDocumentSigned = Boolean(
     previewComplianceKind
@@ -3290,7 +3360,7 @@ export function LeadWizard({
       return issues;
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -3301,7 +3371,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -3376,31 +3446,35 @@ export function LeadWizard({
   ) => {
     let clinical: PatientClinicalProfile;
     try {
-      clinical = await fetchPatientClinical(patientId);
+      clinical = await loadPatientClinical(patientId);
     } catch (nextError) {
       throw new Error(tx(
         `Не удалось безопасно загрузить медицинскую карту пациента: ${errorText(nextError, tx)}`,
         `Die Patientenakte konnte nicht sicher geladen werden: ${errorText(nextError, tx)}`,
       ));
     }
-    const hydrated = mergePatientClinicalDraft(fallbackDraft, clinical, caseId);
+    const hydrated = hydrateClinicalDraft(fallbackDraft, clinical, caseId);
     setDraft((current) => current
-      ? mergePatientClinicalDraft(current, clinical, caseId)
+      ? hydrateClinicalDraft(current, clinical, caseId)
       : hydrated);
     return hydrated;
-  }, [tx]);
+  }, [hydrateClinicalDraft, loadPatientClinical, tx]);
 
   const persistMedicalDraft = useCallback(async (medicalDraft: Draft) => {
     const run = async () => {
       if (!leadId) throw new Error("Lead is not selected");
       const { patientId, caseId } = await ensureProspect(medicalDraft);
-      const latestClinical = await fetchPatientClinical(patientId).catch((nextError) => {
+      if (prospectMergeOnlyRef.current) {
+        await saveCaseOverview(caseId, { hauptanfragegrund: medicalDraft.concern.trim(), zuweiser: medicalDraft.referrer.trim() });
+        return caseId;
+      }
+      const latestClinical = await loadPatientClinical(patientId).catch((nextError) => {
         throw new Error(tx(
           `Не удалось проверить актуальные медицинские данные перед сохранением: ${errorText(nextError, tx)}`,
           `Die aktuellen medizinischen Daten konnten vor dem Speichern nicht geprüft werden: ${errorText(nextError, tx)}`,
         ));
       });
-      const safeDraft = mergePatientClinicalDraft(medicalDraft, latestClinical, caseId);
+      const safeDraft = hydrateClinicalDraft(medicalDraft, latestClinical, caseId);
       const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
       await saveCaseOverview(caseId, {
         hauptanfragegrund: safeDraft.concern.trim(),
@@ -3447,7 +3521,7 @@ export function LeadWizard({
         });
         safeDraft.narrative = saved;
       }
-      const persistedClinical = await fetchPatientClinical(patientId);
+      const persistedClinical = await loadPatientClinical(patientId);
       setDraft((previous) => previous
         ? applyPersistedClinicalProfile(previous, persistedClinical)
         : applyPersistedClinicalProfile(safeDraft, persistedClinical));
@@ -3456,7 +3530,7 @@ export function LeadWizard({
     const queued = medicalSaveQueueRef.current.then(run, run);
     medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
     return queued;
-  }, [ensureProspect, leadId, tx]);
+  }, [ensureProspect, hydrateClinicalDraft, leadId, loadPatientClinical, tx]);
 
   const persistClinicalDraftSection = useCallback(async (
     section: LeadClinicalDraftSection,
@@ -3467,18 +3541,34 @@ export function LeadWizard({
       const { patientId, caseId } = await ensureProspect(medicalDraft);
       const saveMode = prospectMergeOnlyRef.current ? "merge" : "replace";
 
+      const baseline = clinicalBaselineRef.current;
+      const field = section === "allergies" ? "allergien" : section === "caves" ? "cave" : section;
+      const nextValue = section === "narrative" ? medicalDraft.narrative : medicalDraft[section];
+      const requestKey = JSON.stringify([section, nextValue]);
+      let guard = pendingClinicalEditsRef.current.get(requestKey);
+      if (prospectMergeOnlyRef.current && !guard) {
+        if (baseline?.revision == null) throw new Error(tx("Обновите медицинскую карту перед сохранением", "Aktualisieren Sie die Patientenakte vor dem Speichern"));
+        const nextIds = new Set(Array.isArray(nextValue) ? nextValue.map(item => item.id) : []);
+        const previous = baseline[field];
+        const removedIds = Array.isArray(previous) ? previous.flatMap(item => item.id && !nextIds.has(item.id) ? [item.id] : []) : [];
+        guard = { expected_revision: baseline.revision, operation_id: crypto.randomUUID(), ...(removedIds.length ? {remove_ids: removedIds.join(",")} : {}) };
+        pendingClinicalEditsRef.current.set(requestKey, guard);
+      }
+
+      try {
       switch (section) {
         case "narrative":
           if (!medicalDraft.narrative) {
             throw new Error(tx("Анамнез не заполнен", "Anamnese ist nicht ausgefüllt"));
           }
-          await savePatientNarrative(patientId, narrativeForIntakeSave(medicalDraft.narrative, caseId));
+          await savePatientNarrative(patientId, narrativeForIntakeSave(medicalDraft.narrative, caseId), guard);
           break;
         case "diagnoses":
           await savePatientDiagnoses(
             patientId,
             medicalDraft.diagnoses.filter((item) => item.label.trim()),
             saveMode,
+            guard,
           );
           break;
         case "medications":
@@ -3486,6 +3576,7 @@ export function LeadWizard({
             patientId,
             medicalDraft.medications.filter((item) => item.wirkstoff?.trim()),
             saveMode,
+            guard,
           );
           break;
         case "allergies":
@@ -3494,6 +3585,7 @@ export function LeadWizard({
             "allergie",
             medicalDraft.allergies.filter((item) => item.label.trim()),
             saveMode,
+            guard,
           );
           break;
         case "caves":
@@ -3502,31 +3594,42 @@ export function LeadWizard({
             "cave",
             medicalDraft.caves.filter((item) => item.label.trim()),
             saveMode,
+            guard,
           );
           break;
       }
 
-      const persistedClinical = await fetchPatientClinical(patientId);
-      setDraft((previous) => applyPersistedClinicalSection(
-        previous ?? medicalDraft,
-        persistedClinical,
-        section,
-      ));
-      return caseId;
+      } catch (cause) {
+        if (cause instanceof ApiRequestError && cause.status === 409) {
+          pendingClinicalEditsRef.current.delete(requestKey);
+          clinicalBaselineRef.current = null;
+          throw new Error(tx("Медицинская карта изменена другим пользователем. Обновите обращение и проверьте изменения перед сохранением.", "Die Patientenakte wurde zwischenzeitlich geändert. Aktualisieren Sie die Anfrage und prüfen Sie die Änderungen vor dem Speichern."));
+        }
+        throw cause;
+      }
+      const persistedClinical = await loadPatientClinical(patientId);
+      setDraft((previous) => prospectMergeOnlyRef.current
+        ? applyPersistedClinicalProfile(previous ?? medicalDraft, persistedClinical)
+        : applyPersistedClinicalSection(previous ?? medicalDraft, persistedClinical, section));
+      pendingClinicalEditsRef.current.delete(requestKey);
+      return persistedClinical;
     };
 
     const queued = medicalSaveQueueRef.current.then(run, run);
     medicalSaveQueueRef.current = queued.then(() => undefined, () => undefined);
     return queued;
-  }, [ensureProspect, leadId, tx]);
+  }, [ensureProspect, leadId, loadPatientClinical, tx]);
 
-  async function saveClinicalDraftChange(
-    section: LeadClinicalDraftSection,
+  async function saveClinicalDraftChange<S extends LeadClinicalDraftSection>(
+    section: S,
     nextDraft: Draft,
-  ) {
+  ): Promise<NonNullable<Draft[S]>> {
     setError("");
     clearServerValidation();
-    await persistClinicalDraftSection(section, nextDraft);
+    const profile = await persistClinicalDraftSection(section, nextDraft);
+    const saved = applyPersistedClinicalProfile(nextDraft, profile)[section];
+    if (saved == null) throw new Error(tx("Не удалось загрузить сохранённую запись", "Der gespeicherte Eintrag konnte nicht geladen werden"));
+    return saved as NonNullable<Draft[S]>;
   }
 
   const persistSnapshot = useCallback((
@@ -3558,6 +3661,8 @@ export function LeadWizard({
       try {
         if (!targetLeadId) {
           const created = await createLead({
+            creation_key: creationKeyRef.current,
+            ...(existingPatient?.id ? { repeat_patient_id: existingPatient.id } : {}),
             first_name: snapshot.draft.firstName.trim(),
             last_name: snapshot.draft.lastName.trim(),
             email: snapshot.draft.email.trim() || null,
@@ -3600,8 +3705,8 @@ export function LeadWizard({
 
         if (initializing) {
           if (existingPatient?.id && caseIdRef.current) {
-            const clinical = await fetchPatientClinical(existingPatient.id);
-            savedDraft = mergePatientClinicalDraft(snapshot.draft, clinical, caseIdRef.current);
+            const clinical = await loadPatientClinical(existingPatient.id);
+            savedDraft = hydrateClinicalDraft(snapshot.draft, clinical, caseIdRef.current);
           }
           await createOrder({ source_lead_id: targetLeadId });
         }
@@ -3645,7 +3750,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [existingPatient?.id, lead?.prospect_patient_id, leadId, onCreated, tx]);
+  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
@@ -4052,7 +4157,7 @@ export function LeadWizard({
       window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
       return false;
     }
-    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx);
+    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -4328,6 +4433,10 @@ ${serviceCommentLines.join("\n")}`
       );
     }
     if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
+    if (draft.frameworkContractId && !contract) throw new Error(tx("Выбранный договор недоступен. Обновите проверку документов.", "Der gewählte Vertrag ist nicht verfügbar. Aktualisieren Sie die Dokumentenprüfung."));
+    if (inheritedContract && contract && !contractCoversOrder(contract, draft.programDateFrom || null, draft.programDateTo || null)) {
+      throw new Error(tx("Сохранённый договор не покрывает весь период. Выберите подходящий договор или оформите новый.", "Der gespeicherte Vertrag deckt den Zeitraum nicht ab. Wählen Sie einen passenden Vertrag oder erstellen Sie einen neuen."));
+    }
     let contractId = contract?.id;
     if (!contractId) {
       contractId = (await createContract({
@@ -4337,7 +4446,8 @@ ${serviceCommentLines.join("\n")}`
         client_reference: "lead-onboarding:" + leadId + ":framework",
       })).id;
     } else if (
-      draft.contractEffectiveDate
+      !inheritedContract
+      && draft.contractEffectiveDate
       && draft.contractEffectiveDate !== contract?.valid_from
     ) {
       await updateContractStatus(contractId, {
@@ -4368,8 +4478,10 @@ ${serviceCommentLines.join("\n")}`
         && validMoneyInput(normalizedPrepaymentAmount)
         ? { prepayment_amount: normalizedPrepaymentAmount }
         : {}),
-      signed_patient: flags.signed_patient ?? signedPatient,
-      signed_agency: flags.signed_agency ?? signedAgency,
+      // Existing repeat signatures are changed only by the explicit signature action.
+      // Sending cached checkboxes here would restore signatures invalidated by a service edit.
+      signed_patient: flags.signed_patient ?? (prospectMergeOnlyRef.current ? undefined : signedPatient),
+      signed_agency: flags.signed_agency ?? (prospectMergeOnlyRef.current ? undefined : signedAgency),
       needs_description: needsDescription,
       date_from: draft.programDateFrom,
       date_to: draft.programDateTo,
@@ -4846,7 +4958,8 @@ ${serviceCommentLines.join("\n")}`
     try {
       await ensureCommercial();
       const result = await wizardConvertLead(leadId, true);
-      if (onConverted) onConverted(result.patient_id);
+      if (isRepeatIntake && order?.id && onOrderCreated) onOrderCreated(order.id);
+      else if (onConverted) onConverted(result.patient_id);
       else onOpenChange(false);
     } catch (nextError) {
       await reload(false);
@@ -4888,9 +5001,6 @@ ${serviceCommentLines.join("\n")}`
     try {
       if (!leadId || !draft) return;
       setBusy("intake");
-      if (draft.concern.trim()) {
-        await completeMedicalIntake();
-      }
       if (!(await save("release", false))) return;
       await refreshLeadState();
       setStep("release");
@@ -5092,6 +5202,19 @@ ${serviceCommentLines.join("\n")}`
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
+  const patientDocumentReview = repeatPatientId ? <>
+    {patientReview.error ? <Banner tone="error"><p>{tx("Не удалось проверить документы пациента", "Patientendokumente konnten nicht geprüft werden")}: {patientReview.error}</p><Button type="button" variant="outline" size="sm" onClick={() => void patientReview.refresh().catch(() => undefined)}>{tx("Повторить", "Erneut versuchen")}</Button></Banner> : null}
+    {patientReview.loading ? <p role="status" className="text-xs text-muted-foreground">{tx("Проверка документов пациента…", "Patientendokumente werden geprüft…")}</p> : null}
+    {patientReview.readiness ? <OrderPatientDocumentReview readiness={patientReview.readiness} documents={[...patientReview.documents, ...documents]} dateTo={draft?.programDateTo || null} lang={lang} busy={isBusy || patientReview.loading}
+      onRefresh={() => void Promise.all([patientReview.refresh(), refreshLeadState()]).catch(showWizardError)}
+      onOpenDocuments={() => { setStep("documents"); window.requestAnimationFrame(() => document.getElementById(CONFIDENTIALITY_RELEASE_ID)?.focus()); }}
+      onSaveExpiry={async expiry => { setBusy("passport-expiry"); setError(""); try { return await patientReview.saveExpiry(expiry); } catch (cause) { showWizardError(cause); return false; } finally { setBusy(null); } }} /> : null}
+  </> : null;
+  const patientContractReview = repeatPatientId && draft ? <Section title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
+    <OrderExistingContractsTable contracts={patientReview.contracts} dateFrom={draft.programDateFrom || null} dateTo={draft.programDateTo || null} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
+      onSelect={id => { const selected = patientReview.contracts.find(item => item.id === id); if (selected) setDraft(current => current ? { ...current, frameworkContractId: id, contractEffectiveDate: selected.valid_from ?? "" } : current); }} />
+    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "", contractEffectiveDate: current.programDateFrom } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
+  </Section> : null;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
   const previousStep = STEPS[stepIndex - 1];
   const nextStep = STEPS[stepIndex + 1];
@@ -5216,7 +5339,7 @@ ${serviceCommentLines.join("\n")}`
               </Button>
             ) : null}
             {leadId ? (
-              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void reload(false)}>
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true), patientReview.refresh()]).catch(showWizardError)}>
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
             ) : null}
@@ -5261,7 +5384,7 @@ ${serviceCommentLines.join("\n")}`
                     className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <StepIcon aria-hidden="true" className="size-4 shrink-0" />
-                    <span className="whitespace-nowrap">{item.id === "release" && isRepeatIntake
+                    <span className="whitespace-nowrap">{item.id === "documents" && isRepeatIntake ? tx("Проверка документов", "Dokumentenprüfung") : item.id === "release" && isRepeatIntake
                       ? tx("Завершение обращения", "Anfrage abschließen")
                       : lang === "de" ? item.de : item.ru}</span>
                     <span
@@ -5911,7 +6034,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                <LeadMedicalIntakeForm
+                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : <LeadMedicalIntakeForm
                   lead={lead}
                   tx={tx}
                   lang={lang}
@@ -5933,7 +6056,7 @@ ${serviceCommentLines.join("\n")}`
                   onMedicationsChange={(value) => saveClinicalDraftChange("medications", { ...draft, medications: value })}
                   onAllergiesChange={(value) => saveClinicalDraftChange("allergies", { ...draft, allergies: value })}
                   onCavesChange={(value) => saveClinicalDraftChange("caves", { ...draft, caves: value })}
-                />
+                />}
               </Suspense>
             </section>
           ) : null}
@@ -6068,6 +6191,8 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "documents" ? (
             <section className="space-y-5">
+              {patientDocumentReview}
+              {patientContractReview}
               {amlRequired || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
@@ -6582,6 +6707,7 @@ ${serviceCommentLines.join("\n")}`
 
           {draft && step === "commercial" ? (
             <section className="space-y-5">
+              {patientContractReview}
               {commercialLookupsLoading ? (
                 <div
                   role="status"
@@ -6603,7 +6729,7 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   )}
                   accessory={(
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
+                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy || inheritedContract || !lines.some(validLine)} onClick={() => void generateCommercialDocument("framework_contract")}>
                       {busy === "generate-framework_contract" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {commercialDocuments.framework_contract.length > 0 ? tx("Новая версия", "Neue Version") : tx("Создать", "Erstellen")}
                     </Button>
@@ -6615,6 +6741,7 @@ ${serviceCommentLines.join("\n")}`
                       className={inputClass}
                       id={CONTRACT_EFFECTIVE_DATE_ID}
                       name="contract_effective_date"
+                      disabled={inheritedContract}
                       type="date"
                       value={draft.contractEffectiveDate}
                       onChange={(event) => patch("contractEffectiveDate", event.target.value)}
@@ -6642,7 +6769,7 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                   </Field>
                 </div>
-                <WizardDocumentRows
+                {inheritedContract ? <p className="text-sm">{tx("Используется подписанный договор", "Unterzeichneter Vertrag wird verwendet")}: {contract?.contract_number} · {formatIntakeDate(contract?.valid_from)} – {contract?.valid_to ? formatIntakeDate(contract.valid_to) : tx("Бессрочно", "Unbefristet")}</p> : <WizardDocumentRows
                   documents={commercialDocuments.framework_contract}
                   complianceKind="framework_contract"
                   showSignatureStatus={false}
@@ -6655,7 +6782,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document) => void signContract(document.id)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
-                />
+                />}
                 {renderCommercialDocumentError("framework_contract")}
                 </Section>
               </div>
@@ -6819,6 +6946,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {isRepeatIntake && commercialDocuments.single_order.length > 0 && readinessChecks.get("order_document_generated") === false ? <Banner tone="warning">{tx("Заказ изменён. Создайте актуальную версию документа и подтвердите подписи заново.", "Der Auftrag wurde geändert. Erstellen Sie die aktuelle Dokumentversion und bestätigen Sie die Unterschriften erneut.")}</Banner> : null}
                 {renderCommercialDocumentError("single_order")}
                 </Section>
               </div>
@@ -7084,6 +7212,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                 />
+                {isRepeatIntake && commercialDocuments.order_cost_estimate.length > 0 && readinessChecks.get("order_cost_estimate_document_generated") === false ? <Banner tone="warning">{tx("Смета к заказу устарела. Создайте актуальную версию.", "Der Kostenvoranschlag zum Auftrag ist veraltet. Erstellen Sie eine aktuelle Version.")}</Banner> : null}
                 {renderCommercialDocumentError("order_cost_estimate")}
                 </Section>
               </div>
@@ -7124,6 +7253,8 @@ ${serviceCommentLines.join("\n")}`
 
           {lead && step === "release" ? (
             <section className="space-y-5">
+              {patientDocumentReview}
+              {patientContractReview}
               <Section title={isRepeatIntake ? tx("Завершение обращения", "Anfrage abschließen") : tx("Создание пациента", "Patient anlegen")}>
                 <p className="text-sm text-muted-foreground">
                   {isRepeatIntake

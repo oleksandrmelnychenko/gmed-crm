@@ -19,6 +19,7 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { formatIntakeDate, INTAKE_CHECK_LABELS } from "../model/order-intake";
 import type { IntakeCheck, IntakeLine } from "../model/order-intake";
+import { PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 
 export function OrderWizardSection({ title, accessory, children, flush = false }: {
   title: ReactNode; accessory?: ReactNode; children: ReactNode; flush?: boolean;
@@ -119,12 +120,12 @@ export function OrderWizardChecksTable({ checks, lang, busy, onStepChange }: {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const label = (check: IntakeCheck) => INTAKE_CHECK_LABELS[check.key]?.[lang === "de" ? 1 : 0] ?? check.key;
   const columns: ColumnDef<IntakeCheck>[] = [
-    { id: "check", label: tx("Проверка", "Prüfung"), accessor: label, minWidth: 360, render: check => <span className="truncate" title={label(check)}>{label(check)}</span> },
+    { id: "check", label: tx("Проверка", "Prüfung"), accessor: label, minWidth: 360, render: check => <div><span>{label(check)}</span>{check.key === "passport" && check.reason ? <p className="mt-1 text-[11px] text-muted-foreground">{PASSPORT_REVIEW_LABELS[check.reason]?.[lang === "de" ? 1 : 0]}{check.expiry ? ` · ${formatIntakeDate(check.expiry)}` : ""}</p> : null}</div> },
     { id: "status", label: tx("Статус", "Status"), accessor: check => check.status, width: 185, render: check => <Badge variant="outline" className={check.status === "passed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"}>
       {check.status === "passed" ? <><Check />{tx("Готово", "Erledigt")}</> : check.status === "warning" ? tx("Внимание", "Hinweis") : tx("Нужно завершить", "Offen")}
     </Badge> },
   ];
-  return <DataTable rows={checks} columns={columns} rowId={check => check.key} density="compact" rowHeightOverrides={{ compact: 44 }} mobilePrimaryColumnId="check" className="sm:max-h-[420px]"
+  return <DataTable rows={checks} columns={columns} rowId={check => check.key} density="compact" rowHeightOverrides={{ compact: 60 }} mobilePrimaryColumnId="check" className="sm:max-h-[480px]"
     onRowClick={busy ? undefined : check => onStepChange(check.step)}
     rowActions={check => <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={`${tx("Открыть этап", "Schritt öffnen")}: ${label(check)}`} onClick={() => onStepChange(check.step)}><ArrowRight className="size-3.5" /></Button>}
   />;

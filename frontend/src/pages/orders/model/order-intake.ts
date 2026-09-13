@@ -27,7 +27,8 @@ export type IntakeDraft = {
   };
   aml_review: { risk_reason: string; manager_approval_name: string; continuous_monitoring: string; reviewer_name: string; review_date: string | null };
 };
-export type IntakeCheck = { key: string; status: "passed" | "warning" | "blocked"; step: number };
+export type IntakeCheck = { key: string; status: "passed" | "warning" | "blocked"; step: number;
+  reason?: import("./order-document-review").PassportReviewStatus; expiry?: string | null };
 export type IntakeWorkspace = {
   order_id: string; patient_id: string; order_number: string; intake_state: "draft" | "confirmed";
   revision: number; data: IntakeDraft; current_facts: IntakeFacts; baseline_facts: IntakeFacts;

@@ -875,10 +875,32 @@ async fn checks_tx(
         );
         add("pep_evidence", signed("enhanced_due_diligence"), 4);
     }
-    if recheck.payload["passport_expired"] == true || recheck.payload["passport_expiring"] == true {
-        checks.push(json!({"key":"passport","status":"warning","step":0}));
-    }
+    let expiry = recheck.payload["passport_expiry"]
+        .as_str()
+        .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok());
+    checks.push(passport_check(
+        expiry,
+        chrono::Utc::now().date_naive(),
+        d.date_to,
+    ));
     Ok(checks)
+}
+
+fn passport_check(
+    expiry: Option<NaiveDate>,
+    today: NaiveDate,
+    order_end: Option<NaiveDate>,
+) -> Value {
+    let reason = match expiry {
+        None => "unknown",
+        Some(date) if date < today => "expired",
+        Some(date) if order_end.is_some_and(|end| date < end) => "expires_during_order",
+        Some(date) if (date - today).num_days() <= 90 => "expiring",
+        Some(_) => "valid",
+    };
+    // Passport validity remains advisory; it must not prevent draft preparation.
+    json!({"key":"passport","status":if reason == "valid" {"passed"} else {"warning"},
+        "step":0,"reason":reason,"expiry":expiry})
 }
 
 async fn workspace(state: &AppState, id: Uuid) -> ApiResult {
@@ -1004,4 +1026,40 @@ fn quote_matches(d: &Draft, value: &Value) -> bool {
     expected.sort();
     actual.sort();
     !expected.is_empty() && actual == expected
+}
+
+#[cfg(test)]
+mod document_review_tests {
+    use super::*;
+
+    #[test]
+    fn passport_checks_current_and_planned_validity_without_blocking() {
+        let date = |value| NaiveDate::parse_from_str(value, "%Y-%m-%d").unwrap();
+        let today = date("2026-09-12");
+        for (expiry, end, expected) in [
+            (None, None, "unknown"),
+            (Some("2026-09-11"), None, "expired"),
+            (Some("2026-09-12"), None, "expiring"),
+            (Some("2026-12-11"), None, "expiring"),
+            (Some("2026-12-12"), None, "valid"),
+            (
+                Some("2027-05-01"),
+                Some("2027-05-02"),
+                "expires_during_order",
+            ),
+            (Some("2027-05-01"), Some("2027-05-01"), "valid"),
+        ] {
+            let check = passport_check(expiry.map(date), today, end.map(date));
+            assert_eq!(check["reason"], expected);
+            assert_eq!(
+                check["status"],
+                if expected == "valid" {
+                    "passed"
+                } else {
+                    "warning"
+                }
+            );
+            assert_eq!(check["expiry"], json!(expiry));
+        }
+    }
 }

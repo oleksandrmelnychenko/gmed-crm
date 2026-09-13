@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -11,7 +10,6 @@ import {
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { Plus } from "lucide-react";
 
 import type { OrderItem } from "../../model/detail-tab-types";
 
@@ -34,7 +32,6 @@ type PatientOrdersDictionary = {
 type PatientOrdersTabProps = {
   emptyLabel: string;
   formatDate: (value?: string | null, fallback?: string) => string;
-  onCreateOrder?: () => void;
   onOpenOrder: (orderId: string) => void;
   orderPhaseLabel: (value: string) => string;
   orders: OrderItem[];
@@ -47,7 +44,6 @@ type PatientOrdersTabProps = {
 export function PatientOrdersTab({
   emptyLabel,
   formatDate,
-  onCreateOrder,
   onOpenOrder,
   orderPhaseLabel,
   orders,
@@ -114,7 +110,7 @@ export function PatientOrdersTab({
       {
         id: "status",
         label: dict.users_status,
-        accessor: (item) => item.intake_state === "draft" ? (labelLang === "de" ? "Entwurf" : "Черновик") : statusLabel(item.status),
+        accessor: (item) => item.intake_state === "draft" && item.status !== "cancelled" ? (labelLang === "de" ? "Entwurf" : "Черновик") : statusLabel(item.status),
         sortable: true,
         width: 150,
         render: (item) => (
@@ -122,7 +118,7 @@ export function PatientOrdersTab({
             variant="outline"
             className={cn("rounded-full font-mono text-[10px]", statusColors[item.status] ?? "")}
           >
-            {item.intake_state === "draft" ? (labelLang === "de" ? "Entwurf · Fortsetzen" : "Черновик · Продолжить") : statusLabel(item.status)}
+            {item.intake_state === "draft" && item.status !== "cancelled" ? (labelLang === "de" ? "Entwurf · Fortsetzen" : "Черновик · Продолжить") : statusLabel(item.status)}
           </Badge>
         ),
       },
@@ -206,14 +202,6 @@ export function PatientOrdersTab({
 
   return (
     <TabsContent value="orders" className="space-y-4 mt-4 min-h-[400px]">
-        {onCreateOrder ? (
-          <div className="flex justify-end">
-            <Button type="button" size="sm" onClick={onCreateOrder}>
-              <Plus className="size-4" />
-              {dict.orders_create_title}
-            </Button>
-          </div>
-        ) : null}
         {tabLoading ? (
           <TabLoader />
         ) : orders.length === 0 ? (

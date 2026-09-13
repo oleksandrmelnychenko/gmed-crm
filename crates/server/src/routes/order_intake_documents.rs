@@ -174,6 +174,48 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
     })
 }
 
+/// Repeat-order PDFs are rendered from persisted facts, including service snapshots.
+pub(super) fn repeat_bindings(context: &Value) -> DocumentBindingOverrides {
+    let parse_date = |key| text(context, key).parse::<NaiveDate>().ok();
+    let mut bindings = DocumentBindingOverrides {
+        period_from: parse_date("date_from"),
+        period_to: parse_date("date_to"),
+        contract_date: parse_date("contract_effective_date"),
+        cost_threshold: context["cost_threshold"].as_str().map(str::to_owned),
+        examination_purpose: context["needs_description"].as_str().map(str::to_owned),
+        ..Default::default()
+    };
+    bindings.estimate_total = totals(&json!({"lines":context["services"]})).map(|value| value.2);
+    bindings.service_lines = context["services"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|line| {
+            let unit = text(line, "unit_label");
+            ServiceLineInput {
+                description: text(line, "description").to_owned(),
+                description_items: serde_json::from_value(line["description_items"].clone()).ok(),
+                note: line["note"].as_str().map(str::to_owned),
+                quantity: Some(text(line, "quantity").to_owned()),
+                fee: Some(format!(
+                    "{}{}",
+                    format_eur(decimal(&line["unit_price"])),
+                    if unit.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" / {unit}")
+                    }
+                )),
+                line_total: Some(format_eur(
+                    line_net(line).to_string().parse().unwrap_or_default(),
+                )),
+                vat_rate: Some(text(line, "vat_rate").to_owned()),
+            }
+        })
+        .collect();
+    bindings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

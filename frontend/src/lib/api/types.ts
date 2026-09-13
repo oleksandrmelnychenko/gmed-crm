@@ -217,6 +217,8 @@ export interface StatusCount {
 }
 
 export interface CreateLeadBody {
+  creation_key?: string;
+  repeat_patient_id?: string;
   first_name: string;
   last_name: string;
   email?: string | null;
