@@ -12,7 +12,20 @@ import { SignatureSignerFields } from "./signature-signer-fields";
 import { createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, signatureAction, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
 
 const emptySigner = (role: Signer["role"]): Signer => ({ first_name: "", last_name: "", email: "", role });
-const initialSigners = () => [emptySigner("client"), emptySigner("agency")];
+const initialSigners = (policy: SignatureState["signer_policy"] = "flexible") =>
+  policy === "client_only"
+    ? [emptySigner("client")]
+    : [emptySigner("client"), emptySigner("agency")];
+
+function suggestedSigners(state: SignatureState) {
+  if (state.signer_policy === "client_only") {
+    const patientSide = state.suggested_signers?.filter((signer) => signer.role === "client") ?? [];
+    return patientSide.length > 0 ? patientSide : initialSigners("client_only");
+  }
+  return state.suggested_signers?.length
+    ? state.suggested_signers
+    : initialSigners(state.signer_policy);
+}
 const statuses: Record<SignatureStatus, [string, string]> = {
   submitting: ["Отправка приглашений", "Einladungen werden versendet"],
   submission_unknown: ["Проверяем отправку — повторно не отправляйте", "Versand wird geprüft – bitte nicht erneut senden"],
@@ -90,7 +103,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         setState(next); setError(false); setAwaitingState(false);
         onStateChangeRef.current?.(next);
         if (!initialized.current || pending) {
-          const defaults = next.suggested_signers?.length ? next.suggested_signers : initialSigners();
+          const defaults = suggestedSigners(next);
           setSigners(defaults); setBaseline(defaults); setConfirmed(false); setEditingSigners([]); setExcludedSigners([]);
           initialized.current = true;
         }
@@ -122,6 +135,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         ? tx("Выберите актуальное приложение для ознакомления и проверьте его PDF.", "Wählen und prüfen Sie die aktuelle Anlage zur Kenntnisnahme.")
         : code === "both_contract_parties_required"
         ? tx("Для договора нужны клиент и представитель агентства.", "Verträge benötigen Kunde und Agenturvertretung.")
+        : code === "patient_signature_only"
+        ? tx("Для этого согласия нужна только подпись пациента или его законного представителя.", "Für diese Einwilligung ist nur die Unterschrift der Patientenseite erforderlich.")
         : tx("Действие не выполнено. Проверьте статус перед повторной отправкой.", "Aktion fehlgeschlagen. Prüfen Sie vor erneutem Versand den Status."));
     }
     finally {
@@ -134,6 +149,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const pending = state?.requests.some(r => isSignaturePending(r.status));
   const mutationDisabled = busy || awaitingState || error;
   const completed = state?.requests.some(r => r.status === "completed");
+  const clientOnly = state?.signer_policy === "client_only";
   const attachmentId = selectedAttachment || (state?.review_package?.documents.length === 1 ? state.review_package.documents[0].id : "");
   const attachmentReady = !state?.review_package || (!!attachmentId && state.review_package.documents.some(d => d.id === attachmentId) && previewedDocumentIds.includes(attachmentId));
   const updateSigner = (index: number, patch: Partial<Signer>) => {
@@ -230,7 +246,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && completed && !composeNew ? <Button type="button" variant="outline" disabled={mutationDisabled} onClick={() => { setComposeNew(true); onComposeNew?.(); }}><Plus className="size-4" />{tx("Новый запрос подписи", "Neue Signaturanfrage")}</Button> : null}
           {state.enabled && state.can_send && !pending && !state.ineligible_reason && (!completed || composeNew) ? <section className="rounded-xl border border-border/70 bg-card shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
-              <AdminSectionTitle>{tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
+              <AdminSectionTitle>{clientOnly ? tx("Подпись пациента", "Unterschrift der Patientenseite") : tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
               <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
@@ -254,7 +270,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                     <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
                       <input type="checkbox" aria-label={`${tx("Выбрать подписанта", "Person auswählen")} ${index + 1}: ${name}`} checked={selected} disabled={busy || awaitingState} onChange={event => selectSigner(index, event.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" />
                       <span className="min-w-0 space-y-1">
-                        <span className="block text-[11px] text-muted-foreground">{signer.role === "agency" ? tx("Представитель GMED", "GMED-Vertretung") : signer.role === "client" ? tx("Клиент / представитель клиента", "Kunde / Kundenvertretung") : tx("Другая сторона", "Weitere Partei")}</span>
+                        <span className="block text-[11px] text-muted-foreground">{signer.role === "agency" ? tx("Представитель GMED", "GMED-Vertretung") : signer.role === "client" ? clientOnly ? tx("Пациент / законный представитель", "Patient/in / gesetzliche Vertretung") : tx("Клиент / представитель клиента", "Kunde / Kundenvertretung") : tx("Другая сторона", "Weitere Partei")}</span>
                         <span className="block break-words text-sm font-medium">{name}</span>
                         {signer.email ? <span className="block break-all text-xs text-muted-foreground">{signer.email}</span> : null}
                       </span>
@@ -270,7 +286,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                   </div> : null}
                 </div>;
               })}
-              {signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
+              {!clientOnly && signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
             </div>
             <div className="border-t border-border/60 bg-muted/10 p-4">
               <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{state.review_package ? tx("Я проверил основной PDF, приложение для ознакомления и адреса. Отправить комплект выбранным подписантам через Skribble.", "Ich habe Haupt-PDF, Anlage zur Kenntnisnahme und Adressen geprüft. Dieses Paket über Skribble an die ausgewählten Personen senden.") : tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>

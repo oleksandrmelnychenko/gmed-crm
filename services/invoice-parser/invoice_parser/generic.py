@@ -131,7 +131,7 @@ def _identifier(value: str) -> str | None:
     return value
 
 
-def _supplier_candidates(text: str) -> list[str]:
+def _supplier_candidates_from_scope(text: str) -> list[str]:
     raw_lines = [line.strip() for line in text.splitlines() if line.strip()]
     lines = [_compact(line) for line in raw_lines]
     header = lines[:35]
@@ -237,6 +237,30 @@ def _supplier_candidates(text: str) -> list[str]:
                 branded.append(f"{line.title()} {header[index + 1]}")
                 break
     return branded[:1]
+
+
+def _formal_invoice_page(text: str) -> str | None:
+    """Prefer the actual invoice over a payment receipt used as a cover page."""
+    pages = [page for page in re.split(r"\f+", text) if page.strip()]
+    if len(pages) < 2:
+        return None
+    number_label = re.compile(
+        r"\bRechnung(?:s)?[. -]*(?:nummer|nr\.?|no\.?)\b|\bRechn\.?[ -]*Nr\.?\b",
+        re.I,
+    )
+    for page in pages:
+        if re.search(r"(?im)^[ \t]*Rechnung[ \t]*$", page) and number_label.search(page):
+            return page
+    return None
+
+
+def _supplier_candidates(text: str) -> list[str]:
+    formal_page = _formal_invoice_page(text)
+    if formal_page:
+        candidates = _supplier_candidates_from_scope(formal_page)
+        if candidates:
+            return candidates
+    return _supplier_candidates_from_scope(text)
 
 
 def _last_amount(value: str) -> str | None:

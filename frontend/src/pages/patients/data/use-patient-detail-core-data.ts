@@ -14,6 +14,7 @@ type UsePatientDetailCoreDataArgs = {
 };
 
 type PatientDetailCoreDataState = {
+  patientId: string;
   detail: PatientDetail | null;
   assignments: PatientAssignment[];
   staff: StaffOption[];
@@ -25,13 +26,15 @@ type PatientDetailCoreDataAction =
   | {
       type: "success";
       requestKey: string;
+      patientId: string;
       detail: PatientDetail;
       assignments: PatientAssignment[];
       staff: StaffOption[];
     }
-  | { type: "error"; requestKey: string; message: string };
+  | { type: "error"; requestKey: string; patientId: string; message: string };
 
 const EMPTY_PATIENT_DETAIL_CORE_DATA_STATE: PatientDetailCoreDataState = {
+  patientId: "",
   detail: null,
   assignments: [],
   staff: [],
@@ -45,6 +48,24 @@ export function patientDetailResourceItems<T>(
   return Array.isArray(resource?.items) ? resource.items : [];
 }
 
+export function patientDetailCoreDataPresentation(
+  requestedPatientId: string | undefined,
+  loadedPatientId: string,
+  hasDetail: boolean,
+  requestKey: string,
+  settledKey: string,
+) {
+  const isSettled = settledKey === requestKey;
+  const hasCurrentPatientData = Boolean(
+    requestedPatientId && loadedPatientId === requestedPatientId && hasDetail,
+  );
+  return {
+    hasCurrentPatientData,
+    isSettled,
+    loading: Boolean(requestKey) && !isSettled && !hasCurrentPatientData,
+  };
+}
+
 function patientDetailCoreDataReducer(
   state: PatientDetailCoreDataState,
   action: PatientDetailCoreDataAction,
@@ -52,6 +73,7 @@ function patientDetailCoreDataReducer(
   switch (action.type) {
     case "success":
       return {
+        patientId: action.patientId,
         detail: action.detail,
         assignments: action.assignments,
         staff: action.staff,
@@ -59,8 +81,16 @@ function patientDetailCoreDataReducer(
         settledKey: action.requestKey,
       };
     case "error":
+      if (state.patientId === action.patientId && state.detail) {
+        return {
+          ...state,
+          coreError: action.message,
+          settledKey: action.requestKey,
+        };
+      }
       return {
         ...EMPTY_PATIENT_DETAIL_CORE_DATA_STATE,
+        patientId: action.patientId,
         coreError: action.message,
         settledKey: action.requestKey,
       };
@@ -74,7 +104,7 @@ export function usePatientDetailCoreData({
   version,
 }: UsePatientDetailCoreDataArgs) {
   const [
-    { detail, assignments, staff, coreError, settledKey },
+    { patientId: loadedPatientId, detail, assignments, staff, coreError, settledKey },
     dispatchCoreData,
   ] = useReducer(
     patientDetailCoreDataReducer,
@@ -100,6 +130,7 @@ export function usePatientDetailCoreData({
           dispatchCoreData({
             type: "success",
             requestKey,
+            patientId: id,
             detail: nextDetail,
             assignments: nextAssignments,
             staff: nextStaff,
@@ -112,6 +143,7 @@ export function usePatientDetailCoreData({
           dispatchCoreData({
             type: "error",
             requestKey,
+            patientId: id,
             message: error instanceof Error ? error.message : String(error),
           });
         });
@@ -122,13 +154,20 @@ export function usePatientDetailCoreData({
     };
   }, [id, requestKey]);
 
-  const isSettled = settledKey === requestKey;
+  const { hasCurrentPatientData, isSettled, loading } =
+    patientDetailCoreDataPresentation(
+      id,
+      loadedPatientId,
+      detail !== null,
+      requestKey,
+      settledKey,
+    );
 
   return {
-    assignments: isSettled ? assignments : [],
+    assignments: hasCurrentPatientData ? assignments : [],
     coreError: isSettled ? coreError : "",
-    detail: isSettled ? detail : null,
-    loading: Boolean(requestKey) && !isSettled,
-    staff: isSettled ? staff : [],
+    detail: hasCurrentPatientData ? detail : null,
+    loading,
+    staff: hasCurrentPatientData ? staff : [],
   };
 }

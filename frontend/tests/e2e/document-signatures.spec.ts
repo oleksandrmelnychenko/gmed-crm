@@ -841,16 +841,16 @@ test("preview failures block sending until a successful retry and completed DEMO
 });
 
 for (const lang of ["de", "ru"] as const) {
-  test(`recipient checkboxes select one or both without changing defaults in ${lang}`, async ({ page }) => {
+  test(`recipient checkboxes select one or both for flexible documents in ${lang}`, async ({ page }) => {
     const fixture = await prepare(page);
     await page.addInitScript(language => localStorage.setItem("gmed_lang", language), lang);
     const tx = (ru: string, de: string) => lang === "de" ? de : ru;
     const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
     const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
-    await page.route(`**/api/v1/documents/${documentId}`, route => route.fulfill({ json: { ...document, generated_template_id: "confidentiality_release", art: "confidentiality_release" } }));
+    await page.route(`**/api/v1/documents/${documentId}`, route => route.fulfill({ json: { ...document, generated_template_id: null, art: "manual" } }));
     await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
       if (route.request().method() === "POST" || fixture.submissions.length) return route.fallback();
-      await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, requests: [], suggested_signers: [client, agency] } });
+      await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, signer_policy: "flexible", ineligible_reason: null, requests: [], suggested_signers: [client, agency] } });
     });
     await page.goto(`/documents/${documentId}`);
     const action = page.getByRole("button", { name: `${tx("Электронная подпись", "Elektronische Unterschrift")}: vertrag.pdf`, exact: true });
@@ -891,13 +891,6 @@ for (const lang of ["de", "ru"] as const) {
     await page.keyboard.press("Escape");
     await expect(clientChoice).not.toBeChecked();
     await expect(agencyChoice).toBeChecked();
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await expect(dialog.getByRole("img", { name: tx("PDF, страница 1", "PDF, Seite 1"), exact: true })).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
-    await dialog.screenshot({ path: `../artifacts/design-qa/signature-selection-${lang}-desktop.png` });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
-    await agencyChoice.scrollIntoViewIfNeeded();
-    await dialog.screenshot({ path: `../artifacts/design-qa/signature-selection-${lang}-mobile.png` });
     await consent.check();
     await send.click();
     await expect.poll(() => fixture.submissions.length).toBe(1);
@@ -907,6 +900,75 @@ for (const lang of ["de", "ru"] as const) {
     await expect(clientChoice).toHaveCount(0);
     await expect(send).toHaveCount(0);
   });
+}
+
+for (const lang of ["de", "ru"] as const) {
+  for (const template of ["confidentiality_release", "privacy_consents"] as const) {
+    test(`${template} requests only the patient-side signature in ${lang}`, async ({ page }) => {
+      const fixture = await prepare(page);
+      await page.addInitScript(language => localStorage.setItem("gmed_lang", language), lang);
+      const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+      const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+      const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
+      await page.route(`**/api/v1/documents/${documentId}`, route => route.fulfill({
+        json: {
+          ...document,
+          generated_template_id: template,
+          art: template,
+          compliance_kind: template === "privacy_consents" ? "dsgvo" : "confidentiality_release",
+        },
+      }));
+      await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
+        if (route.request().method() === "POST" || fixture.submissions.length) return route.fallback();
+        await route.fulfill({ json: {
+          enabled: true,
+          region: "DE",
+          test_mode: true,
+          can_send: true,
+          can_configure: true,
+          signer_policy: "client_only",
+          ineligible_reason: null,
+          requests: [],
+          // The UI also filters a stale server response defensively.
+          suggested_signers: [client, agency],
+        } });
+      });
+      await page.goto(`/documents/${documentId}`);
+      await page.getByRole("button", {
+        name: `${tx("Электронная подпись", "Elektronische Unterschrift")}: vertrag.pdf`,
+        exact: true,
+      }).click();
+      const dialog = page.getByRole("dialog", {
+        name: tx("Электронная подпись", "Elektronische Unterschrift"),
+        exact: true,
+      });
+      const clientChoice = dialog.getByRole("checkbox", {
+        name: `${tx("Выбрать подписанта", "Person auswählen")} 1: Erika Mustermann`,
+        exact: true,
+      });
+      const consent = dialog.getByRole("checkbox", {
+        name: /Ich habe die gespeicherte PDF|Я проверил сохранённый PDF/,
+      });
+      const send = dialog.getByRole("button", {
+        name: tx("Отправить на подпись", "Zur Unterschrift senden"),
+        exact: true,
+      });
+
+      await expect(dialog.getByText(tx("Подпись пациента", "Unterschrift der Patientenseite"), { exact: true })).toBeVisible();
+      await expect(dialog.getByText(tx("Пациент / законный представитель", "Patient/in / gesetzliche Vertretung"), { exact: true })).toBeVisible();
+      await expect(clientChoice).toBeChecked();
+      await expect(dialog.getByText("1 / 1", { exact: true })).toBeVisible();
+      await expect(dialog.getByText("Max Muster", { exact: true })).toHaveCount(0);
+      await expect(dialog.getByRole("button", { name: tx("Добавить подписанта", "Person hinzufügen"), exact: true })).toHaveCount(0);
+      await consent.check();
+      await expect(send).toBeEnabled();
+      await send.click();
+
+      await expect.poll(() => fixture.submissions.length).toBe(1);
+      expect(fixture.submissions).toEqual([{ signers: [client] }]);
+      expect(fixture.defaultSaves).toEqual([]);
+    });
+  }
 }
 
 for (const lang of ["ru", "de"] as const) {

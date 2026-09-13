@@ -29,6 +29,54 @@ fn signers() -> Vec<Signer> {
     ])
     .unwrap()
 }
+
+#[test]
+fn consent_documents_require_only_the_patient_side_signature() {
+    for template in [
+        "confidentiality_release",
+        "privacy_consents",
+        "consent_data_release_child",
+        "consent_data_release_single",
+    ] {
+        assert_eq!(
+            signer_policy_for_parts(Some(template), None, "document"),
+            SignerPolicy::ClientOnly,
+            "unexpected signer policy for {template}"
+        );
+    }
+    for compliance_kind in ["dsgvo", "confidentiality_release"] {
+        assert_eq!(
+            signer_policy_for_parts(None, Some(compliance_kind), "document"),
+            SignerPolicy::ClientOnly,
+            "unexpected signer policy for {compliance_kind}"
+        );
+    }
+
+    let both = signers();
+    let patient = vec![both[0].clone()];
+    assert_eq!(SignerPolicy::ClientOnly.validate(&patient), Ok(()));
+    assert_eq!(
+        SignerPolicy::ClientOnly.validate(&both),
+        Err("patient_signature_only")
+    );
+}
+
+#[test]
+fn contracts_still_require_both_signing_parties() {
+    for template in ["framework_contract", "single_order"] {
+        assert_eq!(
+            signer_policy_for_parts(Some(template), None, "document"),
+            SignerPolicy::BothParties
+        );
+    }
+    let both = signers();
+    assert_eq!(SignerPolicy::BothParties.validate(&both), Ok(()));
+    assert_eq!(
+        SignerPolicy::BothParties.validate(&both[..1]),
+        Err("both_contract_parties_required")
+    );
+}
+
 fn provider(demo: bool) -> provider::Provider {
     provider::Provider::new(
         if demo {
@@ -1333,11 +1381,15 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
         .fetch_one(&state.db)
         .await
         .unwrap();
-    let suggested = defaults::suggested(state, auth, &source).await.unwrap();
+    let suggested = defaults::suggested(state, auth, &source, SignerPolicy::Flexible)
+        .await
+        .unwrap();
     assert_eq!(suggested[0].email, "erika@example.org");
     assert_eq!(serde_json::to_value(&suggested[1]).unwrap(), agency);
     // Even when an individual document is shared, the patient profile must not leak.
-    let denied = defaults::suggested(state, &manager, &source).await.unwrap();
+    let denied = defaults::suggested(state, &manager, &source, SignerPolicy::Flexible)
+        .await
+        .unwrap();
     assert!(denied[0].first_name.is_empty() && denied[0].email.is_empty());
     assert_eq!(denied[1].email, "max@example.org");
     sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$2)")
@@ -1347,7 +1399,10 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
         .await
         .unwrap();
     assert_eq!(
-        defaults::suggested(state, &manager, &source).await.unwrap()[0].email,
+        defaults::suggested(state, &manager, &source, SignerPolicy::Flexible)
+            .await
+            .unwrap()[0]
+            .email,
         "erika@example.org"
     );
     let lead_id = Uuid::new_v4();
@@ -1365,7 +1420,10 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
         .await
         .unwrap();
     assert_eq!(
-        defaults::suggested(state, &manager, &source).await.unwrap()[0].email,
+        defaults::suggested(state, &manager, &source, SignerPolicy::Flexible)
+            .await
+            .unwrap()[0]
+            .email,
         "lena@example.org"
     );
     let it_admin = AuthUser {
@@ -1373,7 +1431,7 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
         ..auth.clone()
     };
     assert!(
-        defaults::suggested(state, &it_admin, &source)
+        defaults::suggested(state, &it_admin, &source, SignerPolicy::Flexible)
             .await
             .unwrap()[0]
             .email
@@ -1385,7 +1443,9 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
             .0,
         StatusCode::OK
     );
-    let cleared = defaults::suggested(state, auth, &source).await.unwrap();
+    let cleared = defaults::suggested(state, auth, &source, SignerPolicy::Flexible)
+        .await
+        .unwrap();
     assert_eq!(cleared.len(), 2);
     assert_eq!(cleared[1].role, "agency");
     assert!(cleared[1].email.is_empty());

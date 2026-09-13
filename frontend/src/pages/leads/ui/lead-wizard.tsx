@@ -2727,7 +2727,10 @@ export function LeadWizard({
         fetchAllDoctors().catch(() => []),
       ]);
       const commercialLookupsPromise = Promise.all([
-        fetchSpecializations().catch(() => []),
+        // This catalogue is editable from the admin area. A lead wizard must
+        // not reuse the five-minute shared cache after a speciality is added
+        // or reactivated (for example Kardiologie).
+        fetchSpecializations(false, true).catch(() => []),
         fetchAgencyServices("/agency-services?active_only=true", { forceFresh: true }).catch(() => []),
       ]);
       const leadOrdersPath = "/orders?lead_id=" + encodeURIComponent(leadId);

@@ -85,6 +85,80 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
     None
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SignerPolicy {
+    Flexible,
+    ClientOnly,
+    BothParties,
+}
+
+impl SignerPolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Flexible => "flexible",
+            Self::ClientOnly => "client_only",
+            Self::BothParties => "both_parties",
+        }
+    }
+
+    fn validate(self, signers: &[Signer]) -> Result<(), &'static str> {
+        match self {
+            Self::Flexible => Ok(()),
+            Self::ClientOnly if signers.iter().all(|signer| signer.role == "client") => Ok(()),
+            Self::ClientOnly => Err("patient_signature_only"),
+            Self::BothParties
+                if signers.iter().any(|signer| signer.role == "client")
+                    && signers.iter().any(|signer| signer.role == "agency") =>
+            {
+                Ok(())
+            }
+            Self::BothParties => Err("both_contract_parties_required"),
+        }
+    }
+}
+
+fn signer_policy_for_parts(
+    generated_template_id: Option<&str>,
+    compliance_kind: Option<&str>,
+    art: &str,
+) -> SignerPolicy {
+    if matches!(
+        generated_template_id,
+        Some("framework_contract" | "single_order")
+    ) {
+        return SignerPolicy::BothParties;
+    }
+    if matches!(
+        generated_template_id,
+        Some(
+            "confidentiality_release"
+                | "privacy_consents"
+                | "consent_data_release_child"
+                | "consent_data_release_single"
+        )
+    ) || matches!(compliance_kind, Some("dsgvo" | "confidentiality_release"))
+        || matches!(
+            art,
+            "confidentiality_release"
+                | "privacy_consent"
+                | "privacy_consents"
+                | "consent_data_release"
+        )
+    {
+        return SignerPolicy::ClientOnly;
+    }
+    SignerPolicy::Flexible
+}
+
+fn signer_policy(row: &PgRow) -> SignerPolicy {
+    signer_policy_for_parts(
+        row.get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+        row.get::<Option<String>, _>("compliance_kind").as_deref(),
+        &row.get::<String, _>("art"),
+    )
+}
+
 fn public_request(row: &PgRow) -> Value {
     json!({"id":row.get::<Uuid,_>("id"),"status":row.get::<String,_>("status"),
         "source_document_id":row.get::<Uuid,_>("source_document_id"),
@@ -125,6 +199,7 @@ async fn list(
     let can_send = signature_document_access(&state, &auth, id, true)
         .await
         .is_ok();
+    let signer_policy = signer_policy(&source);
     // A signed version displays the history of its source as well.
     let rows = sqlx::query("SELECT r.*, EXISTS(SELECT 1 FROM document_signature_attachments a WHERE a.request_id=r.id) AS has_review_attachment FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 ORDER BY created_at DESC LIMIT 30")
         .bind(id).fetch_all(&state.db).await.map_err(db_error)?;
@@ -132,7 +207,7 @@ async fn list(
         .await
         .map_err(|e| error(StatusCode::SERVICE_UNAVAILABLE, e))?;
     let suggested_signers = if can_send {
-        defaults::suggested(&state, &auth, &source).await?
+        defaults::suggested(&state, &auth, &source, signer_policy).await?
     } else {
         vec![]
     };
@@ -144,6 +219,7 @@ async fn list(
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
+        "signer_policy":signer_policy.as_str(),
         "suggested_signers":suggested_signers,
         "review_package":review_package,
         "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
@@ -195,19 +271,9 @@ async fn create(
     }
     let signers =
         normalize_signers(body.signers).map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    if matches!(
-        source
-            .get::<Option<String>, _>("generated_template_id")
-            .as_deref(),
-        Some("framework_contract" | "single_order")
-    ) && !(signers.iter().any(|s| s.role == "client")
-        && signers.iter().any(|s| s.role == "agency"))
-    {
-        return Err(error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "both_contract_parties_required",
-        ));
-    }
+    signer_policy(&source)
+        .validate(&signers)
+        .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
     let bytes = source_bytes(&source)
         .await
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;

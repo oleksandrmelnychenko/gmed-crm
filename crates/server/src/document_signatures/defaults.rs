@@ -12,7 +12,7 @@ use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
 
 use super::{
-    db_error, error,
+    SignerPolicy, db_error, error,
     provider::{Signer, normalize_signers},
 };
 use crate::{audit, auth::middleware::AuthUser, routes::patients, state::AppState};
@@ -99,6 +99,7 @@ pub(super) async fn suggested(
     state: &AppState,
     auth: &AuthUser,
     source: &PgRow,
+    policy: SignerPolicy,
 ) -> Result<Vec<Signer>, Response> {
     let mut client = empty("client");
     let patient_id: Option<Uuid> = source.get("patient_id");
@@ -124,6 +125,9 @@ pub(super) async fn suggested(
         client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
     }
     let mut signers = vec![client];
+    if policy == SignerPolicy::ClientOnly {
+        return Ok(signers);
+    }
     let agency = load(state).await?;
     if agency.is_empty() {
         signers.push(empty("agency"));

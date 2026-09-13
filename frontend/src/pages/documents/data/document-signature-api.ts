@@ -12,6 +12,7 @@ export type SignatureRequest = {
 };
 export type SignatureState = {
   enabled: boolean; region: "DE"; test_mode: boolean; can_send: boolean; can_configure: boolean;
+  signer_policy?: "flexible" | "client_only" | "both_parties";
   ineligible_reason: string | null; requests: SignatureRequest[];
   suggested_signers?: Signer[];
   review_package?: { template: "privacy_information" | "cost_estimate"; documents: { id: string; title: string; version: number }[] } | null;

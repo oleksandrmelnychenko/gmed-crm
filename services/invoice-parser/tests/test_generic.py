@@ -179,6 +179,29 @@ Rechnungsbetrag: EUR 155,26
     assert result["fields"]["amount_gross"] == "155.26"
 
 
+def test_formal_invoice_letterhead_wins_over_a_card_receipt_cover_page():
+    result = parse("""KUNDENBELEG
+Diabetes Hormon- u. Stoffwechselzentrum
+Sonnenstraße 24-26
+Betrag 1.681,44 EUR
+12.03.2026
+\f
+DHSZ am Isarklinikum
+Endokrinologie/Diabetologie
+Sonnenstraße 24-26
+80331 München
+Rechnung
+Rechnung-Nr.: 2026 6487
+Rechnungsdatum: 12.03.2026
+\f
+Rechnungsbetrag: 1.681,44 EUR
+""")
+    assert result["fields"]["supplier_name"] == "DHSZ am Isarklinikum"
+    assert result["fields"]["external_invoice_number"] == "20266487"
+    assert result["fields"]["invoice_date"] == "2026-03-12"
+    assert result["fields"]["amount_gross"] == "1681.44"
+
+
 def test_receipt_without_invoice_word_is_detected_from_explicit_total_label():
     result = parse("""Wittelsbacher Apotheke
 24.09.2026 54280
