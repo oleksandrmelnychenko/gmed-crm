@@ -5409,7 +5409,7 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 outline-none sm:px-5">
+        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain px-4 py-5 outline-none [scrollbar-gutter:stable] sm:px-5">
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
               <Banner tone="error">
@@ -6564,7 +6564,13 @@ ${serviceCommentLines.join("\n")}`
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
                     ) : null}
                     {!workTypesLoading && !workTypesError ? (
-                      <div className="max-h-[420px] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                      <div
+                        data-testid="lead-wizard-specialization-list"
+                        role="region"
+                        aria-label={tx("Выбранные специализации и виды работ", "Ausgewählte Fachrichtungen und Leistungsarten")}
+                        tabIndex={0}
+                        className="max-h-[clamp(16rem,42dvh,26rem)] space-y-2 overflow-y-scroll overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring"
+                      >
                         {selectedSpecializationItems.map((specialization) => {
                           const specializationWorkTypes =
                             workTypesBySpecialization[specialization.id] ?? [];

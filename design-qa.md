@@ -57,6 +57,34 @@ final result: passed
 
 ---
 
+# Design QA — Lead order specialization scrolling
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-0b702d9b-41d6-4b16-bb2d-4ed8d3184f62.png` (2080 × 1071 px).
+- Implementation capture: Codex in-app browser capture from `http://127.0.0.1:5173/leads` in this task.
+- Verified viewports: 1280 × 720 and the source viewport 2080 × 1071 CSS px.
+- State: stage 5, `Оформление заказа`, with several selected specializations and expanded work types.
+
+## Comparison
+
+- The selected-specialization area now has its own visible vertical scrollbar and keeps the surrounding form fields stationary.
+- At 2080 × 1071 the region is 416 px high with 867 px of content; it scrolls from the first card to the final work types.
+- The wizard footer remains fixed and both `Назад` and `Далее` stay inside the viewport while the specialization list scrolls.
+- Existing card borders, spacing, typography, checkboxes, duration chips, price chips, and remove actions remain unchanged.
+- The region is keyboard focusable and receives the existing focus-ring token for keyboard navigation.
+
+## Verification
+
+- Live DOM inspection confirmed `overflow-y: scroll` and a positive `scrollTop` after scrolling at both checked viewport sizes.
+- At 2080 × 1071 the `Далее` button remained visible at all times.
+- Targeted ESLint, TypeScript project check, production Vite build, and `git diff --check` passed.
+- No clipped controls, overlap, layout shift, or actionable P0/P1/P2 visual issue remains.
+
+final result: passed
+
+---
+
 # Design QA — Readable disabled OCR laboratory fields
 
 ## Evidence

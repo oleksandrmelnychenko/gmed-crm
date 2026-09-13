@@ -3085,6 +3085,62 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard.getByText("Kundenbedarf", { exact: true })).toBeVisible();
   });
 
+  test("order specialization cards scroll without hiding the wizard footer", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const specializationNames = [
+      "Allgemeinmedizin",
+      "Arbeitsmedizin",
+      "Geriatrie",
+      "Kardiologie",
+      "Neurologie",
+      "Orthopädie",
+    ];
+    await page.route("**/api/v1/providers/specializations", (route) => json(
+      route,
+      specializationNames.map((name, index) => ({
+        id: `00000000-0000-0000-0000-${String(211 + index).padStart(12, "0")}`,
+        code: `specialization-${index + 1}`,
+        name_en: name,
+        name_de: name,
+        name_ru: name,
+        is_active: true,
+        sort_order: (index + 1) * 10,
+      })),
+    ));
+
+    await page.setViewportSize({ width: 2080, height: 1071 });
+    await page.goto(`/leads?lead=${leadId}`);
+    await page.getByRole("button", { name: "Bearbeiten", exact: true }).click();
+
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" })
+      .getByRole("button", { name: /Auftragserfassung/i })
+      .click();
+    const specialtySelect = wizard.getByRole("combobox", {
+      name: "Fachrichtung hinzufügen",
+    });
+    for (const name of specializationNames) {
+      await chooseComboboxOption(page, specialtySelect, name);
+    }
+
+    const list = wizard.getByTestId("lead-wizard-specialization-list");
+    await expect(list).toBeVisible();
+    const initialMetrics = await list.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }));
+    expect(initialMetrics.scrollHeight).toBeGreaterThan(initialMetrics.clientHeight);
+    expect(initialMetrics.scrollTop).toBe(0);
+
+    await list.focus();
+    await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(wizard.getByRole("button", { name: "Weiter", exact: true })).toBeVisible();
+  });
+
   test("service checkboxes persist interpreter support and keep exclusive choices consistent", async ({
     page,
   }) => {
