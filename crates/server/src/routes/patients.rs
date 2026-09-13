@@ -6750,6 +6750,7 @@ async fn list_patient_orders(
                   signed_patient, signed_agency, signed_at
            FROM orders
            WHERE patient_id = $1
+             AND NOT (intake_state = 'draft' AND status = 'cancelled')
            ORDER BY created_at DESC"#,
     )
     .bind(patient_uuid)

@@ -2971,6 +2971,25 @@ async fn repeat_intake_creation_is_atomic_replayable_visible_and_archivable() {
     assert!(b.0.is_success(), "{:?}", b);
     assert_eq!(a.1["id"], b.1["id"]);
     let lead = Uuid::parse_str(a.1["id"].as_str().unwrap()).unwrap();
+    let (second_status, second) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name":"Repeat",
+            "last_name":"Regression",
+            "repeat_patient_id":patient,
+            "creation_key":Uuid::new_v4()
+        })),
+    )
+    .await;
+    assert!(second_status.is_success(), "{second}");
+    assert_eq!(
+        second["id"],
+        lead.to_string(),
+        "a patient reuses its active draft"
+    );
     let (cases,orders):(i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM cases WHERE source_lead_id=$1),(SELECT count(*) FROM orders WHERE source_lead_id=$1)").bind(lead).fetch_one(&app.suite.pool).await.unwrap();
     assert_eq!((cases, orders), (1, 1));
     let (order, state): (Uuid, String) =
@@ -3061,9 +3080,40 @@ async fn repeat_intake_creation_is_atomic_replayable_visible_and_archivable() {
     )
     .await;
     assert!(list.as_array().unwrap().is_empty());
+    let (_, patient_orders) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/orders"),
+        &pm,
+        None,
+    )
+    .await;
+    assert!(
+        patient_orders.as_array().unwrap().is_empty(),
+        "discarded drafts must leave the active patient order list"
+    );
     let (s, b) = json_request(&app, "POST", "/api/v1/leads", &pm, Some(body)).await;
     assert!(s.is_success());
     assert_eq!(b["id"], lead.to_string());
+    let (s, fresh) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name":"Repeat",
+            "last_name":"Regression",
+            "repeat_patient_id":patient,
+            "creation_key":Uuid::new_v4()
+        })),
+    )
+    .await;
+    assert!(s.is_success(), "{fresh}");
+    assert_ne!(
+        fresh["id"],
+        lead.to_string(),
+        "discarding allows a fresh intake"
+    );
 }
 #[tokio::test]
 async fn repeat_intake_requires_existing_patient_access_before_assignment() {

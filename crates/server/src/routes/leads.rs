@@ -1737,8 +1737,11 @@ async fn create_repeat_intake(
         )
     };
     let mut tx = state.db.begin().await.map_err(failed)?;
+    // A patient has one active repeat-intake draft. Serializing on the patient
+    // (instead of the browser request key) also protects against double clicks,
+    // another browser, and two assigned managers starting the flow together.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
-        .bind(format!("repeat:{}:{}", auth.user_id, key))
+        .bind(format!("repeat-patient:{patient}"))
         .execute(&mut *tx)
         .await
         .map_err(failed)?;
@@ -1757,6 +1760,26 @@ async fn create_repeat_intake(
                 "Creation key belongs to another intake",
             ));
         }
+        return Ok(id);
+    }
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT l.id
+           FROM leads l
+           JOIN orders o ON o.source_lead_id = l.id
+           WHERE l.repeat_patient_id = $1
+             AND l.converted_patient_id IS NULL
+             AND l.failed_outcome_status = 'none'
+             AND o.intake_state = 'draft'
+             AND o.status = 'active'
+           ORDER BY l.updated_at DESC, l.id
+           LIMIT 1"#,
+    )
+    .bind(patient)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(failed)?
+    {
+        tx.commit().await.map_err(failed)?;
         return Ok(id);
     }
     let id: Option<Uuid> = sqlx::query_scalar(

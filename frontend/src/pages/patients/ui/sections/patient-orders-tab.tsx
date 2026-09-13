@@ -1,6 +1,16 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -11,6 +21,7 @@ import {
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+import { discardOrderDraft } from "../../data/repeat-intakes-api";
 import type { OrderItem } from "../../model/detail-tab-types";
 
 const ORDER_TAB_LABELS = {
@@ -32,6 +43,7 @@ type PatientOrdersDictionary = {
 type PatientOrdersTabProps = {
   emptyLabel: string;
   formatDate: (value?: string | null, fallback?: string) => string;
+  onDraftDeleted: () => void;
   onOpenOrder: (orderId: string) => void;
   orderPhaseLabel: (value: string) => string;
   orders: OrderItem[];
@@ -44,6 +56,7 @@ type PatientOrdersTabProps = {
 export function PatientOrdersTab({
   emptyLabel,
   formatDate,
+  onDraftDeleted,
   onOpenOrder,
   orderPhaseLabel,
   orders,
@@ -54,6 +67,24 @@ export function PatientOrdersTab({
   const { t: dict, lang } = useLang();
   const labelLang = lang === "de" ? "de" : "ru";
   const orderNumberLabel = dict.uiText["orders_auftrag"] ?? "orders_auftrag";
+  const [deleteTarget, setDeleteTarget] = useState<OrderItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function deleteDraft() {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    setDeleteError("");
+    try {
+      await discardOrderDraft(deleteTarget.id, deleteTarget.repeat_lead_id);
+      setDeleteTarget(null);
+      onDraftDeleted();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
   const columns = useMemo<ColumnDef<OrderItem>[]>(
     () => [
       {
@@ -201,7 +232,8 @@ export function PatientOrdersTab({
   );
 
   return (
-    <TabsContent value="orders" className="space-y-4 mt-4 min-h-[400px]">
+    <>
+      <TabsContent value="orders" className="space-y-4 mt-4 min-h-[400px]">
         {tabLoading ? (
           <TabLoader />
         ) : orders.length === 0 ? (
@@ -215,8 +247,62 @@ export function PatientOrdersTab({
             dictionary={dict as unknown as Record<string, string>}
             emptyState={<EmptyCell>{emptyLabel}</EmptyCell>}
             onRowClick={(item) => onOpenOrder(item.id)}
+            rowActions={(item) =>
+              item.intake_state === "draft" && item.status !== "cancelled" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="size-7 rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={labelLang === "de" ? "Entwurf löschen" : "Удалить черновик"}
+                  title={labelLang === "de" ? "Entwurf löschen" : "Удалить черновик"}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDeleteError("");
+                    setDeleteTarget(item);
+                  }}
+                >
+                  <Trash2 aria-hidden="true" className="size-3.5" />
+                </Button>
+              ) : null
+            }
+            rowActionsWidth={52}
           />
         )}
-    </TabsContent>
+      </TabsContent>
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !deleteBusy) {
+            setDeleteTarget(null);
+            setDeleteError("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {labelLang === "de" ? "Entwurf löschen?" : "Удалить черновик?"}
+            </DialogTitle>
+            <DialogDescription>
+              {labelLang === "de"
+                ? "Der Entwurf wird aus der aktiven Liste entfernt. Abgeschlossene und aktive Aufträge bleiben unverändert."
+                : "Черновик будет удалён из активного списка. Завершённые и активные заказы не изменятся."}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError ? <p role="alert" className="text-sm text-destructive">{deleteError}</p> : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={deleteBusy} onClick={() => setDeleteTarget(null)}>
+              {labelLang === "de" ? "Abbrechen" : "Отмена"}
+            </Button>
+            <Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void deleteDraft()}>
+              {deleteBusy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Trash2 aria-hidden="true" className="size-3.5" />}
+              {labelLang === "de" ? "Entwurf löschen" : "Удалить черновик"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

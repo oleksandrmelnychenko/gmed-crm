@@ -884,6 +884,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
             <LazyPatientOrdersTab
               emptyLabel={emptyOrdersLabel}
               formatDate={formatDate}
+              onDraftDeleted={reload}
               onOpenOrder={(orderId) => {
                 const selected = orders.find(order => order.id === orderId);
                 if (selected?.status === "cancelled" && selected.repeat_lead_id && canViewLeads) {
