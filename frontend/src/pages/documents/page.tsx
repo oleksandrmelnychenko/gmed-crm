@@ -1976,9 +1976,10 @@ function StaffDocumentsPage({
   }
 
   function requestDocumentDeletion(
-    document: Pick<DocumentItem, "id" | "auto_name" | "original_filename">,
+    document: Pick<DocumentItem, "id" | "auto_name" | "original_filename" | "deletion_protected">,
     fromIntake = false,
   ) {
+    if (document.deletion_protected) return;
     setDeleteError("");
     setDeleteReason("");
     setDeleteTarget({
@@ -5370,7 +5371,7 @@ function StaffDocumentsPage({
                     />
                   )}
                 >
-                {detail?.ursprung === "manual_intake" ? (
+                {detail?.ursprung === "manual_intake" && !detail.deletion_protected ? (
                   <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm">{metaText.intakeReviewWorkspace}</p>
                     <Button
@@ -6158,7 +6159,7 @@ function StaffDocumentsPage({
                       >
                         <Download className="size-4" />
                       </Button>
-                      {canManage && detail.has_stored_file ? (
+                      {canManage && detail.has_stored_file && !detail.deletion_protected ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -7847,7 +7848,7 @@ function DocumentIntakeQueueTable({
                 {t.documents_open_document}
               </Button>
             ) : null}
-            {canDelete && item.ursprung === "manual_intake" ? (
+            {canDelete && item.ursprung === "manual_intake" && !item.deletion_protected ? (
               <Button
                 type="button"
                 variant="ghost"

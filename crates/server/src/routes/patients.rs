@@ -6909,6 +6909,9 @@ async fn list_patient_documents(
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
              AND ($2::boolean = false OR COALESCE(d.is_medical, false) = false)
+             AND NOT EXISTS (
+               SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+             )
            ORDER BY d.created_at DESC"#,
     )
     .bind(patient_uuid)

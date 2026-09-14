@@ -8,7 +8,15 @@ import { useLang } from "@/lib/i18n";
 type ReviewEvent = { id: string; at: string; by: string; test_mode: boolean; automatic: boolean };
 export type DocumentReviewState = { sent: ReviewEvent | null; acknowledged: ReviewEvent | null; can_record?: boolean };
 
-export function DocumentReviewStatus({ documentId, disabled }: { documentId: string; disabled?: boolean }) {
+export function DocumentReviewStatus({
+  documentId,
+  disabled,
+  onProtected,
+}: {
+  documentId: string;
+  disabled?: boolean;
+  onProtected?: () => void;
+}) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [state, setState] = useState<DocumentReviewState | null>(null);
@@ -18,12 +26,18 @@ export function DocumentReviewStatus({ documentId, disabled }: { documentId: str
   const [confirming, setConfirming] = useState<{ kind: "sent" | "acknowledged"; sent_event_id: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  const onProtectedRef = useRef(onProtected);
+  onProtectedRef.current = onProtected;
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const next = await apiFetch<DocumentReviewState>(`/documents/${documentId}/review-status`, { forceFresh: true });
-        if (!cancelled) { setState(next); setError(false); }
+        if (!cancelled) {
+          setState(next);
+          setError(false);
+          if (next.sent || next.acknowledged) onProtectedRef.current?.();
+        }
       } catch { if (!cancelled) setError(true); }
     }
     void load();

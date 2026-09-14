@@ -96,6 +96,7 @@ export type DocumentItem = {
   updated_at: string;
   share_count: number;
   shared_to_current: boolean;
+  deletion_protected: boolean;
   data_sensitivity: string;
   needs_categorization: boolean;
   classification_suggestion: DocumentClassificationSuggestion | null;

@@ -1899,6 +1899,7 @@ struct DocumentListQuery {
     document_variant: Option<String>,
     access_category: Option<String>,
     financial_status: Option<String>,
+    include_archived_versions: Option<bool>,
 }
 
 fn normalized_query_value(value: Option<&str>) -> Option<String> {
@@ -9708,6 +9709,8 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").unwrap_or_else(|_| chrono::Utc::now()),
         "share_count": row.try_get::<i64, _>("share_count").unwrap_or(0),
         "shared_to_current": row.try_get::<bool, _>("shared_to_current").unwrap_or(false),
+        "deletion_protected": row.try_get::<bool, _>("deletion_protected").unwrap_or(false)
+            || row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at").unwrap_or_default().is_some(),
         "data_sensitivity": sensitivity.display_name(),
         "needs_categorization": needs_categorization,
         "classification_suggestion": classification_suggestion,
@@ -9909,6 +9912,13 @@ async fn fetch_document_row(
                   extractor.name AS text_extracted_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  (d.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share WHERE protected_share.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event WHERE review_event.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -10135,7 +10145,8 @@ async fn enqueue_document_auto_naming(
 async fn load_replacement_document_version(
     state: &AppState,
     document_id: Uuid,
-    patient_id: Uuid,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
     order_id: Option<Uuid>,
     appointment_id: Option<Uuid>,
     expected_template_id: &str,
@@ -10144,7 +10155,7 @@ async fn load_replacement_document_version(
     allow_legacy_generated_category: bool,
 ) -> Result<ReplacementDocumentVersion, axum::response::Response> {
     let row = match sqlx::query(
-        r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id, d.art, d.category,
+        r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id, d.art, d.category,
                   d.ursprung, d.generated_template_id,
                   d.status, d.version_root_document_id, d.version_number,
                   EXISTS(
@@ -10171,11 +10182,21 @@ async fn load_replacement_document_version(
     if row
         .try_get::<Option<Uuid>, _>("patient_id")
         .unwrap_or_default()
-        != Some(patient_id)
+        != patient_id
     {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Replacement document must belong to the same patient",
+        ));
+    }
+    if row
+        .try_get::<Option<Uuid>, _>("lead_id")
+        .unwrap_or_default()
+        != lead_id
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Replacement document must belong to the same lead",
         ));
     }
     if row
@@ -11795,7 +11816,8 @@ async fn generate_provider_document_from_template_internal(
         match load_replacement_document_version(
             state,
             replace_document_id,
-            patient_uuid,
+            Some(patient_uuid),
+            None,
             order_id,
             appointment_id,
             &generated_template_id,
@@ -12158,6 +12180,11 @@ async fn generate_document(
     {
         return resp;
     }
+    if let Some(lead_uuid) = lead_id
+        && let Err(resp) = super::leads::require_lead_edit_lease(&state, &auth, lead_uuid).await
+    {
+        return resp;
+    }
 
     if lead_id.is_some() && !is_lead_allowed_document_template(template.id) {
         return err(
@@ -12165,13 +12192,6 @@ async fn generate_document(
             "This template is only available after patient conversion",
         );
     }
-    if lead_id.is_some() && body.replace_document_id.is_some() {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Lead document versions must be generated as a new document",
-        );
-    }
-
     // Keep concurrent retries for one intake serialized until the document is
     // stored. This is a distinct advisory lock, so PDF generation can still
     // use its regular database connections without blocking intake row locks.
@@ -12427,7 +12447,8 @@ async fn generate_document(
         match load_replacement_document_version(
             &state,
             replace_document_id,
-            patient_uuid,
+            patient_id,
+            lead_id,
             order_id,
             appointment_id,
             template.id,
@@ -18814,6 +18835,13 @@ async fn list_documents(
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  (d.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share WHERE protected_share.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event WHERE review_event.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -18898,6 +18926,9 @@ async fn list_documents(
              AND ($18::text IS NULL OR d.access_category = $18)
              AND ($19::text IS NULL OR d.financial_status = $19)
              AND ($20::uuid IS NULL OR d.lead_id = $20)
+             AND ($21::boolean OR NOT EXISTS(
+                   SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+                 ))
            ORDER BY d.created_at DESC
            LIMIT 300"#,
     )
@@ -18921,6 +18952,7 @@ async fn list_documents(
     .bind(access_category.as_deref())
     .bind(financial_status.as_deref())
     .bind(lead_id)
+    .bind(query.include_archived_versions.unwrap_or(false))
     .fetch_all(&state.db)
     .await
     {
@@ -18972,7 +19004,7 @@ async fn list_document_intake_queue(
     };
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -18980,6 +19012,7 @@ async fn list_document_intake_queue(
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
+                  d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -18991,6 +19024,13 @@ async fn list_document_intake_queue(
                   u.role AS uploaded_by_role,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  (d.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share WHERE protected_share.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event WHERE review_event.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -19324,7 +19364,7 @@ async fn list_document_versions(
         .unwrap_or(id);
 
     let rows = match sqlx::query(
-        r#"SELECT d.id, d.document_number, d.patient_id, d.order_id, d.appointment_id,
+        r#"SELECT d.id, d.document_number, d.patient_id, d.lead_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
@@ -19332,6 +19372,7 @@ async fn list_document_versions(
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
                   d.generated_manual_text,
+                  d.signed_at, d.signed_by, d.compliance_kind,
                   d.notes, d.version_root_document_id, d.replaces_document_id,
                   d.version_number, d.uploaded_by, d.created_at, d.updated_at,
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
@@ -19342,6 +19383,13 @@ async fn list_document_versions(
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
+                  (d.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share WHERE protected_share.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event WHERE review_event.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -21415,6 +21463,12 @@ async fn upload_document_with_mode(
             "Insufficient permissions for lead documents",
         );
     }
+    if let Some(document_lead_id) = lead_id
+        && let Err(resp) =
+            super::leads::require_lead_edit_lease(&state, &auth, document_lead_id).await
+    {
+        return resp;
+    }
 
     if auth.role == Role::Concierge {
         // A granted upload capability may widen this route only for an
@@ -22360,7 +22414,7 @@ async fn delete_document_file(
         }
     };
     let current = match sqlx::query(
-        "SELECT status,visibility,patient_id,storage_key,file_deleted_at FROM documents WHERE id=$1 FOR UPDATE",
+        "SELECT status,visibility,patient_id,storage_key,file_deleted_at,signed_at FROM documents WHERE id=$1 FOR UPDATE",
     )
     .bind(id)
     .fetch_optional(&mut *tx)
@@ -22394,12 +22448,26 @@ async fn delete_document_file(
         return err(StatusCode::CONFLICT, "Document file was already deleted");
     }
 
-    // Use a separate statement after the row lock: a signing transaction that
-    // committed while we waited must be visible to this reference check.
-    let signature_file_protected = match sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM document_signature_requests
-         WHERE result_document_id=$1 OR (source_document_id=$1 AND status IN
-           ('submitting','submission_unknown','pending','completed','needs_review')))",
+    // Delivery and signature evidence is append-only. Check after locking the
+    // document row so a concurrent send/sign flow cannot race with deletion.
+    let delivery_protected = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM documents protected_document
+               WHERE protected_document.id = $1
+                 AND (
+                   protected_document.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share
+                             WHERE protected_share.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event
+                             WHERE review_event.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = protected_document.id
+                                OR signature_request.result_document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = protected_document.id)
+                 )
+           )"#,
     )
     .bind(id)
     .fetch_one(&mut *tx)
@@ -22414,11 +22482,11 @@ async fn delete_document_file(
             );
         }
     };
-    if signature_file_protected {
+    if delivery_protected {
         return (
             StatusCode::CONFLICT,
-            Json(json!({"error":"document_signature_file_protected",
-                "message":"Document belongs to an active signature request or stored signature evidence"})),
+            Json(json!({"error":"document_delivery_protected",
+                "message":"Sent or signed documents cannot be deleted"})),
         )
             .into_response();
     }

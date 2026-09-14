@@ -176,11 +176,14 @@ import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import { isMinor } from "../model/lead-wizard.model";
 
 import {
+  acquireLeadEditLease,
   createLead,
   createLeadProspect,
   fetchLeadDetail,
   fetchLeadReferrerPatients,
+  heartbeatLeadEditLease,
   importLeadAttachments,
+  releaseLeadEditLease,
   resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
@@ -306,6 +309,10 @@ type Draft = {
 export type { ServiceLine } from "@/pages/orders/model/order-service-line";
 
 type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+type LeadEditLeaseState = {
+  status: "idle" | "acquiring" | "editable" | "blocked";
+  holderName?: string;
+};
 type WizardDocumentKind =
   | "identity"
   | "confidentiality_release"
@@ -497,6 +504,8 @@ type WizardDocumentPreview = {
 };
 
 const AUTOSAVE_DELAY_MS = 800;
+const LEAD_EDIT_LEASE_HEARTBEAT_MS = 60_000;
+const LEAD_EDIT_LEASE_RETRY_MS = 10_000;
 const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const LeadMedicalIntakeForm = lazy(() =>
   import("./lead-medical-intake-form").then((module) => ({
@@ -1933,6 +1942,20 @@ function errorText(error: unknown, tx: Tx): string {
   return leadErrorMessage(error, tx);
 }
 
+function leadEditLeaseHolderName(error: unknown): string | undefined {
+  if (!(error instanceof ApiRequestError) || error.status !== 409) return undefined;
+  const holder = error.body?.["holder"];
+  if (!holder || typeof holder !== "object") return undefined;
+  const name = (holder as Record<string, unknown>)["name"];
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+function isLeadEditLeaseConflict(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError
+    && error.status === 409
+    && error.body?.["error"] === "lead_edit_locked";
+}
+
 function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
   const labels: Record<string, string> = {
     master_data: tx("Данные клиента", "Personendaten"),
@@ -2374,74 +2397,134 @@ function WizardDocumentRows({
   onSign?: (document: DocumentItem, kind: DocumentComplianceKind) => void;
   onDelete: (document: DocumentItem) => void;
 }) {
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [protectedDocumentIds, setProtectedDocumentIds] = useState<Set<string>>(() => new Set());
   if (documents.length === 0) {
     return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
   }
   const sortedDocuments = sortWizardDocumentsNewestFirst(documents);
+  const latestDocuments = sortedDocuments.filter((document) => document.is_latest_version);
+  const archivedDocuments = sortedDocuments.filter((document) => !document.is_latest_version);
+
+  const renderDocument = (document: DocumentItem, archived: boolean) => {
+    const signed = Boolean(
+      complianceKind
+      && document.signed_at
+      && document.compliance_kind === complianceKind,
+    );
+    return (
+      <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+        {archived
+          ? <History aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+          : <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            title={wizardDocumentFilename(document)}
+            disabled={disabled}
+            className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            onClick={() => onOpen(document)}
+          >
+            {wizardDocumentFilename(document)}
+          </button>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <LeadWizardDocumentMetadata document={document} lang={lang} />
+            {archived ? (
+              <Badge variant="outline" className="font-mono text-[11px]">
+                {tx("Версия", "Version")} {document.version_number}
+              </Badge>
+            ) : complianceKind && !signed && onSign ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-busy={busy === `sign-${document.id}`}
+                disabled={disabled}
+                onClick={() => onSign(document, complianceKind)}
+              >
+                {busy === `sign-${document.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileCheck2 aria-hidden="true" className="size-3.5" />}
+                {busy === `sign-${document.id}` ? tx("Подтверждение…", "Wird bestätigt…") : complianceKind === "identity" ? tx("Подтвердить документ", "Dokument bestätigen") : tx("Подтвердить подпись", "Unterschrift bestätigen")}
+              </Button>
+            ) : complianceKind && showSignatureStatus ? (
+              <StateMark
+                done={signed}
+                label={complianceKind === "identity" ? signed ? tx("Проверен", "Geprüft") : tx("Ожидает проверки", "Prüfung offen") : signed ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
+              />
+            ) : null}
+          </div>
+          {!archived && ["privacy_information", "cost_estimate"].includes(document.generated_template_id ?? "") ? (
+            <DocumentReviewStatus
+              key={document.id}
+              documentId={document.id}
+              disabled={disabled}
+              onProtected={() => setProtectedDocumentIds((current) => {
+                if (current.has(document.id)) return current;
+                const next = new Set(current);
+                next.add(document.id);
+                return next;
+              })}
+            />
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {!archived && canSignWizardDocument(document) ? (
+            <DocumentSignatureAction
+              documentId={document.id}
+              title={wizardDocumentFilename(document)}
+              iconOnly
+              disabled={disabled}
+              onDone={() => setProtectedDocumentIds((current) => {
+                if (current.has(document.id)) return current;
+                const next = new Set(current);
+                next.add(document.id);
+                return next;
+              })}
+            />
+          ) : null}
+          {wizardDocumentPreviewKind(document) ? (
+            <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть", "Vorschau")} aria-label={tx("Просмотреть", "Vorschau")} disabled={disabled} onClick={() => onOpen(document)}>
+              {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать", "Herunterladen")} aria-label={tx("Скачать", "Herunterladen")} disabled={disabled} onClick={() => onDownload(document)}>
+            {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+          </Button>
+          {!archived && !document.deletion_protected && !protectedDocumentIds.has(document.id) ? (
+            <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить", "Löschen")} aria-label={tx("Удалить", "Löschen")} disabled={disabled} onClick={() => onDelete(document)}>
+              <Trash2 className="size-3.5" />
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
-      {sortedDocuments.map((document) => {
-        const signed = Boolean(
-          complianceKind
-          && document.signed_at
-          && document.compliance_kind === complianceKind,
-        );
-        return (
-          <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
-            <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <button
-                type="button"
-                title={wizardDocumentFilename(document)}
-                disabled={disabled}
-                className="block max-w-full truncate text-left text-sm font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                onClick={() => onOpen(document)}
-              >
-                {wizardDocumentFilename(document)}
-              </button>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <LeadWizardDocumentMetadata document={document} lang={lang} />
-                {complianceKind && !signed && onSign ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    aria-busy={busy === `sign-${document.id}`}
-                    disabled={disabled}
-                    onClick={() => onSign(document, complianceKind)}
-                  >
-                    {busy === `sign-${document.id}` ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <FileCheck2 aria-hidden="true" className="size-3.5" />}
-                    {busy === `sign-${document.id}` ? tx("Подтверждение…", "Wird bestätigt…") : complianceKind === "identity" ? tx("Подтвердить документ", "Dokument bestätigen") : tx("Подтвердить подпись", "Unterschrift bestätigen")}
-                  </Button>
-                ) : complianceKind && showSignatureStatus ? (
-                  <StateMark
-                    done={signed}
-                    label={complianceKind === "identity" ? signed ? tx("Проверен", "Geprüft") : tx("Ожидает проверки", "Prüfung offen") : signed ? tx("Подписан", "Unterzeichnet") : tx("Ожидает подписи", "Unterschrift offen")}
-                  />
-                ) : null}
-              </div>
-              {["privacy_information", "cost_estimate"].includes(document.generated_template_id ?? "") ? <DocumentReviewStatus key={document.id} documentId={document.id} disabled={disabled} /> : null}
+    <div className="space-y-2">
+      <div className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+        {latestDocuments.map((document) => renderDocument(document, false))}
+      </div>
+      {archivedDocuments.length > 0 ? (
+        <div className={cn("overflow-hidden rounded-lg", tokens.surface.card)}>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50"
+            aria-expanded={archiveOpen}
+            onClick={() => setArchiveOpen((current) => !current)}
+          >
+            <span className="flex items-center gap-2">
+              <Archive aria-hidden="true" className="size-3.5" />
+              {tx("Архив версий", "Versionsarchiv")}
+            </span>
+            <CountBadge>{archivedDocuments.length}</CountBadge>
+          </button>
+          {archiveOpen ? (
+            <div className="divide-y divide-border/70 border-t border-border/70">
+              {archivedDocuments.map((document) => renderDocument(document, true))}
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {canSignWizardDocument(document) ? (
-                <DocumentSignatureAction documentId={document.id} title={wizardDocumentFilename(document)} iconOnly disabled={disabled} />
-              ) : null}
-              {wizardDocumentPreviewKind(document) ? (
-                <Button type="button" variant="ghost" size="icon-sm" title={tx("Просмотреть", "Vorschau")} aria-label={tx("Просмотреть", "Vorschau")} disabled={disabled} onClick={() => onOpen(document)}>
-                  {busy === `preview-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />}
-                </Button>
-              ) : null}
-              <Button type="button" variant="ghost" size="icon-sm" title={tx("Скачать", "Herunterladen")} aria-label={tx("Скачать", "Herunterladen")} disabled={disabled} onClick={() => onDownload(document)}>
-                {busy === `download-${document.id}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-              </Button>
-              <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" title={tx("Удалить", "Löschen")} aria-label={tx("Удалить", "Löschen")} disabled={disabled} onClick={() => onDelete(document)}>
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        );
-      })}
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2518,6 +2601,9 @@ export function LeadWizard({
   const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [editLeaseLeadId, setEditLeaseLeadId] = useState<string | null>(leadId);
+  const [editLeaseState, setEditLeaseState] = useState<LeadEditLeaseState>({ status: "idle" });
+  const editAccessBlocked = Boolean(editLeaseLeadId && editLeaseState.status !== "editable");
   const [error, setError] = useState("");
   const [commercialSaveFeedback, setCommercialSaveFeedback] = useState<{
     tone: "error" | "success" | "warning";
@@ -2596,6 +2682,7 @@ export function LeadWizard({
   const [prospectResolutionBusy, setProspectResolutionBusy] = useState(false);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const lastPersistedLeadIdRef = useRef<string | null>(null);
+  const editLeaseOwnerRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
   // unchecking a lead-supplied service (one outside the fixed questionnaire options)
   // leaves its row in place instead of removing it and making it unrecoverable.
@@ -2607,6 +2694,87 @@ export function LeadWizard({
     prepayment_amount: 0,
     prepayment_due_at: 0,
   });
+
+  useEffect(() => {
+    if (leadId) setEditLeaseLeadId(leadId);
+    else if (!open) setEditLeaseLeadId(null);
+  }, [leadId, open]);
+
+  useEffect(() => {
+    if (!open || !editLeaseLeadId) {
+      setEditLeaseState({ status: "idle" });
+      return;
+    }
+
+    const leaseLeadId = editLeaseLeadId;
+    let disposed = false;
+    let timer: number | undefined;
+    setEditLeaseState({ status: "acquiring" });
+
+    const schedule = (callback: () => void, delay: number) => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(callback, delay);
+    };
+
+    const acquire = async () => {
+      try {
+        await acquireLeadEditLease(leaseLeadId);
+        if (disposed) {
+          void releaseLeadEditLease(leaseLeadId).catch(() => undefined);
+          return;
+        }
+        editLeaseOwnerRef.current = leaseLeadId;
+        setEditLeaseState({ status: "editable" });
+        schedule(() => void heartbeat(), LEAD_EDIT_LEASE_HEARTBEAT_MS);
+      } catch (cause) {
+        if (disposed) return;
+        if (editLeaseOwnerRef.current === leaseLeadId) editLeaseOwnerRef.current = null;
+        setEditLeaseState({
+          status: "blocked",
+          holderName: leadEditLeaseHolderName(cause),
+        });
+        schedule(() => void acquire(), LEAD_EDIT_LEASE_RETRY_MS);
+      }
+    };
+
+    const heartbeat = async () => {
+      try {
+        await heartbeatLeadEditLease(leaseLeadId);
+        if (!disposed) schedule(() => void heartbeat(), LEAD_EDIT_LEASE_HEARTBEAT_MS);
+      } catch (cause) {
+        if (disposed) return;
+        if (cause instanceof ApiRequestError && cause.status === 409) {
+          if (editLeaseOwnerRef.current === leaseLeadId) editLeaseOwnerRef.current = null;
+          setEditLeaseState({
+            status: "blocked",
+            holderName: leadEditLeaseHolderName(cause),
+          });
+          schedule(() => void acquire(), LEAD_EDIT_LEASE_RETRY_MS);
+          return;
+        }
+        schedule(() => void heartbeat(), LEAD_EDIT_LEASE_RETRY_MS);
+      }
+    };
+
+    void acquire();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (editLeaseOwnerRef.current === leaseLeadId) {
+        editLeaseOwnerRef.current = null;
+        void releaseLeadEditLease(leaseLeadId).catch(() => undefined);
+      }
+    };
+  }, [editLeaseLeadId, open]);
+
+  useEffect(() => {
+    if (!editAccessBlocked) return;
+    setArchiveConfirmOpen(false);
+    setDeleteServiceLine(null);
+    setDeleteDocument(null);
+    setTrustedContactEditor(null);
+    setAmlSheetOpen(false);
+  }, [editAccessBlocked]);
 
   useEffect(() => {
     if (!open || draft?.discoverySource !== "customer_referral") {
@@ -2800,7 +2968,11 @@ export function LeadWizard({
     }
   }, []);
 
-  const reload = useCallback(async (hydrateDraft: boolean, hydrateCommercial = false) => {
+  const reload = useCallback(async (
+    hydrateDraft: boolean,
+    hydrateCommercial = false,
+    readOnly = false,
+  ) => {
     if (!leadId) return;
     const reloadVersion = reloadVersionRef.current + 1;
     reloadVersionRef.current = reloadVersion;
@@ -2814,16 +2986,16 @@ export function LeadWizard({
     try {
       const leadPromise = fetchLeadDetail(leadId);
       const initialDocumentsPromise = fetchDocuments(
-        "/documents?lead_id=" + encodeURIComponent(leadId),
+        "/documents?lead_id=" + encodeURIComponent(leadId) + "&include_archived_versions=true",
       ).catch(() => []);
       const documentsPromise = leadPromise.then(async (nextLead) => {
         let attachmentImportError: unknown = null;
         let nextDocuments = await initialDocumentsPromise;
-        if (nextLead.attachments?.some((attachment) => !attachment.imported_at)) {
+        if (!readOnly && nextLead.attachments?.some((attachment) => !attachment.imported_at)) {
           try {
             await importLeadAttachments(leadId);
             nextDocuments = await fetchDocuments(
-              "/documents?lead_id=" + encodeURIComponent(leadId),
+              "/documents?lead_id=" + encodeURIComponent(leadId) + "&include_archived_versions=true",
             ).catch(() => nextDocuments);
           } catch (nextError) {
             attachmentImportError = nextError;
@@ -2848,6 +3020,8 @@ export function LeadWizard({
         fetchOrders(leadOrdersPath).catch(() => []),
       ]).then(async ([orderLead, existingOrders]) => {
           if (
+            readOnly
+            ||
             existingOrders.length > 0
             || !["new", "in_progress", "qualified"].includes(orderLead.qualification_status)
           ) {
@@ -3038,7 +3212,7 @@ export function LeadWizard({
     if (!leadId) return;
     const [nextLead, nextDocuments] = await Promise.all([
       fetchLeadDetail(leadId),
-      fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId)),
+      fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId) + "&include_archived_versions=true"),
       patientReview.refresh(),
     ]);
     if (hydrated.current !== leadId) return;
@@ -3053,7 +3227,7 @@ export function LeadWizard({
     const leadPromise = fetchLeadDetail(targetLeadId);
     const [nextLead, nextDocuments, nextContracts, nextOrders, nextQuotes] = await Promise.all([
       leadPromise,
-      fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`),
+      fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}&include_archived_versions=true`),
       leadPromise.then(fetchWizardContracts),
       fetchOrders(`/orders?lead_id=${encodeURIComponent(targetLeadId)}`),
       fetchQuotes(`/quotes?lead_id=${encodeURIComponent(targetLeadId)}`),
@@ -3146,14 +3320,15 @@ export function LeadWizard({
   }, [createMode, existingPatient, leadId, open]);
 
   useEffect(() => {
-    if (open && leadId) void reload(hydrated.current !== leadId);
-  }, [leadId, open, reload]);
+    if (!open || !leadId || ["idle", "acquiring"].includes(editLeaseState.status)) return;
+    void reload(hydrated.current !== leadId, false, editLeaseState.status !== "editable");
+  }, [editLeaseState.status, leadId, open, reload]);
 
   // Opening the wizard on a brand-new lead moves it into "in progress"
   // (see docs/lead-status-strategy-ua.md). Guarded to fire once per lead.
   const promotedInProgressRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || !leadId || lead?.qualification_status !== "new") return;
+    if (!open || !leadId || editLeaseState.status !== "editable" || lead?.qualification_status !== "new") return;
     if (promotedInProgressRef.current === leadId) return;
     promotedInProgressRef.current = leadId;
     void updateLeadStatus(leadId, "in_progress")
@@ -3162,7 +3337,7 @@ export function LeadWizard({
         return refreshLeadState();
       })
       .catch(() => undefined);
-  }, [open, leadId, lead?.qualification_status, refreshLeadState]);
+  }, [editLeaseState.status, open, leadId, lead?.qualification_status, refreshLeadState]);
 
   useEffect(() => {
     if (open) return;
@@ -3808,6 +3983,13 @@ export function LeadWizard({
           lastPersistedLeadIdRef.current = targetLeadId;
         }
 
+        if (editLeaseOwnerRef.current !== targetLeadId) {
+          await acquireLeadEditLease(targetLeadId);
+          editLeaseOwnerRef.current = targetLeadId;
+          setEditLeaseState({ status: "editable" });
+        }
+        setEditLeaseLeadId(targetLeadId);
+
         lastPersistedLeadIdRef.current = targetLeadId;
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
@@ -3865,6 +4047,15 @@ export function LeadWizard({
           onCreated?.(targetLeadId);
         }
       } catch (nextError) {
+        if (isLeadEditLeaseConflict(nextError)) {
+          if (targetLeadId && editLeaseOwnerRef.current === targetLeadId) {
+            editLeaseOwnerRef.current = null;
+          }
+          setEditLeaseState({
+            status: "blocked",
+            holderName: leadEditLeaseHolderName(nextError),
+          });
+        }
         if (
           (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
           currentAutosaveSignatureRef.current === signature
@@ -3885,7 +4076,7 @@ export function LeadWizard({
   }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, tx]);
 
   useEffect(() => {
-    if (!open || !autosaveSnapshot || loading) return;
+    if (!open || !autosaveSnapshot || loading || editAccessBlocked) return;
 
     const signature = autosaveSnapshotSignature(autosaveSnapshot);
     currentAutosaveSignatureRef.current = signature;
@@ -3910,6 +4101,7 @@ export function LeadWizard({
     loading,
     open,
     persistSnapshot,
+    editAccessBlocked,
   ]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -4467,6 +4659,9 @@ export function LeadWizard({
         template_id: templateId,
         lead_id: targetLeadId,
         order_id: order?.id,
+        replace_document_id: sortWizardDocumentsNewestFirst(
+          wizardDocuments[templateId],
+        ).find((document) => document.is_latest_version)?.id,
         language: "de",
         document_language: "de",
         document_direction: "outgoing",
@@ -4497,7 +4692,7 @@ export function LeadWizard({
             : {}),
         },
       });
-      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}`);
+      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}&include_archived_versions=true`);
       setDocuments(nextDocuments);
       const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
       if (generatedDocument) await openOrDownloadDocument(generatedDocument, true);
@@ -5021,6 +5216,9 @@ ${serviceCommentLines.join("\n")}`
         template_id: templateId,
         lead_id: leadId,
         order_id: commercial.orderId,
+        replace_document_id: sortWizardDocumentsNewestFirst(
+          commercialDocuments[templateId],
+        ).find((document) => document.is_latest_version)?.id,
         language: documentLanguage,
         document_language: documentLanguage,
         document_direction: "outgoing",
@@ -5172,6 +5370,11 @@ ${serviceCommentLines.join("\n")}`
     setValidationContext(null);
     setOrderValidationAttempted(false);
     setMedicalValidationAttempted(false);
+
+    if (editAccessBlocked) {
+      setStep(target);
+      return;
+    }
 
     if (!leadId && createMode) {
       stepNavigationInFlightRef.current = true;
@@ -5459,7 +5662,7 @@ ${serviceCommentLines.join("\n")}`
                 variant="outline"
                 size="sm"
                 className="h-8 rounded-lg border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
-                disabled={loading || isBusy}
+                disabled={loading || isBusy || editAccessBlocked}
                 onClick={() => {
                   if (!leadId) return;
                   void updateLeadStatus(leadId, "not_qualified")
@@ -5476,7 +5679,7 @@ ${serviceCommentLines.join("\n")}`
                 variant="ghost"
                 size="sm"
                 className="h-8"
-                disabled={loading || isBusy}
+                disabled={loading || isBusy || editAccessBlocked}
                 onClick={() => {
                   if (!leadId) return;
                   void updateLeadStatus(leadId, "in_progress")
@@ -5495,7 +5698,7 @@ ${serviceCommentLines.join("\n")}`
                 className="text-destructive hover:text-destructive"
                 title={tx("Архивировать обращение", "Lead archivieren")}
                 aria-label={tx("Архивировать обращение", "Lead archivieren")}
-                disabled={loading || isBusy}
+                disabled={loading || isBusy || editAccessBlocked}
                 onClick={() => setArchiveConfirmOpen(true)}
               >
                 <Archive aria-hidden="true" className="size-3.5" />
@@ -5515,12 +5718,34 @@ ${serviceCommentLines.join("\n")}`
               </Button>
             ) : null}
             {leadId ? (
-              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true), patientReview.refresh()]).catch(showWizardError)}>
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true, false, editAccessBlocked), patientReview.refresh()]).catch(showWizardError)}>
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
             ) : null}
           </div>
         </header>
+
+        {editLeaseLeadId && editLeaseState.status === "acquiring" ? (
+          <div className="shrink-0 border-b border-border px-4 py-2 sm:px-5">
+            <Banner tone="warning">
+              {tx("Проверяем доступ к редактированию…", "Bearbeitungszugriff wird geprüft…")}
+            </Banner>
+          </div>
+        ) : editLeaseLeadId && editLeaseState.status === "blocked" ? (
+          <div className="shrink-0 border-b border-border px-4 py-2 sm:px-5">
+            <Banner tone="warning">
+              {editLeaseState.holderName
+                ? tx(
+                    `Лид сейчас редактирует ${editLeaseState.holderName}. Доступен только просмотр.`,
+                    `${editLeaseState.holderName} bearbeitet diesen Lead gerade. Nur Ansicht ist verfügbar.`,
+                  )
+                : tx(
+                    "Редактирование временно недоступно. Доступен только просмотр; система повторит проверку автоматически.",
+                    "Die Bearbeitung ist vorübergehend nicht verfügbar. Nur Ansicht ist verfügbar; die Prüfung wird automatisch wiederholt.",
+                  )}
+            </Banner>
+          </div>
+        ) : null}
 
         <nav
           ref={stepNavRef}
@@ -5585,6 +5810,7 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
+        <fieldset disabled={editAccessBlocked} className="contents">
         <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain px-4 py-5 outline-none [scrollbar-gutter:stable] sm:px-5">
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
@@ -7699,6 +7925,7 @@ ${serviceCommentLines.join("\n")}`
             </div>
           </footer>
         ) : error ? <div role="alert" className="shrink-0 border-t border-border p-4"><Banner tone="error">{error}</Banner></div> : null}
+        </fieldset>
       </DialogContent>
       </Dialog>
       <Sheet open={amlSheetOpen} onOpenChange={setAmlSheetOpen}>
