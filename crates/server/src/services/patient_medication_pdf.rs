@@ -22,6 +22,17 @@ const COLS: [f32; 10] = [44.0, 40.0, 20.0, 22.0, 14.0, 14.0, 14.0, 14.0, 55.0, 3
 const FONT_SIZE: f32 = 9.0;
 const LINE_HEIGHT: f32 = 4.0;
 const PAD: f32 = 1.8;
+const MEDICATION_DISCLAIMER_TITLE_DE: &str = "Hinweis zur Medikation";
+const MEDICATION_DISCLAIMER_DE: &str = concat!(
+    "Die in diesem Dokument dargestellten Angaben zu Arzneimitteln geben die GMED zum Zeitpunkt der Erstellung vorliegenden Informationen aus ärztlichen Verordnungen, Anordnungen oder sonstigen übermittelten Unterlagen wieder. ",
+    "GMED ist nicht der verordnende Leistungserbringer und nimmt auf Grundlage dieser Darstellung keine eigene ärztliche Verordnung, Therapieentscheidung oder Festlegung einer individuellen Dosierung vor. ",
+    "Die Angaben können zur Dokumentation und Darstellung technisch strukturiert, zusammengeführt oder aus den vorliegenden Unterlagen übernommen worden sein. ",
+    "Maßgeblich für die medizinische Behandlung sind die jeweils aktuellen Anordnungen des behandelnden bzw. verordnenden Arztes. ",
+    "Die Darstellung in diesem Dokument ersetzt nicht die ärztliche Verordnung, ärztliche Beratung oder die Gebrauchsinformation des jeweiligen Arzneimittels. ",
+    "Bitte prüfen Sie die Angaben insbesondere nach Änderungen Ihrer Medikation sowie bei Unklarheiten oder Abweichungen anhand der aktuellen ärztlichen Verordnung. ",
+    "Bei Fragen zur Dosierung, Einnahme, Anwendung oder Änderung einer Medikation wenden Sie sich bitte an den behandelnden bzw. verordnenden Arzt oder Ihre Apotheke. ",
+    "Arzneimittel dürfen nicht aufgrund dieser Dokumentation eigenständig abgesetzt, geändert oder anders angewendet werden."
+);
 
 #[derive(Clone, Default)]
 pub struct MedicationPlanEntry {
@@ -361,6 +372,27 @@ impl<'a> Layout<'a> {
         self.page_header();
     }
 
+    fn new_text_page(&mut self) {
+        if !self.ops.is_empty() {
+            self.pages.push(PdfPage::new(
+                Mm(297.0),
+                Mm(210.0),
+                std::mem::take(&mut self.ops),
+            ));
+        }
+        append_company_footer(
+            &mut self.ops,
+            &self.context.brand,
+            &self.regular,
+            LEFT,
+            RIGHT,
+            17.0,
+            14.0,
+        );
+        self.y = TOP;
+        self.table_top = self.y;
+    }
+
     fn section(&mut self, title: &str) {
         self.rect(LEFT, self.y - 7.0, WIDTH, 7.0, rgb(1.0, 0.96, 0.92));
         self.text(LEFT + PAD, self.y - 4.8, title, 9.0, true, ink());
@@ -443,6 +475,47 @@ impl<'a> Layout<'a> {
                 self.y -= 7.0;
             }
         }
+    }
+
+    fn disclaimer(&mut self) {
+        const BODY_SIZE: f32 = 7.2;
+        const BODY_LINE_HEIGHT: f32 = 3.35;
+        const BLOCK_GAP: f32 = 4.0;
+
+        let lines = self.wrap(MEDICATION_DISCLAIMER_DE, BODY_SIZE, WIDTH - 10.0, false);
+        let block_height = 13.0 + lines.len() as f32 * BODY_LINE_HEIGHT;
+        if self.y - BLOCK_GAP - block_height < BOTTOM {
+            self.new_text_page();
+        }
+        self.y -= BLOCK_GAP;
+        let block_top = self.y;
+        self.rect(
+            LEFT,
+            block_top - block_height,
+            WIDTH,
+            block_height,
+            rgb(0.975, 0.975, 0.978),
+        );
+        self.rect(LEFT, block_top - block_height, 0.8, block_height, orange());
+        self.text(
+            LEFT + 4.0,
+            block_top - 5.2,
+            MEDICATION_DISCLAIMER_TITLE_DE,
+            8.5,
+            true,
+            ink(),
+        );
+        for (index, line) in lines.iter().enumerate() {
+            self.text(
+                LEFT + 4.0,
+                block_top - 10.2 - index as f32 * BODY_LINE_HEIGHT,
+                line,
+                BODY_SIZE,
+                false,
+                muted(),
+            );
+        }
+        self.y -= block_height;
     }
 
     fn finish(mut self) -> Vec<PdfPage> {
@@ -530,6 +603,7 @@ pub fn build_medication_plan_pdf(context: &MedicationPlanContext) -> Result<Vec<
             layout.entry(entry, row_index, title);
         }
     }
+    layout.disclaimer();
     Ok(document
         .with_pages(layout.finish())
         .save(&pdf_text_save_options(), &mut Vec::new()))
@@ -605,9 +679,11 @@ mod tests {
                         index + 1
                     );
                 }
-                // Table labels, footer and numbering still belong on every page.
-                assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));
-                assert!(!page.contains(ctx.tx("Ед.", "Einheit")));
+                // A disclaimer-only final page intentionally has no repeated table header.
+                if !page.contains(MEDICATION_DISCLAIMER_TITLE_DE) {
+                    assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));
+                    assert!(!page.contains(ctx.tx("Ед.", "Einheit")));
+                }
                 assert!(page.contains("contact@gmed-health.com"));
                 assert!(page.contains(&format!(
                     "{} {} / {}",
@@ -617,6 +693,19 @@ mod tests {
                 )));
             }
             let text = pages.join("\n");
+            assert_eq!(
+                pages
+                    .iter()
+                    .filter(|page| page.contains(MEDICATION_DISCLAIMER_TITLE_DE))
+                    .count(),
+                1
+            );
+            assert!(
+                pages
+                    .last()
+                    .is_some_and(|page| page.contains(MEDICATION_DISCLAIMER_TITLE_DE)),
+                "disclaimer must be at the end of the document"
+            );
             for index in 0..45 {
                 assert!(
                     text.contains(&format!("Arzneimittel-{index:02}")),
@@ -628,6 +717,7 @@ mod tests {
             let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(normalized.contains("Dokumentierte Indikation"));
             assert!(normalized.contains("Verordnender Arzt: Dr. Erika Beispiel"));
+            assert!(normalized.contains(MEDICATION_DISCLAIMER_DE));
             assert!(!text.contains("1. Wirkstoff-00"));
             assert!(text.contains("Олена Приклад"));
             assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
