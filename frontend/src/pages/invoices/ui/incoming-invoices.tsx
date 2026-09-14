@@ -167,34 +167,47 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       </div>} />
     <ProviderSettlementDialog liability={selected} accounts={accounts} locale={locale} onClose={() => setSelected(null)} onChanged={() => { setRefresh(value => value + 1); onChanged(); }} />
     <Dialog open={Boolean(paymentChoice)} onOpenChange={(open) => { if (!open && !paymentBusy) setPaymentChoice(null); }}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{tx("Оплата входящего счёта", "Zahlung der Eingangsrechnung")}</DialogTitle>
-          <DialogDescription>{paymentChoice ? `${paymentChoice.external_invoice_number} · ${paymentChoice.provider_name || "—"}` : ""}</DialogDescription>
+      <DialogContent className="gap-0 overflow-hidden rounded-xl p-0 sm:max-w-xl sm:pb-0">
+        <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
+          <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />
+            <span className="min-w-0 break-words">{tx("Оплата входящего счёта", "Zahlung der Eingangsrechnung")}</span>
+          </DialogTitle>
+          <DialogDescription className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-5">
+            {paymentChoice ? <><span className="font-mono font-medium text-foreground">{paymentChoice.external_invoice_number}</span><span aria-hidden>·</span><span className="min-w-0 break-words">{paymentChoice.provider_name || "—"}</span></> : null}
+          </DialogDescription>
         </DialogHeader>
-        {paymentChoice ? <div className="space-y-4">
-          <label className="space-y-1.5 text-sm font-medium">
+        {paymentChoice ? <div className="space-y-4 p-4 sm:p-5">
+          <label className="block space-y-1.5 text-xs font-medium text-muted-foreground">
             <span>{tx("Дата оплаты", "Zahlungsdatum")}</span>
-            <Input type="date" max={new Date().toISOString().slice(0, 10)} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
+            <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={new Date().toISOString().slice(0, 10)} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
           </label>
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung bestätigen")}</Button></div></Banner> : null}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
-              className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
-              <span className="mb-3 flex size-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700"><UserRound className="size-4.5" /></span>
-              <span className="block font-semibold">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMed не создаётся.", "Es wird keine GMed-Geldbewegung erstellt.")}</span>
-            </button>
-            <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
-              className="rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-              onClick={() => { setSelected(paymentChoice); setPaymentChoice(null); }}>
-              <span className="mb-3 flex size-9 items-center justify-center rounded-lg bg-orange-50 text-orange-700"><Building2 className="size-4.5" /></span>
-              <span className="block font-semibold">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMed", "GMed-Zahlungsverlauf") : tx("Оплатила GMed", "Von GMed bezahlt")}</span>
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
-            </button>
-          </div>
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
+                className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-sky-800 dark:hover:bg-sky-950/20"
+                onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
+                <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-sky-100 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300"><UserRound className="size-4.5" /></span>
+                <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMed не создаётся.", "Es wird keine GMed-Geldbewegung erstellt.")}</span>
+              </button>
+              <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
+                className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => { setSelected(paymentChoice); setPaymentChoice(null); }}>
+                <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-orange-100 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300"><Building2 className="size-4.5" /></span>
+                <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMed", "GMed-Zahlungsverlauf") : tx("Оплатила GMed", "Von GMed bezahlt")}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
+              </button>
+            </div>
+          </fieldset>
         </div> : null}
+        <div className="flex shrink-0 justify-end border-t border-border/70 bg-muted/20 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+          <Button type="button" variant="outline" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={paymentBusy} onClick={() => setPaymentChoice(null)}>
+            {tx("Закрыть", "Schließen")}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   </section>;
