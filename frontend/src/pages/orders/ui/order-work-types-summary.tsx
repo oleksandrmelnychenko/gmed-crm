@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 import type { SpecializationWorkType } from "@/pages/specializations/data/specialization-work-types-api";
 type Tx = (ru: string, de: string) => string;
 const formatMoneyValue = (value: number, lang: Lang) => new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+const SPECIALIZATION_COLUMN_WIDTH = 230;
+const WORK_TYPE_COLUMN_MIN_WIDTH = 280;
+const DURATION_COLUMN_WIDTH = 130;
+const PRICE_RANGE_COLUMN_WIDTH = 230;
 
 export function workTypeDurationLabel(hours: number, tx: Tx) {
   const duration = Math.max(1, hours);
@@ -81,7 +85,7 @@ export function SelectedWorkTypesSummary({
       label: tx("Специализация", "Fachrichtung"),
       accessor: specializationNames,
       sortable: false,
-      width: 230,
+      width: SPECIALIZATION_COLUMN_WIDTH,
       render: (workType: SpecializationWorkType) => {
         const names = specializationNameList(workType);
         return names.length > 0 ? (
@@ -110,7 +114,7 @@ export function SelectedWorkTypesSummary({
       label: tx("Вид работы", "Leistungsart"),
       accessor: workTypeName,
       sortable: false,
-      minWidth: 280,
+      minWidth: WORK_TYPE_COLUMN_MIN_WIDTH,
       render: (workType) => (
         <span className="break-words font-medium text-foreground">
           {workTypeName(workType)}
@@ -123,7 +127,7 @@ export function SelectedWorkTypesSummary({
       accessor: (workType) => Math.max(1, workType.duration_hours),
       sortable: false,
       align: "right",
-      width: 130,
+      width: DURATION_COLUMN_WIDTH,
       render: (workType) => (
         <Badge
           variant="outline"
@@ -139,7 +143,7 @@ export function SelectedWorkTypesSummary({
       accessor: (workType) => workType.min_price_eur,
       sortable: false,
       align: "right",
-      width: 230,
+      width: PRICE_RANGE_COLUMN_WIDTH,
       render: (workType) => (
         <span className="whitespace-nowrap font-mono font-semibold tabular-nums text-foreground">
           {formatMoneyValue(workType.min_price_eur, lang)} – {formatMoneyValue(workType.max_price_eur, lang)} EUR
@@ -147,6 +151,14 @@ export function SelectedWorkTypesSummary({
       ),
     },
   ];
+  const footerGridTemplate = [
+    selection ? "32px" : null,
+    compact ? null : `${SPECIALIZATION_COLUMN_WIDTH}px`,
+    `minmax(${WORK_TYPE_COLUMN_MIN_WIDTH}px, 1fr)`,
+    `${DURATION_COLUMN_WIDTH}px`,
+    `${PRICE_RANGE_COLUMN_WIDTH}px`,
+  ].filter((value): value is string => Boolean(value)).join(" ");
+  const durationFooterColumn = 2 + Number(!compact) + Number(Boolean(selection));
 
   return (
     <DataTable
@@ -162,8 +174,8 @@ export function SelectedWorkTypesSummary({
       mobileDetailColumnIds={compact ? ["duration", "range"] : ["specialization", "duration", "range"]}
       disableRowHover
       footer={(
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <div className="flex flex-wrap items-center justify-end gap-3 sm:-mx-3 sm:grid" style={{ gridTemplateColumns: footerGridTemplate }}>
+          <span className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono font-semibold tabular-nums text-emerald-800 sm:mr-2 sm:justify-self-end dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200" style={{ gridColumn: durationFooterColumn }}>
             {tx("Длительность", "Dauer")}: {totalDuration ? workTypeDurationLabel(totalDuration, tx) : tx("0 часов", "0 Stunden")}
           </span>
         </div>
