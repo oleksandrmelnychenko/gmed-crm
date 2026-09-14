@@ -43,6 +43,9 @@ export type LeadReferrerPatientOption = {
   title: string | null;
   first_name: string;
   last_name: string;
+  birth_date: string;
+  email: string | null;
+  phone: string | null;
 };
 
 export function fetchLeadReferrerPatients(search = "") {

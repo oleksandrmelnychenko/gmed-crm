@@ -5,6 +5,7 @@ use axum::{
     response::Response,
     routing::get,
 };
+use chrono::{Datelike, NaiveDate};
 use gmed_domain::role::Role;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -93,6 +94,70 @@ fn empty(role: &str) -> Signer {
     }
 }
 
+fn is_minor(date_of_birth: Option<NaiveDate>) -> bool {
+    let Some(date_of_birth) = date_of_birth else {
+        return false;
+    };
+    let today = chrono::Utc::now().date_naive();
+    let mut age = today.year() - date_of_birth.year();
+    if (today.month(), today.day()) < (date_of_birth.month(), date_of_birth.day()) {
+        age -= 1;
+    }
+    age < 18
+}
+
+fn is_guardian_relation(value: Option<&str>) -> bool {
+    let value = value.unwrap_or_default().trim().to_lowercase();
+    [
+        "parent",
+        "mother",
+        "father",
+        "guardian",
+        "mutter",
+        "vater",
+        "vormund",
+        "мам",
+        "пап",
+        "родител",
+        "опек",
+        "бать",
+    ]
+    .iter()
+    .any(|candidate| value.contains(candidate))
+}
+
+fn signer_name(name: &str) -> (String, String) {
+    let mut parts = name.split_whitespace().collect::<Vec<_>>();
+    if parts.len() <= 1 {
+        return (
+            parts.first().copied().unwrap_or_default().to_string(),
+            String::new(),
+        );
+    }
+    let last_name = parts.pop().unwrap_or_default().to_string();
+    (parts.join(" "), last_name)
+}
+
+fn guardian_signer(contacts: &Value) -> Option<Signer> {
+    contacts.as_array()?.iter().find_map(|contact| {
+        if !is_guardian_relation(contact.get("relation").and_then(Value::as_str)) {
+            return None;
+        }
+        let email = contact.get("email").and_then(Value::as_str)?.trim();
+        let name = contact.get("name").and_then(Value::as_str)?.trim();
+        if email.is_empty() || name.is_empty() {
+            return None;
+        }
+        let (first_name, last_name) = signer_name(name);
+        Some(Signer {
+            first_name,
+            last_name,
+            email: email.to_lowercase(),
+            role: "client".into(),
+        })
+    })
+}
+
 // Called only after checking this document's send permissions. Document access
 // alone does not grant access to the linked patient's contact details.
 pub(super) async fn suggested(
@@ -110,19 +175,42 @@ pub(super) async fn suggested(
         (Some(id), None)
             if matches!(auth.role, Role::Ceo | Role::PatientManager)
                 && patients::has_patient_access(state, auth, id).await? => {
-            sqlx::query("SELECT first_name,last_name,email FROM patients WHERE id=$1 AND is_active=true")
+            sqlx::query(r#"SELECT p.first_name, p.last_name, p.email, p.birth_date,
+                        COALESCE(
+                          CASE WHEN jsonb_typeof(p.intake_profile->'trusted_contacts') = 'array'
+                            THEN p.intake_profile->'trusted_contacts' ELSE '[]'::jsonb END,
+                          '[]'::jsonb
+                        ) || COALESCE((
+                          SELECT jsonb_agg(jsonb_build_object(
+                            'name', COALESCE(NULLIF(btrim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name),
+                            'email', rp.email,
+                            'relation', pr.relation_type
+                          ))
+                          FROM patient_relations pr
+                          LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+                          WHERE pr.patient_id = p.id AND pr.relation_type IN ('parent', 'guardian')
+                        ), '[]'::jsonb) AS guardian_contacts
+                      FROM patients p WHERE p.id=$1 AND p.is_active=true"#)
                 .bind(id).fetch_optional(&state.db).await.map_err(db_error)?
         }
         (None, Some(id)) if auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]).is_ok() => {
-            sqlx::query("SELECT first_name,last_name,email FROM leads WHERE id=$1 AND qualification_status<>'archived'")
+            sqlx::query("SELECT first_name,last_name,email,date_of_birth AS birth_date,COALESCE(trusted_contacts,'[]'::jsonb) AS guardian_contacts FROM leads WHERE id=$1 AND qualification_status<>'archived'")
                 .bind(id).fetch_optional(&state.db).await.map_err(db_error)?
         }
         _ => None,
     };
     if let Some(row) = row {
-        client.first_name = row.get("first_name");
-        client.last_name = row.get("last_name");
-        client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
+        let birth_date = row.get::<Option<NaiveDate>, _>("birth_date");
+        if is_minor(birth_date) {
+            let contacts = row.get::<Value, _>("guardian_contacts");
+            if let Some(guardian) = guardian_signer(&contacts) {
+                client = guardian;
+            }
+        } else {
+            client.first_name = row.get("first_name");
+            client.last_name = row.get("last_name");
+            client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
+        }
     }
     let mut signers = vec![client];
     if policy == SignerPolicy::ClientOnly {
@@ -162,5 +250,19 @@ mod tests {
             }])
             .is_err()
         );
+    }
+
+    #[test]
+    fn guardian_is_used_as_the_minor_document_signer() {
+        let signer = guardian_signer(&json!([{
+            "name": "Anna Beispiel",
+            "email": "ANNA@example.org",
+            "relation": "parent"
+        }]))
+        .unwrap();
+        assert_eq!(signer.first_name, "Anna");
+        assert_eq!(signer.last_name, "Beispiel");
+        assert_eq!(signer.email, "anna@example.org");
+        assert_eq!(signer.role, "client");
     }
 }

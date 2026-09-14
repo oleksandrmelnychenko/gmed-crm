@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -168,6 +168,8 @@ struct CreateLeadRequest {
     last_name: String,
     email: Option<String>,
     phone: Option<String>,
+    date_of_birth: Option<String>,
+    trusted_contacts: Option<Vec<TrustedContactRequest>>,
     source: Option<String>,
     country: Option<String>,
     notes: Option<String>,
@@ -188,6 +190,7 @@ struct FailedLeadResolutionRequest {
 #[derive(Deserialize)]
 struct TrustedContactRequest {
     id: Option<Uuid>,
+    related_patient_id: Option<Uuid>,
     name: String,
     email: Option<String>,
     phone: Option<String>,
@@ -279,6 +282,7 @@ fn normalize_trusted_contacts(contacts: &[TrustedContactRequest]) -> Result<Valu
 
         normalized.push(json!({
             "id": id,
+            "related_patient_id": contact.related_patient_id,
             "name": name,
             "email": normalized_contact_text(contact.email.as_deref()),
             "phone": normalized_contact_text(contact.phone.as_deref()),
@@ -319,7 +323,8 @@ async fn list_lead_referrer_patients(
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default().trim());
     match sqlx::query(
-        r#"SELECT id, patient_id, title, first_name, last_name
+        r#"SELECT id, patient_id, title, first_name, last_name,
+                  birth_date, email, phone_primary
            FROM patients
            WHERE is_active = true
              AND lifecycle_status = 'active'
@@ -344,6 +349,9 @@ async fn list_lead_referrer_patients(
                         "title": row.try_get::<Option<String>, _>("title").unwrap_or_default(),
                         "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
                         "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
+                        "birth_date": row.try_get::<NaiveDate, _>("birth_date").map(|value| value.to_string()).unwrap_or_default(),
+                        "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+                        "phone": row.try_get::<Option<String>, _>("phone_primary").unwrap_or_default(),
                     })
                 })
                 .collect(),
@@ -898,6 +906,251 @@ fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
     } else {
         "other"
     }
+}
+
+fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
+    matches!(
+        normalized_patient_relation_type(value),
+        "parent" | "guardian"
+    )
+}
+
+fn is_minor_on(date_of_birth: Option<NaiveDate>, today: NaiveDate) -> bool {
+    let Some(date_of_birth) = date_of_birth else {
+        return false;
+    };
+    let mut age = today.year() - date_of_birth.year();
+    if (today.month(), today.day()) < (date_of_birth.month(), date_of_birth.day()) {
+        age -= 1;
+    }
+    age < 18
+}
+
+fn normalized_identity_email(value: Option<&str>) -> Option<String> {
+    normalized_contact_text(value).map(|value| value.to_lowercase())
+}
+
+fn normalized_identity_phone(value: Option<&str>) -> Option<String> {
+    let mut digits = value
+        .unwrap_or_default()
+        .chars()
+        .filter(|character| character.is_ascii_digit())
+        .collect::<String>();
+    if let Some(international) = digits.strip_prefix("00") {
+        digits = international.to_string();
+    }
+    (digits.len() >= 6).then_some(digits)
+}
+
+fn normalized_person_name(first_name: &str, last_name: &str) -> String {
+    format!("{first_name} {last_name}")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn guardian_contact_matches_owner(
+    guardians: &Value,
+    owner_id: Option<Uuid>,
+    owner_name: &str,
+    contact_kind: &str,
+    normalized_contact: &str,
+) -> bool {
+    guardians.as_array().is_some_and(|contacts| {
+        contacts.iter().any(|contact| {
+            if !is_parent_or_guardian_relation(contact.get("relation").and_then(Value::as_str)) {
+                return false;
+            }
+            let linked = owner_id.is_some_and(|owner_id| {
+                contact
+                    .get("related_patient_id")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                    == Some(owner_id)
+            });
+            let contact_name = contact
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            let same_contact = match contact_kind {
+                "email" => {
+                    normalized_identity_email(contact.get("email").and_then(Value::as_str))
+                        .as_deref()
+                        == Some(normalized_contact)
+                }
+                "phone" => {
+                    normalized_identity_phone(contact.get("phone").and_then(Value::as_str))
+                        .as_deref()
+                        == Some(normalized_contact)
+                }
+                _ => false,
+            };
+            linked
+                || (owner_id.is_none()
+                    && !contact_name.is_empty()
+                    && contact_name == owner_name
+                    && same_contact)
+        })
+    })
+}
+
+struct LeadContactIdentity<'a> {
+    lead_id: Option<Uuid>,
+    patient_ids: Vec<Uuid>,
+    first_name: &'a str,
+    last_name: &'a str,
+    date_of_birth: Option<NaiveDate>,
+    email: Option<&'a str>,
+    phone: Option<&'a str>,
+    guardians: &'a Value,
+}
+
+async fn validate_lead_contact_identity(
+    state: &AppState,
+    candidate: &LeadContactIdentity<'_>,
+) -> Result<(), axum::response::Response> {
+    let contacts = [
+        ("email", normalized_identity_email(candidate.email)),
+        ("phone", normalized_identity_phone(candidate.phone)),
+    ];
+
+    for (kind, normalized) in contacts {
+        let Some(normalized) = normalized else {
+            continue;
+        };
+        let conflicts = sqlx::query(
+            r#"SELECT l.id AS owner_lead_id,
+                      COALESCE(l.prospect_patient_id, l.repeat_patient_id, l.converted_patient_id) AS owner_patient_id,
+                      l.first_name, l.last_name, l.date_of_birth,
+                      l.trusted_contacts AS guardians
+                 FROM leads l
+                WHERE l.qualification_status <> 'archived'
+                  AND COALESCE(l.failed_outcome_status, 'none') = 'none'
+                  AND (
+                    ($1 = 'email' AND lower(btrim(COALESCE(l.email, ''))) = $2)
+                    OR ($1 = 'phone' AND (
+                      regexp_replace(phone_digits(l.phone), '^00', '') = $2
+                      OR regexp_replace(phone_digits(l.whatsapp_number), '^00', '') = $2
+                      OR EXISTS (
+                        SELECT 1
+                          FROM jsonb_array_elements(
+                            CASE WHEN jsonb_typeof(l.phones) = 'array' THEN l.phones ELSE '[]'::jsonb END
+                          ) item
+                         WHERE regexp_replace(phone_digits(item->>'number'), '^00', '') = $2
+                      )
+                    ))
+                  )
+                UNION ALL
+               SELECT p.source_lead_id AS owner_lead_id, p.id AS owner_patient_id,
+                      p.first_name, p.last_name, p.birth_date AS date_of_birth,
+                      COALESCE(
+                        CASE WHEN jsonb_typeof(p.intake_profile->'trusted_contacts') = 'array'
+                          THEN p.intake_profile->'trusted_contacts' ELSE '[]'::jsonb END,
+                        '[]'::jsonb
+                      ) || COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object(
+                          'related_patient_id', pr.related_patient_id,
+                          'name', COALESCE(NULLIF(btrim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name),
+                          'email', rp.email,
+                          'phone', COALESCE(rp.phone_primary, pr.phone),
+                          'relation', pr.relation_type
+                        ))
+                          FROM patient_relations pr
+                          LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+                         WHERE pr.patient_id = p.id
+                           AND pr.relation_type IN ('parent', 'guardian')
+                      ), '[]'::jsonb) AS guardians
+                 FROM patients p
+                WHERE p.lifecycle_status IN ('prospective', 'active', 'inactive')
+                  AND (
+                    ($1 = 'email' AND (
+                      lower(btrim(COALESCE(p.email, ''))) = $2
+                      OR EXISTS (
+                        SELECT 1 FROM patient_contacts pc
+                         WHERE pc.patient_id = p.id AND pc.contact_kind = 'email'
+                           AND lower(btrim(pc.value)) = $2
+                      )
+                    ))
+                    OR ($1 = 'phone' AND (
+                      regexp_replace(phone_digits(p.phone_primary), '^00', '') = $2
+                      OR regexp_replace(phone_digits(p.phone_secondary), '^00', '') = $2
+                      OR EXISTS (
+                        SELECT 1 FROM patient_contacts pc
+                         WHERE pc.patient_id = p.id AND pc.contact_kind = 'phone'
+                           AND regexp_replace(phone_digits(pc.value), '^00', '') = $2
+                      )
+                    ))
+                  )"#,
+        )
+        .bind(kind)
+        .bind(&normalized)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, contact_kind = kind, "validate lead contact identity");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate contact identity")
+        })?;
+
+        for conflict in conflicts {
+            let owner_lead_id: Option<Uuid> = conflict.try_get("owner_lead_id").unwrap_or_default();
+            let owner_patient_id: Option<Uuid> =
+                conflict.try_get("owner_patient_id").unwrap_or_default();
+            if candidate.lead_id == owner_lead_id
+                || owner_patient_id.is_some_and(|id| candidate.patient_ids.contains(&id))
+            {
+                continue;
+            }
+
+            let owner_first: String = conflict.try_get("first_name").unwrap_or_default();
+            let owner_last: String = conflict.try_get("last_name").unwrap_or_default();
+            let owner_name = normalized_person_name(&owner_first, &owner_last);
+            let owner_birth_date: Option<NaiveDate> =
+                conflict.try_get("date_of_birth").unwrap_or_default();
+            let owner_guardians: Value =
+                conflict.try_get("guardians").unwrap_or_else(|_| json!([]));
+            let candidate_name = normalized_person_name(candidate.first_name, candidate.last_name);
+            let today = chrono::Utc::now().date_naive();
+            let candidate_is_minor = is_minor_on(candidate.date_of_birth, today);
+            let owner_is_minor = is_minor_on(owner_birth_date, today);
+            let guardian_exception = (candidate_is_minor
+                && !owner_is_minor
+                && guardian_contact_matches_owner(
+                    candidate.guardians,
+                    owner_patient_id,
+                    &owner_name,
+                    kind,
+                    &normalized,
+                ))
+                || (owner_is_minor
+                    && !candidate_is_minor
+                    && guardian_contact_matches_owner(
+                        &owner_guardians,
+                        candidate.patient_ids.first().copied(),
+                        &candidate_name,
+                        kind,
+                        &normalized,
+                    ));
+            if guardian_exception {
+                continue;
+            }
+
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                if kind == "email" {
+                    "Email is already used by another person"
+                } else {
+                    "Phone is already used by another person"
+                },
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Default)]
@@ -1844,11 +2097,71 @@ async fn create_lead(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
 
+    if let Some(creation_key) = body.creation_key {
+        match sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM leads WHERE created_by = $1 AND creation_key = $2",
+        )
+        .bind(auth.user_id)
+        .bind(creation_key)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(id)) => {
+                return Json(json!({"id":id,"idempotent_replay":true})).into_response();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(%error, "resolve lead creation key");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+            }
+        }
+    }
+
+    let date_of_birth = match body.date_of_birth.as_deref() {
+        Some(value) if !value.trim().is_empty() => {
+            match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid date_of_birth (YYYY-MM-DD)",
+                    );
+                }
+            }
+        }
+        _ => None,
+    };
+    let trusted_contacts = match body.trusted_contacts.as_deref() {
+        Some(contacts) => match normalize_trusted_contacts(contacts) {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => json!([]),
+    };
+    if let Err(response) = validate_lead_contact_identity(
+        &state,
+        &LeadContactIdentity {
+            lead_id: None,
+            patient_ids: Vec::new(),
+            first_name: body.first_name.trim(),
+            last_name: body.last_name.trim(),
+            date_of_birth,
+            email: body.email.as_deref(),
+            phone: body.phone.as_deref(),
+            guardians: &trusted_contacts,
+        },
+    )
+    .await
+    {
+        return response;
+    }
+
     match sqlx::query_as::<_, (Uuid, bool)>(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
-                notes, created_by, intake_source, creation_key
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9)
+                notes, created_by, intake_source, creation_key, date_of_birth,
+                trusted_contacts
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'manual', $9, $10, $11)
            ON CONFLICT(created_by,creation_key) WHERE creation_key IS NOT NULL
            DO UPDATE SET creation_key=EXCLUDED.creation_key
            RETURNING id, (xmax = 0)"#,
@@ -1862,6 +2175,8 @@ async fn create_lead(
     .bind(body.notes.as_deref())
     .bind(auth.user_id)
     .bind(body.creation_key)
+    .bind(date_of_birth)
+    .bind(&trusted_contacts)
     .fetch_one(&state.db)
     .await
     {
@@ -2635,6 +2950,81 @@ async fn update_lead(
         && body.referrer_patient_id.is_none()
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
+    }
+
+    let current_identity = match sqlx::query(
+        r#"SELECT first_name, last_name, date_of_birth, email, phone,
+                  trusted_contacts, repeat_patient_id, prospect_patient_id,
+                  converted_patient_id
+             FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(error) => {
+            tracing::error!(%error, %lead_id, "load lead contact identity");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate contact identity",
+            );
+        }
+    };
+    let effective_first_name = first_name
+        .clone()
+        .unwrap_or_else(|| current_identity.get::<String, _>("first_name"));
+    let effective_last_name = last_name
+        .clone()
+        .unwrap_or_else(|| current_identity.get::<String, _>("last_name"));
+    let effective_email = body
+        .email
+        .clone()
+        .or_else(|| current_identity.get::<Option<String>, _>("email"));
+    let effective_phone = body
+        .phone
+        .clone()
+        .or_else(|| current_identity.get::<Option<String>, _>("phone"));
+    let effective_birth_date = date_of_birth.or_else(|| {
+        current_identity
+            .try_get::<Option<NaiveDate>, _>("date_of_birth")
+            .unwrap_or_default()
+    });
+    let current_guardians: Value = current_identity
+        .try_get("trusted_contacts")
+        .unwrap_or_else(|_| json!([]));
+    let effective_guardians = trusted_contacts.as_ref().unwrap_or(&current_guardians);
+    let patient_ids = [
+        current_identity
+            .try_get::<Option<Uuid>, _>("repeat_patient_id")
+            .unwrap_or_default(),
+        current_identity
+            .try_get::<Option<Uuid>, _>("prospect_patient_id")
+            .unwrap_or_default(),
+        current_identity
+            .try_get::<Option<Uuid>, _>("converted_patient_id")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if let Err(response) = validate_lead_contact_identity(
+        &state,
+        &LeadContactIdentity {
+            lead_id: Some(lead_id),
+            patient_ids,
+            first_name: &effective_first_name,
+            last_name: &effective_last_name,
+            date_of_birth: effective_birth_date,
+            email: effective_email.as_deref(),
+            phone: effective_phone.as_deref(),
+            guardians: effective_guardians,
+        },
+    )
+    .await
+    {
+        return response;
     }
 
     match sqlx::query(
@@ -4782,6 +5172,10 @@ async fn convert_lead(
             continue;
         }
         let relation = contact.get("relation").and_then(Value::as_str);
+        let related_patient_id = contact
+            .get("related_patient_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok());
         let notes = [
             contact
                 .get("email")
@@ -4806,18 +5200,22 @@ async fn convert_lead(
 
         if let Err(error) = sqlx::query(
             r#"INSERT INTO patient_relations (
-                    patient_id, related_name, relation_type,
+                    patient_id, related_patient_id, related_name, relation_type,
                     is_emergency_contact, phone, notes
                )
-               SELECT $1, $2, $3, true, $4, $5
+               SELECT $1, $2, $3, $4, true, $5, $6
                WHERE NOT EXISTS (
                    SELECT 1 FROM patient_relations existing
                    WHERE existing.patient_id = $1
-                     AND existing.related_name = $2
-                     AND existing.relation_type = $3
+                      AND (
+                        ($2::uuid IS NOT NULL AND existing.related_patient_id = $2)
+                        OR ($2::uuid IS NULL AND existing.related_name = $3)
+                      )
+                      AND existing.relation_type = $4
                )"#,
         )
         .bind(patient_id)
+        .bind(related_patient_id)
         .bind(name)
         .bind(normalized_patient_relation_type(relation))
         .bind(contact.get("phone").and_then(Value::as_str))
@@ -5738,6 +6136,26 @@ async fn ingest_lead_intake(
     }
 
     let (primary_phone, primary_phone_type) = first_phone(&payload["phones"]);
+    let email = str_opt(&payload["email"]);
+    let date_of_birth = date_opt(&payload["dateOfBirth"]);
+    let no_guardians = json!([]);
+    if let Err(response) = validate_lead_contact_identity(
+        &state,
+        &LeadContactIdentity {
+            lead_id: None,
+            patient_ids: Vec::new(),
+            first_name: &first_name,
+            last_name: &last_name,
+            date_of_birth,
+            email: email.as_deref(),
+            phone: primary_phone.as_deref(),
+            guardians: &no_guardians,
+        },
+    )
+    .await
+    {
+        return response;
+    }
     let services = string_array(&payload["services"]);
     let phones_json = if payload["phones"].is_array() {
         payload["phones"].clone()
@@ -5819,9 +6237,9 @@ async fn ingest_lead_intake(
     .bind(str_opt(&payload["middleName"]))
     .bind(&last_name)
     .bind(str_opt(&payload["suffix"]))
-    .bind(date_opt(&payload["dateOfBirth"]))
+    .bind(date_of_birth)
     .bind(str_opt(&payload["legalSex"]))
-    .bind(str_opt(&payload["email"]))
+    .bind(email)
     .bind(bool_opt(&payload["emailConsent"]))
     .bind(primary_phone)
     .bind(primary_phone_type)

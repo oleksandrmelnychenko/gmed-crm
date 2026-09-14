@@ -122,6 +122,12 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Invalid legal_sex"), de)).toBe(
       "Geschlecht laut Ausweisdokument auswählen",
     );
+    expect(leadErrorMessage(new Error("Email is already used by another person"), ru)).toBe(
+      "Этот адрес электронной почты уже используется другим человеком",
+    );
+    expect(leadErrorMessage(new Error("Phone is already used by another person"), de)).toBe(
+      "Diese Telefonnummer wird bereits von einer anderen Person verwendet",
+    );
   });
 
   it("localizes structured backend validation messages without leaking field keys", () => {

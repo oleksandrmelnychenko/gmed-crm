@@ -1426,6 +1426,24 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
             .email,
         "lena@example.org"
     );
+    sqlx::query(
+        r#"UPDATE leads
+           SET date_of_birth = '2015-01-01',
+               email = 'family@example.org',
+               trusted_contacts = '[{"name":"Anna Beispiel","email":"family@example.org","relation":"parent"}]'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let minor_signer = defaults::suggested(state, &manager, &source, SignerPolicy::Flexible)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(minor_signer.first_name, "Anna");
+    assert_eq!(minor_signer.last_name, "Beispiel");
+    assert_eq!(minor_signer.email, "family@example.org");
     let it_admin = AuthUser {
         role: Role::ItAdmin,
         ..auth.clone()

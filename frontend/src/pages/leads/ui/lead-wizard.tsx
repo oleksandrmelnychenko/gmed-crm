@@ -173,6 +173,7 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
+import { isMinor } from "../model/lead-wizard.model";
 
 import {
   createLead,
@@ -209,6 +210,8 @@ type LeadWizardProps = {
 
 type TrustedContactDraft = {
   id: string;
+  relatedPatientId: string;
+  relatedPatientLabel: string;
   name: string;
   phone: string;
   email: string;
@@ -452,6 +455,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
 
 type MasterFieldKey =
   | "referrerPatientId"
+  | "guardian"
   | "firstName"
   | "lastName"
   | "birthDate"
@@ -538,6 +542,7 @@ function referrerPatientOptionLabel(option: LeadReferrerPatientOption) {
 
 const MASTER_FIELD_ORDER: MasterFieldKey[] = [
   "referrerPatientId",
+  "guardian",
   "firstName",
   "lastName",
   "birthDate",
@@ -554,6 +559,7 @@ const MASTER_FIELD_ORDER: MasterFieldKey[] = [
 
 const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   referrerPatientId: "lead-wizard-referrer-patient",
+  guardian: "lead-wizard-guardian",
   firstName: "lead-wizard-first-name",
   lastName: "lead-wizard-last-name",
   birthDate: "lead-wizard-birth-date",
@@ -635,6 +641,8 @@ function questionnaireText(lead: LeadDetail, ...keys: string[]) {
 function emptyTrustedContact(): TrustedContactDraft {
   return {
     id: crypto.randomUUID(),
+    relatedPatientId: "",
+    relatedPatientLabel: "",
     name: "",
     phone: "",
     email: "",
@@ -651,6 +659,8 @@ function trustedContactsFromLead(lead: LeadDetail): TrustedContactDraft[] {
         if (!name) return [];
         return [{
           id: contact.id || crypto.randomUUID(),
+          relatedPatientId: contact.related_patient_id ?? "",
+          relatedPatientLabel: name,
           name,
           phone: contact.phone ?? "",
           email: contact.email ?? "",
@@ -667,6 +677,8 @@ function trustedContactsFromLead(lead: LeadDetail): TrustedContactDraft[] {
   if (!legacyName.trim()) return [];
   return [{
     id: crypto.randomUUID(),
+    relatedPatientId: "",
+    relatedPatientLabel: "",
     name: legacyName.trim(),
     phone: lead.trusted_contact_phone
       ?? questionnaireText(lead, "emergencyContactPhone", "trustedContactPhone"),
@@ -747,6 +759,7 @@ function autosavePayload(
     insurance_number: draft.insuranceNumber.trim(),
     trusted_contacts: draft.trustedContacts.map((contact) => ({
       id: contact.id,
+      related_patient_id: contact.relatedPatientId || null,
       name: contact.name.trim(),
       phone: contact.phone.trim() || null,
       email: contact.email.trim() || null,
@@ -2002,6 +2015,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
 function masterValidationIssues(errors: MasterValidationErrors, tx: Tx): ValidationIssue[] {
   const labels: Record<MasterFieldKey, string> = {
     referrerPatientId: tx("Рекомендовавший клиент", "Empfehlender Kunde"),
+    guardian: tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter"),
     firstName: tx("Имя", "Vorname"),
     lastName: tx("Фамилия", "Nachname"),
     birthDate: tx("Дата рождения", "Geburtsdatum"),
@@ -2179,6 +2193,19 @@ function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationError
       "Das Geburtsdatum darf nicht in der Zukunft liegen",
     );
   }
+  if (isMinor(draft.birthDate, new Date())) {
+    const guardian = draft.trustedContacts.find((contact) => (
+      ["parent", "guardian"].includes(contact.relation)
+      && contact.name.trim()
+      && (contact.email.trim() || contact.phone.trim())
+    ));
+    if (!guardian) {
+      errors.guardian = tx(
+        "Для несовершеннолетнего укажите мать, отца или законного представителя с контактными данными",
+        "Für Minderjährige Elternteil oder gesetzlichen Vertreter mit Kontaktdaten angeben",
+      );
+    }
+  }
   if (!draft.legalSex) errors.legalSex = required;
 
   const email = draft.email.trim();
@@ -2314,7 +2341,6 @@ function WizardDocumentRows({
   if (documents.length === 0) {
     return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
   }
-
   const sortedDocuments = sortWizardDocumentsNewestFirst(documents);
 
   return (
@@ -2423,6 +2449,11 @@ export function LeadWizard({
   const [referrerPatients, setReferrerPatients] = useState<LeadReferrerPatientOption[]>([]);
   const [referrerPatientsLoading, setReferrerPatientsLoading] = useState(false);
   const [referrerPatientsError, setReferrerPatientsError] = useState("");
+  const [guardianSearch, setGuardianSearch] = useState("");
+  const deferredGuardianSearch = useDeferredValue(guardianSearch);
+  const [guardianPatients, setGuardianPatients] = useState<LeadReferrerPatientOption[]>([]);
+  const [guardianPatientsLoading, setGuardianPatientsLoading] = useState(false);
+  const [guardianPatientsError, setGuardianPatientsError] = useState("");
   const [step, setStep] = useState<StepId>("master_data");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [, setCases] = useState<CaseListItem[]>([]);
@@ -2572,6 +2603,38 @@ export function LeadWizard({
       active = false;
     };
   }, [deferredReferrerSearch, draft?.discoverySource, open, tx]);
+
+  useEffect(() => {
+    if (!open || !trustedContactEditor) {
+      setGuardianPatients([]);
+      setGuardianPatientsLoading(false);
+      setGuardianPatientsError("");
+      return;
+    }
+
+    let active = true;
+    setGuardianPatientsLoading(true);
+    setGuardianPatientsError("");
+    void fetchLeadReferrerPatients(deferredGuardianSearch)
+      .then((patients) => {
+        if (active) setGuardianPatients(patients.filter((patient) => !isMinor(patient.birth_date, new Date())));
+      })
+      .catch(() => {
+        if (!active) return;
+        setGuardianPatients([]);
+        setGuardianPatientsError(tx(
+          "Не удалось загрузить список пациентов",
+          "Patientenliste konnte nicht geladen werden",
+        ));
+      })
+      .finally(() => {
+        if (active) setGuardianPatientsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deferredGuardianSearch, open, trustedContactEditor?.id, tx]);
   const selectedSpecializationItems = useMemo(() => {
     const values = new Set(draft?.specialties ?? []);
     return specialties.filter((item) => values.has(specializationValue(item)));
@@ -3680,6 +3743,17 @@ export function LeadWizard({
             last_name: snapshot.draft.lastName.trim(),
             email: snapshot.draft.email.trim() || null,
             phone: snapshot.draft.phone.trim() || null,
+            date_of_birth: snapshot.draft.birthDate || null,
+            trusted_contacts: snapshot.draft.trustedContacts.map((contact) => ({
+              id: contact.id,
+              related_patient_id: contact.relatedPatientId || null,
+              name: contact.name.trim(),
+              phone: contact.phone.trim() || null,
+              email: contact.email.trim() || null,
+              relation: contact.relation.trim() || null,
+              birth_date: contact.birthDate || null,
+              address: contact.address.trim() || null,
+            })),
             source: "manual",
             country: snapshot.draft.country.trim() || null,
             notes: snapshot.draft.serviceNotes.trim() || null,
@@ -3980,11 +4054,13 @@ export function LeadWizard({
 
   const openNewTrustedContact = () => {
     setTrustedContactEditorError("");
+    setGuardianSearch("");
     setTrustedContactEditor(emptyTrustedContact());
   };
 
   const openTrustedContact = (contact: TrustedContactDraft) => {
     setTrustedContactEditorError("");
+    setGuardianSearch("");
     setTrustedContactEditor({ ...contact });
   };
 
@@ -3999,6 +4075,21 @@ export function LeadWizard({
   ) => {
     if (key === "name" && trustedContactEditorError) setTrustedContactEditorError("");
     setTrustedContactEditor((current) => current ? { ...current, [key]: value } : current);
+  };
+
+  const changeGuardianPatient = (patientId: string) => {
+    const selected = guardianPatients.find((patient) => patient.id === patientId);
+    setTrustedContactEditor((current) => current ? {
+      ...current,
+      relatedPatientId: patientId,
+      relatedPatientLabel: selected ? referrerPatientOptionLabel(selected) : "",
+      ...(selected ? {
+        name: [selected.first_name, selected.last_name].filter(Boolean).join(" "),
+        email: selected.email ?? "",
+        phone: selected.phone ?? "",
+        relation: current.relation === "guardian" ? "guardian" : "parent",
+      } : {}),
+    } : current);
   };
 
   const saveTrustedContact = (event: FormEvent<HTMLFormElement>) => {
@@ -5899,6 +5990,59 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               </Section>
+              {isMinor(draft.birthDate, new Date()) ? (
+                <Section
+                  title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
+                  accessory={(
+                    <Button type="button" size="sm" onClick={openNewTrustedContact}>
+                      <Plus aria-hidden="true" className="size-3.5" />
+                      {tx("Добавить", "Hinzufügen")}
+                    </Button>
+                  )}
+                >
+                  <div
+                    id={MASTER_FIELD_IDS.guardian}
+                    tabIndex={-1}
+                    className={cn(
+                      "space-y-3 rounded-lg focus:outline-none",
+                      visibleMasterError("guardian") && "ring-1 ring-destructive/50",
+                    )}
+                  >
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {tx(
+                        "Для ребёнка контакт и электронную подпись оформляет мать, отец или законный представитель. Можно выбрать существующего пациента или внести данные вручную.",
+                        "Bei Minderjährigen werden Kontakt und elektronische Unterschrift durch einen Elternteil oder gesetzlichen Vertreter angegeben. Eine bestehende Patientenakte kann verknüpft oder der Kontakt manuell erfasst werden.",
+                      )}
+                    </p>
+                    {visibleMasterError("guardian") ? (
+                      <p role="alert" className="text-xs font-medium text-destructive">
+                        {visibleMasterError("guardian")}
+                      </p>
+                    ) : null}
+                    {draft.trustedContacts.filter((contact) => ["parent", "guardian"].includes(contact.relation)).length === 0 ? (
+                      <EmptyCell>{tx("Представитель не указан", "Kein Vertreter angegeben")}</EmptyCell>
+                    ) : (
+                      <ul className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
+                        {draft.trustedContacts
+                          .filter((contact) => ["parent", "guardian"].includes(contact.relation))
+                          .map((contact) => (
+                            <li key={contact.id} className="flex items-center gap-3 px-3 py-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium">{contact.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {[contact.email, contact.phone].filter(Boolean).join(" · ")}
+                                </p>
+                              </div>
+                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
+                                <Pencil aria-hidden="true" className="size-3.5" />
+                              </Button>
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </div>
+                </Section>
+              ) : null}
               <Section title={tx("Страхование", "Versicherung")}>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label={tx("Есть страхование", "Versicherung vorhanden")}>
@@ -7679,6 +7823,34 @@ ${serviceCommentLines.join("\n")}`
                 </p>
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
+                    className="md:col-span-2"
+                    label={tx("Связать с существующим пациентом", "Mit bestehender Patientenakte verknüpfen")}
+                  >
+                    <NativeComboboxSelect
+                      value={trustedContactEditor.relatedPatientId}
+                      className={selectClass}
+                      searchPlaceholder={tx("Найти взрослого пациента по имени или PID", "Erwachsene Person nach Name oder PID suchen")}
+                      onSearchChange={setGuardianSearch}
+                      missingValueLabel={() => trustedContactEditor.relatedPatientLabel || trustedContactEditor.relatedPatientId}
+                      onChange={(event) => changeGuardianPatient(event.target.value)}
+                    >
+                      <option value="">{tx("Внести данные вручную", "Daten manuell eingeben")}</option>
+                      {guardianPatients.map((patient) => (
+                        <option key={patient.id} value={patient.id}>
+                          {referrerPatientOptionLabel(patient)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                    <p className={cn(
+                      "mt-1.5 text-[11.5px] leading-tight",
+                      guardianPatientsError ? "text-destructive" : "text-muted-foreground",
+                    )}>
+                      {guardianPatientsError || (guardianPatientsLoading
+                        ? tx("Загрузка пациентов…", "Patienten werden geladen…")
+                        : tx("Связь подтверждает допустимое использование общего email или телефона ребёнка и представителя.", "Die Verknüpfung bestätigt die zulässige gemeinsame Nutzung von E-Mail oder Telefon durch Kind und Vertreter."))}
+                    </p>
+                  </Field>
+                  <Field
                     required
                     className="md:col-span-2"
                     label={tx("Имя и фамилия", "Vor- und Nachname")}
@@ -7712,11 +7884,21 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                   <Field label={tx("Кем приходится клиенту", "Beziehung zur Person")}>
-                    <Input
-                      className={inputClass}
+                    <NativeComboboxSelect
+                      className={selectClass}
                       value={trustedContactEditor.relation}
                       onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
-                    />
+                    >
+                      <option value="">{tx("Выберите", "Auswählen")}</option>
+                      {trustedContactEditor.relation && !["parent", "guardian", "spouse", "relative", "other"].includes(trustedContactEditor.relation) ? (
+                        <option value={trustedContactEditor.relation}>{trustedContactEditor.relation}</option>
+                      ) : null}
+                      <option value="parent">{tx("Мать / отец", "Mutter / Vater")}</option>
+                      <option value="guardian">{tx("Законный представитель", "Gesetzlicher Vertreter")}</option>
+                      <option value="spouse">{tx("Супруг / супруга", "Ehepartner/in")}</option>
+                      <option value="relative">{tx("Родственник", "Verwandte Person")}</option>
+                      <option value="other">{tx("Другое", "Sonstiges")}</option>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={tx("Дата рождения", "Geburtsdatum")}>
                     <Input

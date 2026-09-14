@@ -747,6 +747,97 @@ async fn create_and_get_lead() {
 }
 
 #[tokio::test]
+async fn lead_contacts_are_unique_except_for_a_minor_and_linked_guardian() {
+    let Some(app) = test_app().await else { return };
+    let sales = app.auth_header("sales");
+    let guardian_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO patients (
+              id, patient_id, first_name, last_name, birth_date, gender,
+              email, phone_primary, created_by
+           ) VALUES ($1, $2, 'Anna', 'Beispiel', '1985-01-01', 'female',
+                     'family@example.org', '+49 170 123 45 67', $3)"#,
+    )
+    .bind(guardian_id)
+    .bind(format!("GUARDIAN-{guardian_id}"))
+    .bind(app.patient_manager_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({
+            "first_name": "Other",
+            "last_name": "Adult",
+            "date_of_birth": "1990-02-03",
+            "email": " FAMILY@example.org "
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Email is already used by another person");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({
+            "first_name": "Another",
+            "last_name": "Adult",
+            "date_of_birth": "1991-02-03",
+            "phone": "0049 (170) 123-45-67"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Phone is already used by another person");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Beispiel",
+            "date_of_birth": "2015-02-03",
+            "email": "family@example.org",
+            "phone": "+49 170 123 45 67",
+            "trusted_contacts": [{
+                "id": Uuid::new_v4(),
+                "related_patient_id": guardian_id,
+                "name": "Anna Beispiel",
+                "email": "family@example.org",
+                "phone": "+49 170 123 45 67",
+                "relation": "parent"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+
+    let lead_id = created["id"].as_str().unwrap();
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &sales,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["trusted_contacts"][0]["related_patient_id"],
+        guardian_id.to_string()
+    );
+}
+
+#[tokio::test]
 async fn qualify_lead_flow() {
     let Some(app) = test_app().await else { return };
     let sales = app.auth_header("sales");

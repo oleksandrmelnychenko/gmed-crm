@@ -203,6 +203,7 @@ export interface LeadDetail extends Lead {
 
 export interface LeadTrustedContact {
   id: string;
+  related_patient_id: string | null;
   name: string;
   phone: string | null;
   email: string | null;
@@ -223,6 +224,8 @@ export interface CreateLeadBody {
   last_name: string;
   email?: string | null;
   phone?: string | null;
+  date_of_birth?: string | null;
+  trusted_contacts?: LeadTrustedContact[];
   source?: string | null;
   country?: string | null;
   notes?: string | null;

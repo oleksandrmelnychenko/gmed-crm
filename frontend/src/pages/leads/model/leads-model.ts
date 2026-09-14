@@ -42,6 +42,8 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "invalid compliance_status": ["Выберите корректный статус согласий", "Gültigen Einwilligungsstatus auswählen"],
   "invalid legal_sex": ["Выберите пол по документам", "Geschlecht laut Ausweisdokument auswählen"],
   "invalid date_of_birth (yyyy-mm-dd)": ["Укажите корректную дату рождения", "Gültiges Geburtsdatum angeben"],
+  "email is already used by another person": ["Этот адрес электронной почты уже используется другим человеком", "Diese E-Mail-Adresse wird bereits von einer anderen Person verwendet"],
+  "phone is already used by another person": ["Этот номер телефона уже используется другим человеком", "Diese Telefonnummer wird bereits von einer anderen Person verwendet"],
   "invalid primary_language": ["Выберите язык из списка", "Sprache aus der Liste auswählen"],
   "first_name cannot be empty": ["Укажите имя", "Vorname angeben"],
   "last_name cannot be empty": ["Укажите фамилию", "Nachname angeben"],
