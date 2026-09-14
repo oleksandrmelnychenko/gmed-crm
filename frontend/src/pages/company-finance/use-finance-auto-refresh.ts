@@ -15,6 +15,7 @@ export const COMPANY_FINANCE_REALTIME_EVENTS = [
   "company_financial_account.adjustment_created", "company_financial_account.adjustment_reversed",
   "company_financial_account.transfer_created", "company_financial_account.transfer_reversed",
   "accounting_entry.financial_account_assigned", "provider_payment.recorded", "provider_payment.reversed",
+  "provider_invoice.created", "provider_invoice.approved",
 ] as const;
 
 // Callers expose their loading/mutation state so events arriving during a

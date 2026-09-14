@@ -30,7 +30,13 @@ export type InvoiceImportPreview = {
   };
   recipient?: { name: string | null };
   source_differences?: { field: keyof InvoiceImportFields; structured: string; visible: string }[];
-  tax_breakdown?: { category: string | null; rate: string | null; amount: string | null; base: string | null }[];
+  tax_breakdown?: {
+    category: string | null;
+    label?: string | null;
+    rate: string | null;
+    amount: string | null;
+    base: string | null;
+  }[];
   line_items?: Record<string, unknown>[];
   field_sources?: Partial<Record<keyof InvoiceImportFields, {
     method: "document_without_vat" | "invoice_date_plus_days";

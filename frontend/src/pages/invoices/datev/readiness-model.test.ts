@@ -17,7 +17,8 @@ describe("preparation without DATEV credentials", () => {
     expect(datevReadiness(complete).every((check) => check.complete)).toBe(true);
     const brief = datevSetupBrief(complete);
     expect(brief).toContain("Nicht bestellt");
-    expect(brief).toContain("Keine DATEV-Verbindung");
+    expect(brief).toContain("Diese Checkliste enthält nur Profilangaben");
+    expect(brief).not.toContain("Keine DATEV-Verbindung");
     expect(brief).toContain("keine Zahlungen auslösen");
     expect(brief).toContain("Rechnungsdatenservice 1.0 derzeit nicht unterstützt");
   });

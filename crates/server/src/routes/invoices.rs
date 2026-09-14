@@ -117,6 +117,14 @@ pub fn router() -> Router<AppState> {
             "/quotes/{quote_id}/invoices",
             post(create_invoice_from_quote),
         )
+        .route(
+            "/patients/{patient_id}/billing-workspace",
+            get(get_patient_billing_workspace),
+        )
+        .route(
+            "/patients/{patient_id}/billing-invoices",
+            post(create_patient_billing_invoice),
+        )
 }
 
 #[derive(Deserialize)]
@@ -149,6 +157,19 @@ struct CreateInvoiceRequest {
     due_date: Option<String>,
     notes: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
+}
+
+#[derive(Deserialize)]
+struct CreatePatientBillingInvoiceRequest {
+    request_id: Uuid,
+    order_id: Option<Uuid>,
+    quote_id: Option<Uuid>,
+    currency: Option<String>,
+    invoice_type: Option<String>,
+    due_date: Option<String>,
+    notes: Option<String>,
+    line_items: Option<Vec<CreateInvoiceLineSelection>>,
+    external_invoice_ids: Vec<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -325,7 +346,7 @@ struct ExternalInvoiceAccountingContext {
 
 struct InvoicePaymentContext {
     invoice_id: Uuid,
-    order_id: Uuid,
+    order_id: Option<Uuid>,
     patient_id: Uuid,
     invoice_number: String,
     invoice_status: String,
@@ -343,7 +364,7 @@ struct AccountingEntryInsert<'a> {
     category: &'a str,
     source_invoice_id: Option<Uuid>,
     source_external_invoice_id: Option<Uuid>,
-    order_id: Uuid,
+    order_id: Option<Uuid>,
     patient_id: Uuid,
     entry_date: NaiveDate,
     description: String,
@@ -1114,7 +1135,7 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
             category: "provider_expense",
             source_invoice_id: None,
             source_external_invoice_id: Some(context.external_invoice_id),
-            order_id: context.order_id,
+            order_id: Some(context.order_id),
             patient_id: context.patient_id,
             entry_date,
             description: format!(
@@ -2503,7 +2524,9 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
         return Ok(Vec::new());
     }
 
-    let order_id = row.try_get::<Uuid, _>("order_id").unwrap_or_default();
+    let order_id = row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
     let line_items = row
         .try_get::<Value, _>("line_items")
@@ -2536,7 +2559,8 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
                         WHERE document_id IS NOT NULL
                     )
                  OR (
-                        d.order_id = $4
+                        $4::uuid IS NOT NULL
+                    AND d.order_id = $4
                     AND d.financial_status IN (
                         'open',
                         'in_progress',
@@ -3436,13 +3460,13 @@ async fn load_invoice_detail(
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
                   i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
                   i.payer_updated_at,
-                  o.order_number, o.currency, o.contract_id, q.quote_number,
+                  o.order_number, i.currency, o.contract_id, q.quote_number,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
                   pr.relation_type AS payer_relation_type,
                   COALESCE(NULLIF(trim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name) AS payer_relation_patient_name,
                   rp.patient_id AS payer_relation_patient_pid
            FROM invoices i
-           JOIN orders o ON o.id = i.order_id
+           LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            LEFT JOIN patient_relations pr ON pr.id = i.payer_patient_relation_id
@@ -3526,8 +3550,12 @@ async fn load_invoice_detail(
         .collect::<Vec<_>>()
     };
 
+    let invoice_order_id = row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
     let available_prepayments = if row.try_get::<String, _>("invoice_type").unwrap_or_default()
         == "advance"
+        || invoice_order_id.is_none()
     {
         Vec::new()
     } else {
@@ -3553,7 +3581,7 @@ async fn load_invoice_detail(
                       - COALESCE(SUM(allocation.amount_gross), 0) > 0
                ORDER BY advance.issued_at, advance.id"#,
         )
-        .bind(row.try_get::<Uuid, _>("order_id").unwrap_or_default())
+        .bind(invoice_order_id)
         .bind(patient_id)
         .fetch_all(&state.db)
         .await
@@ -3614,8 +3642,8 @@ async fn load_invoice_detail(
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
-        "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-        "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+        "order_id": invoice_order_id,
+        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "contract_id": row.try_get::<Option<Uuid>, _>("contract_id").unwrap_or_default(),
         "patient_id": patient_id,
         "patient_name": format!(
@@ -3683,7 +3711,7 @@ async fn load_invoice_pdf_context(
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.line_items, i.notes,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
-                  o.order_number, o.currency, q.quote_number,
+                  o.order_number, i.currency, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
                   p.birth_date, p.languages,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
@@ -3697,7 +3725,7 @@ async fn load_invoice_pdf_context(
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban
            FROM invoices i
-           JOIN orders o ON o.id = i.order_id
+           LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.id = $1"#,
@@ -3797,7 +3825,10 @@ async fn load_invoice_pdf_context(
         birth_date: row
             .try_get::<Option<NaiveDate>, _>("birth_date")
             .unwrap_or_default(),
-        order_number: row.try_get::<String, _>("order_number").unwrap_or_default(),
+        order_number: row
+            .try_get::<Option<String>, _>("order_number")
+            .unwrap_or_default()
+            .unwrap_or_default(),
         quote_number: row
             .try_get::<Option<String>, _>("quote_number")
             .unwrap_or_default(),
@@ -4127,12 +4158,12 @@ async fn list_my_invoices(
                   i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
-                  o.order_number, o.currency, q.quote_number,
+                  o.order_number, i.currency, q.quote_number,
                   COALESCE((
                     SELECT count(*)::bigint
                     FROM documents d
                     WHERE d.patient_id = i.patient_id
-                      AND d.order_id = i.order_id
+                      AND d.order_id IS NOT DISTINCT FROM i.order_id
                       AND d.uploaded_by = $1
                       AND d.ursprung = 'patient_portal'
                       AND d.art = 'payment_proof'
@@ -4146,7 +4177,7 @@ async fn list_my_invoices(
                     SELECT max(d.created_at)
                     FROM documents d
                     WHERE d.patient_id = i.patient_id
-                      AND d.order_id = i.order_id
+                      AND d.order_id IS NOT DISTINCT FROM i.order_id
                       AND d.uploaded_by = $1
                       AND d.ursprung = 'patient_portal'
                       AND d.art = 'payment_proof'
@@ -4157,7 +4188,7 @@ async fn list_my_invoices(
                       )
                   ) AS last_payment_proof_at
            FROM invoices i
-           JOIN orders o ON o.id = i.order_id
+           LEFT JOIN orders o ON o.id = i.order_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.patient_id = $2
              AND i.status <> 'draft'
@@ -4192,8 +4223,8 @@ async fn list_my_invoices(
                         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
                         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
-                        "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-                        "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                        "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+                        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
                         "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
                         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
@@ -4693,14 +4724,14 @@ async fn list_invoices(
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.created_at, i.updated_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
-                  o.order_number, o.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
+                  o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM invoices i
-           JOIN orders o ON o.id = i.order_id
+           LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE ($1::text IS NULL
                    OR de_normalize(concat_ws(' ',
-                        i.invoice_number, o.order_number, o.currency, q.quote_number,
+                        i.invoice_number, o.order_number, i.currency, q.quote_number,
                         p.patient_id, p.first_name, p.last_name,
                         p.email, p.phone_primary, p.phone_secondary,
                         i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone
@@ -4750,8 +4781,8 @@ async fn list_invoices(
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
                     "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
-                    "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-                    "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                    "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+                    "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                     "patient_id": patient_id,
                     "patient_name": format!(
                         "{} {}",
@@ -4883,6 +4914,647 @@ async fn inherited_invoice_payer(
         payer_notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default(),
+    }
+}
+
+async fn get_patient_billing_workspace(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+        return response;
+    }
+
+    let payload = sqlx::query_scalar::<_, Value>(
+        r#"SELECT jsonb_build_object(
+            'patient_id', patient.id,
+            'patient_pid', patient.patient_id,
+            'patient_name', CONCAT_WS(' ', patient.first_name, patient.last_name),
+            'orders', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                    'id', patient_order.id,
+                    'order_number', patient_order.order_number,
+                    'status', patient_order.status,
+                    'phase', patient_order.phase,
+                    'currency', UPPER(patient_order.currency),
+                    'billing_release_status', patient_order.billing_release_status,
+                    'updated_at', patient_order.updated_at
+                ) ORDER BY
+                    CASE patient_order.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1
+                         WHEN 'completed' THEN 2 ELSE 3 END,
+                    patient_order.updated_at DESC)
+                FROM orders patient_order
+                WHERE patient_order.patient_id = patient.id
+                  AND patient_order.status <> 'cancelled'
+            ), '[]'::jsonb),
+            'expenses', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object(
+                    'id', external.id,
+                    'external_invoice_number', external.external_invoice_number,
+                    'provider_name', COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name),
+                    'invoice_date', external.invoice_date,
+                    'status', external.status,
+                    'paid_by', external.paid_by,
+                    'currency', UPPER(external.currency),
+                    'amount_gross', external.amount_gross::text,
+                    'company_paid_gross', settlement.company_paid_gross::text,
+                    'remaining_provider_liability_gross', settlement.remaining_provider_liability_gross::text,
+                    'patient_receivable_gross', receivable.patient_receivable_gross::text,
+                    'allocated_receivable_gross', receivable.allocated_receivable_gross::text,
+                    'remaining_receivable_gross', receivable.remaining_receivable_gross::text,
+                    'source_order_id', external.order_id,
+                    'source_order_number', source_order.order_number,
+                    'latest_patient_invoice_id', allocation_summary.latest_invoice_id,
+                    'latest_patient_invoice_number', allocation_summary.latest_invoice_number,
+                    'latest_patient_invoice_status', allocation_summary.latest_invoice_status,
+                    'billable', external.status = 'paid'
+                        AND external.paid_by = 'agency'
+                        AND settlement.remaining_provider_liability_gross = 0
+                        AND receivable.remaining_receivable_gross > 0
+                ) ORDER BY external.invoice_date DESC NULLS LAST, external.created_at DESC)
+                FROM external_invoices external
+                LEFT JOIN providers provider ON provider.id = external.provider_id
+                LEFT JOIN orders source_order ON source_order.id = external.order_id
+                JOIN external_invoice_provider_settlement_balances settlement
+                  ON settlement.external_invoice_id = external.id
+                JOIN external_invoice_receivable_balances receivable
+                  ON receivable.external_invoice_id = external.id
+                LEFT JOIN LATERAL (
+                    SELECT invoice.id AS latest_invoice_id,
+                           invoice.invoice_number AS latest_invoice_number,
+                           invoice.status AS latest_invoice_status
+                    FROM external_invoice_patient_invoice_allocations allocation
+                    JOIN invoices invoice ON invoice.id = allocation.patient_invoice_id
+                    WHERE allocation.external_invoice_id = external.id
+                      AND allocation.reversed_at IS NULL
+                      AND invoice.status <> 'cancelled'
+                    ORDER BY allocation.created_at DESC
+                    LIMIT 1
+                ) allocation_summary ON true
+                WHERE external.patient_id = patient.id
+                  AND external.invoice_scope = 'patient_order'
+                  AND external.status <> 'cancelled'
+            ), '[]'::jsonb)
+        )
+        FROM patients patient
+        WHERE patient.id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await;
+
+    match payload {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Patient not found"),
+        Err(error) => {
+            tracing::error!(%error, %patient_id, "load patient billing workspace");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load patient billing workspace",
+            )
+        }
+    }
+}
+
+async fn create_patient_billing_invoice(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<CreatePatientBillingInvoiceRequest>,
+) -> axum::response::Response {
+    if !can_create_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+        return response;
+    }
+
+    match sqlx::query_scalar::<_, Uuid>(
+        "SELECT invoice_id FROM patient_billing_invoice_requests WHERE request_id = $1 AND patient_id = $2",
+    )
+    .bind(body.request_id)
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(invoice_id)) => {
+            return match load_invoice_detail(&state, invoice_id, &auth).await {
+                Ok(Some(invoice)) => Json(invoice).into_response(),
+                Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+                Err(response) => response,
+            };
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(%error, %patient_id, "check patient billing request");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create invoice");
+        }
+    }
+
+    let invoice_type = body
+        .invoice_type
+        .clone()
+        .unwrap_or_else(|| "interim".to_string());
+    if !is_valid_invoice_type(&invoice_type)
+        || (!body.external_invoice_ids.is_empty() && invoice_type == "advance")
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid patient billing invoice type",
+        );
+    }
+    let due_date = match parse_optional_date(body.due_date.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+
+    let quote_context = if let Some(quote_id) = body.quote_id {
+        let Some(context) = (match load_quote_invoice_context(&state, quote_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        }) else {
+            return err(StatusCode::NOT_FOUND, "Quote not found");
+        };
+        if context.patient_id != patient_id || Some(context.order_id) != body.order_id {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote does not belong to the selected patient order",
+            );
+        }
+        Some(context)
+    } else {
+        if body
+            .line_items
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote lines require a quote",
+            );
+        }
+        None
+    };
+
+    let mut snapshot = if let Some(context) = quote_context.as_ref() {
+        let value = match build_selected_invoice_snapshot(
+            &state,
+            context,
+            &invoice_type,
+            body.line_items.as_deref(),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let source_ids = value
+            .allocations
+            .iter()
+            .filter_map(|allocation| allocation.order_leistung_id)
+            .collect::<Vec<_>>();
+        if let Err(response) =
+            validate_invoice_creation_for_quote(&state, context, &invoice_type, &source_ids).await
+        {
+            return response;
+        }
+        value
+    } else {
+        InvoiceCreationSnapshot {
+            total_net: Decimal::ZERO,
+            total_vat: Decimal::ZERO,
+            total_gross: Decimal::ZERO,
+            line_items: Value::Array(Vec::new()),
+            allocations: Vec::new(),
+        }
+    };
+
+    let external_ids = body
+        .external_invoice_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if snapshot.line_items.as_array().is_none_or(Vec::is_empty) && external_ids.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Select at least one invoice item",
+        );
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %patient_id, "begin patient billing invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice",
+            );
+        }
+    };
+    let mut currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_uppercase);
+    if let Some(order_id) = body.order_id {
+        let anchor = match sqlx::query(
+            r#"SELECT UPPER(currency) AS currency, status, billing_release_status
+               FROM orders WHERE id = $1 AND patient_id = $2 FOR UPDATE"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Selected order does not belong to the patient",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %patient_id, %order_id, "load patient billing anchor order");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        };
+        if anchor.try_get::<String, _>("status").unwrap_or_default() == "cancelled" {
+            return err(
+                StatusCode::CONFLICT,
+                "Cancelled orders cannot anchor a patient invoice",
+            );
+        }
+        if anchor
+            .try_get::<String, _>("billing_release_status")
+            .unwrap_or_default()
+            != "granted"
+        {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Order requires billing release before invoice creation",
+            );
+        }
+        currency = Some(
+            anchor
+                .try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+        );
+    } else if body.quote_id.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A quote requires an order",
+        );
+    }
+    if currency.as_deref().is_some_and(|value| {
+        value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_uppercase())
+    }) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice currency");
+    }
+
+    let mut external_allocations = Vec::new();
+    let line_items = snapshot
+        .line_items
+        .as_array_mut()
+        .expect("invoice line array");
+    for external_id in external_ids {
+        let source = match sqlx::query(
+            r#"SELECT external.patient_id, external.status, external.paid_by,
+                      external.invoice_scope, UPPER(external.currency) AS currency,
+                      external.external_invoice_number, external.invoice_date,
+                      external.source_document_id, external.order_id AS source_order_id,
+                      COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name, 'Provider') AS provider_name,
+                      settlement.remaining_provider_liability_gross
+               FROM external_invoices external
+               LEFT JOIN providers provider ON provider.id = external.provider_id
+               JOIN external_invoice_provider_settlement_balances settlement
+                 ON settlement.external_invoice_id = external.id
+               WHERE external.id = $1
+               FOR UPDATE OF external"#,
+        )
+        .bind(external_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Selected incoming invoice not found"),
+            Err(error) => {
+                tracing::error!(%error, %external_id, "lock patient billing source");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create invoice");
+            }
+        };
+        let source_patient = source
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default();
+        let source_status = source.try_get::<String, _>("status").unwrap_or_default();
+        let source_paid_by = source.try_get::<String, _>("paid_by").unwrap_or_default();
+        let source_scope = source
+            .try_get::<String, _>("invoice_scope")
+            .unwrap_or_default();
+        let source_currency = source.try_get::<String, _>("currency").unwrap_or_default();
+        let provider_remaining = source
+            .try_get::<Decimal, _>("remaining_provider_liability_gross")
+            .unwrap_or(Decimal::ZERO);
+        if currency.is_none() {
+            currency = Some(source_currency.clone());
+        }
+        if source_patient != Some(patient_id)
+            || source_scope != "patient_order"
+            || source_status != "paid"
+            || source_paid_by != "agency"
+            || provider_remaining != Decimal::ZERO
+            || Some(source_currency.clone()) != currency
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Incoming invoice is not ready to bill to this patient",
+            );
+        }
+        let remaining = match sqlx::query_scalar::<_, Decimal>(
+            "SELECT remaining_receivable_gross FROM external_invoice_receivable_balances WHERE external_invoice_id = $1",
+        )
+        .bind(external_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(Some(value)) if value > Decimal::ZERO => value.round_dp(2),
+            Ok(_) => return err(StatusCode::CONFLICT, "Incoming invoice was already included in a patient invoice"),
+            Err(error) => {
+                tracing::error!(%error, %external_id, "load patient receivable balance");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create invoice");
+            }
+        };
+        let provider_name = source
+            .try_get::<String, _>("provider_name")
+            .unwrap_or_else(|_| "Provider".to_string());
+        let source_number = source
+            .try_get::<String, _>("external_invoice_number")
+            .unwrap_or_default();
+        line_items.push(json!({
+            "description": format!("{provider_name} · {source_number}"),
+            "quantity": "1",
+            "unit": "invoice",
+            "unit_price": decimal_to_string(remaining),
+            "vat_rate": "0",
+            "line_net": decimal_to_string(remaining),
+            "line_vat": "0",
+            "line_gross": decimal_to_string(remaining),
+            "is_cost_passthrough": true,
+            "source": "external_invoice",
+            "source_external_invoice_id": external_id,
+            "source_document_id": source.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
+            "source_order_id": source.try_get::<Option<Uuid>, _>("source_order_id").unwrap_or_default(),
+            "source_invoice_date": source.try_get::<Option<NaiveDate>, _>("invoice_date").unwrap_or_default(),
+        }));
+        snapshot.total_net = (snapshot.total_net + remaining).round_dp(2);
+        snapshot.total_gross = (snapshot.total_gross + remaining).round_dp(2);
+        external_allocations.push((external_id, remaining));
+    }
+    let Some(currency) = currency else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Select a currency for the patient invoice",
+        );
+    };
+
+    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
+        .fetch_one(&mut *transaction)
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, "patient billing invoice sequence");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice",
+            );
+        }
+    };
+    let invoice_number = gen_invoice_number(seq);
+    let payer = match body.order_id {
+        Some(order_id) => inherited_invoice_payer(&state.db, order_id, patient_id).await,
+        None => InheritedInvoicePayer::default(),
+    };
+    let notes = body.notes.clone().or_else(|| {
+        quote_context
+            .as_ref()
+            .and_then(|context| context.notes.clone())
+    });
+    let invoice_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoices (
+                quote_id, order_id, patient_id, invoice_number, invoice_type, status, currency,
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
+                payer_patient_relation_id, payer_contact_name, payer_contact_email,
+                payer_contact_phone, payer_contact_relationship, payer_notes
+           ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13,
+                     $14, $15, $16, $17, $18, $19)
+           RETURNING id"#,
+    )
+    .bind(body.quote_id)
+    .bind(body.order_id)
+    .bind(patient_id)
+    .bind(&invoice_number)
+    .bind(&invoice_type)
+    .bind(&currency)
+    .bind(due_date)
+    .bind(snapshot.total_net)
+    .bind(snapshot.total_vat)
+    .bind(snapshot.total_gross)
+    .bind(snapshot.line_items.clone())
+    .bind(notes)
+    .bind(auth.user_id)
+    .bind(payer.payer_patient_relation_id)
+    .bind(payer.payer_contact_name)
+    .bind(payer.payer_contact_email)
+    .bind(payer.payer_contact_phone)
+    .bind(payer.payer_contact_relationship)
+    .bind(payer.payer_notes)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %patient_id, "insert patient billing invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice",
+            );
+        }
+    };
+
+    if let Some(context) = quote_context.as_ref() {
+        for allocation in &snapshot.allocations {
+            if let Err(error) = sqlx::query(
+                r#"INSERT INTO invoice_order_line_allocations (
+                       invoice_id, quote_id, quote_line_index, order_leistung_id, quantity,
+                       description_snapshot, unit_price_net_snapshot, vat_rate_snapshot,
+                       amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+            )
+            .bind(invoice_id)
+            .bind(context.quote_id)
+            .bind(allocation.quote_line_index)
+            .bind(allocation.order_leistung_id)
+            .bind(allocation.quantity)
+            .bind(&allocation.description)
+            .bind(allocation.unit_price_net)
+            .bind(allocation.vat_rate)
+            .bind(allocation.amount_net)
+            .bind(allocation.amount_vat)
+            .bind(allocation.amount_gross)
+            .execute(&mut *transaction)
+            .await
+            {
+                tracing::error!(%error, %invoice_id, "insert patient billing service allocation");
+                return err(
+                    StatusCode::CONFLICT,
+                    "Invoice quantities changed; reload and try again",
+                );
+            }
+        }
+    }
+    for (external_id, amount) in &external_allocations {
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO external_invoice_patient_invoice_allocations
+                  (external_invoice_id, patient_invoice_id, amount_gross, created_by, request_id)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(external_id)
+        .bind(invoice_id)
+        .bind(amount)
+        .bind(auth.user_id)
+        .bind(body.request_id)
+        .execute(&mut *transaction)
+        .await
+        {
+            tracing::error!(%error, %invoice_id, %external_id, "reserve patient billing expense");
+            return err(
+                StatusCode::CONFLICT,
+                "An incoming invoice was selected by another draft; reload and try again",
+            );
+        }
+    }
+
+    let completed_source_ids = snapshot
+        .allocations
+        .iter()
+        .filter(|allocation| allocation.completes_quote_line)
+        .filter_map(|allocation| allocation.order_leistung_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if invoice_type != "advance"
+        && !completed_source_ids.is_empty()
+        && let Some(order_id) = body.order_id
+    {
+        match sqlx::query(
+            "UPDATE order_leistungen SET status = 'invoiced'
+             WHERE order_id = $1 AND id = ANY($2) AND status = 'approved'",
+        )
+        .bind(order_id)
+        .bind(&completed_source_ids)
+        .execute(&mut *transaction)
+        .await
+        {
+            Ok(result)
+                if result.rows_affected()
+                    == u64::try_from(completed_source_ids.len()).unwrap_or(u64::MAX) => {}
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Order service approval changed; reload and try again",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "mark patient billing services invoiced");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        }
+    }
+    if invoice_snapshot_has_package_overage(&snapshot)
+        && let Some(order_id) = body.order_id
+        && let Err(error) = sqlx::query(
+            r#"UPDATE service_package_consumptions consumption
+               SET invoice_id = $1
+               FROM patient_service_packages patient_package
+               WHERE consumption.patient_service_package_id = patient_package.id
+                 AND patient_package.patient_id = $2
+                 AND consumption.order_id = $3
+                 AND consumption.invoice_id IS NULL
+                 AND consumption.approval_status IN ('not_required', 'approved')"#,
+        )
+        .bind(invoice_id)
+        .bind(patient_id)
+        .bind(order_id)
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(%error, %invoice_id, "link patient billing package consumption");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create invoice",
+        );
+    }
+    if let Err(error) = sqlx::query(
+        r#"INSERT INTO patient_billing_invoice_requests (request_id, patient_id, invoice_id, created_by)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(body.request_id)
+    .bind(patient_id)
+    .bind(invoice_id)
+    .bind(auth.user_id)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(%error, %invoice_id, "persist patient billing request");
+        return err(StatusCode::CONFLICT, "This billing request was already processed");
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %invoice_id, "commit patient billing invoice");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create invoice",
+        );
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "create_patient_billing_invoice",
+        invoice_id,
+        json!({
+            "patient_id": patient_id,
+            "order_id": body.order_id,
+            "quote_id": body.quote_id,
+            "external_invoice_count": external_allocations.len(),
+            "service_line_count": snapshot.allocations.len(),
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.created",
+        invoice_id,
+        json!({"invoice_number": invoice_number, "patient_id": patient_id, "order_id": body.order_id, "status": "draft"}),
+    )
+    .await;
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => (StatusCode::CREATED, Json(invoice)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(response) => response,
     }
 }
 
@@ -5301,7 +5973,7 @@ async fn apply_invoice_prepayment(
         );
     }
 
-    let target = match sqlx::query("SELECT patient_id FROM invoices WHERE id = $1")
+    let target = match sqlx::query("SELECT patient_id, order_id FROM invoices WHERE id = $1")
         .bind(invoice_id)
         .fetch_optional(&state.db)
         .await
@@ -5317,6 +5989,16 @@ async fn apply_invoice_prepayment(
         }
     };
     let patient_id = target.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if target
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+        .is_none()
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Prepayments require an invoice linked to an order",
+        );
+    }
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
@@ -6144,9 +6826,9 @@ async fn create_invoice_payment(
                   invoice.invoice_number, invoice.status,
                   invoice.total_vat, invoice.total_gross, invoice.credited_amount,
                   invoice.prepayment_applied_amount, invoice.line_items,
-                  orders.currency
+                  invoice.currency
            FROM invoices invoice
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.id = $1
            FOR UPDATE OF invoice"#,
     )
@@ -6166,7 +6848,9 @@ async fn create_invoice_payment(
     };
     let context = InvoicePaymentContext {
         invoice_id,
-        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
         patient_id,
         invoice_number: row
             .try_get::<String, _>("invoice_number")
@@ -6526,7 +7210,7 @@ async fn reverse_invoice_payment(
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.issued_at, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
-                  invoice.line_items, orders.currency,
+                  invoice.line_items, invoice.currency,
                   EXISTS (
                       SELECT 1 FROM invoice_payment_transactions reversal
                       WHERE reversal.reverses_transaction_id = payment.id
@@ -6534,7 +7218,7 @@ async fn reverse_invoice_payment(
                   ) AS already_reversed
            FROM invoice_payment_transactions payment
            JOIN invoices invoice ON invoice.id = payment.invoice_id
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE payment.id = $1
              AND payment.invoice_id = $2
            FOR UPDATE OF payment, invoice"#,
@@ -6584,7 +7268,9 @@ async fn reverse_invoice_payment(
         .unwrap_or_default();
     let context = InvoicePaymentContext {
         invoice_id,
-        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
         patient_id,
         invoice_number: row
             .try_get::<String, _>("invoice_number")
@@ -6829,9 +7515,9 @@ async fn create_invoice_credit_note(
         r#"SELECT invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.issued_at, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
-                  invoice.line_items, orders.currency
+                  invoice.line_items, invoice.currency
            FROM invoices invoice
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.id = $1
            FOR UPDATE OF invoice"#,
     )
@@ -6851,7 +7537,9 @@ async fn create_invoice_credit_note(
     };
     let context = InvoicePaymentContext {
         invoice_id,
-        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
         patient_id,
         invoice_number: row
             .try_get::<String, _>("invoice_number")
@@ -7133,7 +7821,7 @@ async fn reverse_invoice_credit_note(
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
-                  invoice.line_items, orders.currency AS order_currency,
+                  invoice.line_items, invoice.currency AS order_currency,
                   EXISTS (
                       SELECT 1 FROM invoice_credit_note_transactions reversal
                       WHERE reversal.reverses_transaction_id = credit.id
@@ -7141,7 +7829,7 @@ async fn reverse_invoice_credit_note(
                   ) AS already_reversed
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE credit.id = $1 AND credit.invoice_id = $2
            FOR UPDATE OF credit, invoice"#,
     )
@@ -7546,9 +8234,9 @@ async fn create_invoice_refund(
         r#"SELECT invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
-                  invoice.paid_amount, invoice.line_items, orders.currency
+                  invoice.paid_amount, invoice.line_items, invoice.currency
            FROM invoices invoice
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.id = $1
            FOR UPDATE OF invoice"#,
     )
@@ -7565,7 +8253,9 @@ async fn create_invoice_refund(
     };
     let context = InvoicePaymentContext {
         invoice_id,
-        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
         patient_id,
         invoice_number: row
             .try_get::<String, _>("invoice_number")
@@ -7844,7 +8534,7 @@ async fn reverse_invoice_refund(
                   invoice.order_id, invoice.invoice_number, invoice.status,
                   invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
-                  invoice.line_items, orders.currency,
+                  invoice.line_items, invoice.currency,
                   EXISTS (
                       SELECT 1 FROM invoice_refund_transactions reversal
                       WHERE reversal.reverses_transaction_id = refund.id
@@ -7852,7 +8542,7 @@ async fn reverse_invoice_refund(
                   ) AS already_reversed
            FROM invoice_refund_transactions refund
            JOIN invoices invoice ON invoice.id = refund.invoice_id
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE refund.id = $1 AND refund.invoice_id = $2
            FOR UPDATE OF refund, invoice"#,
     )
@@ -7901,7 +8591,9 @@ async fn reverse_invoice_refund(
         .unwrap_or_default();
     let context = InvoicePaymentContext {
         invoice_id,
-        order_id: row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
         patient_id,
         invoice_number: row
             .try_get::<String, _>("invoice_number")
@@ -8832,7 +9524,7 @@ async fn update_invoice_status(
             r#"SELECT invoices.order_id, invoices.patient_id, invoices.invoice_number,
                       invoices.status, invoices.total_vat, invoices.total_gross,
                       invoices.credited_amount, invoices.prepayment_applied_amount,
-                      invoices.line_items, orders.currency,
+                      invoices.line_items, invoices.currency,
                       COALESCE((
                           SELECT SUM(
                               CASE
@@ -8853,7 +9545,7 @@ async fn update_invoice_status(
                           WHERE refund.invoice_id = invoices.id
                       ), 0) AS journal_paid_amount
                FROM invoices
-               JOIN orders ON orders.id = invoices.order_id
+               LEFT JOIN orders ON orders.id = invoices.order_id
                WHERE invoices.id = $1
                FOR UPDATE OF invoices"#,
         )
@@ -8882,7 +9574,7 @@ async fn update_invoice_status(
         let payment_context = InvoicePaymentContext {
             invoice_id,
             order_id: payment_row
-                .try_get::<Uuid, _>("order_id")
+                .try_get::<Option<Uuid>, _>("order_id")
                 .unwrap_or_default(),
             patient_id,
             invoice_number: payment_row

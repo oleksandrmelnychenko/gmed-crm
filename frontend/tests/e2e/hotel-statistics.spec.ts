@@ -38,6 +38,9 @@ async function setup(page: Page, lang: "ru" | "de", role = "ceo") {
       if (route.request().method() === "PUT") {
         if (state.fail) return route.fulfill({ status: 500, json: { error: "Test save failed" } });
         state.hotelTerms[path] = { ...route.request().postDataJSON(), updated_at: "2026-09-10T12:00:00Z" };
+        const providerId = path.split("/").at(-2);
+        const hotel = state.directory.find(item => item.id === providerId);
+        if (hotel) hotel.breakfast_terms = state.hotelTerms[path];
       }
       return route.fulfill({ json: state.hotelTerms[path] ?? {} });
     }
@@ -175,6 +178,30 @@ for (const [lang, role] of [["ru", "ceo"], ["de", "patient_manager"], ["ru", "co
     await page.screenshot({ path: `../artifacts/design-qa/hotel-directory-${lang}-mobile.png` });
   });
 }
+
+test("hotel table shows general breakfast terms and refreshes them after save", async ({ page }) => {
+  const state = await setup(page, "ru", "concierge");
+  const termsPath = "/stats/reports/hotels/hotel-0/breakfast-terms";
+  const terms: HotelBreakfastTerms = { mode: "extra", price_per_person: "12.50", currency: "EUR", notes: "07:00–10:00" };
+  state.hotelTerms[termsPath] = terms;
+  state.directory = [{ id: "hotel-0", name: "Hotel Lindenhof", city: "München", country: "DE", breakfast_terms: terms }];
+
+  await page.goto("/hotels");
+  const row = page.getByTestId("hotel-table").getByRole("row").filter({ has: page.getByRole("button", { name: "Hotel Lindenhof", exact: true }) });
+  await expect(page.getByRole("columnheader", { name: /Условия завтрака/ })).toBeVisible();
+  await expect(row.getByText("За доплату", { exact: true })).toBeVisible();
+  await expect(row).toContainText("12,50");
+
+  await row.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
+  const editor = page.getByTestId("hotel-breakfast-terms");
+  await editor.getByRole("button", { name: "Изменить условия", exact: true }).click();
+  await chooseFilter(page, "Условия гостиницы", "Включён в стоимость проживания");
+  await editor.getByRole("button", { name: "Сохранить условия", exact: true }).click();
+  await page.getByTestId("hotel-detail-dialog").locator("footer").getByRole("button", { name: "Закрыть", exact: true }).click();
+
+  await expect(row.getByText("Включён", { exact: true })).toBeVisible();
+  await expect(row).not.toContainText("12,50");
+});
 
 test("concierge saves general hotel breakfast terms without rewriting stays or payments", async ({ page }) => {
   const state = await setup(page, "ru", "concierge");

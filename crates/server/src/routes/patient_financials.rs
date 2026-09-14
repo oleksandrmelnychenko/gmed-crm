@@ -215,7 +215,7 @@ async fn load_patient_settlement_ledger(
         r#"WITH scoped_invoices AS (
                SELECT invoice.*, orders.order_number
                FROM invoices invoice
-               JOIN orders ON orders.id = invoice.order_id
+               LEFT JOIN orders ON orders.id = invoice.order_id
                WHERE invoice.patient_id = $1
                  AND ($3::uuid IS NULL OR invoice.order_id = $3)
                  AND ($4::uuid IS NULL OR EXISTS (
@@ -236,7 +236,7 @@ async fn load_patient_settlement_ledger(
                                 )
                           )
                  ))
-                 AND orders.currency = $6
+                 AND invoice.currency = $6
                  AND (
                         $5::boolean = false
                         OR (
@@ -676,12 +676,11 @@ async fn load_patient_account_statement(
     let mut available_currencies = sqlx::query_scalar::<_, String>(
         r#"SELECT DISTINCT currency
            FROM (
-               SELECT UPPER(TRIM(orders.currency)) AS currency
+               SELECT UPPER(TRIM(invoice.currency)) AS currency
                FROM invoices invoice
-               JOIN orders ON orders.id = invoice.order_id
                WHERE invoice.patient_id = $1
                  AND invoice.status <> 'cancelled'
-                 AND TRIM(COALESCE(orders.currency, '')) <> ''
+                 AND TRIM(COALESCE(invoice.currency, '')) <> ''
                  AND (
                         $2::boolean = false
                         OR (
@@ -765,7 +764,7 @@ async fn load_patient_account_statement(
                         AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
                   ), 0) AS allocated_from_advance
            FROM invoices invoice
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.patient_id = $1
              AND invoice.status <> 'cancelled'
              AND ($2::date IS NULL OR invoice.issued_at::date >= $2)
@@ -796,7 +795,7 @@ async fn load_patient_account_statement(
                         AND invoice.status NOT IN ('draft', 'cancelled')
                     )
              )
-             AND orders.currency = $7
+             AND invoice.currency = $7
            ORDER BY invoice.issued_at DESC, invoice.created_at DESC"#,
     )
     .bind(patient_id)
@@ -875,8 +874,8 @@ async fn load_patient_account_statement(
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "kind": if invoice_type == "advance" { "prepayment" } else { "invoice" },
             "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("issued_at").map(|value| value.date_naive().to_string()).unwrap_or_default(),
-            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
             "document_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
             "description": if invoice_type == "advance" { "Advance payment" } else { "Patient invoice" },
             "status": status,
@@ -903,7 +902,7 @@ async fn load_patient_account_statement(
                   invoice.hide_amounts_from_patient, orders.order_number
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
-           JOIN orders ON orders.id = invoice.order_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.patient_id = $1
              AND invoice.status <> 'cancelled'
              AND ($2::date IS NULL OR credit.issued_on >= $2)
@@ -916,7 +915,7 @@ async fn load_patient_account_statement(
                       AND package.package_id = $5
                       AND package.order_id = invoice.order_id
              ))
-             AND orders.currency = $6
+             AND invoice.currency = $6
              AND (
                     $7::boolean = false
                     OR (
@@ -956,8 +955,8 @@ async fn load_patient_account_statement(
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "kind": if transaction_type == "credit_note" { "credit_note" } else { "credit_note_reversal" },
             "entry_date": row.try_get::<NaiveDate, _>("issued_on").map(|value| value.to_string()).unwrap_or_default(),
-            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
             "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
             "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
             "document_number": row.try_get::<String, _>("document_number").unwrap_or_default(),
@@ -1428,12 +1427,7 @@ async fn get_patient_financial_summary(
                             )
                       )
              ))
-             AND EXISTS (
-                    SELECT 1
-                    FROM orders currency_order
-                    WHERE currency_order.id = invoices.order_id
-                      AND currency_order.currency = $6
-             )
+             AND invoices.currency = $6
            ORDER BY issued_at DESC, created_at DESC"#,
     )
     .bind(patient_id)
@@ -1682,7 +1676,7 @@ async fn get_patient_financial_summary(
         }
 
         order_breakdown.push(serde_json::json!({
-            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
             "invoice_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
             "status": status,

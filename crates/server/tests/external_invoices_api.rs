@@ -13,6 +13,476 @@ use gmed_server::state::AppState;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 
+#[tokio::test]
+async fn patient_import_without_order_is_listed_approved_and_paid_through_the_journal() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("unassigned-invoice");
+    let patient = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient = seed_patient(&pool, admin_id, &unique_tag("other")).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let document_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO documents (id, version_root_document_id, auto_name, art, category, uploaded_by, patient_id) VALUES ($1, $1, $2, 'invoice_document', 'finance', $3, $4)")
+        .bind(document_id).bind(format!("Invoice {tag}" )).bind(admin_id).bind(patient).execute(&pool).await.unwrap();
+    let payload = json!({ "patient_id": patient, "source_document_id": document_id, "supplier_name": "Synthetic Clinic", "external_invoice_number": tag, "amount_net": 100, "amount_vat": 19, "amount_gross": 119, "currency": "EUR" });
+    let path = format!("/api/v1/patients/{patient}/external-invoices");
+    let (status, _) = json_request(&app, "POST", &path, &manager, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let mut foreign_payload = payload.clone();
+    foreign_payload["patient_id"] = json!(other_patient);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{other_patient}/external-invoices"),
+        &billing,
+        Some(foreign_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, created) =
+        json_request(&app, "POST", &path, &billing, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap();
+    let invoice_id = Uuid::parse_str(id).unwrap();
+    let (status, _) = json_request(&app, "POST", &path, &billing, Some(payload)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let list_path =
+        format!("/api/v1/external-invoices?patient_id={patient}&search={tag}&per_page=1");
+    let (status, list) = json_request(&app, "GET", &list_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["total"], 1);
+    let item = &list["items"][0];
+    assert_eq!(item["id"], id);
+    assert_eq!(item["source_document_id"], document_id.to_string());
+    assert_eq!(item["patient_id"], patient.to_string());
+    assert!(item["order_id"].is_null());
+    assert_eq!(item["status"], "received");
+    assert_eq!(item["provider_name"], "Synthetic Clinic");
+    let (status, list) = json_request(&app, "GET", &list_path, &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["total"], 0);
+    seed_patient_assignment(&pool, patient, manager_id, admin_id).await;
+    let (_, list) = json_request(&app, "GET", &list_path, &manager, None).await;
+    assert_eq!(list["total"], 1);
+
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let settlement_path = format!("/api/v1/company-provider-liabilities/{id}/settlements");
+    let payment = |amount: &str| json!({ "request_id": Uuid::new_v4(), "financial_account_id": account_id, "amount_gross": amount, "paid_on": chrono::Utc::now().date_naive().to_string(), "payment_method": "bank_transfer" });
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &settlement_path,
+        &billing,
+        Some(payment("40")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let approve_path = format!("/api/v1/external-invoices/{id}/approve");
+    let (status, _) = json_request(&app, "POST", &approve_path, &manager, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, approved) =
+        json_request(&app, "POST", &approve_path, &billing, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{approved}");
+    let (status, _) = json_request(&app, "POST", &approve_path, &billing, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM accounting_entries WHERE source_external_invoice_id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 0, "Approval must not create a cash movement");
+
+    let first_payment = payment("40");
+    let (status, first) = json_request(
+        &app,
+        "POST",
+        &settlement_path,
+        &billing,
+        Some(first_payment.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let (status, replay) = json_request(
+        &app,
+        "POST",
+        &settlement_path,
+        &billing,
+        Some(first_payment),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["idempotent_replay"], true);
+    let (_, summary) = json_request(&app, "GET", &settlement_path, &billing, None).await;
+    assert_eq!(
+        summary["remaining_provider_liability_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        79.0
+    );
+    assert_eq!(summary["settlement_status"], "partial");
+    let (status, paid) = json_request(
+        &app,
+        "POST",
+        &settlement_path,
+        &billing,
+        Some(payment("79")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid}");
+    let (_, list) = json_request(&app, "GET", &list_path, &billing, None).await;
+    assert_eq!(list["items"][0]["status"], "paid");
+    assert_eq!(list["items"][0]["settlement_status"], "paid");
+    let cash: String = sqlx::query_scalar("SELECT SUM(amount_gross)::text FROM accounting_entries WHERE source_external_invoice_id = $1 AND direction = 'expense'").bind(invoice_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(cash.parse::<f64>().unwrap(), 119.0);
+    let contextual: bool = sqlx::query_scalar("SELECT BOOL_AND(patient_id = $2 AND order_id IS NULL) FROM accounting_entries WHERE source_external_invoice_id = $1").bind(invoice_id).bind(patient).fetch_one(&pool).await.unwrap();
+    assert!(contextual);
+    let (status, position) = json_request(
+        &app,
+        "GET",
+        "/api/v1/company-financial-position?currency=EUR",
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{position}");
+    let liability = position["provider_liabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .unwrap();
+    assert_eq!(
+        liability["remaining_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        0.0
+    );
+}
+
+#[tokio::test]
+async fn patient_paid_state_is_auditable_idempotent_and_creates_no_company_cash_movement() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-paid-journal");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices"),
+        &bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "external_invoice_number": format!("PAT-{tag}"),
+            "amount_net": 100,
+            "amount_vat": 19,
+            "amount_gross": 119,
+            "currency": "EUR",
+            "status": "received"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let external_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{external_id}/approve"),
+        &bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let request_id = Uuid::new_v4();
+    let payment_payload = json!({
+        "request_id": request_id,
+        "paid": true,
+        "paid_on": chrono::Utc::now().date_naive().to_string()
+    });
+    let payment_path = format!("/api/v1/external-invoices/{external_id}/patient-payment");
+    let (status, paid) = json_request(
+        &app,
+        "POST",
+        &payment_path,
+        &bearer,
+        Some(payment_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid}");
+    assert_eq!(paid["paid_by"], "patient");
+    let (status, replay) =
+        json_request(&app, "POST", &payment_path, &bearer, Some(payment_payload)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+
+    let row = sqlx::query("SELECT status, paid_by FROM external_invoices WHERE id = $1")
+        .bind(external_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row.try_get::<String, _>("status").unwrap(), "paid");
+    assert_eq!(row.try_get::<String, _>("paid_by").unwrap(), "patient");
+    let event_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM external_invoice_patient_payment_events WHERE external_invoice_id = $1",
+    )
+    .bind(external_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(event_count, 1);
+    let cash_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM accounting_entries WHERE source_external_invoice_id = $1",
+    )
+    .bind(external_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cash_count, 0);
+
+    let (status, reopened) = json_request(
+        &app,
+        "POST",
+        &payment_path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "paid": false,
+            "paid_on": chrono::Utc::now().date_naive().to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
+    assert_eq!(reopened["paid_by"], "unpaid");
+}
+
+#[tokio::test]
+async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoice_once() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-billing-constructor");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let source_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-source")).await;
+    let anchor_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-anchor")).await;
+    sqlx::query("UPDATE orders SET status = 'completed', phase = 'closure' WHERE id = $1")
+        .bind(anchor_order)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let bearer = auth_header_for(admin_id, "ceo");
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{source_order}/external-invoices"),
+        &bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "external_invoice_number": format!("LATE-{tag}"),
+            "amount_net": 250,
+            "amount_vat": 0,
+            "amount_gross": 250,
+            "currency": "EUR",
+            "status": "approved"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let external_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/company-provider-liabilities/{external_id}/settlements"),
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "financial_account_id": account_id,
+            "amount_gross": "250",
+            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "payment_method": "bank_transfer"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{payment}");
+
+    let workspace_path = format!("/api/v1/patients/{patient_id}/billing-workspace");
+    let (status, workspace) = json_request(&app, "GET", &workspace_path, &bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{workspace}");
+    assert!(
+        workspace["orders"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["id"] == anchor_order.to_string() && row["status"] == "completed" })
+    );
+    let expense = workspace["expenses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == external_id.to_string())
+        .unwrap();
+    assert_eq!(expense["billable"], true);
+
+    let request_id = Uuid::new_v4();
+    let payload = json!({
+        "request_id": request_id,
+        "order_id": anchor_order,
+        "invoice_type": "interim",
+        "external_invoice_ids": [external_id]
+    });
+    let create_path = format!("/api/v1/patients/{patient_id}/billing-invoices");
+    let (status, invoice) =
+        json_request(&app, "POST", &create_path, &bearer, Some(payload.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    let invoice_id = Uuid::parse_str(invoice["id"].as_str().unwrap()).unwrap();
+    assert_eq!(invoice["status"], "draft");
+    assert_eq!(invoice["order_id"], anchor_order.to_string());
+    assert_eq!(
+        invoice["line_items"][0]["source_external_invoice_id"],
+        external_id.to_string()
+    );
+    assert_eq!(invoice["line_items"][0]["is_cost_passthrough"], true);
+
+    let (status, replay) = json_request(&app, "POST", &create_path, &bearer, Some(payload)).await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["id"], invoice_id.to_string());
+    let (status, duplicate) = json_request(
+        &app,
+        "POST",
+        &create_path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": anchor_order,
+            "external_invoice_ids": [external_id]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{duplicate}");
+
+    let (_, workspace) = json_request(&app, "GET", &workspace_path, &bearer, None).await;
+    let reserved = workspace["expenses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == external_id.to_string())
+        .unwrap();
+    assert_eq!(reserved["billable"], false);
+    assert_eq!(
+        reserved["latest_patient_invoice_id"],
+        invoice_id.to_string()
+    );
+
+    sqlx::query("UPDATE invoices SET status = 'cancelled' WHERE id = $1")
+        .bind(invoice_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, workspace) = json_request(&app, "GET", &workspace_path, &bearer, None).await;
+    let released = workspace["expenses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == external_id.to_string())
+        .unwrap();
+    assert_eq!(released["billable"], true);
+
+    let (status, invoice_without_order) = json_request(
+        &app,
+        "POST",
+        &create_path,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": null,
+            "currency": "EUR",
+            "invoice_type": "interim",
+            "external_invoice_ids": [external_id]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice_without_order}");
+    assert_eq!(invoice_without_order["order_id"], Value::Null);
+    assert_eq!(invoice_without_order["order_number"], Value::Null);
+    assert_eq!(invoice_without_order["currency"], "EUR");
+    let invoice_without_order_id =
+        Uuid::parse_str(invoice_without_order["id"].as_str().unwrap()).unwrap();
+
+    let (status, invoice_list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices?patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{invoice_list}");
+    assert!(invoice_list["items"].as_array().unwrap().iter().any(|row| {
+        row["id"] == invoice_without_order_id.to_string() && row["order_id"].is_null()
+    }));
+
+    sqlx::query("UPDATE invoices SET status = 'sent' WHERE id = $1")
+        .bind(invoice_without_order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, paid_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_without_order_id}/payments"),
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "250.00",
+            "payment_method": "bank_transfer",
+            "payment_reference": format!("PATIENT-{tag}"),
+            "received_on": chrono::Utc::now().date_naive().to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid_invoice}");
+    assert_eq!(paid_invoice["invoice"]["status"], "paid");
+    assert_eq!(paid_invoice["invoice"]["order_id"], Value::Null);
+
+    let unlinked_accounting_entries: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM accounting_entries
+           WHERE source_invoice_id = $1
+             AND order_id IS NULL
+             AND currency = 'EUR'"#,
+    )
+    .bind(invoice_without_order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(unlinked_accounting_entries > 0);
+}
+
 async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
     let ctx = support::suite_context(TEST_SECRET).await?;
     Some((ctx.app, ctx.pool, ctx.admin_id))
@@ -449,6 +919,40 @@ async fn company_invoice_import_validates_and_preserves_the_selected_provider() 
         .unwrap();
     assert_eq!(liability["provider_id"], provider_id.to_string());
     assert_eq!(liability["provider_name"], format!("Clinic {tag}"));
+
+    let account_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM company_financial_accounts WHERE currency = 'EUR' AND is_default",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, payment) = json_request(&app, "POST", &format!("/api/v1/company-provider-liabilities/{invoice_id}/settlements"), &bearer, Some(json!({
+        "request_id": Uuid::new_v4(), "financial_account_id": account_id,
+        "amount_gross": "119", "paid_on": chrono::Utc::now().date_naive().to_string(), "payment_method": "bank_transfer"
+    }))).await;
+    assert_eq!(status, StatusCode::OK, "{payment}");
+    let (status, ledger) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/invoices/accounting-ledger?year={}",
+            chrono::Utc::now().format("%Y")
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ledger}");
+    let entry = ledger["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["external_invoice_id"] == invoice_id.to_string())
+        .expect("company payment in ledger");
+    assert_eq!(entry["direction"], "expense");
+    assert_eq!(entry["source_document_id"], document_id.to_string());
+    assert!(entry["patient_id"].is_null());
+    assert!(entry["order_id"].is_null());
 }
 
 #[tokio::test]

@@ -161,8 +161,8 @@ export type InvoiceItem = {
   id: string;
   quote_id: string | null;
   quote_number: string | null;
-  order_id: string;
-  order_number: string;
+  order_id: string | null;
+  order_number: string | null;
   contract_id: string | null;
   patient_id: string;
   patient_name: string;

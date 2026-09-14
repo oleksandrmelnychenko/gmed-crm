@@ -4,6 +4,23 @@ import fs from "node:fs";
 import path from "node:path";
 if (process.env.PARSER_TEST_BASE_URL) test.use({ baseURL: process.env.PARSER_TEST_BASE_URL });
 
+for (const lang of ["ru", "de"] as const) test(`patient invoice without an order remains on the incoming tab in ${lang}`, async ({ page }) => {
+  await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+  const { dialog, writes, uploads } = await prepare(page);
+  await dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ }).click();
+  await page.getByRole("option", { name: /Alpha/ }).click();
+  await expect(dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ })).toContainText(/Без заказа|Ohne Auftrag/);
+  await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
+  await dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/\/invoices\?source=incoming/);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({ patient_id: patientA, source_document_id: documentId, status: "received" });
+  expect(uploads[0]).toContain(patientA);
+  expect(uploads[0]).not.toContain('name="order_id"');
+  await expect(page.getByRole("button", { name: lang === "ru" ? "Входящие" : "Eingangsrechnungen", exact: true })).toHaveAttribute("aria-current", "page");
+});
+
 const patientA = "00000000-0000-0000-0000-000000000101";
 const patientB = "00000000-0000-0000-0000-000000000102";
 const orderA = "00000000-0000-0000-0000-000000000201";
@@ -57,10 +74,10 @@ async function prepare(page: Page, options: { pdf?: string; scope?: "company" | 
     await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
   });
   await page.goto("/invoices");
-  await page.getByRole("button", { name: /Входящий счёт|Eingangsrechnung/ }).click();
+  await page.getByRole("button", { name: /^(Входящий счёт|Eingangsrechnung)$/ }).click();
   const dialog = page.getByRole("dialog", { name: /Проверка входящего инвойса|Eingangsrechnung prüfen/ });
   if (options.scope !== "company") {
-    await dialog.getByRole("button", { name: /Расход по заказу|Auftragsbezogene Ausgabe/ }).click();
+    await dialog.getByRole("button", { name: /Расход клиента|Patientenbezogene Ausgabe/ }).click();
   }
   const png = await page.evaluate(() => {
     const canvas = document.createElement("canvas");

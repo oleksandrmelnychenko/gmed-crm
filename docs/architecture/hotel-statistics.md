@@ -78,7 +78,9 @@ only Add hotel. The former report refresh and summary export actions are removed
 Hotel-wide breakfast terms are separate from actual stay breakfast records.
 `GET/PUT /api/v1/stats/reports/hotels/{id}/breakfast-terms` stores unknown, included,
 extra, or unavailable; optional price per person per breakfast, its currency, and
-notes. CEO, PatientManager and Concierge can edit. Reporting roles can read.
+notes. The hotel directory response includes these terms so the main hotel table
+can show the arrangement and optional per-person price without one request per row.
+CEO, PatientManager and Concierge can edit. Reporting roles can read.
 The server requires a non-medical hotel provider, validates the mode/price/currency,
 and patches only `providers.taxonomy_attributes.hotel_breakfast_terms`, recording
 editor/time while preserving other attributes. Included/unavailable breakfast has

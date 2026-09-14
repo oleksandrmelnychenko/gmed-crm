@@ -13,6 +13,7 @@ pub(crate) mod bmp;
 pub mod business_metrics;
 pub mod config;
 pub mod crypto;
+pub mod datev;
 pub mod document_signatures;
 pub mod file_scan;
 pub mod file_sniff;
@@ -79,6 +80,7 @@ fn build_app_with_workspace_gate(
 
     let misc_public = rate_limit::apply_general(
         Router::new()
+            .merge(datev::public_router())
             .merge(routes::leads::public_router())
             .merge(routes::messages::public_router())
             .merge(routes::realtime::public_router())

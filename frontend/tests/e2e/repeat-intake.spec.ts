@@ -291,6 +291,57 @@ test("saved repeat is resumed through the patient entry without creating another
   expect(writes.filter(x=>x.path==="/leads")).toHaveLength(1);
 });
 
+test("saved repeat drafts can be removed from the picker", async ({page}) => {
+  const {wizard} = await mount(page);
+  await wizard.getByRole("button", {name: "Закрыть", exact: true}).click();
+
+  const firstLeadId = "00000000-0000-0000-0000-000000000901";
+  const secondLeadId = "00000000-0000-0000-0000-000000000902";
+  let drafts = [
+    {id: firstLeadId, created_at: "2026-09-12T10:00:00Z", concern: "First saved draft"},
+    {id: secondLeadId, created_at: "2026-09-10T10:00:00Z", concern: null},
+  ];
+  const discarded: {path: string; body: Record<string, unknown>}[] = [];
+
+  await page.route(`**/api/v1/patients/${patientId}/repeat-intakes`, route =>
+    route.fulfill({contentType: "application/json", body: JSON.stringify(drafts)}),
+  );
+  await page.route("**/api/v1/leads/*/failed-flow", async route => {
+    const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    discarded.push({path, body});
+    drafts = drafts.filter(item => !path.includes(item.id));
+    await route.fulfill({contentType: "application/json", body: "{}"});
+  });
+
+  await page.getByRole("button", {name: "Repeat intake", exact: true}).click();
+  const picker = page.getByRole("dialog", {name: "Повторное обращение", exact: true});
+  await expect(picker.getByText("First saved draft", {exact: true})).toBeVisible();
+  await picker.getByRole("button", {name: "Удалить черновик: First saved draft", exact: true}).click();
+
+  const confirmation = page.getByRole("dialog", {name: "Удалить черновик?", exact: true});
+  await confirmation.getByRole("button", {name: "Отмена", exact: true}).click();
+  await expect(picker.getByText("First saved draft", {exact: true})).toBeVisible();
+  expect(discarded).toEqual([]);
+
+  await picker.getByRole("button", {name: "Удалить черновик: First saved draft", exact: true}).click();
+  await confirmation.getByRole("button", {name: "Удалить черновик", exact: true}).click();
+  await expect(picker.getByText("First saved draft", {exact: true})).toHaveCount(0);
+  await expect(picker.getByText("Черновик обращения", {exact: true})).toBeVisible();
+  expect(discarded).toEqual([{
+    path: `/leads/${firstLeadId}/failed-flow`,
+    body: {resolution: "archive", reason: "draft_discarded"},
+  }]);
+
+  await picker.getByRole("button", {name: "Удалить черновик: Черновик обращения", exact: true}).click();
+  await confirmation.getByRole("button", {name: "Удалить черновик", exact: true}).click();
+  await expect(picker.getByText("Сохранённых черновиков нет.", {exact: true})).toBeVisible();
+  expect(discarded.map(item => item.path)).toEqual([
+    `/leads/${firstLeadId}/failed-flow`,
+    `/leads/${secondLeadId}/failed-flow`,
+  ]);
+});
+
 test("uncertain first save retries the same durable creation key",async({page})=>{
   const {wizard}=await mount(page);
   const requests:Record<string,unknown>[]=[];

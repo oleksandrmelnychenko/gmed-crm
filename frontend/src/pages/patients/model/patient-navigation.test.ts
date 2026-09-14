@@ -8,7 +8,7 @@ describe("patient navigation", () => {
     const items = patientWorkspaceNavigation("ceo", lang, t(lang));
     expect([...new Set(items.map(item => item.group))]).toEqual(["patient", "medicine", "coordination", "finance"]);
     expect(new Set(items.map(item => item.key)).size).toBe(items.length);
-    expect(items.filter(item => item.group === "finance").map(item => item.key)).toEqual(["finance", "invoices", "contracts"]);
+    expect(items.filter(item => item.group === "finance").map(item => item.key)).toEqual(["finance", "billing", "invoices", "contracts"]);
     expect(items.every(item => item.label && item.groupLabel)).toBe(true);
   });
   it.each(["ceo", "ceo_assistant", "patient_manager", "billing", "it_admin", "doctor", "lab", "partner", undefined])("matches financial API access for %s, including direct links", role => {
@@ -16,5 +16,6 @@ describe("patient navigation", () => {
     expect(canViewPatientFinanceSurface(role)).toBe(allowed);
     expect(patientWorkspaceNavigation(role, "ru", t("ru")).some(item => item.key === "finance")).toBe(allowed);
     expect(normalizePatientDetailTab("finance", { canViewFinance: allowed, canViewInvoices: true, canViewDocuments: true, canViewContracts: true, canViewOperationalSurface: true })).toBe(allowed ? "finance" : "profile");
+    expect(normalizePatientDetailTab("billing", { canViewFinance: true, canViewInvoices: allowed, canViewDocuments: true, canViewContracts: true, canViewOperationalSurface: true })).toBe(allowed ? "billing" : "profile");
   });
 });

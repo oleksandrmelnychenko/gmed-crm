@@ -1,9 +1,10 @@
 import { expect, test, type Download, type Page, type WebSocketRoute } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import type { CompanyFinancialAccount, CompanyFinancialPosition, CompanyProviderLiability, CompanyProviderPosition } from "../../src/pages/company-finance/types";
+import type { CompanyFinancialAccount, CompanyFinancialPosition, CompanyProviderLiability, CompanyProviderPosition, CompanyProviderPaymentTransaction } from "../../src/pages/company-finance/types";
 
 async function mockFinance(page: Page, connected = true) {
-  const state = { receivable: "100.00", cash: "500.00", remaining: "100.00", positionReads: 0, accountReads: 0, queueReads: 0, settlementReads: 0, statementReads: 0, fail: false };
+  const state = { receivable: "100.00", cash: "500.00", remaining: "100.00", invoiceStatus: "approved", positionReads: 0, accountReads: 0, queueReads: 0, settlementReads: 0, statementReads: 0, fail: false };
+  const payments: CompanyProviderPaymentTransaction[] = [];
   let providerTables: { positions: CompanyProviderPosition[]; liabilities: CompanyProviderLiability[] } | null = null;
   const sockets: WebSocketRoute[] = [];
   let seq = 0;
@@ -32,9 +33,9 @@ async function mockFinance(page: Page, connected = true) {
   });
   const liability = (): CompanyProviderLiability => ({
     id: "liability-1", external_invoice_number: "LIVE-INVOICE-1", invoice_date: "2026-09-01", due_date: "2026-09-20",
-    status: "approved", paid_by: "unpaid", liability_kind: "payable", amount_gross: "100.00",
+    status: state.invoiceStatus, paid_by: Number(state.remaining) === 0 ? "agency" : "unpaid", liability_kind: Number(state.remaining) === 0 ? "settled" : "payable", amount_gross: "100.00",
     company_paid_gross: String(100 - Number(state.remaining)), remaining_gross: state.remaining,
-    settlement_status: "unpaid", latest_payment_on: null, payment_count: 0,
+    settlement_status: Number(state.remaining) === 0 ? "paid" : Number(state.remaining) < 100 ? "partial" : "unpaid", latest_payment_on: null, payment_count: payments.length,
     order_id: null, order_number: null, patient_id: null, patient_pid: null, patient_name: "",
     provider_id: "provider-1", provider_name: "Clinic Realtime",
   });
@@ -50,6 +51,10 @@ async function mockFinance(page: Page, connected = true) {
     let body: unknown = [];
     if (path === "/auth/refresh") body = { access_token: "finance-test-token", refresh_token: "finance-test-refresh" };
     if (path === "/me") body = { id: "tester", name: "Finance Tester", email: "finance@example.com", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
+    if (path === "/invoices") body = { items: [], total: 0, page: 1, per_page: 25, total_pages: 1 };
+    if (path === "/invoices/accounting-ledger") body = { entries: [], monthly: [], currency: "EUR", available_currencies: ["EUR"], summary: {} };
+    if (path === "/external-invoices") body = { items: (providerTables?.liabilities ?? [liability()]).map(row => ({ ...row, currency: "EUR", invoice_scope: row.patient_id ? "patient_order" : "company" })), total: providerTables?.liabilities.length ?? 1, page: 1, per_page: 25 };
+    if (path === "/external-invoices/liability-1/approve") { state.invoiceStatus = "approved"; body = { id: "liability-1" }; }
     if (path === "/company-financial-position") {
       state.positionReads += 1;
       body = {
@@ -78,8 +83,18 @@ async function mockFinance(page: Page, connected = true) {
       body = { items: [], page: 1, page_size: 100, total: 0, has_more: false };
     }
     if (path === "/company-provider-liabilities/liability-1/settlements") {
+      if (route.request().method() === "POST") {
+        const payment = route.request().postDataJSON();
+        expect(state.invoiceStatus).toBe("approved");
+        state.remaining = (Number(state.remaining) - Number(payment.amount_gross)).toFixed(2);
+        state.cash = (Number(state.cash) - Number(payment.amount_gross)).toFixed(2);
+        if (Number(state.remaining) === 0) state.invoiceStatus = "paid";
+        const transaction: CompanyProviderPaymentTransaction = { ...payment, id: `payment-${payments.length + 1}`, external_invoice_id: "liability-1", financial_account_name: "Realtime Bank", transaction_type: "payment", reverses_transaction_id: null, currency: "EUR", created_by: "tester", created_by_name: "Finance Tester", created_at: new Date().toISOString() };
+        payments.push(transaction);
+        return route.fulfill({ json: { transaction, idempotent_replay: false } });
+      }
       state.settlementReads += 1;
-      body = { ...liability(), external_invoice_id: "liability-1", currency: "EUR", remaining_provider_liability_gross: state.remaining, transactions: [] };
+      body = { ...liability(), external_invoice_id: "liability-1", currency: "EUR", remaining_provider_liability_gross: state.remaining, transactions: payments };
     }
     if (path === "/company-provider-statements/provider-1") {
       state.statementReads += 1;
@@ -91,6 +106,7 @@ async function mockFinance(page: Page, connected = true) {
   });
   return {
     state,
+    payments,
     provider,
     liability,
     setProviderTables(positions: CompanyProviderPosition[], liabilities: CompanyProviderLiability[]) { providerTables = { positions, liabilities }; },
@@ -171,6 +187,44 @@ test("patient search combines with balance filters and zero advances have no min
 function summary(page: Page, label: string) {
   return page.getByText(label, { exact: true }).locator("..").locator("p").last();
 }
+
+for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and partial/full payment stay in the invoice workspace in ${lang}`, async ({ page }) => {
+  const api = await mockFinance(page);
+  api.state.invoiceStatus = "received";
+  await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/invoices?source=incoming");
+  const workspace = page.getByRole("region", { name: lang === "ru" ? "Входящие счета" : "Eingangsrechnungen", exact: true });
+  const table = workspace.getByRole("table");
+  await expect(table.getByText("LIVE-INVOICE-1", { exact: true })).toBeVisible();
+  await expect(table.getByText(lang === "ru" ? "На проверке" : "Zu prüfen", { exact: true })).toBeVisible();
+  const pay = workspace.getByRole("button", { name: lang === "ru" ? "Записать оплату" : "Zahlung erfassen", exact: true });
+  const bounds = await pay.boundingBox();
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1440);
+  await pay.click();
+  const dialog = page.getByRole("dialog");
+  expect(api.payments).toHaveLength(0);
+  await dialog.getByRole("button", { name: lang === "ru" ? "Подтвердить счёт" : "Rechnung freigeben", exact: true }).click();
+  const amount = dialog.getByLabel(lang === "ru" ? "Сумма выплаты" : "Zahlungsbetrag", { exact: true });
+  await expect(amount).toHaveValue("100.00");
+  await amount.fill("40");
+  await dialog.getByRole("button", { name: lang === "ru" ? "Записать выплату" : "Zahlung erfassen", exact: true }).click();
+  await expect(amount).toHaveValue("60.00");
+  expect(api.payments).toHaveLength(1);
+  expect(api.payments[0]).toMatchObject({ amount_gross: "40", financial_account_id: "account-1" });
+  await dialog.getByRole("button", { name: lang === "ru" ? "Записать выплату" : "Zahlung erfassen", exact: true }).click();
+  await expect(dialog.getByText(lang === "ru" ? "Счёт партнёра / исполнителя полностью оплачен." : "Die Rechnung des Partners / Leistungserbringers ist vollständig bezahlt.", { exact: true })).toBeVisible();
+  expect(api.payments).toHaveLength(2);
+  expect(api.state.cash).toBe("400.00");
+  await page.keyboard.press("Escape");
+  await expect(table.getByText(lang === "ru" ? "Оплачен" : "Bezahlt", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/invoices\?source=incoming/);
+  await page.screenshot({ path: `../artifacts/design-qa/incoming-invoices-${lang}-desktop.png` });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+  await expect(workspace.getByRole("button", { name: lang === "ru" ? "История оплат" : "Zahlungsverlauf", exact: true })).toBeVisible();
+  await page.screenshot({ path: `../artifacts/design-qa/incoming-invoices-${lang}-mobile.png`, fullPage: true });
+});
 
 test("financial events update balances without a refresh button and coalesce during a slow request", async ({ page }) => {
   const api = await mockFinance(page);
@@ -356,9 +410,11 @@ for (const lang of ["ru", "de"] as const) {
     }
     await table.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `../artifacts/design-qa/provider-documents-${lang}-desktop.png` });
-    // Trailing context and the payment action remain reachable by scrolling.
-    await table.evaluate(element => { element.scrollLeft = element.scrollWidth; });
-    await table.locator('[role="cell"][data-column-id="settlement"] button').click();
+    // The payment action stays visible without horizontal scrolling.
+    const pay = table.getByRole("button", { name: lang === "ru" ? "Записать оплату" : "Zahlung erfassen", exact: true });
+    const payBounds = await pay.boundingBox();
+    expect(payBounds!.x + payBounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await pay.click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);

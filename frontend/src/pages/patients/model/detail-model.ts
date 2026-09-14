@@ -321,7 +321,7 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
   if (requestedTab === "contracts" && !access.canViewContracts) {
     return "profile";
   }
-  if (requestedTab === "invoices" && !access.canViewInvoices) {
+  if ((requestedTab === "invoices" || requestedTab === "billing") && !access.canViewInvoices) {
     return "profile";
   }
   if (requestedTab === "finance" && !access.canViewFinance) {

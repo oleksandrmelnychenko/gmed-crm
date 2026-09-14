@@ -36,7 +36,7 @@ export function DatevReadiness({ profile, dirty }: { profile: DatevProfile; dirt
     </ul>
     <div className="flex items-start gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
       <LockKeyhole aria-hidden className="mt-0.5 size-4 shrink-0" />
-      <p>{de ? "Noch erforderlich: App-Registrierung, API-Abonnements, Sandbox-Test und Freigabe der Steuerberatung. Die Verbindung bleibt bis dahin nicht eingerichtet." : "Ещё нужны регистрация приложения, доступ к API, тест в sandbox и разрешение бухгалтерии. До этого подключение остаётся ненастроенным."}</p>
+      <p>{de ? "Für echte Daten sind App-Registrierung, API-Abonnements und DATEV-Berechtigungen erforderlich. Den tatsächlichen Zugriff oben prüfen; diese Checkliste bestätigt nur Ihre Angaben." : "Для реальных данных нужны регистрация приложения, подписки API и права DATEV. Фактический доступ проверяется выше; этот список подтверждает только заполнение профиля."}</p>
     </div>
     {profile.modules.includes("belege") ? <p className="text-xs leading-5 text-muted-foreground">
       {de ? "Bei der neuen Version von Belege online wird Rechnungsdatenservice 1.0 derzeit nicht unterstützt. Den passenden Datenservice und die Formate anhand der tatsächlichen Version prüfen." : "Новая версия Belege online пока не поддерживает Rechnungsdatenservice 1.0. Сервис обмена и форматы нужно сверить с фактической версией кабинета."}{" "}

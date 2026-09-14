@@ -21,6 +21,9 @@ import {
   Eye,
   FileText,
   FileUp,
+  FileInput,
+  FileOutput,
+  Landmark,
   Pencil,
   LoaderCircle,
   Plus,
@@ -63,6 +66,7 @@ import { useAuth } from "@/lib/auth";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
+import { IncomingInvoices } from "./ui/incoming-invoices";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
@@ -247,6 +251,8 @@ const STAFF_INVOICE_REALTIME_EVENTS = [
   "invoice.dunning_created",
   "invoice.overdue_marked",
   "document.payment_proof_uploaded",
+  "provider_payment.recorded",
+  "provider_payment.reversed",
 ] as const;
 
 function quoteOptionLabel(quote: QuoteOption) {
@@ -397,6 +403,7 @@ function useStaffInvoicesPageContent() {
   const { staffGo, canStaffPath } = useStaffNavigate();
   const [importOpen, setImportOpen] = useState(false);
   const datevActive = searchParams.get("source") === "datev";
+  const incomingActive = searchParams.get("source") === "incoming";
   const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user?.role);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -1041,6 +1048,7 @@ function useStaffInvoicesPageContent() {
         sortable: true,
         searchable: true,
         width: 180,
+        render: (row) => row.order_number ?? <StatusBadge tone="neutral">{text.noOrder}</StatusBadge>,
       },
       {
         id: "quote_number",
@@ -1276,7 +1284,7 @@ function useStaffInvoicesPageContent() {
       sortable: true,
       searchable: true,
       width: 160,
-      render: (row) => row.order_number ?? text.noOrder,
+      render: (row) => row.order_number ?? (row.patient_id && row.external_invoice_id ? <StatusBadge tone="warning">{text.noOrder}</StatusBadge> : text.noOrder),
     },
     {
       id: "patient_name",
@@ -1982,8 +1990,9 @@ function useStaffInvoicesPageContent() {
 
         <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
           <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "ghost" : "default"} aria-current={!datevActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}>{lang === "de" ? "GMed-Rechnungen" : "Счета GMed"}</Button>
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "default" : "ghost"} aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}>{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive || incomingActive ? "ghost" : "default"} aria-current={!datevActive && !incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={incomingActive ? "default" : "ghost"} aria-current={incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: "incoming", invoice: null, datev_mode: null }, { replace: false })}><FileInput className="size-4" aria-hidden />{lang === "de" ? "Eingangsrechnungen" : "Входящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "default" : "ghost"} aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}><Landmark className="size-4" aria-hidden />{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
           </nav>
         </div>
         <DatevWorkspace active={datevActive} demo={datevDemo} onConnection={canStaffPath("/admin/datev") ? () => staffGo("/admin/datev") : undefined} onModeChange={(demo) => syncQuery({ datev_mode: demo ? "demo" : null })} />
@@ -1996,19 +2005,18 @@ function useStaffInvoicesPageContent() {
             initialOrderId={filters.orderId}
             optionsError={optionsError}
             onClose={() => setImportOpen(false)}
-            onCreated={(result) => {
+            onCreated={() => {
               setImportOpen(false);
               clearApiCache();
-              if (result.scope === "company") {
-                staffGo(`/company-finance?provider_invoice=${encodeURIComponent(result.id)}`);
-              } else if (result.orderId) {
-                staffGo(`/orders?order=${encodeURIComponent(result.orderId)}&section=invoices`);
-              }
+              setFilters(current => ({ ...current, patientId: "", orderId: "", quoteId: "" }));
+              setReloadToken(current => current + 1);
+              syncQuery({ source: "incoming", invoice: null, patient: null, order: null, quote: null }, { replace: false });
             }}
           />
         ) : null}
 
-        <div hidden={datevActive} className="space-y-5">
+        {incomingActive ? <IncomingInvoices key={`${filters.patientId}:${filters.orderId}`} canManage={access.canManage} patientId={filters.patientId} orderId={filters.orderId} reloadToken={reloadToken} onChanged={() => { clearApiCache("/invoices/accounting-ledger"); setReloadToken(current => current + 1); }} /> : null}
+        <div hidden={datevActive || incomingActive} className="space-y-5">
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <div className="space-y-3">
@@ -2026,7 +2034,7 @@ function useStaffInvoicesPageContent() {
             toolbarStart={
               <>
             <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
-              {titleWithDot(t.invoices_title)}
+              {titleWithDot(lang === "de" ? "Ausgangsrechnungen" : "Исходящие счета")}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
             <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
@@ -2254,6 +2262,8 @@ function useStaffInvoicesPageContent() {
           />
         </div>
 
+        </div>
+        <div hidden={datevActive} className="space-y-5">
         {access.canAccounting ? (
           <>
             <div className="space-y-2">
@@ -2542,7 +2552,7 @@ function useStaffInvoicesPageContent() {
                   <div className="space-y-4">
                     <div className="grid gap-x-5 sm:grid-cols-2">
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
-                      <SummaryLine label={t.orders_title} value={detail.order_number} />
+                      <SummaryLine label={t.orders_title} value={detail.order_number ?? text.noOrder} />
                       <SummaryLine label={text.createQuoteSection} value={detail.quote_number ?? t.common_not_set} />
                       <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
@@ -3284,23 +3294,25 @@ function useStaffInvoicesPageContent() {
                         description: text.linkedPatientCardDescription,
                         href: `/patients?patient=${detail.patient_id}`,
                       },
-                      {
+                      ...(detail.order_id ? [{
                         key: "order",
                         label: text.linkedOrder,
                         description: text.linkedOrderCardDescription,
                         href: `/orders?order=${detail.order_id}&patient=${detail.patient_id}`,
-                      },
-                      {
+                      }] : []),
+                      ...(detail.order_id && detail.quote_id ? [{
                         key: "quotes",
                         label: text.quotes,
                         description: text.linkedQuoteCardDescription,
-                        href: `/contracts?quote=${detail.quote_id ?? ""}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`,
-                      },
+                        href: `/contracts?quote=${detail.quote_id}&order=${detail.order_id}&patient=${detail.patient_id}&tab=quotes`,
+                      }] : []),
                       {
                         key: "documents",
                         label: t.nav_documents,
                         description: text.linkedDocumentsCardDescription ?? text.linkedOrderDocument,
-                        href: `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                        href: detail.order_id
+                          ? `/documents?order=${detail.order_id}&patient=${detail.patient_id}`
+                          : `/documents?patient=${detail.patient_id}`,
                       },
                     ].map((link) => (
                       <button
@@ -3771,7 +3783,9 @@ function useStaffInvoicesPageContent() {
                   dictionary={t as unknown as Record<string, string>}
                   onRowClick={() =>
                     window.open(
-                      `/documents?order=${detail.order_id}&patient=${detail.patient_id}`,
+                      detail.order_id
+                        ? `/documents?order=${detail.order_id}&patient=${detail.patient_id}`
+                        : `/documents?patient=${detail.patient_id}`,
                       "_blank",
                       "noopener,noreferrer",
                     )

@@ -2302,11 +2302,10 @@ async fn list_patients(
                             AND invoice.status NOT IN ('draft', 'cancelled')
                       )::bigint AS released_invoice_count
                FROM invoices invoice
-               JOIN orders ON orders.id = invoice.order_id
                LEFT JOIN source_allocations source
                  ON source.advance_invoice_id = invoice.id
                WHERE $6::boolean = true
-                 AND UPPER(orders.currency) = 'EUR'
+                 AND UPPER(invoice.currency) = 'EUR'
                GROUP BY invoice.patient_id
            ), external_allocations AS (
                SELECT allocation.external_invoice_id,

@@ -1,6 +1,10 @@
 SELECT jsonb_build_object(
     'id', provider.id, 'name', provider.name,
-    'city', provider.address_city, 'country', provider.address_country
+    'city', provider.address_city, 'country', provider.address_country,
+    'breakfast_terms', COALESCE(
+        provider.taxonomy_attributes->'hotel_breakfast_terms',
+        '{}'::jsonb
+    )
 ) AS item
 FROM providers provider
 WHERE provider.is_active AND provider.provider_type = 'non_medical'

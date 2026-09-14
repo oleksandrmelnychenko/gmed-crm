@@ -1,4 +1,4 @@
-//! Local DATEV onboarding. No outbound DATEV client or accounting write routes.
+//! Declared DATEV onboarding profile, separate from verified API connectivity.
 use axum::{
     Extension, Json, Router,
     extract::{DefaultBodyLimit, State},
@@ -16,6 +16,7 @@ use crate::{audit, auth::middleware::AuthUser, state::AppState};
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::datev::router())
         .route("/admin/datev/setup", get(load).put(save))
         .layer(DefaultBodyLimit::max(8 * 1024))
 }

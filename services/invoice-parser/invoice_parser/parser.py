@@ -213,6 +213,7 @@ def parse_invoice(extraction: Any, templates: list) -> dict:
         "schema_version": "1.0", "status": "needs_review", "requires_review": True,
         "template": template_name, "document_kind": document_kind(extraction.text),
         "fields": fields, "line_items": lines,
+        "tax_breakdown": details.get("tax_breakdown", []),
         "missing_fields": missing, "warnings": warnings,
         "extraction_complete": not incomplete, "extraction": asdict(metadata),
         "text": extraction.text,

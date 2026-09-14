@@ -1522,9 +1522,10 @@ function WorkTypeSheet({
               </FormField>
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-foreground">
+            <div className="flex items-center gap-2 text-sm text-foreground">
               <input
                 type="checkbox"
+                aria-label={tx("Активен", "Aktiv")}
                 checked={draft.isActive}
                 onChange={(event) =>
                   setDraft((current) => ({
@@ -1535,7 +1536,7 @@ function WorkTypeSheet({
                 className={checkboxClass}
               />
               {tx("Активен", "Aktiv")}
-            </label>
+            </div>
 
             <section className="border-t border-border/70 pt-4">
               <div className="flex items-center justify-between gap-3">
@@ -1582,9 +1583,10 @@ function WorkTypeSheet({
                             <option value="es">Español</option>
                           </NativeComboboxSelect>
                         </FormField>
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <input
                             type="checkbox"
+                            aria-label={`${tx("Активно", "Aktiv")} · ${description.languageCode}`}
                             checked={description.isActive}
                             onChange={(event) =>
                               updateDescription(description.key, {
@@ -1594,7 +1596,7 @@ function WorkTypeSheet({
                             className={checkboxClass}
                           />
                           {tx("Активно", "Aktiv")}
-                        </label>
+                        </div>
                       </div>
 
                       <FormField

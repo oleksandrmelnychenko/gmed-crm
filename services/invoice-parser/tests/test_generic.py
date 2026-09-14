@@ -152,6 +152,128 @@ Nettosumme MwSt 7.00% 0,28
     assert "amount_vat_aggregated_from_tax_breakdown" in result["warnings"]
 
 
+def test_parking_receipt_belegsnr_uses_letterhead_supplier_and_reads_vat():
+    result = parse("""Anlage zur Rechnung Nr.:
+www.operngarage.de
+Münchner Hochgaragen GmbH
+Fürstenrieder Str. 285
+81377 München
+089/581089
+
+CRC Funcnal 08294/010608511188455
+BelegsNr 124955/0603/603 27.04.26 16:11
+10100 Ausv. Parkticket 4,00 EUR A
+27.04.26 15:10 - 27.04.26 16:11
+Gesamtbetrag 4,00 EUR
+Kredit Mastercard 4,00 EUR
+MUSt. 19,9O % 0,64 EUR
+MUEHOGA GmbH Operngarage
+Max-Joseph-Platz 4
+80539 Muenchen
+""")
+    assert result["document_kind"] == "receipt"
+    assert result["fields"] == {
+        "supplier_name": "Münchner Hochgaragen GmbH",
+        "external_invoice_number": "124955/0603/603",
+        "invoice_date": "2026-04-27",
+        "due_date": None,
+        "amount_net": "3.36",
+        "amount_vat": "0.64",
+        "amount_gross": "4.00",
+        "currency": "EUR",
+    }
+    assert "amount_net_derived_from_totals" in result["warnings"]
+    assert "document_kind_receipt" in result["warnings"]
+
+
+def test_inclusive_parenthesized_vat_summary_is_read_from_hp_invoice():
+    result = parse("""HP Instant Ink
+Tinten-Lieferservice
+Rechnung
+Abrechnungsdatum: 04.12.24
+Rechnungsdatum: 05.12.24
+RECHNUNGSNUMMER
+IIDEDN1026554478
+Gesamtsumme: 4,99 €
+Inklusive MwSt (19%): 0,80 €
+Zwischensumme ohne MwSt: 4,19 €
+© 2024 HP Development Company, L.P.
+HP Deutschland GmbH | Herrenberger Str. 140 | 71034 Böblingen | Deutschland
+""")
+    assert result["document_kind"] == "invoice"
+    assert result["fields"] == {
+        "supplier_name": "HP Deutschland GmbH",
+        "external_invoice_number": "IIDEDN1026554478",
+        "invoice_date": "2024-12-05",
+        "due_date": None,
+        "amount_net": "4.19",
+        "amount_vat": "0.80",
+        "amount_gross": "4.99",
+        "currency": "EUR",
+    }
+
+
+def test_mixed_medical_services_and_taxable_materials_are_reconciled_for_review():
+    result = parse("""Demo Klinik GmbH
+München, 8. September 2030
+Rechnungsnummer: R-2030-330 (Bitte mit angeben)
+Datum Ziffer Leistung / Begründung Anzahl Faktor Betrag
+08.09.30 1 Beratung 1 3,5 16,32 €
+5 Untersuchung 1 3,5 16,32 €
+252 Injektion 6 3,5 48,96 €
+- Demo Material 1 194,32 €
+530 Dokumentation 1 3,5 714 €
+davon ärztliche Leistungen: 88,74 €
+davon Sach-/Materialkosten: 194,32 €
+zzgl. 19% USt.: 36,92 €
+Gesamtbetrag: 319,98 €
+Gemäß § 12 der GOÄ wird diese Rechnung bei Erhalt zur Zahlung fällig.
+Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.
+""")
+    assert result["fields"] == {
+        "supplier_name": "Demo Klinik GmbH",
+        "external_invoice_number": "R-2030-330",
+        "invoice_date": "2030-09-08",
+        "due_date": None,
+        "amount_net": "283.06",
+        "amount_vat": "36.92",
+        "amount_gross": "319.98",
+        "currency": "EUR",
+    }
+    assert result["tax_breakdown"] == [
+        {
+            "category": None,
+            "label": "Sach-/Materialkosten",
+            "rate": "19",
+            "base": "194.32",
+            "amount": "36.92",
+        },
+        {
+            "category": None,
+            "label": "ärztliche Leistungen",
+            "rate": None,
+            "base": "88.74",
+            "amount": None,
+        },
+    ]
+    assert "mixed_tax_treatment_requires_review" in result["warnings"]
+    assert "amount_net_derived_from_totals" in result["warnings"]
+    assert "line_item_amount_recovered_from_subtotal" in result["warnings"]
+    assert [(item["position"], item["price_subtotal"]) for item in result["line_items"]] == [
+        ("1", "16.32"),
+        ("5", "16.32"),
+        ("252", "48.96"),
+        ("-", "194.32"),
+        ("530", "7.14"),
+    ]
+    assert result["line_items"][-1]["amount_source"] == "subtotal_reconciliation"
+    assert "line_items_total_mismatch" not in result["warnings"]
+    assert result["payment"]["terms"] == [
+        "Gemäß § 12 der GOÄ wird diese Rechnung bei Erhalt zur Zahlung fällig.",
+        "Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.",
+    ]
+
+
 def test_cost_estimate_is_parsed_but_explicitly_classified_for_review():
     result = parse("""TUM Universitätsklinikum
 München, den 06.05.2025

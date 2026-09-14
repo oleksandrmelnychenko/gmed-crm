@@ -6,17 +6,17 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import type { Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
-import { moneyCents } from "./model";
+import { emptyHotelBreakfastTerms, moneyCents, type HotelBreakfastTerms } from "./model";
 
-export type HotelBreakfastTerms = { mode: "unknown" | "included" | "extra" | "unavailable"; price_per_person: string | null; currency: string | null; notes: string | null; updated_at?: string | null };
-const empty: HotelBreakfastTerms = { mode: "unknown", price_per_person: null, currency: null, notes: null };
+export type { HotelBreakfastTerms } from "./model";
+const empty = emptyHotelBreakfastTerms;
 const copy = {
   ru: { title: "Завтраки в гостинице", mode: "Условия гостиницы", unknown: "Условия не указаны", included: "Включён в стоимость проживания", extra: "Гостиница предлагает за доплату", unavailable: "Гостиница не предоставляет", price: "Цена за человека / завтрак", currency: "Валюта", notes: "Условия и примечания", edit: "Изменить условия", save: "Сохранить условия", cancel: "Сбросить изменения", hint: "Общие условия гостиницы. Фактические завтраки и расходы указываются отдельно в каждом проживании.", failed: "Не удалось загрузить условия завтраков", saveFailed: "Не удалось сохранить условия. Введённые данные сохранены в форме.", invalid: "Укажите корректную цену и валюту", retry: "Повторить", link: "Для общих условий выберите гостиницу из провайдеров в бронировании.", saved: "Условия сохранены", loading: "Загрузка…" },
   de: { title: "Frühstück im Hotel", mode: "Hotelkonditionen", unknown: "Konditionen nicht erfasst", included: "Im Übernachtungspreis enthalten", extra: "Hotel bietet Frühstück gegen Aufpreis", unavailable: "Hotel bietet kein Frühstück", price: "Preis pro Person / Frühstück", currency: "Währung", notes: "Konditionen und Hinweise", edit: "Konditionen bearbeiten", save: "Konditionen speichern", cancel: "Änderungen verwerfen", hint: "Allgemeine Hotelkonditionen. Tatsächliches Frühstück und Kosten werden je Aufenthalt separat erfasst.", failed: "Frühstückskonditionen konnten nicht geladen werden", saveFailed: "Konditionen konnten nicht gespeichert werden. Eingaben bleiben erhalten.", invalid: "Gültigen Preis und gültige Währung angeben", retry: "Erneut versuchen", link: "Für allgemeine Konditionen ein Hotel aus den Anbietern in der Buchung wählen.", saved: "Konditionen gespeichert", loading: "Wird geladen…" },
 } as const;
 const draftOf = (terms: HotelBreakfastTerms) => ({ mode: terms.mode, price: terms.price_per_person ?? "", currency: terms.currency ?? "EUR", notes: terms.notes ?? "" });
 
-export function HotelBreakfastTermsEditor({ providerId, role, lang, onDirty }: { providerId: string | null; role: string; lang: Lang; onDirty: (id: string, dirty: boolean) => void }) {
+export function HotelBreakfastTermsEditor({ providerId, role, lang, onDirty, onSaved }: { providerId: string | null; role: string; lang: Lang; onDirty: (id: string, dirty: boolean) => void; onSaved?: () => void }) {
   const labels = copy[lang], editable = ["ceo", "patient_manager", "concierge"].includes(role);
   const [terms, setTerms] = useState(empty), [draft, setDraft] = useState(() => draftOf(empty));
   const [editing, setEditing] = useState(false), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(""), [saveError, setSaveError] = useState(""), [saved, setSaved] = useState(false);
@@ -36,7 +36,7 @@ export function HotelBreakfastTermsEditor({ providerId, role, lang, onDirty }: {
     if (draft.mode === "extra" && price && (moneyCents(price) === null || moneyCents(price)! > 999999999999n || !/^[A-Z]{3}$/.test(currency))) { setSaveError(labels.invalid); return; }
     setBusy(true); setSaveError("");
     const body: HotelBreakfastTerms = { mode: draft.mode, price_per_person: draft.mode === "extra" && price ? price : null, currency: draft.mode === "extra" && price ? currency : null, notes: draft.notes.trim() || null };
-    try { const result = await apiFetch<HotelBreakfastTerms>(`/stats/reports/hotels/${providerId}/breakfast-terms`, { method: "PUT", body: JSON.stringify(body) }); setTerms(result); setDraft(draftOf(result)); setEditing(false); setSaved(true); clearApiCache(`/providers/${providerId}`); }
+    try { const result = await apiFetch<HotelBreakfastTerms>(`/stats/reports/hotels/${providerId}/breakfast-terms`, { method: "PUT", body: JSON.stringify(body) }); setTerms(result); setDraft(draftOf(result)); setEditing(false); setSaved(true); clearApiCache(`/providers/${providerId}`); onSaved?.(); }
     catch { setSaveError(labels.saveFailed); }
     finally { setBusy(false); }
   }

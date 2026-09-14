@@ -21240,14 +21240,10 @@ async fn upload_document_with_mode(
                     "Company invoice cannot use patient or order context",
                 );
             }
-        } else if patient_id.is_none()
-            || order_id.is_none()
-            || lead_id.is_some()
-            || appointment_id.is_some()
-        {
+        } else if patient_id.is_none() || lead_id.is_some() || appointment_id.is_some() {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Order invoice requires a patient and their order",
+                "Patient invoice requires a patient; order is optional",
             );
         }
         if !invoice_xml

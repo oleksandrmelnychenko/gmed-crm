@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "@/lib/api";
 import { blankImportFields } from "../model/import-model";
-import { confirmCompanyInvoiceImport, discardInvoiceImportSource, uploadInvoiceSource } from "./invoice-import-api";
+import { confirmCompanyInvoiceImport, confirmInvoiceImport, discardInvoiceImportSource, uploadInvoiceSource } from "./invoice-import-api";
 
 vi.mock("@/lib/api", () => ({ apiFetch: vi.fn() }));
 
@@ -67,5 +67,20 @@ describe("company invoice import", () => {
       method: "POST",
       body: JSON.stringify({ reason: "Replaced before invoice import completion" }),
     });
+  });
+});
+
+describe("patient invoice context", () => {
+  it("keeps the patient on the original without inventing an order", async () => {
+    await uploadInvoiceSource(new File(["%PDF-test"], "invoice.pdf"), "patient_order", "patient-1", "", fields);
+    const body = request.mock.calls[0][1]?.body as FormData;
+    expect(body.get("patient_id")).toBe("patient-1");
+    expect(body.has("order_id")).toBe(false);
+    expect(body.get("invoice_scope")).toBe("patient_order");
+  });
+  it.each([ ["", "/patients/patient-1/external-invoices"], ["order-1", "/orders/order-1/external-invoices"] ])("confirms the reviewed source with order '%s'", async (order, path) => {
+    await confirmInvoiceImport("document-1", "patient-1", order, fields, "Reviewed");
+    expect(request.mock.calls[0][0]).toBe(path);
+    expect(JSON.parse(request.mock.calls[0][1]?.body as string)).toMatchObject({ patient_id: "patient-1", source_document_id: "document-1", amount_gross: 779.45, status: "received", paid_by: "unpaid" });
   });
 });

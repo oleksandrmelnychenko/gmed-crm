@@ -127,6 +127,10 @@ export function createCompanyProviderPayment(
   }>(`/company-provider-liabilities/${externalInvoiceId}/settlements`, payload);
 }
 
+export function approveProviderInvoice(externalInvoiceId: string) {
+  return postJson<{ id: string }>(`/external-invoices/${externalInvoiceId}/approve`, {});
+}
+
 export function reverseCompanyProviderPayment(
   externalInvoiceId: string,
   paymentId: string,

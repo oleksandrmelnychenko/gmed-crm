@@ -16,8 +16,11 @@ use crate::state::AppState;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
+mod incoming_invoices;
+
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(incoming_invoices::router())
         .route("/me/followup-milestones", get(list_my_followup_milestones))
         .route("/orders", get(list_orders).post(create_order))
         .route("/orders/debt-management", get(list_debt_management_queue))
@@ -60,6 +63,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/external-invoices/company",
             post(create_company_external_invoice),
+        )
+        .route(
+            "/patients/{patient_id}/external-invoices",
+            post(create_patient_external_invoice),
         )
         .route(
             "/orders/{order_id}/external-invoices/{external_invoice_id}/update",
@@ -6241,15 +6248,76 @@ async fn create_company_external_invoice(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateExternalInvoiceRequest>,
 ) -> axum::response::Response {
+    create_unassigned_external_invoice(state, auth, body, None).await
+}
+
+async fn create_patient_external_invoice(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<CreateExternalInvoiceRequest>,
+) -> axum::response::Response {
+    create_unassigned_external_invoice(state, auth, body, Some(patient_id)).await
+}
+
+async fn create_unassigned_external_invoice(
+    state: AppState,
+    auth: AuthUser,
+    body: CreateExternalInvoiceRequest,
+    patient_id: Option<Uuid>,
+) -> axum::response::Response {
     if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo])
     {
         return response;
     }
+    if body.patient_id.is_some() && body.patient_id != patient_id {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoice patient must match the selected context",
+        );
+    }
+    if body.order_leistung_id.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoice service requires an order",
+        );
+    }
+    if let Some(patient_id) = patient_id {
+        if auth.role == Role::PatientManager
+            && let Err(response) = ensure_patient_access(&state, &auth, patient_id).await
+        {
+            return response;
+        }
+        match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::NOT_FOUND, "Patient not found"),
+            Err(_) => {
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate patient",
+                );
+            }
+        }
+    }
+    let invoice_scope = if patient_id.is_some() {
+        "patient_order"
+    } else {
+        "company"
+    };
+    let status = if patient_id.is_some() {
+        "received"
+    } else {
+        "approved"
+    };
 
     let Some(source_document_id) = body.source_document_id else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Company invoice source document is required",
+            "Invoice source document is required",
         );
     };
     let external_invoice_number = body.external_invoice_number.trim();
@@ -6267,7 +6335,7 @@ async fn create_company_external_invoice(
     let Some(supplier_name) = supplier_name else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Company invoice supplier is required",
+            "Invoice supplier is required",
         );
     };
     if supplier_name.chars().count() > 500 || external_invoice_number.chars().count() > 250 {
@@ -6345,7 +6413,7 @@ async fn create_company_external_invoice(
         r#"SELECT EXISTS(
                SELECT 1 FROM documents
                WHERE id = $1
-                 AND patient_id IS NULL
+                 AND patient_id IS NOT DISTINCT FROM $2::uuid
                  AND order_id IS NULL
                  AND lead_id IS NULL
                  AND appointment_id IS NULL
@@ -6354,6 +6422,7 @@ async fn create_company_external_invoice(
            )"#,
     )
     .bind(source_document_id)
+    .bind(patient_id)
     .fetch_one(&state.db)
     .await
     {
@@ -6369,7 +6438,7 @@ async fn create_company_external_invoice(
     if !document_is_valid {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Company invoice document must not belong to a patient or order",
+            "Invoice source document must belong to the same patient context without an order",
         );
     }
 
@@ -6379,12 +6448,12 @@ async fn create_company_external_invoice(
                external_invoice_number, invoice_date, due_date,
                amount_net, amount_vat, amount_gross, currency,
                status, paid_by, service_delivered, notes,
-               received_at, created_by, provider_id
+               received_at, created_by, provider_id, patient_id
            ) VALUES (
-               'company', $1, $2, $3, $4, $5,
+               $13, $1, $2, $3, $4, $5,
                $6, $7, $8, $9,
-               'approved', 'unpaid', false, $10,
-               now(), $11, $12
+               $14, 'unpaid', false, $10,
+               now(), $11, $12, $15
            )
            RETURNING id"#,
     )
@@ -6400,17 +6469,26 @@ async fn create_company_external_invoice(
     .bind(notes)
     .bind(auth.user_id)
     .bind(body.provider_id)
+    .bind(invoice_scope)
+    .bind(status)
+    .bind(patient_id)
     .fetch_one(&state.db)
     .await
     {
         Ok(row) => {
             let id = row.try_get::<Uuid, _>("id").unwrap_or_default();
             state.audit_sender.try_send(audit::domain_event(
-                "create_company_external_invoice",
+                if patient_id.is_some() {
+                    "create_patient_external_invoice"
+                } else {
+                    "create_company_external_invoice"
+                },
                 Some(auth.user_id),
                 "external_invoice",
                 Some(id),
                 serde_json::json!({
+                    "patient_id": patient_id,
+                    "invoice_scope": invoice_scope,
                     "source_document_id": source_document_id,
                     "supplier_name": supplier_name,
                     "provider_id": body.provider_id,
@@ -6426,7 +6504,8 @@ async fn create_company_external_invoice(
                 "external_invoice",
                 id,
                 serde_json::json!({
-                    "invoice_scope": "company",
+                    "invoice_scope": invoice_scope,
+                    "patient_id": patient_id,
                     "supplier_name": supplier_name,
                     "provider_id": body.provider_id,
                     "external_invoice_number": external_invoice_number,
@@ -6442,7 +6521,7 @@ async fn create_company_external_invoice(
             {
                 return err(
                     StatusCode::CONFLICT,
-                    "This company invoice has already been imported",
+                    "This invoice has already been imported",
                 );
             }
             tracing::error!(error = %error, "create company external invoice");

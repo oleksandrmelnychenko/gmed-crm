@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, Stethoscope, UserRound, UsersRound, Wallet } from "lucide-react";
+import { ArrowLeft, BadgeCheck, CalendarClock, ClipboardList, FilePlus2, FileSignature, FolderOpen, History, ReceiptText, ShieldCheck, Stethoscope, UserRound, UsersRound, Wallet } from "lucide-react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
@@ -19,7 +19,7 @@ import {
 
 import { patientWorkspaceNavigation } from "../model/patient-navigation";
 
-const icons = { profile: UserRound, clinical: Stethoscope, "medication-ai": AiMark, relations: UsersRound, orders: ClipboardList, appointments: CalendarClock, documents: FolderOpen, contracts: FileSignature, invoices: ReceiptText, finance: Wallet, workflow: BadgeCheck, curators: ShieldCheck, timeline: History };
+const icons = { profile: UserRound, clinical: Stethoscope, "medication-ai": AiMark, relations: UsersRound, orders: ClipboardList, appointments: CalendarClock, documents: FolderOpen, contracts: FileSignature, billing: FilePlus2, invoices: ReceiptText, finance: Wallet, workflow: BadgeCheck, curators: ShieldCheck, timeline: History };
 
 export function PatientWorkspaceNav() {
   const { id: routeId } = useParams<{ id: string }>();

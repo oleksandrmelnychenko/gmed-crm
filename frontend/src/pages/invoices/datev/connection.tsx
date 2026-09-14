@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Download, Eye, LoaderCircle, LockKeyhole, Save } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -9,6 +9,8 @@ import { useDatevText } from "./text";
 import { DATEV_MODULES, fetchDatevSetup, saveDatevSetup, type DatevProfile, type DatevSetup } from "./setup-api";
 import { DATEV_EXPORT_DOCS, DATEV_MODULE_NAMES, DATEV_PORTAL, datevSetupBrief, profileNumbersValid } from "./setup-model";
 import { useDatevSetupText } from "./setup-text";
+import { DatevActionButton } from "./action-button";
+import { operationDescription } from "./operation-text";
 import { DatevReadiness } from "./readiness";
 import { DatevSetupSection } from "./setup-section";
 
@@ -48,6 +50,7 @@ export function DatevConnectionDetails() {
     try {
       const value = await saveDatevSetup(draft, setup.revision);
       setSetup(value); setDraft(value.profile); setSaved(true);
+      window.dispatchEvent(new Event("gmed-datev-profile-saved"));
     } catch (cause) {
       setError(cause instanceof ApiRequestError && cause.status === 409 ? "conflict" : "saveError");
     } finally { setSaving(false); }
@@ -65,15 +68,15 @@ export function DatevConnectionDetails() {
   const valid = profileNumbersValid(draft);
 
   return <div className="min-w-0 space-y-3">
-    <DatevSetupSection title={text.connectionStatus} bodyClassName="p-0" action={<><Badge variant="outline">{text.notConnected}</Badge><Badge variant="secondary"><Eye aria-hidden className="mr-1 size-3" />{text.readOnly}</Badge></>}>
-      <dl className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2 xl:grid-cols-4">
-        {[[text.company, setup.profile.company_name || text.notSelected], [copy.selectedModules, String(setup.profile.modules.length)], [text.lastSync, text.never], [text.sending, text.disabled]].map(([label, value]) =>
+    <DatevSetupSection title={lang === "de" ? "Buchhaltungsprofil" : "Профиль бухгалтерии"} bodyClassName="p-0" action={<Badge variant="secondary"><Eye aria-hidden className="mr-1 size-3" />{lang === "de" ? "Eigene Angaben" : "Указанные сведения"}</Badge>}>
+      <dl className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2">
+        {[[text.company, setup.profile.company_name || text.notSelected], [copy.selectedModules, String(setup.profile.modules.length)]].map(([label, value]) =>
           <div key={label} className="min-w-0 bg-card px-3.5 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1.5 break-words text-sm font-medium">{value}</dd></div>)}
       </dl>
     </DatevSetupSection>
     <DatevReadiness profile={setup.profile} dirty={dirty} />
     <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.65fr)_minmax(18rem,1fr)]">
-      <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.click(); }}>
         <DatevSetupSection title={copy.profile} description={copy.profileHint}>
           <fieldset disabled={saving} className="grid min-w-0 gap-3 sm:grid-cols-2">
             <label className="grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2"><span>{copy.companyName}</span><Input className="h-9 bg-field font-normal text-foreground" value={draft.company_name} maxLength={160} onChange={(e) => edit({ company_name: e.target.value })} autoComplete="off" /></label>
@@ -91,7 +94,7 @@ export function DatevConnectionDetails() {
                 <span className="min-w-0 break-words">{DATEV_MODULE_NAMES[id]}</span>
               </label>
               <p className="ml-7 mt-1.5 text-xs leading-5 text-muted-foreground">{copy[id]}</p>
-              {draft.modules.includes(id) ? <p className="ml-7 mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-muted-foreground"><LockKeyhole aria-hidden className="mt-1 size-3 shrink-0" />{copy.accessPending}</p> : null}
+              <p className="ml-7 mt-1.5 flex items-start gap-1.5 text-xs leading-5 text-muted-foreground"><LockKeyhole aria-hidden className="mt-1 size-3 shrink-0" />{copy.moduleUnavailable}</p>
             </div>)}
           </fieldset>
         </DatevSetupSection>
@@ -106,15 +109,14 @@ export function DatevConnectionDetails() {
         <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
           <span className="text-xs leading-5 text-muted-foreground sm:mr-auto">{dirty ? copy.unsaved : setup.updated_at ? `${copy.savedAt}: ${new Date(setup.updated_at).toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}` : null}</span>
           {dirty ? <Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" disabled={saving} onClick={() => { setDraft(setup.profile); setSaved(false); setError(null); }}>{copy.reset}</Button> : null}
-          <Button type="submit" size="sm" className="h-9 rounded-md sm:h-8" disabled={saving || !valid || (!dirty && !!setup.revision)}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}{saving ? copy.saving : copy.save}</Button>
+          <DatevActionButton type="submit" size="sm" title={`DATEV · ${copy.save}`} description={operationDescription("profile", lang === "de")} context={<><p>{draft.company_name}</p><p>Beraternummer: {draft.consultant_number || "—"} · Mandantennummer: {draft.client_number || "—"}</p></>} contextKey={JSON.stringify(draft)} onConfirm={save} disabled={saving || !valid || (!dirty && !!setup.revision)}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}DATEV · {saving ? copy.saving : copy.save}</DatevActionButton>
         </div>
       </form>
       <aside className="min-w-0 space-y-3">
         <DatevSetupSection title={text.systemName}>
-          <a className={buttonVariants({ variant: "outline", size: "sm", className: "h-auto min-h-9 w-full whitespace-normal rounded-md py-2" })} href={DATEV_PORTAL} target="_blank" rel="noopener noreferrer"><ArrowUpRight className="size-4" />{copy.openPortal}</a>
+          <DatevActionButton size="sm" className="w-full" title={copy.openPortal} description={operationDescription("portal", lang === "de")} onConfirm={() => { window.open(DATEV_PORTAL, "_blank", "noopener,noreferrer"); }}><ArrowUpRight className="size-4" />{copy.openPortal}</DatevActionButton>
           <p className="text-xs leading-5 text-muted-foreground">{copy.portalHint}</p>
-          <Button type="button" size="sm" disabled className="h-9 w-full rounded-md"><LockKeyhole className="size-4" />{text.connect}</Button>
-          <p className="text-xs leading-5 text-muted-foreground">{text.setupNeeded}</p>
+          <p className="text-xs leading-5 text-muted-foreground">{lang === "de" ? "Zugangsdaten, Anmeldung und tatsächliche Zugriffsprüfung befinden sich im Abschnitt DATEV-Zugriff oben." : "Ключи, вход и фактическая проверка прав находятся в разделе «Доступ к DATEV» выше."}</p>
         </DatevSetupSection>
         <DatevSetupSection title={copy.next}>
           <ol className="divide-y divide-border/60">
@@ -123,7 +125,7 @@ export function DatevConnectionDetails() {
           <a className="inline-flex items-center gap-1 text-xs underline underline-offset-4" href={DATEV_EXPORT_DOCS} target="_blank" rel="noopener noreferrer">{copy.docs}<ArrowUpRight className="size-3" /></a>
         </DatevSetupSection>
         <section className="space-y-3 rounded-lg border border-border/70 bg-card p-3.5">
-          <Button type="button" variant="outline" size="sm" className="h-auto min-h-9 w-full whitespace-normal rounded-md py-2 text-left" disabled={dirty || !setup.revision} onClick={downloadBrief}><Download className="size-4 shrink-0" />{copy.brief}</Button>
+          <DatevActionButton size="sm" className="w-full" title={`DATEV · ${copy.brief}`} description={operationDescription("brief", lang === "de")} disabled={dirty || !setup.revision} contextKey={setup.revision ?? ""} onConfirm={downloadBrief}><Download className="size-4 shrink-0" />DATEV · {copy.brief}</DatevActionButton>
           <p className="text-xs leading-5 text-muted-foreground">{copy.briefHint}</p>
         </section>
       </aside>

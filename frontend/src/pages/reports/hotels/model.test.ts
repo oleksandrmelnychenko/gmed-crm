@@ -33,6 +33,18 @@ describe("hotel negotiation statistics", () => {
     expect(total.total).toBe(5000000n); expect(total.roomNights).toBe(500);
     expect(groupHotels(rows, today).reduce((sum, row) => sum + row.total, 0n)).toBe(total.total);
   });
+  it("adds stored hotel breakfast terms to grouped and unbooked hotels", () => {
+    const directory = [{
+      id: "h1", name: "Hotel A", city: "Berlin", country: "DE",
+      breakfast_terms: { mode: "extra" as const, price_per_person: "12.50", currency: "EUR", notes: "07:00–10:00" },
+    }];
+    expect(groupHotels([stay()], today, directory)[0].breakfastTerms).toMatchObject({
+      mode: "extra", price_per_person: "12.50", currency: "EUR", notes: "07:00–10:00",
+    });
+    expect(groupHotels([stay()], today, [{ ...directory[0], breakfast_terms: { mode: "extra", price_per_person: "broken", currency: "EUR" } }])[0].breakfastTerms).toMatchObject({
+      mode: "extra", price_per_person: null, currency: null,
+    });
+  });
   it("counts calendar nights across daylight saving and rejects missing or invalid dates", () => {
     expect(stayNights(stay())).toBe(2);
     expect(stayNights(stay({ check_in: "2026-10-24", check_out: "2026-10-26" }))).toBe(2);

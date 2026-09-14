@@ -10,6 +10,12 @@ type HotelGroup = ReturnType<typeof groupHotels>[number];
 export function HotelTable({ groups, lang, currency, resetKey, onOpen }: { groups: HotelGroup[]; lang: Lang; currency: string; resetKey: string; onOpen: (id: string) => void }) {
   const labels = hotelCopy[lang];
   const money = (value: bigint) => formatMoneyAmount(decimal(value), currency);
+  const breakfastLabel = (row: HotelGroup) => ({
+    unknown: labels.breakfastTermsUnknown,
+    included: labels.breakfastTermsIncluded,
+    extra: labels.breakfastTermsExtra,
+    unavailable: labels.breakfastTermsUnavailable,
+  })[row.breakfastTerms.mode];
   const columns: ColumnDef<HotelGroup>[] = [
     { id: "hotel", label: labels.hotel, accessor: row => row.name, required: true, pinned: "left", width: 220,
       render: row => <button className="min-w-0 truncate text-left font-mono font-semibold text-primary hover:underline" title={row.name || labels.noHotel} onClick={event => { event.stopPropagation(); onOpen(row.key); }}>{row.name || labels.noHotel}</button> },
@@ -19,6 +25,8 @@ export function HotelTable({ groups, lang, currency, resetKey, onOpen }: { group
     { id: "nights", label: labels.nights, accessor: row => row.nights, filterType: "number", width: 126 },
     { id: "roomNights", label: labels.roomNights, accessor: row => row.roomsKnown ? row.roomNights : null, filterType: "number", width: 126,
       render: row => <div className="w-full text-right tabular-nums">{row.roomsKnown ? row.roomNights : "—"}<p className="text-[10px] text-muted-foreground">{row.roomsKnown}/{row.stays.filter(stay => stay.status !== "cancelled").length}</p></div> },
+    { id: "breakfastTerms", label: labels.breakfastTerms, accessor: row => `${breakfastLabel(row)} ${row.breakfastTerms.price_per_person ?? ""} ${row.breakfastTerms.currency ?? ""}`, width: 210,
+      render: row => row.breakfastTerms.mode === "unknown" ? "—" : <div className="min-w-0" title={row.breakfastTerms.notes ?? undefined}><p className="truncate text-xs font-medium">{breakfastLabel(row)}</p>{row.breakfastTerms.price_per_person && row.breakfastTerms.currency ? <p className="truncate text-[10px] tabular-nums text-muted-foreground">{formatMoneyAmount(row.breakfastTerms.price_per_person, row.breakfastTerms.currency)} · {labels.breakfastPerPerson}</p> : null}</div> },
     { id: "volume", label: labels.volume, accessor: row => row.pricedStays ? Number(decimal(row.total)) : null, filterType: "number", width: 185,
       render: row => <div className="w-full text-right tabular-nums"><span className="font-medium">{row.pricedStays ? money(row.total) : "—"}</span>{row.estimatedStays || row.costsMissing ? <p className="truncate text-[10px] text-muted-foreground">{row.estimatedStays ? `${labels.estimated}: ${money(row.estimated)}` : ""}{row.costsMissing ? ` · ${labels.partial}` : ""}</p> : null}</div> },
     { id: "average", label: labels.average, accessor: row => row.averageRoomNight === null ? null : Number(decimal(row.averageRoomNight)), filterType: "number", width: 185,
@@ -29,7 +37,7 @@ export function HotelTable({ groups, lang, currency, resetKey, onOpen }: { group
   return <section data-testid="hotel-table" className="min-w-0">
     <DataTableSurface rows={groups} columns={columns} rowId={row => row.key} storageKey="hotels:table" onRowClick={row => onOpen(row.key)}
       defaultSort={[{ field: "volume", dir: "desc" }]} defaultDensity="compact" rowHeightOverrides={{ compact: 44 }}
-      pagination={{ pageSize: 50, resetKey }} tableClassName="sm:max-h-[640px]" mobilePrimaryColumnId="hotel" mobileDetailColumnIds={["city", "patients", "bookings", "nights", "volume", "direct", "company"]}
+      pagination={{ pageSize: 50, resetKey }} tableClassName="sm:max-h-[640px]" mobilePrimaryColumnId="hotel" mobileDetailColumnIds={["city", "breakfastTerms", "patients", "bookings", "nights", "volume", "direct", "company"]}
       toolbarStart={<h2 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-primary" />{labels.table}</h2>}
       emptyState={<p className="px-4 py-8 text-center text-sm text-muted-foreground">{labels.noStays}</p>} />
   </section>;

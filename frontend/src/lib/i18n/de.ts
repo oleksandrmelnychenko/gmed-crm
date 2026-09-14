@@ -1192,7 +1192,7 @@ export const de = {
   invoices_workspace_no_patient: "Kein Patient",
   invoices_workspace_net: "Netto",
   invoices_workspace_gross: "Brutto",
-  invoices_workspace_monthly_euer: "Monatliche EÜR",
+  invoices_workspace_monthly_euer: "Einnahmen und Ausgaben pro Monat",
   invoices_workspace_no_cash_movement: "Für {year} wurde noch kein Geldfluss erfasst.",
   invoices_workspace_income: "Einnahmen",
   invoices_workspace_expense: "Ausgaben",

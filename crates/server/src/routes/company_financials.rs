@@ -165,9 +165,8 @@ async fn get_company_financial_position(
     let mut available_currencies = match sqlx::query_scalar::<_, String>(
         r#"SELECT DISTINCT currency
            FROM (
-               SELECT UPPER(TRIM(orders.currency)) AS currency
+               SELECT UPPER(TRIM(invoice.currency)) AS currency
                FROM invoices invoice
-               JOIN orders ON orders.id = invoice.order_id
                WHERE invoice.status <> 'cancelled'
                UNION ALL
                SELECT UPPER(TRIM(external.currency))
@@ -255,10 +254,9 @@ async fn get_company_financial_position(
                             AND invoice.status NOT IN ('draft', 'cancelled')
                       )::bigint AS released_invoice_count
                FROM invoices invoice
-               JOIN orders ON orders.id = invoice.order_id
                LEFT JOIN source_allocations source
                  ON source.advance_invoice_id = invoice.id
-               WHERE UPPER(orders.currency) = $1
+               WHERE UPPER(invoice.currency) = $1
                GROUP BY invoice.patient_id
            ), external_allocations AS (
                SELECT allocation.external_invoice_id,

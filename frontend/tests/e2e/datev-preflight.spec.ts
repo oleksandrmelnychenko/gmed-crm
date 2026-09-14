@@ -109,7 +109,7 @@ test("readiness reflects saved settings and does not grant DATEV access", async 
   await page.getByRole("textbox", { name: "Unternehmensname", exact: true }).fill("Unsaved company");
   await expect(page.getByTestId("datev-readiness")).toContainText("Änderungen zuerst speichern");
   await expect(page.getByTestId("datev-readiness")).toContainText("Angaben vorbereitet: 1 / 5");
-  await expect(page.getByRole("button", { name: "DATEV verbinden", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Mit DATEV verbinden", exact: true })).toBeDisabled();
   expect(mutations).toEqual([]);
 });
 

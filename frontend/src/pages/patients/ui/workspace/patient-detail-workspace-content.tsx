@@ -69,6 +69,7 @@ const loadPatientDocumentsTab = () => import("../sections/patient-documents-tab"
 const loadPatientContractsTab = () => import("../sections/patient-contracts-tab");
 const loadPatientInvoicesTab = () => import("../sections/patient-invoices-tab");
 const loadPatientFinanceTab = () => import("../sections/patient-finance-tab");
+const loadPatientBillingTab = () => import("../sections/patient-billing-tab");
 const loadPatientWorkflowTab = () => import("../sections/patient-workflow-section");
 const loadPatientTimelineTab = () => import("../sections/patient-timeline-section");
 const loadLeadWizard = () => import("@/pages/leads/ui/lead-wizard");
@@ -132,6 +133,11 @@ const LazyPatientFinanceTab = lazy(async () => {
   return { default: mod.PatientFinanceTab };
 });
 
+const LazyPatientBillingTab = lazy(async () => {
+  const mod = await loadPatientBillingTab();
+  return { default: mod.PatientBillingTab };
+});
+
 const LazyPatientWorkflowTab = lazy(async () => {
   const mod = await loadPatientWorkflowTab();
   return { default: mod.PatientWorkflowTab };
@@ -181,6 +187,9 @@ function preloadPatientWorkspaceTab(tab: string) {
       break;
     case "finance":
       void loadPatientFinanceTab();
+      break;
+    case "billing":
+      void loadPatientBillingTab();
       break;
     case "workflow":
       void loadPatientWorkflowTab();
@@ -1000,6 +1009,10 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
 
           {activeTab === "finance" && canViewFinance ? (
             <LazyPatientFinanceTab key={detail.id} patientId={detail.id} onOpenInvoices={() => handleWorkspaceTabChange("invoices")} />
+          ) : null}
+
+          {activeTab === "billing" && canViewInvoices ? (
+            <LazyPatientBillingTab key={detail.id} patientId={detail.id} />
           ) : null}
 
           {activeTab === "invoices" && canViewInvoices ? (

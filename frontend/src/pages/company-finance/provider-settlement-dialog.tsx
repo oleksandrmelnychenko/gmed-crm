@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
 import {
+  approveProviderInvoice,
   createCompanyProviderPayment,
   fetchCompanyProviderSettlement,
   reverseCompanyProviderPayment,
@@ -70,7 +71,10 @@ const copy = {
     confirmReversal: "Подтвердить отмену",
     cancel: "Не отменять",
     noAccount: "Нет активного счёта компании в этой валюте.",
-    approveFirst: "Сначала подтвердите счёт партнёра / исполнителя в заказе.",
+    approveFirst: "Проверьте реквизиты и сумму входящего счёта перед оплатой.",
+    approve: "Подтвердить счёт",
+    approvalFailed: "Не удалось подтвердить счёт.",
+    expected: "Ожидаемый расход можно оплатить после получения и проверки счёта.",
     paidInFull: "Счёт партнёра / исполнителя полностью оплачен.",
     loadFailed: "Не удалось загрузить историю выплат партнёру / исполнителю.",
     saveFailed: "Не удалось записать выплату.",
@@ -105,7 +109,10 @@ const copy = {
     confirmReversal: "Stornierung bestätigen",
     cancel: "Nicht stornieren",
     noAccount: "Für diese Währung ist kein aktives Unternehmenskonto vorhanden.",
-    approveFirst: "Die Rechnung des Partners / Leistungserbringers muss zuerst im Auftrag freigegeben werden.",
+    approveFirst: "Prüfen Sie die Angaben und den Betrag der Eingangsrechnung vor der Zahlung.",
+    approve: "Rechnung freigeben",
+    approvalFailed: "Die Rechnung konnte nicht freigegeben werden.",
+    expected: "Erwartete Kosten können nach Eingang und Prüfung der Rechnung bezahlt werden.",
     paidInFull: "Die Rechnung des Partners / Leistungserbringers ist vollständig bezahlt.",
     loadFailed: "Der Zahlungsverlauf für den Partner / Leistungserbringer konnte nicht geladen werden.",
     saveFailed: "Die Zahlung konnte nicht erfasst werden.",
@@ -160,7 +167,11 @@ export function ProviderSettlementDialog({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentDirty, setPaymentDirty] = useState(false);
+  const [reversalDirty, setReversalDirty] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     requestId: crypto.randomUUID(),
     accountId: "",
@@ -180,11 +191,15 @@ export function ProviderSettlementDialog({
   });
 
   const activeAccounts = useMemo(
-    () => accounts.filter((account) => account.is_active),
-    [accounts],
+    () => accounts.filter((account) => account.is_active && (!settlement || account.currency === settlement.currency)),
+    [accounts, settlement],
   );
   const activeAccountsRef = useRef(activeAccounts);
   useEffect(() => { activeAccountsRef.current = activeAccounts; }, [activeAccounts]);
+  useEffect(() => {
+    const defaultAccount = activeAccounts.find(account => account.is_default) ?? activeAccounts[0];
+    if (defaultAccount) setPaymentForm(current => current.accountId ? current : { ...current, accountId: defaultAccount.id });
+  }, [activeAccounts]);
   const initializedIdRef = useRef<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const liabilityId = liability?.id ?? null;
@@ -207,6 +222,7 @@ export function ProviderSettlementDialog({
     }
     let active = true;
     const initializeForm = initializedIdRef.current !== liabilityId;
+    if (initializeForm) setApprovalError(null);
     if (initializeForm) setSettlement(null);
     setLoading(true);
     void fetchCompanyProviderSettlement(liabilityId, true)
@@ -216,6 +232,8 @@ export function ProviderSettlementDialog({
         setSettlement(result);
         if (!initializeForm) return;
         initializedIdRef.current = liabilityId;
+        setPaymentDirty(false);
+        setReversalDirty(false);
         const defaultAccount = activeAccountsRef.current.find((account) => account.is_default)
           ?? activeAccountsRef.current[0];
         setPaymentForm({
@@ -266,6 +284,7 @@ export function ProviderSettlementDialog({
         note: paymentForm.note.trim() || null,
       });
       const updated = await reload(liability.id, true);
+      setPaymentDirty(false);
       setPaymentForm((current) => ({
         ...current,
         requestId: crypto.randomUUID(),
@@ -278,6 +297,21 @@ export function ProviderSettlementDialog({
       setPaymentError(error instanceof Error ? error.message : text.saveFailed);
     } finally {
       setPaymentBusy(false);
+    }
+  }
+
+  async function handleApproval() {
+    if (!liability || approvalBusy) return;
+    setApprovalBusy(true);
+    setApprovalError(null);
+    try {
+      await approveProviderInvoice(liability.id);
+      await reload(liability.id, true);
+      onChanged();
+    } catch (error) {
+      setApprovalError(error instanceof Error ? error.message : text.approvalFailed);
+    } finally {
+      setApprovalBusy(false);
     }
   }
 
@@ -298,6 +332,7 @@ export function ProviderSettlementDialog({
         amount: updated.remaining_provider_liability_gross,
       }));
       setReversal(null);
+      setReversalDirty(false);
       setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" });
       onChanged();
     } catch (error) {
@@ -315,7 +350,7 @@ export function ProviderSettlementDialog({
     && settlement.paid_by !== "patient";
 
   return (
-    <Dialog open={Boolean(liability)} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
@@ -354,7 +389,7 @@ export function ProviderSettlementDialog({
 
             {canPay ? (
               <SettlementSection title={text.payment}>
-              <form onSubmit={handlePayment}>
+              <form onSubmit={handlePayment} onChangeCapture={() => setPaymentDirty(true)}>
                 <div className="space-y-3 p-3.5">
                 {paymentError ? <ShellBanner tone="error">{paymentError}</ShellBanner> : null}
                 {activeAccounts.length === 0 ? <ShellBanner tone="warning">{text.noAccount}</ShellBanner> : null}
@@ -387,8 +422,14 @@ export function ProviderSettlementDialog({
                 </div>
               </form>
               </SettlementSection>
-            ) : settlement.status === "expected" || settlement.status === "received" ? (
-              <ShellBanner tone="warning">{text.approveFirst}</ShellBanner>
+            ) : settlement.status === "received" ? (
+              <div className="space-y-2">
+                <ShellBanner tone="warning">{text.approveFirst}</ShellBanner>
+                {approvalError ? <ShellBanner tone="error">{approvalError}</ShellBanner> : null}
+                <Button type="button" size="sm" disabled={approvalBusy || loading || Boolean(loadError)} onClick={() => void handleApproval()}>{approvalBusy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}{text.approve}</Button>
+              </div>
+            ) : settlement.status === "expected" ? (
+              <ShellBanner tone="warning">{text.expected}</ShellBanner>
             ) : remaining <= 0 ? (
               <div role="status" className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" /><p>{text.paidInFull}</p></div>
             ) : null}
@@ -415,7 +456,7 @@ export function ProviderSettlementDialog({
                         <p className="mt-1.5 break-words text-xs leading-5">{item.financial_account_name}</p>
                         <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{item.reference || item.note || "—"}</p>
                         <p className="mt-1 break-words text-[11px] leading-5 text-muted-foreground">{text.by}: {item.created_by_name}</p>
-                        {!isReversal && !isReversed ? <div className="mt-2 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs text-muted-foreground hover:text-destructive" onClick={() => { setReversalError(null); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button></div> : null}
+                        {!isReversal && !isReversed ? <div className="mt-2 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs text-muted-foreground hover:text-destructive" onClick={() => { setReversalError(null); setReversalDirty(false); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button></div> : null}
                       </article>
                     );
                   })}
@@ -425,7 +466,7 @@ export function ProviderSettlementDialog({
 
             {reversal ? (
               <SettlementSection title={text.reverse} action={<Badge variant="outline" className="text-rose-700 dark:text-rose-400">{formatMoney(reversal.amount_gross, reversal.currency, locale)}</Badge>}>
-              <form onSubmit={handleReversal}>
+              <form onSubmit={handleReversal} onChangeCapture={() => setReversalDirty(true)}>
                 <div className="space-y-3 p-3.5">
                 {reversalError ? <ShellBanner tone="error">{reversalError}</ShellBanner> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -433,7 +474,7 @@ export function ProviderSettlementDialog({
                   <label className={paymentFieldClassName}><span>{text.reversalReason}</span><Input className={paymentInputClassName} required maxLength={1000} value={reversalForm.note} onChange={(event) => setReversalForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
                 </div>
-                <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:justify-end"><Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" onClick={() => setReversal(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" size="sm" className="h-9 rounded-md sm:h-8" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
+                <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:justify-end"><Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" onClick={() => { setReversal(null); setReversalDirty(false); }}>{text.cancel}</Button><Button type="submit" variant="destructive" size="sm" className="h-9 rounded-md sm:h-8" disabled={reversalBusy || !reversalForm.note.trim()}>{reversalBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.confirmReversal}</Button></div>
               </form>
               </SettlementSection>
             ) : null}

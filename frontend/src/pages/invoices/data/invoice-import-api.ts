@@ -21,7 +21,7 @@ export function uploadInvoiceSource(
   body.set("invoice_scope", scope);
   if (scope === "patient_order") {
     body.set("patient_id", patientId);
-    body.set("order_id", orderId);
+    if (orderId) body.set("order_id", orderId);
   }
   body.set("auto_name", fields.external_invoice_number.trim());
   body.set("source_institution", fields.supplier_name.trim());
@@ -65,7 +65,8 @@ export function confirmInvoiceImport(
   documentId: string, patientId: string, orderId: string, fields: InvoiceImportFields, notes: string,
   providerId?: string,
 ) {
-  return apiFetch<{ id: string }>(`/orders/${orderId}/external-invoices`, {
+  const path = orderId ? `/orders/${orderId}/external-invoices` : `/patients/${patientId}/external-invoices`;
+  return apiFetch<{ id: string }>(path, {
     method: "POST", body: JSON.stringify({
       patient_id: patientId, source_document_id: documentId,
       provider_id: providerId || null, supplier_name: fields.supplier_name.trim() || null,

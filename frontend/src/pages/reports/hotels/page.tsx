@@ -94,7 +94,7 @@ export default function HotelStatisticsPage() {
   const rows = scoped.filter(row => row.check_in && row.check_in >= period.from && row.check_in <= period.to);
   const undated = scoped.filter(row => !row.check_in).length;
   const summary = summarizeStays(rows, today);
-  const reportGroups = groupHotels(rows, today);
+  const reportGroups = groupHotels(rows, today, directory);
   const unbookedHotels = directory.filter(hotel => !reportGroups.some(group => group.key === hotel.id)
     && filters.breakfast === "all" && ["all", "committed"].includes(filters.status)
     && (filters.hotel === "all" || filters.hotel === hotel.id) && (filters.city === "all" || filters.city === hotel.city)
@@ -102,7 +102,7 @@ export default function HotelStatisticsPage() {
   const groups = [...reportGroups, ...unbookedHotels.map(hotel => emptyHotelGroup(hotel, today))];
   // Keep an open editor mounted if its save changes the breakfast filter match.
   const selectedDirectoryHotel = directory.find(hotel => hotel.id === selected);
-  const selectedHotel = groupHotels((workspace?.rows ?? []).filter(row => selectedStayKeys.includes(`${row.source}:${row.id}`)), today).find(group => group.key === selected)
+  const selectedHotel = groupHotels((workspace?.rows ?? []).filter(row => selectedStayKeys.includes(`${row.source}:${row.id}`)), today, directory).find(group => group.key === selected)
     ?? (selectedDirectoryHotel ? emptyHotelGroup(selectedDirectoryHotel, today) : undefined);
   const detailStays = selectedHotel?.stays.filter(stay => matchesStaySearch(stay, staySearch)) ?? [];
   function openHotel(key: string) {
@@ -186,7 +186,7 @@ export default function HotelStatisticsPage() {
       <div className="min-h-0 space-y-4 overflow-y-auto bg-muted/10 p-4 sm:p-5">
         {selectedHotel ? <>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium">{selectedHotel.city || selectedDirectoryHotel?.country || "—"}</span><span className="text-muted-foreground">{labels.patients}: {selectedHotel.patients}</span><span className="text-muted-foreground">{labels.bookings}: {selectedHotel.bookings}</span><span className="text-muted-foreground">{labels.nights}: {selectedHotel.nights}</span></div>
-          <div className="grid items-start gap-4 lg:grid-cols-2"><HotelBreakfastTermsEditor key={`terms:${selectedHotel.key}`} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /><HotelDocuments key={selectedHotel.key} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /></div>
+          <div className="grid items-start gap-4 lg:grid-cols-2"><HotelBreakfastTermsEditor key={`terms:${selectedHotel.key}`} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} onSaved={() => setVersion(value => value + 1)} /><HotelDocuments key={selectedHotel.key} providerId={selectedHotel.providerId} role={user?.role ?? ""} lang={lang} onDirty={onRoomDirty} /></div>
         </> : null}
         <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
         <header className="flex flex-wrap items-center gap-3 border-b border-border/70 bg-muted/15 px-4 py-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{labels.details}<span className="rounded-full border border-border/70 bg-card px-2 py-0.5 font-mono text-xs font-normal text-muted-foreground">{selectedHotel?.stays.length ?? 0}</span></h3><div className="flex flex-wrap items-center gap-3 sm:ml-auto">{selectedHotel?.providerId ? <StaffLink className="inline-flex items-center gap-1 text-xs text-orange-600 hover:underline" to={`/providers/${selectedHotel.providerId}`}>{labels.hotelProfile}<ArrowUpRight className="size-3.5" /></StaffLink> : null}<Button size="sm" disabled={!detailStays.length} onClick={exportStays}><Download className="size-3.5" />{labels.exportStays}</Button></div></header>

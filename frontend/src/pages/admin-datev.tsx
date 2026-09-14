@@ -5,6 +5,7 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DatevConnectionDetails } from "@/pages/invoices/datev/connection";
 import { useDatevText } from "@/pages/invoices/datev/text";
 import { DatevDocumentChecks } from "@/pages/invoices/datev/document-checks";
+import { DatevLiveConnection } from "@/pages/invoices/datev/live-connection";
 
 export function AdminDatevPage() {
   const { text } = useDatevText();
@@ -14,6 +15,7 @@ export function AdminDatevPage() {
       <Button type="button" variant="outline" onClick={() => staffGo("/invoices?source=datev")}><ArrowUpRight className="size-4" /><span className="sm:hidden">{text.fromDatev}</span><span className="hidden sm:inline">{text.openInvoices}</span></Button>
       <Button type="button" onClick={() => staffGo("/invoices?source=datev&datev_mode=demo")}><Eye className="size-4" />{text.openDemo}</Button>
     </> : undefined} />
+    <DatevLiveConnection />
     <DatevConnectionDetails />
     <DatevDocumentChecks />
   </div>;

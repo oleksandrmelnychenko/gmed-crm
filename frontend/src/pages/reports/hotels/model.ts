@@ -5,6 +5,14 @@ export type BreakfastDetails = {
   breakfast_currency: string | null; breakfast_payer: "unknown" | "patient" | "company" | "split"; breakfast_notes: string | null;
 };
 export const emptyBreakfast: BreakfastDetails = { breakfast_mode: "unknown", breakfast_count: null, breakfast_total: null, breakfast_currency: null, breakfast_payer: "unknown", breakfast_notes: null };
+export type HotelBreakfastTerms = {
+  mode: "unknown" | "included" | "extra" | "unavailable";
+  price_per_person: string | null;
+  currency: string | null;
+  notes: string | null;
+  updated_at?: string | null;
+};
+export const emptyHotelBreakfastTerms: HotelBreakfastTerms = { mode: "unknown", price_per_person: null, currency: null, notes: null };
 export type HotelStay = BreakfastDetails & {
   id: string; source: "service" | "task"; task_id: string | null; patient_id: string;
   patient_name: string | null; patient_number: string | null; booking_reference: string | null;
@@ -16,7 +24,13 @@ export type HotelStay = BreakfastDetails & {
   provider_due: string; pending_cost: string; pending_count: number;
 };
 export type HotelWorkspace = { rows: HotelStay[]; from: string; to: string; timezone: string; generated_at: string };
-export type HotelDirectoryItem = { id: string; name: string; city: string | null; country: string | null };
+export type HotelDirectoryItem = {
+  id: string;
+  name: string;
+  city: string | null;
+  country: string | null;
+  breakfast_terms?: Partial<HotelBreakfastTerms> | null;
+};
 export type HotelFilters = { hotel: string; city: string; currency: string; status: string; search: string; breakfast: string };
 export const initialFilters: HotelFilters = { hotel: "all", city: "all", currency: "EUR", status: "committed", search: "", breakfast: "all" };
 export const hotelStatisticsRoles = ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"];
@@ -31,6 +45,19 @@ export function decimal(cents: bigint) {
 }
 export function hotelKey(stay: HotelStay) {
   return stay.provider_id ?? `vendor:${stay.hotel_name?.trim().toLocaleLowerCase() || "unknown"}`;
+}
+export function normalizeHotelBreakfastTerms(value?: Partial<HotelBreakfastTerms> | null): HotelBreakfastTerms {
+  const storedMode = value?.mode;
+  const mode: HotelBreakfastTerms["mode"] = storedMode === "included" || storedMode === "extra" || storedMode === "unavailable" ? storedMode : "unknown";
+  const price = typeof value?.price_per_person === "string" && moneyCents(value.price_per_person) !== null ? value.price_per_person : null;
+  const currency = typeof value?.currency === "string" && /^[A-Z]{3}$/.test(value.currency) ? value.currency : null;
+  return {
+    mode,
+    price_per_person: mode === "extra" && price && currency ? price : null,
+    currency: mode === "extra" && price && currency ? currency : null,
+    notes: typeof value?.notes === "string" && value.notes.trim() ? value.notes : null,
+    updated_at: typeof value?.updated_at === "string" ? value.updated_at : null,
+  };
 }
 export function matchesStaySearch(stay: HotelStay, query: string) {
   const needle = query.trim().toLocaleLowerCase();
@@ -121,19 +148,21 @@ export function summarizeBreakfast(rows: HotelStay[]) {
   return { counts, meals, mealsKnown, hotelCost, selfCost, hotelPriced, selfPriced, otherCurrency };
 }
 export type HotelSummary = ReturnType<typeof summarizeStays>;
-export function groupHotels(rows: HotelStay[], today: string) {
+export function groupHotels(rows: HotelStay[], today: string, directory: HotelDirectoryItem[] = []) {
   const grouped = new Map<string, HotelStay[]>();
+  const directoryById = new Map(directory.map(hotel => [hotel.id, hotel]));
   for (const row of rows) {
     const key = hotelKey(row);
     grouped.set(key, [...(grouped.get(key) ?? []), row]);
   }
   return [...grouped].map(([key, stays]) => ({
     key, name: stays[0].hotel_name, city: stays[0].city, providerId: stays[0].provider_id,
+    breakfastTerms: normalizeHotelBreakfastTerms(directoryById.get(key)?.breakfast_terms),
     stays, ...summarizeStays(stays, today),
   }));
 }
 export function emptyHotelGroup(hotel: HotelDirectoryItem, today: string) {
-  return { key: hotel.id, name: hotel.name, city: hotel.city, providerId: hotel.id, stays: [] as HotelStay[], ...summarizeStays([], today) };
+  return { key: hotel.id, name: hotel.name, city: hotel.city, providerId: hotel.id, breakfastTerms: normalizeHotelBreakfastTerms(hotel.breakfast_terms), stays: [] as HotelStay[], ...summarizeStays([], today) };
 }
 export function monthlyCosts(rows: HotelStay[], from: string, to: string) {
   const months: { month: string; actual: bigint; estimated: bigint; known: number; bookings: number }[] = [];

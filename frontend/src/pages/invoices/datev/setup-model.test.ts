@@ -15,7 +15,9 @@ describe("DATEV onboarding", () => {
     expect(brief).toContain("0012345");
     expect(brief).toContain("Liquiditätsmonitor online");
     expect(brief).toContain("API-Zugriff nicht geprüft");
-    expect(brief).toContain("Keine DATEV-Verbindung");
+    expect(brief).toContain("Diese Checkliste enthält nur Profilangaben");
+    expect(brief).not.toContain("Keine DATEV-Verbindung");
+    expect(brief).toContain("Wirtschaftsjahren, Zahlungsbedingungen sowie Summen und Salden");
     expect(brief).toContain("keine Zahlungen auslösen");
   });
 });

@@ -120,6 +120,8 @@ const textByLanguage = {
     settledProvider: "Оплачено",
     openProviderPayments: "Открытые",
     providerSettlements: "Расчеты",
+    recordPayment: "Записать оплату",
+    noOrder: "Без заказа",
     byProviders: "По поставщикам",
     providerDocuments: "Документы",
     allProviders: "Все поставщики",
@@ -205,6 +207,8 @@ const textByLanguage = {
     settledProvider: "Bezahlt",
     openProviderPayments: "Offen",
     providerSettlements: "Abrechnung",
+    recordPayment: "Zahlung erfassen",
+    noOrder: "Ohne Auftrag",
     byProviders: "Nach Leistungserbringer",
     providerDocuments: "Belege",
     allProviders: "Alle Leistungserbringer",
@@ -639,8 +643,7 @@ export function CompanyFinancePage() {
     { id: "remaining", label: text.remainingAmount, accessor: (row) => parseAmount(row.remaining_gross), filterType: "number", sortable: true, width: 170, render: (row) => <span className={cn("font-semibold", parseAmount(row.remaining_gross) > 0 ? "text-rose-700 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400")}>{money(row.remaining_gross)}</span> },
     { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date, locale) },
     { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—" },
-    { id: "order", label: text.order, accessor: (row) => row.order_number ?? "", filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => row.order_id ? <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number || "—"}</StaffLink> : "—" },
-    { id: "settlement", label: text.providerSettlements, accessor: (row) => row.settlement_status, filterType: "enum", width: 130, render: (row) => <Button type="button" size="xs" variant="outline" onClick={(event) => { event.stopPropagation(); setSelectedProviderLiability(row); }}>{text.providerSettlements}</Button> },
+    { id: "order", label: text.order, accessor: (row) => row.order_number ?? (row.patient_id ? text.noOrder : ""), filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => row.order_id ? <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number || "—"}</StaffLink> : row.patient_id ? <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">{text.noOrder}</Badge> : "—" },
   ], [locale, money, openProviderDocument, openingDocumentId, text]);
 
   const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
@@ -895,7 +898,9 @@ export function CompanyFinancePage() {
                 toolbarClassName="sm:flex-wrap"
                 defaultDensity="compact"
                 mobilePrimaryColumnId="document"
-                mobileDetailColumnIds={["status", "provider", "amount", "company_paid", "remaining"]}
+                mobileDetailColumnIds={["status", "provider", "amount", "company_paid", "remaining", "order"]}
+                rowActionsWidth={185}
+                rowActions={(row) => <Button type="button" size="sm" variant={Number(row.remaining_gross) > 0 ? "default" : "outline"} onClick={(event) => { event.stopPropagation(); setSelectedProviderLiability(row); }}>{Number(row.remaining_gross) > 0 ? text.recordPayment : text.providerSettlements}</Button>}
                 defaultSort={[{ field: "due_date", dir: "asc" }]}
                 emptyState={text.noRows}
                 pagination={{ pageSize: 50, resetKey: `${providerFilter}:${selectedProviderId ?? "all"}` }}

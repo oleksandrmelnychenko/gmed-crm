@@ -42,7 +42,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
     </div>
     {!demo ? <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border bg-card px-5 py-12 text-center">
       <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-muted"><Link2 className="size-6 text-muted-foreground" /></div>
-      <Badge variant="outline">{text.notConnected}</Badge>
+      <Badge variant="outline">{lang === "de" ? "Belegabruf nicht verfügbar" : "Получение оригиналов недоступно"}</Badge>
       <h2 className="mt-3 text-lg font-semibold">{text.disconnectedTitle}</h2>
       <p className="mt-2 max-w-lg text-sm leading-6 text-muted-foreground">{text.disconnectedHint}</p>
       <div className="mt-5 flex flex-wrap justify-center gap-2">{onConnection ? <Button type="button" variant="outline" onClick={onConnection}><Link2 className="size-4" />{text.connection}</Button> : null}<Button type="button" onClick={() => onModeChange(true)}><Eye className="size-4" />{text.openDemo}</Button></div>

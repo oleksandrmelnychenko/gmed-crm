@@ -1,3 +1,4 @@
+import { confirm } from "./datev-fixture";
 import { expect, test, type Page } from "@playwright/test";
 
 async function prepare(page: Page, role = "billing", lang = "ru") {
@@ -21,6 +22,7 @@ async function prepare(page: Page, role = "billing", lang = "ru") {
       if (route.request().method() === "PUT") setup = { ...setup, profile: route.request().postDataJSON().profile, revision: "datev-profile-revision", updated_at: "2026-09-05T20:00:00Z" };
       body = setup;
     }
+    if (path === "/admin/datev/connection") body = { configured: false, status: "not_configured", has_tokens: false, accounting_writes_enabled: false, invoice_originals_supported: false };
     if (path === "/me") body = { id: "00000000-0000-0000-0000-000000000001", email: "datev-test@example.com", name: "DATEV tester", role, created_at: "2026-01-01T00:00:00Z" };
     if (path === "/invoices") body = { items: [], total: 0, page: 1, per_page: 25, total_pages: 1 };
     if (path === "/invoices/accounting-ledger") body = { entries: [], monthly: [], year: "2026" };
@@ -33,7 +35,7 @@ test("connection stays disconnected and demo never writes or contacts DATEV", as
   const { writes, datevRequests } = await prepare(page);
   await page.setViewportSize({ width: 1500, height: 1000 });
   await page.goto("/invoices?source=datev");
-  await expect(page.getByRole("heading", { name: "Подключите бухгалтерию к GMed" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Оригиналы счетов из DATEV" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Подключение DATEV", exact: true })).toHaveCount(0);
   await expect(page.getByText("Подключение DATEV настраивает администратор.")).toBeVisible();
   await expect(page.locator('a[href="/admin/datev"]')).toHaveCount(0);
@@ -59,7 +61,7 @@ test("connection stays disconnected and demo never writes or contacts DATEV", as
   await expect(panel.getByRole("status")).toContainText("Демо-привязка сохранена");
   await panel.getByRole("button", { name: "Обновить демо" }).click();
   await expect(panel.getByText("Привязан в демо", { exact: true }).last()).toBeVisible();
-  await page.getByRole("button", { name: "Счета GMed", exact: true }).click();
+  await page.getByRole("button", { name: "Исходящие", exact: true }).click();
   await page.getByRole("button", { name: "Из DATEV", exact: true }).click();
   await panel.getByRole("button", { name: "Демо", exact: true }).click();
   await panel.getByRole("button", { name: "DEMO-2026-001", exact: true }).click();
@@ -109,7 +111,7 @@ test("German DATEV administration page is separate and links back to invoices", 
   await expect(page.getByRole("heading", { name: "DATEV-Verbindung", exact: true })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator('a[href="/admin/datev"]').first()).toHaveAttribute("aria-current", "page");
-  await expect(screen.getByRole("button", { name: "DATEV verbinden", exact: true })).toBeDisabled();
+  await expect(screen.getByRole("button", { name: "Mit DATEV verbinden", exact: true })).toBeDisabled();
   await page.screenshot({ path: "../artifacts/design-qa/datev-admin-desktop.png", animations: "disabled" });
   await page.getByRole("button", { name: "DATEV-Rechnungen öffnen", exact: true }).click();
   await page.getByRole("button", { name: "DATEV-Verbindung", exact: true }).click();
@@ -122,27 +124,29 @@ test("German DATEV administration page is separate and links back to invoices", 
   await expect(page).toHaveURL(/invoices\?source=datev&datev_mode=demo/);
   await expect(page.getByTestId("datev-workspace").getByText("GMed Demo · Testunternehmen")).toBeVisible();
   await page.getByRole("button", { name: "DATEV-Daten", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Buchhaltung mit GMed verbinden" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Originalrechnungen aus DATEV" })).toBeVisible();
 });
 
 test("DATEV profile persists module choices and does not grant DATEV access", async ({ page }) => {
   const { writes, datevRequests } = await prepare(page, "ceo");
   await page.goto("/admin/datev");
-  await expect(page.getByRole("checkbox")).toHaveCount(6);
+  await expect(page.getByRole("checkbox", { name: /^(Belege online|Belegfreigabe online|Bank online|Kassenbuch online|Auswertungspakete Rechnungswesen online|Liquiditätsmonitor online)$/ })).toHaveCount(6);
   await page.getByRole("textbox", { name: "Название компании", exact: true }).fill("GMed test company");
   await page.getByRole("textbox", { name: "Beraternummer", exact: true }).fill("0012345");
   await expect(page.getByRole("button", { name: "Сохранить профиль" })).toBeDisabled();
   await page.getByRole("textbox", { name: "Mandantennummer", exact: true }).fill("00012");
   await page.getByRole("checkbox", { name: "Kassenbuch online", exact: true }).uncheck();
-  await page.getByRole("button", { name: "Сохранить профиль" }).click();
+  await confirm(page, page.locator("main"), "DATEV · Сохранить профиль");
   await expect(page.getByRole("status")).toContainText("Профиль сохранён в GMed");
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Beraternummer", exact: true })).toHaveValue("0012345");
   await expect(page.getByRole("checkbox", { name: "Kassenbuch online", exact: true })).not.toBeChecked();
-  await expect(page.getByRole("button", { name: "Подключить DATEV", exact: true })).toBeDisabled();
-  await expect(page.getByRole("link", { name: "Открыть кабинет DATEV", exact: true })).toHaveAttribute("href", "https://www.datev.de/web/de/berufsgruppenuebergreifend/mydatev/cloud-anwendungen/datev-unternehmen-online");
+  await expect(page.getByRole("button", { name: "Подключить через DATEV", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Открыть кабинет DATEV", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("официальный кабинет DATEV");
+  await page.getByRole("dialog").getByRole("button", { name: "Отмена", exact: true }).click();
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Скачать список для бухгалтерии" }).click();
+  await confirm(page, page.locator("main"), "DATEV · Скачать список для бухгалтерии");
   expect((await download).suggestedFilename()).toBe("GMED-DATEV-Checkliste.txt");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -155,13 +159,13 @@ test("DATEV setup handles load failure and stale save without losing the draft",
   await prepare(page, "ceo");
   await page.route("**/api/v1/admin/datev/setup", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"unavailable"}' }));
   await page.goto("/admin/datev");
-  await expect(page.getByRole("alert")).toContainText("Не удалось загрузить настройки DATEV");
+  await expect(page.getByRole("alert").filter({ hasText: /настройки DATEV|Профиль изменён/ })).toContainText("Не удалось загрузить настройки DATEV");
   await expect(page.getByRole("button", { name: "Сохранить профиль" })).toHaveCount(0);
   await page.unroute("**/api/v1/admin/datev/setup");
   await page.getByRole("button", { name: "Загрузить заново" }).click();
   await page.getByRole("textbox", { name: "Название компании", exact: true }).fill("Unsaved draft");
   await page.route("**/api/v1/admin/datev/setup", (route) => route.request().method() === "PUT" ? route.fulfill({ status: 409, contentType: "application/json", body: '{"error":"datev_setup_changed"}' }) : route.fallback());
-  await page.getByRole("button", { name: "Сохранить профиль" }).click();
-  await expect(page.getByRole("alert")).toContainText("Профиль изменён в другой сессии");
+  await confirm(page, page.locator("main"), "DATEV · Сохранить профиль");
+  await expect(page.getByRole("alert").filter({ hasText: /настройки DATEV|Профиль изменён/ })).toContainText("Профиль изменён в другой сессии");
   await expect(page.getByRole("textbox", { name: "Название компании", exact: true })).toHaveValue("Unsaved draft");
 });

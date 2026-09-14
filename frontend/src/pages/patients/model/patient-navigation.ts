@@ -26,6 +26,7 @@ export function patientWorkspaceNavigation(role: string | undefined, lang: Lang,
     ] },
     { key: "finance", label: de ? "Finanzen" : "Финансы", items: [
       ["finance", de ? "Übersicht nach Zeitraum" : "Обзор по периодам", canViewPatientFinanceSurface(role)],
+      ["billing", de ? "Patientenabrechnung" : "Выставление пациенту", canViewPatientInvoicesSurface(role)],
       ["invoices", t.invoices_title, canViewPatientInvoicesSurface(role)],
       ["contracts", t.contracts_title, canViewPatientContractsSurface(role)],
     ] },

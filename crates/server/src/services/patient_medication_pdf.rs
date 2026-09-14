@@ -22,7 +22,18 @@ const COLS: [f32; 10] = [44.0, 40.0, 20.0, 22.0, 14.0, 14.0, 14.0, 14.0, 55.0, 3
 const FONT_SIZE: f32 = 9.0;
 const LINE_HEIGHT: f32 = 4.0;
 const PAD: f32 = 1.8;
+const MEDICATION_DISCLAIMER_TITLE_RU: &str = "Важная информация о лекарственной терапии";
 const MEDICATION_DISCLAIMER_TITLE_DE: &str = "Hinweis zur Medikation";
+const MEDICATION_DISCLAIMER_RU: &str = concat!(
+    "Сведения о лекарственных препаратах, приведённые в настоящем документе, отражают информацию из врачебных назначений, медицинских предписаний или иных переданных документов, доступную GMED на момент составления документа. ",
+    "GMED не осуществляет назначение указанных препаратов и на основании настоящего документа не выдаёт собственных врачебных назначений, не принимает решений о лечении и не определяет индивидуальную дозировку. ",
+    "В целях документирования и представления сведения могли быть технически структурированы, объединены или перенесены из имеющихся документов. ",
+    "Определяющее значение для медицинского лечения имеют актуальные назначения лечащего врача или врача, назначившего препарат. ",
+    "Сведения в настоящем документе не заменяют врачебное назначение, консультацию врача или инструкцию по медицинскому применению соответствующего лекарственного препарата. ",
+    "Пожалуйста, сверяйте сведения с актуальным врачебным назначением, особенно после изменения лекарственной терапии, а также при наличии неясностей или расхождений. ",
+    "По вопросам дозировки, приёма, способа применения или изменения лекарственной терапии обращайтесь к лечащему врачу, врачу, назначившему препарат, или в аптеку. ",
+    "Не следует самостоятельно прекращать приём лекарственного препарата, изменять схему лечения или применять препарат иным способом на основании настоящего документа."
+);
 const MEDICATION_DISCLAIMER_DE: &str = concat!(
     "Die in diesem Dokument dargestellten Angaben zu Arzneimitteln geben die GMED zum Zeitpunkt der Erstellung vorliegenden Informationen aus ärztlichen Verordnungen, Anordnungen oder sonstigen übermittelten Unterlagen wieder. ",
     "GMED ist nicht der verordnende Leistungserbringer und nimmt auf Grundlage dieser Darstellung keine eigene ärztliche Verordnung, Therapieentscheidung oder Festlegung einer individuellen Dosierung vor. ",
@@ -482,7 +493,14 @@ impl<'a> Layout<'a> {
         const BODY_LINE_HEIGHT: f32 = 3.35;
         const BLOCK_GAP: f32 = 4.0;
 
-        let lines = self.wrap(MEDICATION_DISCLAIMER_DE, BODY_SIZE, WIDTH - 10.0, false);
+        let disclaimer = self
+            .context
+            .tx(MEDICATION_DISCLAIMER_RU, MEDICATION_DISCLAIMER_DE);
+        let disclaimer_title = self.context.tx(
+            MEDICATION_DISCLAIMER_TITLE_RU,
+            MEDICATION_DISCLAIMER_TITLE_DE,
+        );
+        let lines = self.wrap(disclaimer, BODY_SIZE, WIDTH - 10.0, false);
         let block_height = 13.0 + lines.len() as f32 * BODY_LINE_HEIGHT;
         if self.y - BLOCK_GAP - block_height < BOTTOM {
             self.new_text_page();
@@ -500,7 +518,7 @@ impl<'a> Layout<'a> {
         self.text(
             LEFT + 4.0,
             block_top - 5.2,
-            MEDICATION_DISCLAIMER_TITLE_DE,
+            disclaimer_title,
             8.5,
             true,
             ink(),
@@ -663,6 +681,11 @@ mod tests {
             ctx.russian = russian;
             let bytes = build_medication_plan_pdf(&ctx).unwrap();
             let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap();
+            let disclaimer_title = ctx.tx(
+                MEDICATION_DISCLAIMER_TITLE_RU,
+                MEDICATION_DISCLAIMER_TITLE_DE,
+            );
+            let disclaimer = ctx.tx(MEDICATION_DISCLAIMER_RU, MEDICATION_DISCLAIMER_DE);
             assert!(pages.len() > 1);
             for (index, page) in pages.iter().enumerate() {
                 for label in [
@@ -680,7 +703,7 @@ mod tests {
                     );
                 }
                 // A disclaimer-only final page intentionally has no repeated table header.
-                if !page.contains(MEDICATION_DISCLAIMER_TITLE_DE) {
+                if !page.contains(disclaimer_title) {
                     assert!(page.contains(ctx.tx("Торговое название", "Handelsname")));
                     assert!(!page.contains(ctx.tx("Ед.", "Einheit")));
                 }
@@ -696,14 +719,14 @@ mod tests {
             assert_eq!(
                 pages
                     .iter()
-                    .filter(|page| page.contains(MEDICATION_DISCLAIMER_TITLE_DE))
+                    .filter(|page| page.contains(disclaimer_title))
                     .count(),
                 1
             );
             assert!(
                 pages
                     .last()
-                    .is_some_and(|page| page.contains(MEDICATION_DISCLAIMER_TITLE_DE)),
+                    .is_some_and(|page| page.contains(disclaimer_title)),
                 "disclaimer must be at the end of the document"
             );
             for index in 0..45 {
@@ -717,7 +740,12 @@ mod tests {
             let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(normalized.contains("Dokumentierte Indikation"));
             assert!(normalized.contains("Verordnender Arzt: Dr. Erika Beispiel"));
-            assert!(normalized.contains(MEDICATION_DISCLAIMER_DE));
+            assert!(normalized.contains(disclaimer));
+            assert!(!normalized.contains(if russian {
+                MEDICATION_DISCLAIMER_DE
+            } else {
+                MEDICATION_DISCLAIMER_RU
+            }));
             assert!(!text.contains("1. Wirkstoff-00"));
             assert!(text.contains("Олена Приклад"));
             assert!(text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));

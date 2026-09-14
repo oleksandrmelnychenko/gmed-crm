@@ -1,6 +1,6 @@
 """Document facts and arithmetical suggestions, never accounting tax decisions."""
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import re
 
 from .generic import CURRENCY, DATE, DOCUMENT_MARKERS, MONEY, decimal_amount, german_date
@@ -54,7 +54,13 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
     # Collect payment terms separately from the invoice due date. Dates of
     # receipt, delivery and early-payment discounts are not invoice-date terms.
     term_lines = [compact(line) for line in text.splitlines()
-                  if re.search(r"Zahlbar|Zahlungsbedingung|Zahlungsziel", line, re.I)]
+                  if re.search(
+                      r"Zahlbar|Zahlungsbedingung|Zahlungsziel|"
+                      r"bei\s+Erhalt.{0,80}Zahlung\s+f(?:ä|a)llig|"
+                      r"(?:ü|u)berweisen.{0,80}\bbinnen\s+\d{1,3}\s+Tag",
+                      line,
+                      re.I,
+                  )]
     if term_lines:
         payment["terms"] = list(dict.fromkeys(term_lines))[:5]
     relative = set()
@@ -86,6 +92,9 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
         payment["method"] = "direct_debit"
 
     items = extract_line_items(text)
+    items = recover_goae_decimal_from_subtotal(text, items)
+    if any(item.get("amount_source") == "subtotal_reconciliation" for item in items):
+        warnings.append("line_item_amount_recovered_from_subtotal")
     if items:
         total = sum(Decimal(item["price_subtotal"]) for item in items)
         known = [Decimal(fields[key]) for key in ("amount_net", "amount_gross") if fields.get(key) is not None]
@@ -94,7 +103,159 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
         if len(items) > 500:
             items = items[:500]
             warnings.append("line_items_truncated")
-    return {"field_sources": sources, "payment": payment, "line_items": items}
+    tax_breakdown = extract_tax_breakdown(text, fields, warnings)
+    return {
+        "field_sources": sources,
+        "payment": payment,
+        "line_items": items,
+        "tax_breakdown": tax_breakdown,
+    }
+
+
+def extract_tax_breakdown(text: str, fields: dict, warnings: list[str]) -> list[dict]:
+    """Read a labelled mixed-VAT summary without deciding its tax category.
+
+    A common medical-invoice layout lists an untaxed service component, a
+    taxable material component and one VAT line.  Preserve the two bases for
+    review only when all printed amounts reconcile.  The document does not
+    necessarily state the legal exemption category, so generic OCR deliberately
+    leaves ``category`` unset instead of inventing a DATEV/EN16931 tax code.
+    """
+    bases: dict[str, tuple[str, str]] = {}
+    taxes: list[tuple[str, str]] = []
+    for original in text.splitlines():
+        line = compact(original)
+        if not line:
+            continue
+        base = re.match(
+            rf"^davon\s+(?P<label>"
+            rf"(?:a|ä)rztliche\s+Leistungen|"
+            rf"Sach[ -]*/?[ -]*Materialkosten|"
+            rf"steuerfreie\s+(?:Leistungen|Ums(?:ä|a)tze)|"
+            rf"steuerpflichtige\s+(?:Leistungen|Ums(?:ä|a)tze))"
+            rf"\s*:?[ \t]*(?P<amount>{MONEY})[ \t]*(?:{CURRENCY})?[ \t]*$",
+            line,
+            re.I,
+        )
+        if base:
+            label = compact(base["label"])
+            kind = "taxed" if re.search(r"Sach|steuerpflichtig", label, re.I) else "untaxed"
+            amount = decimal_amount(base["amount"])
+            if amount is not None and kind not in bases:
+                bases[kind] = (label, amount)
+            continue
+        tax = re.match(
+            rf"^(?:(?:zzgl\.?|zuz(?:ü|u)glich)[ \t]*)?"
+            rf"(?:(?P<rate_before>\d{{1,2}}(?:[.,]\d{{1,6}})?)[ \t]*%[ \t]*)?"
+            rf"(?:USt\.?|M[WU]St\.?|Umsatzsteuer)"
+            rf"(?:[ \t]*(?P<rate_after>\d{{1,2}}(?:[.,]\d{{1,6}})?)[ \t]*%)?"
+            rf"[^\r\n]*?(?P<amount>{MONEY})[ \t]*(?:{CURRENCY})?[ \t]*$",
+            line,
+            re.I,
+        )
+        if tax and (tax["rate_before"] or tax["rate_after"]):
+            rate = (tax["rate_before"] or tax["rate_after"]).replace(",", ".")
+            amount = decimal_amount(tax["amount"])
+            if amount is not None:
+                taxes.append((rate, amount))
+
+    if set(bases) != {"taxed", "untaxed"} or len(taxes) != 1:
+        return []
+    rate, vat = taxes[0]
+    taxed_label, taxed_base = bases["taxed"]
+    untaxed_label, untaxed_base = bases["untaxed"]
+    rate_value = Decimal(rate)
+    taxed_value = Decimal(taxed_base)
+    untaxed_value = Decimal(untaxed_base)
+    vat_value = Decimal(vat)
+    expected_vat = (taxed_value * rate_value / Decimal("100")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    net = fields.get("amount_net")
+    gross = fields.get("amount_gross")
+    if expected_vat != vat_value:
+        warnings.append("mixed_tax_breakdown_mismatch")
+        return []
+    if net is not None and abs(taxed_value + untaxed_value - Decimal(net)) > Decimal("0.01"):
+        warnings.append("mixed_tax_breakdown_mismatch")
+        return []
+    if gross is not None and abs(taxed_value + untaxed_value + vat_value - Decimal(gross)) > Decimal("0.01"):
+        warnings.append("mixed_tax_breakdown_mismatch")
+        return []
+    warnings.append("mixed_tax_treatment_requires_review")
+    return [
+        {
+            "category": None,
+            "label": taxed_label,
+            "rate": format(rate_value, "f"),
+            "base": format(taxed_value, ".2f"),
+            "amount": format(vat_value, ".2f"),
+        },
+        {
+            "category": None,
+            "label": untaxed_label,
+            "rate": None,
+            "base": format(untaxed_value, ".2f"),
+            "amount": None,
+        },
+    ]
+
+
+def recover_goae_decimal_from_subtotal(text: str, items: list[dict]) -> list[dict]:
+    """Recover one lost decimal separator only when the GOÄ subtotal proves it.
+
+    Tesseract can read a printed ``7,14 €`` as ``714 €``.  Treating every
+    integer as cents would be unsafe, so require exactly one such row and an
+    explicit ``davon ärztliche Leistungen`` subtotal that reconciles exactly
+    with the already parsed medical rows.
+    """
+    subtotal_match = re.search(
+        rf"(?im)^davon[ \t]+(?:a|ä)rztliche[ \t]+Leistungen[ \t]*:[ \t]*"
+        rf"({MONEY})[ \t]*(?:{CURRENCY})?[ \t]*$",
+        text,
+    )
+    if not subtotal_match:
+        return items
+    subtotal = decimal_amount(subtotal_match[1])
+    if subtotal is None:
+        return items
+    candidates = []
+    for page, original in enumerate(text.split("\f"), 1):
+        for line in original.splitlines():
+            candidate = re.match(
+                rf"^[ \t]*(?:{DATE}[ \t]+)?(?P<position>\d{{1,5}})[ \t]+"
+                rf"(?P<name>.+?)[ \t]+(?P<qty>\d+(?:[.,]\d+)?)[ \t]+"
+                rf"(?P<factor>\d+(?:[.,]\d+)?)[ \t]+(?P<digits>\d{{3,6}})"
+                rf"[ \t]*(?:{CURRENCY})[ \t]*$",
+                line,
+                re.I,
+            )
+            if candidate:
+                candidates.append((page, candidate))
+    if len(candidates) != 1:
+        return items
+    page, candidate = candidates[0]
+    recovered = Decimal(candidate["digits"]) / Decimal("100")
+    known = sum(
+        Decimal(item["price_subtotal"])
+        for item in items
+        if item.get("position") != "-" and item.get("price_subtotal") is not None
+    )
+    if known + recovered != Decimal(subtotal):
+        return items
+    position = candidate["position"]
+    if any(item.get("position") == position for item in items):
+        return items
+    return [
+        *items,
+        {
+            "name": compact(candidate["name"])[:1000],
+            "position": position,
+            "price_subtotal": format(recovered, ".2f"),
+            "page": page,
+            "amount_source": "subtotal_reconciliation",
+        },
+    ]
 
 
 def extract_line_items(text: str) -> list[dict]:
@@ -243,7 +404,7 @@ def extract_line_items(text: str) -> list[dict]:
         explicit = re.match(r"Pos\.?\s*(\d+)\s+(.+)$", line, re.I)
         numbered = re.match(r"(\d+)\.\s+(.+)$", line) if table == "numbered" else None
         row = re.match(r"(\d+(?:,\d+)?)\s{2,}(.+)$", line) if table in {"quantity", "position_table"} else None
-        goae = re.match(rf"(?:({DATE})\s+)?([A-Za-z]?\d{{1,5}}[A-Za-z]?)\s+(.+)$", line, re.I) if table == "goae" else None
+        goae = re.match(rf"(?:({DATE})\s+)?([A-Za-z]?\d{{1,5}}[A-Za-z]?|-)\s+(.+)$", line, re.I) if table == "goae" else None
         if explicit or numbered or row or goae:
             marker = explicit or numbered or row or goae
             marker_index = 2 if goae else 1
@@ -261,6 +422,29 @@ def extract_line_items(text: str) -> list[dict]:
             pending = None
             continue
         body = pending["body"]
+        if pending["kind"] == "goae" and pending["marker"] == "-":
+            material = re.fullmatch(
+                rf"(?P<name>.+?)[ \t]+(?P<qty>\d+(?:[.,]\d+)?)[ \t]+"
+                rf"(?P<amount>[+-]?(?:\d{{1,3}}(?:[.]\d{{3}})+|\d+)[,.]\d{{2}})"
+                rf"[ \t]*(?:{CURRENCY})?",
+                body,
+                re.I,
+            )
+            if material:
+                amount = decimal_amount(material["amount"])
+                name = compact(material["name"])
+                if amount is not None and re.search(r"[A-Za-zÄÖÜäöüß]", name):
+                    item = {
+                        "name": name[:1000],
+                        "position": "-",
+                        "price_subtotal": amount,
+                        "page": pending["page"],
+                        "qty": material["qty"].replace(",", "."),
+                    }
+                    items.append(item)
+                    previous_item = item
+                    pending = None
+                    continue
         ending = tail.search(body)
         if not ending:
             continue

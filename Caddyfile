@@ -55,6 +55,14 @@
 	# log driver we plug in later, e.g. Loki) can ingest them as-is.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace code REDACTED
+					replace state REDACTED
+				}
+			}
+		}
 	}
 }

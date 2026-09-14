@@ -1189,7 +1189,7 @@ export const ru = {
   invoices_workspace_no_patient: "Без пациента",
   invoices_workspace_net: "Нетто",
   invoices_workspace_gross: "Брутто",
-  invoices_workspace_monthly_euer: "Помесячный EÜR",
+  invoices_workspace_monthly_euer: "Доходы и расходы по месяцам",
   invoices_workspace_no_cash_movement: "За {year} движение денежных средств ещё не зафиксировано.",
   invoices_workspace_income: "Доход",
   invoices_workspace_expense: "Расход",

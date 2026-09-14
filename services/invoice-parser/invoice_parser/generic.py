@@ -24,7 +24,7 @@ ENGLISH_MONTHS = {name: number for number, name in enumerate(
 
 DOCUMENT_MARKERS = re.compile(
     r"\bRechnung(?:snummer)?\b|\bRechn\.|\bInvoice\b|I\s+N\s+V\s+O\s+I\s+C\s+E|\bLiquidation\b|"
-    r"\b(?:Kunden)?beleg\b|\bQuittung\b|\bBuchungsbest(?:ä|a)tigung\b|"
+    r"\b(?:Kunden)?beleg\b|\bBeleg(?:s)?[ -]*(?:Nr\.?|nummer)\b|\bQuittung\b|\bBuchungsbest(?:ä|a)tigung\b|"
     r"\bKostenvoranschlag\b|\bKosten(?:sch(?:ä|a)tzung|schätzung)\b|"
     r"\bHonorarvereinbarung\b|\bCost[ \t]+estimate\b|"
     r"\bGesamter[ \t]+Zahlbetrag\b",
@@ -43,7 +43,12 @@ def document_kind(text: str) -> str | None:
     invoice_text = re.sub(r"Anlage\s+zur\s+Rechnung(?:s)?[. -]*(?:Nr|No)\.?", "", text, flags=re.I)
     if re.search(r"\bRechnung(?:snummer|s?[. -]*(?:Nr|No))\b|\bRechn\.|\bInvoice\b|I\s+N\s+V\s+O\s+I\s+C\s+E|\bLiquidation\b", invoice_text, re.I):
         return "invoice"
-    if re.search(r"\b(?:Kunden)?beleg\b|\bQuittung\b|\bGesamter[ \t]+Zahlbetrag\b", text, re.I):
+    if re.search(
+        r"\b(?:Kunden)?beleg\b|\bBeleg(?:s)?[ -]*(?:Nr\.?|nummer)\b|"
+        r"\bQuittung\b|\bGesamter[ \t]+Zahlbetrag\b",
+        text,
+        re.I,
+    ):
         return "receipt"
     if re.search(r"\bRechnung\b", text, re.I):
         return "invoice"
@@ -113,7 +118,12 @@ def _compact(value: str) -> str:
 
 def _identifier(value: str) -> str | None:
     value = _compact(value).strip("|:;,. $ ")
-    value = re.sub(r"\s+(?:Original|Kopie|Copy)\s*$", "", value, flags=re.I)
+    value = re.sub(
+        r"\s+(?:Original|Kopie|Copy|\(?Bitte\s+(?:bei\s+Zahlung\s+)?mit\s+angeben\)?)\s*$",
+        "",
+        value,
+        flags=re.I,
+    )
     value = re.split(
         r"\s+\(?(?:Pat(?:ient)?[. -]*Nr\.?|bei[ \t]+[ÜU]berweisung|geplante[ \t]+Abteilung)\b",
         value,
@@ -260,6 +270,22 @@ def _supplier_candidates(text: str) -> list[str]:
         candidates = _supplier_candidates_from_scope(formal_page)
         if candidates:
             return candidates
+    # Receipts can repeat an abbreviated operator name below the totals while
+    # the full supplier entity and address are printed in the letterhead. When
+    # the preamble before the first receipt-number row contains exactly one
+    # legal entity, prefer that explicit letterhead instead of treating the
+    # later operator label as a conflicting supplier. Full invoices keep the
+    # conservative all-document ambiguity handling below.
+    if document_kind(text) == "receipt":
+        preamble = re.split(
+            r"(?im)^[ \t]*(?:Beleg(?:s)?[ -]*(?:Nr\.?|nummer)|Kassen(?:bon|beleg)|Bon[ -]*(?:Nr\.?|nummer))\b",
+            text,
+            maxsplit=1,
+        )[0]
+        if preamble != text:
+            candidates = _supplier_candidates_from_scope(preamble)
+            if len(candidates) == 1:
+                return candidates
     return _supplier_candidates_from_scope(text)
 
 
@@ -287,7 +313,7 @@ def extract_german_fields(text: str) -> tuple[dict, list[str]]:
     nonempty = [_compact(line) for line in text.splitlines() if _compact(line)]
     number_label = (
         r"(?:Rechnung(?:s)?[. -]*(?:nummer|nr\.?|no\.?)|Rechn\.?[ -]*Nr\.?|Rech[ -]*Nr\.?|"
-        r"Invoice[ \t]*(?:No\.?|Nr\.?)?|Document|Beleg[ -]*Nr\.?|BelegNr|Quittungs[ -]*Nr\.?|"
+        r"Invoice[ \t]*(?:No\.?|Nr\.?)?|Document|Beleg(?:s)?[ -]*(?:Nr\.?|nummer)|Quittungs[ -]*Nr\.?|"
         r"Buchungsnummer|Kostensch(?:ä|a)tzung[ \t]+Nr\.?)"
     )
     for index, line in enumerate(nonempty):
@@ -389,8 +415,10 @@ def extract_german_fields(text: str) -> tuple[dict, list[str]]:
             add("amount_net", _last_amount(net_summary[1]), 20 if re.match(r"Gesamtnettobetrag", line, re.I) else 15)
 
         vat_summary = re.match(
-            rf"^[ \t]*(?:\+?[ \t]*\d+(?:[.,]\d+)?[ \t]*%[ \t]*)?"
-            rf"(?:MwSt[ -]*Summe|(?:Umsatzsteuer|MwSt\.?|USt\.?)(?:[ \t]+\d+(?:[.,]\d+)?[ \t]*%)?)"
+            rf"^[ \t]*(?:(?:zzgl\.?|zuz(?:ü|u)glich)[ \t]*)?(?:\+?[ \t]*\d+(?:[.,]\d+)?[ \t]*%[ \t]*)?"
+            rf"(?:M[WU]St[ -]*Summe|(?:Umsatzsteuer|M[WU]St\.?|USt\.?)(?:[ \t]+\d+(?:[.,]\d+)?[ \t]*%)?|"
+            rf"(?:Inkl(?:usive)?\.?|Enthaltene|davon)[ \t]+(?:Umsatzsteuer|M[WU]St\.?|USt\.?)"
+            rf"(?:[ \t]*(?:\([ \t]*\d+(?:[.,]\d+)?[ \t]*%[ \t]*\)|\d+(?:[.,]\d+)?[ \t]*%))?)"
             rf"[^\r\n]*?({MONEY})[ \t]*(?:{CURRENCY})?[ \t]*$",
             line,
             re.I,
@@ -398,7 +426,7 @@ def extract_german_fields(text: str) -> tuple[dict, list[str]]:
         if vat_summary:
             add("amount_vat", decimal_amount(vat_summary[1]), 15)
         vat_on_net = re.search(
-            rf"\b(?:MwSt\.?|USt\.?)\b[^\r\n]{{0,80}}?\b(?:auf|aus)[ \t]+(?:Netto[ \t]+)?{MONEY}"
+            rf"\b(?:M[WU]St\.?|USt\.?)\b[^\r\n]{{0,80}}?\b(?:auf|aus)[ \t]+(?:Netto[ \t]+)?{MONEY}"
             rf"[ \t]*(?:{CURRENCY})?[^\r\n]{{0,30}}?({MONEY})[ \t]*(?:{CURRENCY})?[ \t]*$",
             line,
             re.I,

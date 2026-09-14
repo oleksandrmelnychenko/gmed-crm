@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, RefreshCw } from "lucide-react";
+import { Check, Eye, RefreshCw } from "lucide-react";
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
@@ -76,8 +76,8 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   ];
   return <OrderWizardSection flush title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
     accessory={<Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw className="size-3.5" />{tx("Проверить снова", "Erneut prüfen")}</Button>}>
-    <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: 56 }} mobilePrimaryColumnId="document" className={tableClass}
-      rowActionsWidth={155} rowActions={row => row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onOpenDocuments}>{tx("Документы", "Dokumente")}</Button>} />
+    <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: 44 }} mobilePrimaryColumnId="document" className={tableClass}
+      rowActionsWidth={210} rowActions={row => row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
     {editing ? <div role="group" aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} className="space-y-3 border-t p-3 sm:p-4">
       <Field label={tx("Паспорт действителен до", "Reisepass gültig bis")}><Input aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} type="date" value={expiry} onChange={event => setExpiry(event.target.value)} className="max-w-xs" /></Field>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy || !expiry || expiry === readiness.passport_expiry} onClick={() => { void onSaveExpiry(expiry).then(saved => { if (saved) setEditing(false); }); }}>{tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern")}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>{tx("Отмена", "Abbrechen")}</Button></div>

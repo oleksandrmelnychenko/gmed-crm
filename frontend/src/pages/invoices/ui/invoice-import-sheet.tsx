@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Building2, Check, FileUp, LoaderCircle, RotateCcw, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -76,11 +77,12 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   const selectedPatient = patients.find((patient) => patient.id === patientId);
   const patientOrders = orders.filter((order) => order.patient_id === patientId);
   const selectedOrder = patientOrders.find((order) => order.id === orderId);
+  const supplierRequired = scope === "company" || !orderId;
   const totalsValid = importTotalsMatch(fields);
   const contextReady = scope === "company"
     ? Boolean(fields.supplier_name.trim())
-    : Boolean(selectedPatient && selectedOrder);
-  const supplierReady = !systemSupplier || Boolean(supplierProvider);
+    : Boolean(selectedPatient && (!orderId || selectedOrder));
+  const supplierReady = (!systemSupplier || Boolean(supplierProvider)) && (!supplierRequired || Boolean(fields.supplier_name.trim()));
   const vatRateValid = vatCalculation.selection === "manual" || validInvoiceVatRate(invoiceVatRate(vatCalculation));
   const ready = Boolean(invoiceSourceCanSave(file, preview) && contextReady && supplierReady && vatRateValid
     && fields.external_invoice_number.trim() && fields.invoice_date
@@ -183,13 +185,13 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
       const created = scope === "company"
         ? await confirmCompanyInvoiceImport(sourceId, fields, notes, systemSupplier ? supplierProvider?.id : undefined)
         : await confirmInvoiceImport(sourceId, patientId, orderId, fields, notes, systemSupplier ? supplierProvider?.id : undefined);
-      onCreated({ id: created.id, scope, orderId: scope === "patient_order" ? orderId : undefined });
+      onCreated({ id: created.id, scope, orderId: scope === "patient_order" ? orderId || undefined : undefined });
     } catch (failure) {
       setError(failure instanceof ApiRequestError && failure.status === 409
         ? tx("Такой счёт уже добавлен. Проверьте номер и оригинал документа.", "Diese Rechnung wurde bereits erfasst. Nummer und Originaldokument prüfen.")
         : scope === "company"
           ? tx("Не удалось сохранить счёт компании. Проверьте реквизиты и повторите.", "Unternehmensrechnung konnte nicht gespeichert werden. Angaben prüfen und erneut versuchen.")
-          : tx("Не удалось сохранить счёт. Проверьте поля, валюту заказа и повторите.", "Rechnung konnte nicht gespeichert werden. Angaben und Auftragswährung prüfen und erneut versuchen."));
+          : tx("Не удалось сохранить счёт. Проверьте реквизиты, привязку к клиенту и повторите.", "Rechnung konnte nicht gespeichert werden. Angaben und Patientenzuordnung prüfen und erneut versuchen."));
     } finally {
       saveInProgress.current = false;
       setSaving(false);
@@ -205,7 +207,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
   };
   const missingFields = (Object.keys(labels) as (keyof InvoiceImportFields)[])
     .filter((key) => key !== "due_date"
-      && !(key === "supplier_name" && scope !== "company")
+      && !(key === "supplier_name" && !supplierRequired)
       && !fields[key].trim());
   const saveHint = !file
     ? tx("Выберите файл инвойса", "Rechnungsdatei auswählen")
@@ -213,7 +215,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
       ? tx("Дождитесь завершения распознавания", "Erkennung abwarten")
       : !invoiceSourceCanSave(file, preview)
         ? tx("Сначала успешно распознайте документ", "Dokument zuerst erfolgreich erkennen")
-        : !supplierReady
+        : systemSupplier && !supplierProvider
           ? tx("Выберите поставщика из системы или снимите отметку для ручного ввода", "Anbieter aus dem System auswählen oder Markierung für die manuelle Eingabe entfernen")
         : !vatRateValid
           ? tx("Укажите ставку НДС от 0 до 100 %", "Umsatzsteuersatz von 0 bis 100 % angeben")
@@ -223,8 +225,8 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
             ? tx("Проверьте суммы: без НДС + НДС = итого", "Beträge prüfen: Netto + Umsatzsteuer = Brutto")
             : scope === "patient_order" && !selectedPatient
               ? tx("Выберите клиента", "Patient auswählen")
-              : scope === "patient_order" && !selectedOrder
-                ? tx("Выберите заказ клиента", "Auftrag des Patienten auswählen")
+              : scope === "patient_order" && orderId && !selectedOrder
+                ? tx("Выберите доступный заказ или сохраните без заказа", "Verfügbaren Auftrag auswählen oder ohne Auftrag speichern")
                 : !confirmed
                   ? tx("Подтвердите проверку реквизитов", "Prüfung der Angaben bestätigen")
                   : tx("Инвойс готов к сохранению", "Rechnung kann gespeichert werden");
@@ -291,7 +293,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                     onClick={() => { setScope("patient_order"); setConfirmed(false); }}
                   >
                     <Users className="size-4 shrink-0" />
-                    <span><span className="block font-semibold">{tx("Расход по заказу", "Auftragsbezogene Ausgabe")}</span><span className="block text-xs font-normal opacity-80">{tx("Счёт относится к клиенту и его заказу", "Rechnung gehört zu Patient und Auftrag")}</span></span>
+                    <span><span className="block font-semibold">{tx("Расход клиента", "Patientenbezogene Ausgabe")}</span><span className="block text-xs font-normal opacity-80">{tx("Счёт относится к клиенту; заказ необязателен", "Rechnung gehört zum Patienten; Auftrag ist optional")}</span></span>
                   </Button>
                 </div>
               </div>
@@ -303,7 +305,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
               {scope === "patient_order" ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" /><Users className="size-4 text-muted-foreground" />{tx("Привязка к клиенту", "Patientenzuordnung")}</h3>
                 {manualPatientId === null && patientMatch && !parsing ? <p className="text-xs text-muted-foreground" role="status">{patientMatch.status === "matched"
-                  ? tx("Клиент подставлен из документа. Проверьте привязку и выберите его заказ.", "Patient aus dem Dokument zugeordnet. Zuordnung prüfen und Auftrag auswählen.")
+                  ? tx("Клиент подставлен из документа. Проверьте привязку; заказ можно выбрать при необходимости.", "Patient aus dem Dokument zugeordnet. Zuordnung prüfen; bei Bedarf einen Auftrag auswählen.")
                   : patientMatch.status === "ambiguous"
                     ? tx("Данные подходят нескольким клиентам или противоречат друг другу. Выберите клиента вручную.", "Die Angaben passen zu mehreren Patienten oder widersprechen sich. Patienten manuell auswählen.")
                     : tx("Не удалось определить клиента по документу. Выберите его вручную.", "Patient konnte nicht anhand des Dokuments zugeordnet werden. Bitte manuell auswählen.")}</p> : null}
@@ -311,11 +313,15 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                   <option value="">{tx("Найти клиента по имени или ID", "Patient nach Name oder ID suchen")}</option>
                   {patients.map((patient) => <option key={patient.id} value={patient.id}>{[patient.last_name, patient.first_name, patient.patient_id].filter(Boolean).join(" · ")}</option>)}
                 </NativeComboboxSelect></Field>
-                <Field label={tx("Заказ клиента", "Auftrag des Patienten")}><NativeComboboxSelect aria-label={tx("Заказ клиента", "Auftrag des Patienten")} value={selectedOrder ? orderId : ""} disabled={!patientId || saving || Boolean(documentId)} onChange={(event) => { setOrderId(event.target.value); setConfirmed(false); }}>
-                  <option value="">{tx("Выбрать заказ", "Auftrag auswählen")}</option>
+                <Field label={tx("Заказ клиента (необязательно)", "Auftrag des Patienten (optional)")}><NativeComboboxSelect aria-label={tx("Заказ клиента", "Auftrag des Patienten")} value={orderId} disabled={!patientId || saving || Boolean(documentId)} onChange={(event) => { setOrderId(event.target.value); setConfirmed(false); }}>
+                  <option value="">{tx("Без заказа", "Ohne Auftrag")}</option>
+                  {orderId && !selectedOrder ? <option value={orderId} disabled>{tx("Заказ недоступен", "Auftrag nicht verfügbar")}</option> : null}
                   {patientOrders.map((order) => <option key={order.id} value={order.id}>{order.order_number}</option>)}
                 </NativeComboboxSelect></Field>
-                {patientId && !patientOrders.length ? <p className="text-xs text-amber-700">{tx("У клиента ещё нет доступного заказа. Создайте заказ перед сохранением инвойса.", "Für diesen Patienten ist kein Auftrag verfügbar. Vor dem Speichern einen Auftrag anlegen.")}</p> : null}
+                {patientId && !orderId ? <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">{tx("Без заказа", "Ohne Auftrag")}</Badge>
+                  <p>{tx("Инвойс будет виден в «Счета → Входящие» и «Баланс компании → Поставщики» с привязкой к клиенту. В экономику заказов он не включается.", "Die Rechnung erscheint unter „Rechnungen → Eingangsrechnungen“ und „Unternehmenssaldo → Lieferanten“ mit Patientenzuordnung. Sie wird keinem Auftrag wirtschaftlich zugerechnet.")}</p>
+                </div> : null}
               </div> : null}
               <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
                 <div className="flex items-center justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />{tx("Реквизиты инвойса", "Rechnungsangaben")}</h3>
@@ -337,7 +343,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 <fieldset disabled={parsing || saving} className="grid gap-3 sm:grid-cols-2">
                   {(Object.keys(labels) as (keyof InvoiceImportFields)[]).filter(key => !key.startsWith("amount_") && key !== "currency").map((key) => <Field key={key} label={labels[key]}>
                     {key === "supplier_name" ? <InvoiceSupplierField
-                      label={labels[key]} name={fields.supplier_name} system={systemSupplier} provider={supplierProvider} disabled={parsing || saving} required={scope === "company"}
+                      label={labels[key]} name={fields.supplier_name} system={systemSupplier} provider={supplierProvider} disabled={parsing || saving} required={supplierRequired}
                       onNameChange={value => updateField("supplier_name", value)}
                       onModeChange={value => { setSystemSupplier(value); setSupplierProvider(null); setConfirmed(false); }}
                       onProviderChange={provider => { setSupplierProvider(provider); updateField("supplier_name", provider?.name ?? ""); }}
@@ -365,6 +371,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
               </div> : null}
               {preview?.line_items?.length ? <div className="space-y-3 rounded-xl border border-border/70 bg-card p-4 shadow-sm"><h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />{tx("Позиции в документе", "Positionen im Dokument")} <span className="rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">{preview.line_items.length}</span></h3>
                 {preview.warnings.includes("line_items_total_mismatch") ? <Banner tone="warning" withIcon>{tx("Сумма распознанных позиций не совпадает с итогом. Проверьте, все ли позиции прочитаны.", "Die Summe der erkannten Positionen stimmt nicht mit dem Gesamtbetrag überein. Prüfen, ob alle Positionen erfasst wurden.")}</Banner> : null}
+                {preview.warnings.includes("line_item_amount_recovered_from_subtotal") ? <Banner tone="warning" withIcon>{tx("В одной позиции OCR потерял десятичный разделитель. Сумма восстановлена только по точному совпадению с напечатанным подытогом; сверьте позицию с оригиналом.", "Bei einer Position hat die OCR das Dezimaltrennzeichen verloren. Der Betrag wurde nur anhand der exakten Übereinstimmung mit der gedruckten Zwischensumme rekonstruiert; bitte mit dem Original abgleichen.")}</Banner> : null}
                 <div className="divide-y rounded-lg border text-xs">{preview.line_items.map((line, index) => <div key={index} className="space-y-1.5 p-3">
                   <div className="flex justify-between gap-3"><span>{String(line.name ?? line.description ?? "")}</span><span className="shrink-0 font-mono">{String(line.price_subtotal ?? line.amount ?? "")} {preview.fields.currency}</span></div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
@@ -378,7 +385,7 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />{tx("Проверка и примечание", "Prüfung und Notiz")}</h3>
                 {preview?.text ? <div><Button type="button" variant="outline" size="sm" onClick={() => setShowText(!showText)}>{showText ? tx("Скрыть текст", "Text ausblenden") : tx("Показать распознанный текст", "Erkannten Text anzeigen")}</Button>{showText ? <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-border/70 bg-muted/30 p-3 text-xs">{preview.text}</pre> : null}</div> : null}
                 <Field label={tx("Примечание", "Notiz")}><textarea aria-label={tx("Примечание", "Notiz")} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full rounded-md border bg-field px-3 py-2 text-sm" /></Field>
-                <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/25 p-3 text-xs leading-5"><input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-orange-500" checked={confirmed} disabled={parsing || saving || (scope === "patient_order" && (!selectedPatient || !selectedOrder))} onChange={(event) => setConfirmed(event.target.checked)} /><span>{scope === "company"
+                <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/25 p-3 text-xs leading-5"><input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-orange-500" checked={confirmed} disabled={parsing || saving || !contextReady} onChange={(event) => setConfirmed(event.target.checked)} /><span>{scope === "company"
                   ? tx("Я сверил реквизиты с оригиналом и проверил, что счёт выставлен нашей компании.", "Ich habe die Angaben mit dem Original verglichen und geprüft, dass die Rechnung an unser Unternehmen gestellt ist.")
                   : tx("Я сверил реквизиты с оригиналом и проверил, что выбран верный клиент и заказ.", "Ich habe die Angaben mit dem Original verglichen und Patient sowie Auftrag geprüft.")}</span></label>
               </div>
