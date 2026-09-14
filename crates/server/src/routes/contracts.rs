@@ -2487,7 +2487,8 @@ async fn load_quote_line_items_from_order_tx(
            FROM order_leistungen
            WHERE order_id = $1
              AND status <> 'invoiced'
-           ORDER BY created_at
+           ORDER BY (is_cost_passthrough AND description = 'Voraussichtliche Auslagen'),
+                    created_at, id
            FOR SHARE"#,
     )
     .bind(order_id)

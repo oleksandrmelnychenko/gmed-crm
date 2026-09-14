@@ -175,7 +175,7 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
 }
 
 /// Repeat-order PDFs are rendered from persisted facts, including service snapshots.
-pub(super) fn repeat_bindings(context: &Value) -> DocumentBindingOverrides {
+pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindingOverrides {
     let parse_date = |key| text(context, key).parse::<NaiveDate>().ok();
     let mut bindings = DocumentBindingOverrides {
         period_from: parse_date("date_from"),
@@ -185,11 +185,19 @@ pub(super) fn repeat_bindings(context: &Value) -> DocumentBindingOverrides {
         examination_purpose: context["needs_description"].as_str().map(str::to_owned),
         ..Default::default()
     };
-    bindings.estimate_total = totals(&json!({"lines":context["services"]})).map(|value| value.2);
-    bindings.service_lines = context["services"]
+    let mut services = context["services"]
         .as_array()
         .into_iter()
         .flatten()
+        .filter(|line| {
+            template == "order_cost_estimate"
+                || text(line, "description") != "Voraussichtliche Auslagen"
+        })
+        .collect::<Vec<_>>();
+    services.sort_by_key(|line| text(line, "description") == "Voraussichtliche Auslagen");
+    bindings.estimate_total = totals(&json!({"lines": &services})).map(|value| value.2);
+    bindings.service_lines = services
+        .into_iter()
         .map(|line| {
             let unit = text(line, "unit_label");
             ServiceLineInput {
@@ -255,5 +263,29 @@ mod tests {
             totals(&json!({"lines":[line,line]})),
             Some(("0,06 EUR".into(), "0,02 EUR".into(), "0,08 EUR".into()))
         );
+    }
+
+    #[test]
+    fn repeat_quote_keeps_estimated_outlays_last_and_other_documents_exclude_them() {
+        let context = json!({
+            "services": [
+                {"description":"Voraussichtliche Auslagen","quantity":"1","unit_price":"50","vat_rate":"0"},
+                {"description":"Coordination","quantity":"1","unit_price":"100","vat_rate":"19"}
+            ]
+        });
+
+        let quote = repeat_bindings(&context, "order_cost_estimate");
+        assert_eq!(quote.service_lines.len(), 2);
+        assert_eq!(quote.service_lines[0].description, "Coordination");
+        assert_eq!(
+            quote.service_lines[1].description,
+            "Voraussichtliche Auslagen"
+        );
+        assert_eq!(quote.estimate_total.as_deref(), Some("169,00 EUR"));
+
+        let order = repeat_bindings(&context, "single_order");
+        assert_eq!(order.service_lines.len(), 1);
+        assert_eq!(order.service_lines[0].description, "Coordination");
+        assert_eq!(order.estimate_total.as_deref(), Some("119,00 EUR"));
     }
 }

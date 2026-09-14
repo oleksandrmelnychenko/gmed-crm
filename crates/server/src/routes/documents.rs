@@ -12526,7 +12526,7 @@ async fn generate_document(
                 "Edit the repeat order before generating its documents",
             );
         }
-        bindings = intake_documents::repeat_bindings(context);
+        bindings = intake_documents::repeat_bindings(context, template.id);
     }
     if let Some(context) = &intake_context {
         if body

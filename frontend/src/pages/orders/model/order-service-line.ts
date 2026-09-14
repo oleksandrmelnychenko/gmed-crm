@@ -5,6 +5,7 @@ export type ServiceLine = {
   agencyServicePriceVersionId: string | null;
   clientReference: string | null;
   managedByWizard?: boolean;
+  isCostPassthrough?: boolean;
   description: string;
   catalogDescription: string;
   catalogDescriptionItems?: ServiceDescriptionItem[];

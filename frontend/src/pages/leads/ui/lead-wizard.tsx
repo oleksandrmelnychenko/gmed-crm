@@ -344,6 +344,9 @@ type CommercialFlagsPatch = {
 
 type CommercialFlagKey = keyof CommercialFlagsPatch;
 
+const ESTIMATED_OUTLAYS_DESCRIPTION = "Voraussichtliche Auslagen";
+const ESTIMATED_OUTLAYS_REFERENCE_SUFFIX = ":estimated-outlays";
+
 const AML_HIGH_RISK_COUNTRY_CODES = new Set([
   "AF", "DZ", "AO", "BO", "VG", "CI", "CD", "HT", "YE", "CM", "KE", "LA",
   "LB", "MC", "MM", "NA", "NP", "RU", "SS", "SY", "TT", "VU", "VE", "VN",
@@ -711,6 +714,7 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
           clientReference:
             typeof line.client_reference === "string" ? line.client_reference : null,
           managedByWizard: line.managed_by_wizard !== false,
+          isCostPassthrough: line.is_cost_passthrough === true,
           description: inputString(line.description),
           catalogDescription: inputString(line.catalog_description),
           catalogDescriptionItems: serviceDescriptionItems(
@@ -831,6 +835,7 @@ function autosavePayload(
           agency_service_price_version_id: line.agencyServicePriceVersionId,
           client_reference: line.clientReference,
           managed_by_wizard: line.managedByWizard !== false,
+          is_cost_passthrough: line.isCostPassthrough === true,
           description: line.description,
           catalog_description: line.catalogDescription,
           catalog_description_items: serviceDescriptionItems(line.catalogDescriptionItems, line.catalogDescription),
@@ -1618,6 +1623,7 @@ function newLine(index = 1): ServiceLine {
     agencyServicePriceVersionId: null,
     clientReference: null,
     managedByWizard: true,
+    isCostPassthrough: false,
     description: "",
     catalogDescription: "",
     catalogUnitLabel: "",
@@ -1626,6 +1632,19 @@ function newLine(index = 1): ServiceLine {
     price: "",
     vat: "19",
   };
+}
+
+export function isEstimatedOutlaysLine(line: ServiceLine) {
+  return line.isCostPassthrough === true && (
+    line.description.trim() === ESTIMATED_OUTLAYS_DESCRIPTION
+    || line.clientReference?.endsWith(ESTIMATED_OUTLAYS_REFERENCE_SUFFIX) === true
+  );
+}
+
+export function withEstimatedOutlaysLast(serviceLines: ServiceLine[]) {
+  return serviceLines.toSorted((left, right) => (
+    Number(isEstimatedOutlaysLine(left)) - Number(isEstimatedOutlaysLine(right))
+  ));
 }
 
 
@@ -1713,7 +1732,9 @@ export function calculateServiceLineEstimate(serviceLines: ServiceLine[]) {
   let gross = 0;
   serviceLines.filter(validLine).forEach((line) => {
     const lineNet = Math.round(money(line.quantity) * money(line.price) * 100) / 100;
-    const lineVat = Math.round(lineNet * money(line.vat)) / 100;
+    const lineVat = line.isCostPassthrough
+      ? 0
+      : Math.round(lineNet * money(line.vat)) / 100;
     const lineGross = Math.round((lineNet + lineVat) * 100) / 100;
     net += lineNet;
     vat += lineVat;
@@ -1735,12 +1756,14 @@ function quoteLineSignature(
   quantity: unknown,
   unitPrice: unknown,
   vatRate: unknown,
+  isCostPassthrough: unknown,
 ) {
   return JSON.stringify([
     description.trim(),
     money(quantity).toFixed(4),
     money(unitPrice).toFixed(4),
     money(vatRate).toFixed(4),
+    isCostPassthrough === true,
   ]);
 }
 
@@ -1748,10 +1771,22 @@ function quoteMatchesServiceLines(quote: QuoteItem, lines: ServiceLine[]) {
   if (!Array.isArray(quote.line_items)) return false;
   const currentLines = lines
     .filter(validLine)
-    .map((line) => quoteLineSignature(line.description, line.quantity, line.price, line.vat))
+    .map((line) => quoteLineSignature(
+      line.description,
+      line.quantity,
+      line.price,
+      line.vat,
+      line.isCostPassthrough,
+    ))
     .sort();
   const quotedLines = quote.line_items
-    .map((line) => quoteLineSignature(line.description, line.quantity, line.unit_price, line.vat_rate))
+    .map((line) => quoteLineSignature(
+      line.description,
+      line.quantity,
+      line.unit_price,
+      line.vat_rate,
+      line.is_cost_passthrough,
+    ))
     .sort();
   return currentLines.length === quotedLines.length
     && currentLines.every((line, index) => line === quotedLines[index]);
@@ -1796,6 +1831,7 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
     agencyServicePriceVersionId: item.agency_service_price_version_id ?? null,
     clientReference: item.client_reference ?? null,
     managedByWizard: item.client_reference?.startsWith("lead-wizard:") ?? false,
+    isCostPassthrough: item.is_cost_passthrough === true,
     description: item.description,
     catalogDescriptionItems: serviceDescriptionItems(
       item.agency_service_description_items_snapshot,
@@ -1824,9 +1860,9 @@ export function preferPersistedCommercialLines(
   storedLines: ServiceLine[],
   orderLeistungen: Leistung[] | undefined,
 ) {
-  return orderLeistungen !== undefined
+  return withEstimatedOutlaysLast(orderLeistungen !== undefined
     ? orderLeistungen.map(lineFromOrderLeistung)
-    : storedLines;
+    : storedLines);
 }
 
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
@@ -2718,7 +2754,12 @@ export function LeadWizard({
     ),
     [lang, selectedSpecializationItems],
   );
-  const orderPositionCount = lines.length + selectedCostEstimateWorkTypes.length;
+  const estimatedOutlaysLine = lines.find(isEstimatedOutlaysLine) ?? null;
+  const orderServiceLines = useMemo(
+    () => lines.filter((line) => !isEstimatedOutlaysLine(line)),
+    [lines],
+  );
+  const orderPositionCount = orderServiceLines.length + selectedCostEstimateWorkTypes.length;
 
   const showWizardError = useCallback((nextError: unknown) => {
     const reasons = leadErrorBlockingReasons(nextError);
@@ -3238,6 +3279,10 @@ export function LeadWizard({
   const currentPatientEvidence = useMemo(() => patientReview.documents.filter(item => item.is_latest_version && item.status === "active" && !item.file_deleted_at
     && ["identity", "confidentiality_release", "privacy_information", "privacy_consents"].includes(wizardDocumentKind(item) ?? "")), [patientReview.documents]);
   const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
+  const orderServicesEstimate = useMemo(
+    () => calculateServiceLineEstimate(orderServiceLines),
+    [orderServiceLines],
+  );
   const orderQuotes = useMemo(
     () => quotes.filter((item) => !order || item.order_id === order.id),
     [order, quotes],
@@ -4591,15 +4636,15 @@ ${serviceCommentLines.join("\n")}`
       date_to: draft.programDateTo,
     });
 
-    let persistedServiceLines = lines.filter(validLine);
+    let persistedServiceLines = withEstimatedOutlaysLast(lines.filter(validLine));
     if (syncOrderServiceLines) {
-      const currentServiceLines = lines
-        .filter((line) => validLine(line) && line.managedByWizard !== false)
-        .map((line) => ({
+      const currentServiceLines = withEstimatedOutlaysLast(
+        lines.filter((line) => validLine(line) && line.managedByWizard !== false),
+      ).map((line) => ({
         line,
         clientReference:
           line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
-        }));
+      }));
       await Promise.all(
         currentServiceLines.map(({ line, clientReference }) =>
           createOrderLeistung(orderId, {
@@ -4609,6 +4654,7 @@ ${serviceCommentLines.join("\n")}`
             quantity: money(line.quantity),
             unit_price: money(line.price),
             vat_rate: money(line.vat),
+            is_cost_passthrough: line.isCostPassthrough === true,
             client_reference: clientReference,
           }),
         ),
@@ -4619,9 +4665,9 @@ ${serviceCommentLines.join("\n")}`
         currentServiceLines.map((item) => item.clientReference),
       );
       const persistedOrder = await fetchOrder(orderId);
-      persistedServiceLines = persistedOrder.leistungen
-        .map(lineFromOrderLeistung)
-        .filter(validLine);
+      persistedServiceLines = withEstimatedOutlaysLast(
+        persistedOrder.leistungen.map(lineFromOrderLeistung).filter(validLine),
+      );
       if (persistedServiceLines.length === 0) {
         throw new Error(tx(
           "Заказ не сохранил ни одной корректной услуги",
@@ -4932,8 +4978,14 @@ ${serviceCommentLines.join("\n")}`
         {},
         templateId !== "cost_estimate" || validServiceLines.length > 0,
       );
-      const commercialServiceLines = commercial.serviceLines.filter(validLine);
+      const commercialServiceLines = withEstimatedOutlaysLast(
+        commercial.serviceLines.filter(validLine),
+      );
       const commercialEstimate = calculateServiceLineEstimate(commercialServiceLines);
+      const documentServiceLines = commercialServiceLines.filter((line) => (
+        templateId === "order_cost_estimate" || !isEstimatedOutlaysLine(line)
+      ));
+      const documentEstimate = calculateServiceLineEstimate(documentServiceLines);
       if (
         prepayment
         && commercialServiceLines.length > 0
@@ -4988,14 +5040,14 @@ ${serviceCommentLines.join("\n")}`
           estimate_total: templateId === "cost_estimate"
             ? usesSpecializationWorkTypes
               ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-              : `${formatMoneyValue(commercialEstimate.gross, "de")} EUR`
-            : `${commercialEstimate.gross.toFixed(2)} EUR`,
+              : `${formatMoneyValue(documentEstimate.gross, "de")} EUR`
+            : `${documentEstimate.gross.toFixed(2)} EUR`,
           service_lines: templateId === "cost_estimate" && usesSpecializationWorkTypes
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
                 draft.costEstimateAdditionalLanguage,
               )
-            : commercialServiceLines.map((line) => ({
+            : documentServiceLines.map((line) => ({
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
@@ -5140,6 +5192,26 @@ ${serviceCommentLines.join("\n")}`
     setLines((current) => current.map((line) => line.id === id ? { ...line, ...patchValue } : line));
   }
 
+  function addEstimatedOutlays() {
+    if (!leadId) return;
+    setCommercialSaveFeedback(null);
+    setLines((current) => {
+      if (current.some(isEstimatedOutlaysLine)) return current;
+      return withEstimatedOutlaysLast([
+        ...current,
+        {
+          ...newLine(current.length + 1),
+          clientReference: `lead-wizard:${leadId}${ESTIMATED_OUTLAYS_REFERENCE_SUFFIX}`,
+          isCostPassthrough: true,
+          description: ESTIMATED_OUTLAYS_DESCRIPTION,
+          quantity: "1",
+          price: "",
+          vat: "0",
+        },
+      ]);
+    });
+  }
+
   function servicePriceChoiceLabel(
     price: ReturnType<typeof listAgencyServicePriceChoices>[number],
   ) {
@@ -5217,7 +5289,7 @@ ${serviceCommentLines.join("\n")}`
     setCommercialSaveFeedback(null);
     setLines((current) => {
       if (current.some((line) => line.agencyServiceId === service.id)) return current;
-      return [
+      return withEstimatedOutlaysLast([
         ...current,
         {
           ...newLine(current.length + 1),
@@ -5231,7 +5303,7 @@ ${serviceCommentLines.join("\n")}`
           price: inputString(selectedPrice.unit_price),
           vat: inputString(selectedPrice.vat_rate, "19"),
         },
-      ];
+      ]);
     });
   }
 
@@ -7077,14 +7149,14 @@ ${serviceCommentLines.join("\n")}`
                     })}
                   </NativeComboboxSelect>
                 </div>
-                {lines.length === 0 ? (
+                {orderServiceLines.length === 0 ? (
                   <p className="text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>
                 ) : (
-                  <OrderCatalogServicesTable lines={lines} catalogById={agencyServiceById} effectiveOn={draft.programDateFrom || undefined} lang={lang} tx={tx} disabled={isBusy}
+                  <OrderCatalogServicesTable lines={orderServiceLines} catalogById={agencyServiceById} effectiveOn={draft.programDateFrom || undefined} lang={lang} tx={tx} disabled={isBusy}
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}
                     onQuantityChange={(line, quantity) => { setCommercialSaveFeedback(null); updateLine(line.id, { quantity }); }}
                     onPriceChange={(line, service, priceId) => applyAgencyServicePrice(line.id, service, priceId)}
-                    onDelete={setDeleteServiceLine} totals={estimate} />
+                    onDelete={setDeleteServiceLine} totals={orderServicesEstimate} />
                 )}
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
@@ -7161,6 +7233,66 @@ ${serviceCommentLines.join("\n")}`
                   </Button>
                 )}
               >
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  {estimatedOutlaysLine ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <Field
+                        className="min-w-0 flex-1 sm:max-w-sm"
+                        label={tx("Предполагаемые расходы", ESTIMATED_OUTLAYS_DESCRIPTION)}
+                      >
+                        <div className="relative">
+                          <Input
+                            id="lead-wizard-estimated-outlays"
+                            aria-label={tx("Предполагаемые расходы", ESTIMATED_OUTLAYS_DESCRIPTION)}
+                            className={cn(inputClass, "pr-12 font-mono tabular-nums")}
+                            inputMode="decimal"
+                            min="0"
+                            step="0.01"
+                            value={estimatedOutlaysLine.price}
+                            onChange={(event) => {
+                              setCommercialSaveFeedback(null);
+                              updateLine(estimatedOutlaysLine.id, { price: event.target.value });
+                            }}
+                            disabled={isBusy}
+                            placeholder="0.00"
+                          />
+                          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-muted-foreground">
+                            EUR
+                          </span>
+                        </div>
+                      </Field>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        disabled={isBusy}
+                        title={tx("Удалить предполагаемые расходы", "Voraussichtliche Auslagen entfernen")}
+                        aria-label={tx("Удалить предполагаемые расходы", "Voraussichtliche Auslagen entfernen")}
+                        onClick={() => setDeleteServiceLine(estimatedOutlaysLine)}
+                      >
+                        <Trash2 aria-hidden="true" className="size-4" />
+                      </Button>
+                      <p className="w-full text-xs text-muted-foreground">
+                        {tx(
+                          "Будет добавлено последней строкой сметы без НДС.",
+                          "Wird als letzte Position des Kostenvoranschlags ohne MwSt. ausgewiesen.",
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isBusy || !leadId}
+                      onClick={addEstimatedOutlays}
+                    >
+                      <Plus aria-hidden="true" className="size-3.5" />
+                      {tx("Добавить предполагаемые расходы", "Voraussichtliche Auslagen hinzufügen")}
+                    </Button>
+                  )}
+                </div>
                 {quote ? (
                   <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>

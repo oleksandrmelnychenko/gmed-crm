@@ -5,9 +5,11 @@ import type { Leistung } from "@/pages/orders/model/types";
 
 import {
   calculateServiceLineEstimate,
+  isEstimatedOutlaysLine,
   mergeCommercialQuoteReadiness,
   preferPersistedCommercialLines,
   quoteMatchesCurrentServices,
+  withEstimatedOutlaysLast,
   type ServiceLine,
 } from "./lead-wizard";
 
@@ -69,6 +71,32 @@ describe("lead wizard commercial source of truth", () => {
       net: 0.21,
       vat: 0.03,
       gross: 0.24,
+    });
+  });
+
+  it("keeps estimated outlays last and adds them without VAT", () => {
+    const service = storedLine("100");
+    const outlays: ServiceLine = {
+      ...storedLine("250"),
+      id: "estimated-outlays",
+      agencyServiceId: null,
+      agencyServicePriceVersionId: null,
+      clientReference: "lead-wizard:lead-id:estimated-outlays",
+      description: "Voraussichtliche Auslagen",
+      quantity: "1",
+      vat: "19",
+      isCostPassthrough: true,
+    };
+
+    expect(isEstimatedOutlaysLine(outlays)).toBe(true);
+    expect(withEstimatedOutlaysLast([outlays, service]).map((line) => line.id)).toEqual([
+      service.id,
+      outlays.id,
+    ]);
+    expect(calculateServiceLineEstimate([outlays])).toEqual({
+      net: 250,
+      vat: 0,
+      gross: 250,
     });
   });
 

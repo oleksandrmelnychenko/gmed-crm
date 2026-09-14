@@ -2275,6 +2275,172 @@ test.describe("lead wizard UX", () => {
     });
   }
 
+  test("estimated outlays become the last quote and estimate-document row", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const contractId = "00000000-0000-0000-0000-000000000971";
+    const orderId = "00000000-0000-0000-0000-000000000972";
+    const quoteId = "00000000-0000-0000-0000-000000000973";
+    const serviceId = "00000000-0000-0000-0000-000000000974";
+    let nextLineId = 975;
+    let quote: Record<string, unknown> | null = null;
+    const serviceWrites: Record<string, unknown>[] = [];
+    const persistedLines: Record<string, unknown>[] = [{
+      id: serviceId,
+      client_reference: `lead-wizard:${leadId}:coordination`,
+      description: "Coordination",
+      quantity: "1",
+      unit_price: "100",
+      unit_price_snapshot: "100",
+      currency: "EUR",
+      currency_snapshot: "EUR",
+      vat_rate: "19",
+      vat_rate_snapshot: "19",
+      is_cost_passthrough: false,
+      status: "planned",
+    }];
+    const order = () => ({
+      id: orderId,
+      order_number: "A-OUTLAYS-TEST",
+      source_lead_id: leadId,
+      contract_id: contractId,
+      phase: "discovery",
+      status: "active",
+      total_estimated: quote?.total_gross ?? "119",
+      currency: "EUR",
+      signed_patient: false,
+      signed_agency: false,
+      prepayment_required: false,
+      leistungen: persistedLines,
+    });
+
+    await page.route(`**/api/v1/framework-contracts?lead_id=${leadId}`, (route) =>
+      json(route, [{ id: contractId, status: "sent", valid_from: "2026-09-01" }]),
+    );
+    await page.route(`**/api/v1/orders?lead_id=${leadId}`, (route) => json(route, [order()]));
+    await page.route(`**/api/v1/orders/${orderId}`, (route) => json(route, order()));
+    await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, (route) =>
+      json(route, { ok: true, order_id: orderId }),
+    );
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      serviceWrites.push(payload);
+      const existing = persistedLines.findIndex(
+        (line) => line.client_reference === payload.client_reference,
+      );
+      const saved = {
+        id: existing >= 0
+          ? persistedLines[existing]?.id
+          : `00000000-0000-0000-0000-000000000${nextLineId++}`,
+        ...payload,
+        unit_price_snapshot: String(payload.unit_price ?? "0"),
+        currency: "EUR",
+        currency_snapshot: "EUR",
+        vat_rate_snapshot: String(payload.vat_rate ?? "0"),
+        status: "planned",
+      };
+      if (existing >= 0) persistedLines[existing] = saved;
+      else persistedLines.push(saved);
+      return json(route, { id: saved.id }, 201);
+    });
+    await page.route(`**/api/v1/orders/${orderId}/leistungen/sync-lead-wizard`, (route) =>
+      json(route, { ok: true, removed_count: 0 }),
+    );
+    await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => {
+      const lineItems = persistedLines
+        .toSorted((left, right) => Number(left.is_cost_passthrough) - Number(right.is_cost_passthrough))
+        .map((line) => {
+          const quantity = Number(line.quantity);
+          const unitPrice = Number(line.unit_price_snapshot);
+          const passthrough = line.is_cost_passthrough === true;
+          const vatRate = passthrough ? 0 : Number(line.vat_rate_snapshot);
+          const lineNet = quantity * unitPrice;
+          const lineVat = lineNet * vatRate / 100;
+          return {
+            description: line.description,
+            quantity: String(quantity),
+            unit_price: unitPrice.toFixed(2),
+            vat_rate: vatRate.toFixed(2),
+            is_cost_passthrough: passthrough,
+            line_net: lineNet.toFixed(2),
+            line_vat: lineVat.toFixed(2),
+            line_gross: (lineNet + lineVat).toFixed(2),
+          };
+        });
+      const totalNet = lineItems.reduce((sum, line) => sum + Number(line.line_net), 0);
+      const totalVat = lineItems.reduce((sum, line) => sum + Number(line.line_vat), 0);
+      quote = {
+        id: quoteId,
+        order_id: orderId,
+        order_number: "A-OUTLAYS-TEST",
+        contract_id: contractId,
+        patient_id: null,
+        lead_id: leadId,
+        patient_name: "Ready Lead",
+        patient_pid: "",
+        quote_number: "KV-OUTLAYS-TEST",
+        status: "draft",
+        total_net: totalNet.toFixed(2),
+        total_vat: totalVat.toFixed(2),
+        total_gross: (totalNet + totalVat).toFixed(2),
+        valid_until: null,
+        paid_amount: "0",
+        paid_at: null,
+        notes: null,
+        version_count: 1,
+        current_version_number: 1,
+        created_at: "2026-09-14T18:00:00Z",
+        updated_at: "2026-09-14T18:00:00Z",
+        line_items: lineItems,
+      };
+      return json(route, quote, 201);
+    });
+    await page.route("**/api/v1/quotes?*", (route) => json(route, quote ? [quote] : []));
+
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="commercial"]').click();
+    await wizard.getByRole("button", { name: "Voraussichtliche Auslagen hinzufügen" }).click();
+    await wizard.getByRole("textbox", { name: "Voraussichtliche Auslagen", exact: true }).fill("50");
+    await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
+
+    await expect.poll(() => serviceWrites.find(
+      (payload) => payload.description === "Voraussichtliche Auslagen",
+    )).toMatchObject({
+      description: "Voraussichtliche Auslagen",
+      quantity: 1,
+      unit_price: 50,
+      vat_rate: 0,
+      is_cost_passthrough: true,
+    });
+    expect((quote?.line_items as Record<string, unknown>[]).at(-1)).toMatchObject({
+      description: "Voraussichtliche Auslagen",
+      line_gross: "50.00",
+    });
+    expect(quote?.total_gross).toBe("169.00");
+
+    const generatedRequest = page.waitForRequest((request) =>
+      request.method() === "POST"
+      && request.url().endsWith("/documents/generate")
+      && request.postDataJSON().template_id === "order_cost_estimate",
+    );
+    await wizard
+      .locator("#lead-wizard-order-cost-estimate-document")
+      .getByRole("button", { name: "Erstellen", exact: true })
+      .click();
+    const documentPayload = (await generatedRequest).postDataJSON();
+    expect(documentPayload.bindings.service_lines.map(
+      (line: { description: string }) => line.description,
+    )).toEqual(["Coordination", "Voraussichtliche Auslagen"]);
+    expect(documentPayload.bindings.service_lines.at(-1)).toMatchObject({
+      description: "Voraussichtliche Auslagen",
+      quantity: "1",
+      fee: "50.00 EUR",
+      line_total: "50.00 EUR",
+      vat_rate: "0",
+    });
+    expect(documentPayload.bindings.estimate_total).toBe("169.00 EUR");
+  });
+
   test("catalog placeholders follow lead selections through the generated order request", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     const contractId = "00000000-0000-0000-0000-000000000981";
