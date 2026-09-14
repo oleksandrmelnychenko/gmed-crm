@@ -11,7 +11,7 @@ export const metadataPillClass = "rounded-full px-2 py-0.5 font-mono text-[10px]
 type LeadWizardDocumentMetadataProps = {
   document: Pick<
     DocumentItem,
-    "created_at" | "document_number" | "file_size" | "generated_template_id" | "id"
+    "created_at" | "document_number" | "file_size" | "generated_bindings" | "generated_template_id" | "id"
   > & Partial<Pick<DocumentItem, "version_number" | "version_count" | "is_latest_version">>;
   lang: Lang;
 };
@@ -53,6 +53,17 @@ export function leadWizardDocumentNumber(
     : `DOC-${document.id.slice(0, 8).toUpperCase()}`;
 }
 
+export function leadWizardDocumentTotal(
+  document: Pick<DocumentItem, "generated_bindings" | "generated_template_id">,
+) {
+  if (![
+    "order_cost_estimate",
+    "cost_estimate",
+  ].includes(document.generated_template_id ?? "")) return null;
+  const total = document.generated_bindings?.estimate_total;
+  return typeof total === "string" && total.trim() ? total.trim() : null;
+}
+
 export function LeadWizardDocumentMetadata({
   document,
   lang,
@@ -69,12 +80,22 @@ export function LeadWizardDocumentMetadata({
         "",
       )
     : "";
+  const totalLabel = leadWizardDocumentTotal(document);
 
   return (
     <>
       <Badge variant="outline" title={document.document_number} className={cn(metadataPillClass, STATUS_TONE.brand)}>
         {leadWizardDocumentNumber(document)}
       </Badge>
+      {totalLabel ? (
+        <Badge
+          variant="outline"
+          data-generated-document-total
+          className={cn(metadataPillClass, "font-semibold", STATUS_TONE.warning)}
+        >
+          {lang === "de" ? "Gesamt" : "Итого"}: {totalLabel}
+        </Badge>
+      ) : null}
       {showVersion ? (
         <span>
           {lang === "de" ? "Version" : "Версия"} {versionNumber}

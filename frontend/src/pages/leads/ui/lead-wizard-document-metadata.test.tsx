@@ -6,6 +6,7 @@ import { formatDateTime } from "@/pages/leads/model/leads-model";
 import {
   LeadWizardDocumentMetadata,
   leadWizardDocumentNumber,
+  leadWizardDocumentTotal,
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 
@@ -39,6 +40,50 @@ describe("LeadWizardDocumentMetadata", () => {
     })).toBe("VKS-20260727-A1B2C3D4E5F6");
   });
 
+  it("reads the immutable total stored with the generated document", () => {
+    expect(leadWizardDocumentTotal({
+      generated_template_id: "order_cost_estimate",
+      generated_bindings: { estimate_total: " 2.735,81 EUR " },
+    })).toBe("2.735,81 EUR");
+    expect(leadWizardDocumentTotal({
+      generated_template_id: "cost_estimate",
+      generated_bindings: { estimate_total: "" },
+    })).toBeNull();
+    expect(leadWizardDocumentTotal({
+      generated_template_id: "cost_estimate",
+      generated_bindings: null,
+    })).toBeNull();
+  });
+
+  it("does not show a total on the order document", () => {
+    expect(leadWizardDocumentTotal({
+      generated_template_id: "single_order",
+      generated_bindings: { estimate_total: "1.463,70 EUR" },
+    })).toBeNull();
+  });
+
+  it("shows a generated document total as a prominent metadata chip", () => {
+    const html = renderToStaticMarkup(
+      <LeadWizardDocumentMetadata
+        lang="ru"
+        document={{
+          id: "quote-1",
+          document_number: "KV-20260913-0033",
+          file_size: 1.9 * 1024 * 1024,
+          generated_template_id: "order_cost_estimate",
+          generated_bindings: { estimate_total: "2.735,81 EUR" },
+          created_at: createdAt,
+        }}
+      />,
+    );
+
+    expect(html).toContain("data-generated-document-total");
+    expect(html).toContain("Итого: 2.735,81 EUR");
+    expect(html).toContain("border-amber-200");
+    expect(html.indexOf("KV-20260913-0033")).toBeLessThan(html.indexOf("Итого: 2.735,81 EUR"));
+    expect(html.indexOf("Итого: 2.735,81 EUR")).toBeLessThan(html.indexOf("1,9 MB"));
+  });
+
   it("distinguishes document versions while retaining the business number", () => {
     const html = renderToStaticMarkup(
       <LeadWizardDocumentMetadata
@@ -50,6 +95,7 @@ describe("LeadWizardDocumentMetadata", () => {
           version_count: 3,
           is_latest_version: false,
           file_size: 2048,
+          generated_bindings: null,
           generated_template_id: "framework_contract",
           created_at: createdAt,
         }}
@@ -68,6 +114,7 @@ describe("LeadWizardDocumentMetadata", () => {
           id: "document-1",
           document_number: "DOC-1001",
           file_size: 5 * 1024,
+          generated_bindings: null,
           generated_template_id: "privacy_consents",
           created_at: createdAt,
         }}
@@ -93,6 +140,7 @@ describe("LeadWizardDocumentMetadata", () => {
           id: "upload-1",
           document_number: undefined,
           file_size: 5 * 1024,
+          generated_bindings: null,
           generated_template_id: null,
           created_at: createdAt,
         }}
