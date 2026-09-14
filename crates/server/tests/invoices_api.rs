@@ -2745,13 +2745,12 @@ async fn staff_can_download_invoice_pdf_document() {
             .and_then(|value| value.to_str().ok()),
         Some("application/pdf")
     );
-    assert!(
-        headers
-            .get("content-disposition")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .contains(invoice_number)
-    );
+    let disposition = headers
+        .get("content-disposition")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(disposition.contains("RECHNUNG-"));
+    assert!(disposition.contains(invoice_number));
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.len() > 1_000);
     let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();

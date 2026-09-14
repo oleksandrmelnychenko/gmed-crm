@@ -24,6 +24,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::me::resolve_self_patient_id;
+use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -468,7 +469,7 @@ struct InvoicePdfLayout {
     page_ops: Vec<Op>,
     y_mm: f32,
     document_reference: String,
-    footer_lines: Vec<String>,
+    brand: PatientPdfBrand,
     page_label: String,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
@@ -1651,7 +1652,7 @@ fn invoice_pdf_footer_line(page_label: &str, page_number: usize, total_pages: us
 impl InvoicePdfLayout {
     fn new(
         document_reference: String,
-        footer_lines: Vec<String>,
+        brand: PatientPdfBrand,
         page_label: String,
         regular_font: PdfFontHandle,
         bold_font: PdfFontHandle,
@@ -1661,7 +1662,7 @@ impl InvoicePdfLayout {
             page_ops: Vec::new(),
             y_mm: INVOICE_PDF_PAGE_HEIGHT_MM - INVOICE_PDF_TOP_MARGIN_MM,
             document_reference,
-            footer_lines,
+            brand,
             page_label,
             regular_font,
             bold_font,
@@ -1692,44 +1693,16 @@ impl InvoicePdfLayout {
             &self.regular_font,
             InvoicePdfColor::Body,
         );
-        append_invoice_pdf_filled_rect(
+        append_company_chrome(
             &mut self.page_ops,
+            &self.brand,
+            &self.regular_font,
             INVOICE_PDF_LEFT_MARGIN_MM,
+            INVOICE_PDF_PAGE_WIDTH_MM - INVOICE_PDF_RIGHT_MARGIN_MM,
             INVOICE_PDF_HEADER_RULE_Y_MM,
-            INVOICE_PDF_CONTENT_WIDTH_MM,
-            0.25,
-            invoice_pdf_color(InvoicePdfColor::Primary),
-        );
-        append_invoice_pdf_filled_rect(
-            &mut self.page_ops,
-            INVOICE_PDF_LEFT_MARGIN_MM,
             INVOICE_PDF_FOOTER_RULE_Y_MM,
-            INVOICE_PDF_CONTENT_WIDTH_MM,
-            0.25,
-            invoice_pdf_color(InvoicePdfColor::Primary),
-        );
-
-        let logo_height_mm = 8.5;
-        self.page_ops.extend(crate::pdf_logo::gmed_logo_ops(
-            INVOICE_PDF_LEFT_MARGIN_MM,
             INVOICE_PDF_FOOTER_CONTENT_TOP_MM,
-            logo_height_mm,
-            Color::Rgb(Rgb::new(0.0, 0.0, 0.0, None)),
-        ));
-        let footer_x_mm =
-            INVOICE_PDF_LEFT_MARGIN_MM + logo_height_mm * crate::pdf_logo::GMED_LOGO_ASPECT + 4.0;
-        for (index, line) in self.footer_lines.iter().take(3).enumerate() {
-            let line = truncate_invoice_pdf_text(line, 6.3, 112.0);
-            append_invoice_pdf_text_line(
-                &mut self.page_ops,
-                &line,
-                footer_x_mm,
-                16.8 - index as f32 * 3.35,
-                6.3,
-                &self.regular_font,
-                InvoicePdfColor::Muted,
-            );
-        }
+        );
 
         self.pages.push(PdfPage::new(
             Mm(INVOICE_PDF_PAGE_WIDTH_MM),
@@ -2347,68 +2320,15 @@ fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
         .unwrap_or_else(|| "n/a".to_string())
 }
 
-fn invoice_pdf_agency_footer_lines(agency: &InvoicePdfAgency) -> Vec<String> {
-    let mut identity = agency.name.trim().to_string();
-    if let Some(care_of) = agency
-        .care_of
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        && !identity.to_lowercase().contains(&care_of.to_lowercase())
-    {
-        identity.push(' ');
-        identity.push_str(care_of);
+fn invoice_pdf_brand(agency: &InvoicePdfAgency) -> PatientPdfBrand {
+    PatientPdfBrand {
+        name: agency.name.clone(),
+        responsible_person: agency.care_of.clone().unwrap_or_default(),
+        address: agency.address.clone(),
+        phone: agency.phone.clone(),
+        email: agency.email.clone(),
+        website: agency.website.clone(),
     }
-    let mut lines = vec![identity];
-    if let Some(address) = agency
-        .address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        lines.push(
-            address
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" · "),
-        );
-    }
-    let mut contacts = Vec::new();
-    if let Some(phone) = agency
-        .phone
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        contacts.push(format!("Tel.: {phone}"));
-    }
-    if let Some(email) = agency
-        .email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        contacts.push(format!("E-Mail: {email}"));
-    }
-    if let Some(website) = agency
-        .website
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        let website = website
-            .strip_prefix("https://")
-            .or_else(|| website.strip_prefix("http://"))
-            .unwrap_or(website)
-            .trim_end_matches('/');
-        contacts.push(format!("Web: {website}"));
-    }
-    if !contacts.is_empty() {
-        lines.push(contacts.join(" · "));
-    }
-    lines
 }
 
 fn invoice_pdf_bank_cells(
@@ -2438,7 +2358,7 @@ fn invoice_pdf_filename(context: &InvoicePdfContext) -> String {
             _ => ch,
         })
         .collect::<String>();
-    format!("{}.pdf", base.trim())
+    format!("RECHNUNG-{}.pdf", base.trim())
 }
 
 fn extract_source_line_ids(line_items: &Value) -> Vec<Uuid> {
@@ -3896,7 +3816,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     let mut layout = InvoicePdfLayout::new(
         context.invoice_number.clone(),
-        invoice_pdf_agency_footer_lines(&context.agency),
+        invoice_pdf_brand(&context.agency),
         invoice_pdf_label(&context.language, "page_label").to_string(),
         regular_handle,
         bold_handle,
@@ -3932,10 +3852,6 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             format_invoice_pdf_date(context.due_date),
         ),
         (
-            invoice_pdf_label(&context.language, "order_number"),
-            context.order_number.clone(),
-        ),
-        (
             invoice_pdf_label(&context.language, "status"),
             invoice_pdf_status_label(&context.language, &context.status).to_string(),
         ),
@@ -3943,15 +3859,21 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             invoice_pdf_label(&context.language, "patient_id"),
             context.patient_pid.clone(),
         ),
+        (
+            invoice_pdf_label(&context.language, "birth_date"),
+            format_invoice_pdf_date(context.birth_date),
+        ),
     ];
+    if !context.order_number.is_empty() {
+        meta_cells.push((
+            invoice_pdf_label(&context.language, "order_number"),
+            context.order_number.clone(),
+        ));
+    }
     if let Some(quote_number) = context.quote_number.as_deref() {
         meta_cells.push((
             invoice_pdf_label(&context.language, "quote_number"),
             quote_number.to_string(),
-        ));
-        meta_cells.push((
-            invoice_pdf_label(&context.language, "birth_date"),
-            format_invoice_pdf_date(context.birth_date),
         ));
     }
     layout.meta_grid(&meta_cells);
@@ -9867,7 +9789,10 @@ async fn update_invoice_status(
 
 #[cfg(test)]
 mod tests {
-    use super::{InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, invoice_pdf_footer_line};
+    use super::{
+        InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, invoice_pdf_filename,
+        invoice_pdf_footer_line,
+    };
     use chrono::{NaiveDate, Utc};
     use uuid::Uuid;
 
@@ -9932,9 +9857,19 @@ mod tests {
         assert!(extracted_text.contains("Макс Мюллер"));
         assert!(extracted_text.contains("Оплатить после получения счёта."));
         assert!(!extracted_text.contains("Подробное описание услуги"));
+        assert!(extracted_text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
+        assert!(extracted_text.contains("contact@gmed-health.com"));
         assert!(extracted_text.contains("DE02120300000000202051"));
         assert!(extracted_text.contains("145"));
         assert!(extracted_text.contains("EUR"));
+        assert_eq!(invoice_pdf_filename(&context), "RECHNUNG-INV-UNIT-1.pdf");
+        context.order_number.clear();
+        context.quote_number = None;
+        let no_order_bytes = build_invoice_pdf(&context).unwrap();
+        let no_order_text = pdf_extract::extract_text_from_mem(&no_order_bytes).unwrap();
+        assert!(!no_order_text.contains("ORD-UNIT-1"));
+        assert!(!no_order_text.contains("Q-UNIT-1"));
+        assert!(no_order_text.contains("01.01.1990"));
         context.currency = "USD".to_string();
         let usd_bytes = build_invoice_pdf(&context).unwrap();
         let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
