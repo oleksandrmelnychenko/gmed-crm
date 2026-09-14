@@ -56,8 +56,14 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
     term_lines = [compact(line) for line in text.splitlines()
                   if re.search(
                       r"Zahlbar|Zahlungsbedingung|Zahlungsziel|"
+                      r"F(?:ä|a)lligkeit|f(?:ä|a)llig.{0,100}\d{1,3}\s+Tag|"
                       r"bei\s+Erhalt.{0,80}Zahlung\s+f(?:ä|a)llig|"
-                      r"(?:ü|u)berweisen.{0,80}\bbinnen\s+\d{1,3}\s+Tag",
+                      r"(?:(?:ü|u)berweisen|bezahlen|zahlen).{0,100}\b(?:binnen|innert|innerhalb(?:\s+von)?)\s+\d{1,3}\s+Tag|"
+                      r"(?:Rechnungsbetrag|Betrag).{0,100}\b(?:binnen|innert|innerhalb(?:\s+von)?)\s+\d{1,3}\s+Tag|"
+                      r"\d{1,3}\s+Tag(?:e|en)?\s+(?:ab|nach)\s+(?:Rechnungsdatum|Rechnungsstellung)|"
+                      r"Payable|Payment\s+(?:terms?|(?:is\s+)?due)|Please\s+(?:pay|remit)|"
+                      r"Terms\s*:\s*net|(?:pay|remit).{0,100}\b(?:within|in)\s+\d{1,3}\s+(?:calendar\s+)?day|"
+                      r"\d{1,3}\s+(?:calendar\s+)?days?\s+(?:from|after)\s+(?:the\s+)?invoice\s+date",
                       line,
                       re.I,
                   )]
@@ -65,12 +71,48 @@ def extract_details(text: str, fields: dict, warnings: list[str]) -> dict:
         payment["terms"] = list(dict.fromkeys(term_lines))[:5]
     relative = set()
     for line in term_lines:
-        if re.search(r"Eingang|Erhalt|Zugang|Lieferung|Skonto|Arbeitstag|Werktag", line, re.I):
+        if re.search(
+            r"Eingang|Erhalt|Zugang|Lieferung|Skonto|Arbeitstag|Werktag|"
+            r"receipt|delivery|discount|business\s+day|working\s+day",
+            line,
+            re.I,
+        ):
             continue
-        term = re.search(r"(?:Zahlbar\s+(?:innert|innerhalb(?:\s+von)?)|Zahlungsziel\s*:?|"
-                         r"Zahlungsbedingung\s*:?\s*(?:innerhalb(?:\s+von)?)?)\s*(\d{1,3})\s+Tag(?:e|en)?\b", line, re.I)
-        if term and 1 <= int(term[1]) <= 365:
-            relative.add((int(term[1]), line))
+        term = re.search(
+            r"(?:"
+            r"Zahlbar\s+(?:innert|binnen|innerhalb(?:\s+von)?)|"
+            r"Zahlbar\s+in|"
+            r"Zahlungsziel\s*:?|"
+            r"Zahlungsbedingung\s*:?\s*(?:innert|binnen|innerhalb(?:\s+von)?)?|"
+            r"F(?:ä|a)lligkeit\s*:?\s*(?:innert|binnen|innerhalb(?:\s+von)?|in)?|"
+            r"f(?:ä|a)llig\s+(?:innert|binnen|innerhalb(?:\s+von)?|in)|"
+            r"(?:Rechnungsbetrag|Betrag)\b.{0,100}?\b(?:binnen|innert|innerhalb(?:\s+von)?)|"
+            r"(?:Bitte\s+)?(?:(?:ü|u)berweisen|bezahlen|zahlen)\b.{0,100}?\b(?:binnen|innert|innerhalb(?:\s+von)?)"
+            r")\s*(?P<days_de>\d{1,3})\s+(?:Kalendertag(?:e|en)?|Tag(?:e|en)?)\b|"
+            r"(?P<days_de_invoice>\d{1,3})\s+(?:Kalendertag(?:e|en)?|Tag(?:e|en)?)\s+"
+            r"(?:ab|nach)\s+(?:dem\s+)?(?:Rechnungsdatum|Rechnungsstellung)\b|"
+            r"(?:"
+            r"Payable\s+(?:within|in)|"
+            r"Payment\s+(?:is\s+)?due\s+(?:within|in)|"
+            r"Payment\s+terms?\s*:?\s*(?:net\s*)?|"
+            r"Terms\s*:\s*net\s*|"
+            r"Please\s+(?:pay|remit)\b.{0,100}?\b(?:within|in)|"
+            r"(?:pay|remit)\b.{0,100}?\b(?:within|in)"
+            r")\s*(?P<days_en>\d{1,3})\s+(?:calendar\s+)?days?\b|"
+            r"(?P<days_en_invoice>\d{1,3})\s+(?:calendar\s+)?days?\s+"
+            r"(?:from|after)\s+(?:the\s+)?invoice\s+date\b",
+            line,
+            re.I,
+        )
+        if term:
+            value = int(
+                term["days_de"]
+                or term["days_de_invoice"]
+                or term["days_en"]
+                or term["days_en_invoice"]
+            )
+            if 1 <= value <= 365:
+                relative.add((value, line))
     days = {value for value, _ in relative}
     if fields.get("due_date") is None and fields.get("invoice_date") and len(days) == 1 and "invalid_or_ambiguous_due_date" not in warnings:
         # The inferred base is displayed to the reviewer, never hidden.

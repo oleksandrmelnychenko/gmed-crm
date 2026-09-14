@@ -46,8 +46,40 @@ def test_relative_due_date_is_a_visible_calculation_and_explicit_date_wins():
     assert "due_date" not in explicit["field_sources"]
 
 
+def test_transfer_within_calendar_days_is_calculated_from_invoice_date():
+    for terms in [
+        "Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.",
+        "Bitte überweisen Sie den Rechnungsbetrag innerhalb von 14 Tagen.",
+        "Der Rechnungsbetrag ist innerhalb von 14 Tagen zu zahlen.",
+        "Zahlbar in 14 Tagen ohne Abzug.",
+        "Fälligkeit: 14 Kalendertage.",
+        "Zahlungsziel: 14 Tage nach Rechnungsdatum.",
+        "Please pay the invoice amount within 14 calendar days.",
+        "Payment is due within 14 days.",
+        "Payment terms: net 14 days.",
+        "Terms: net 14 days from invoice date.",
+    ]:
+        result = parse(BASE + terms)
+        assert result["fields"]["due_date"] == "2030-04-29"
+        assert result["field_sources"]["due_date"] == {
+            "method": "invoice_date_plus_days",
+            "days": 14,
+            "text": terms,
+        }
+        assert "due_date_calculated_from_invoice_date" in result["warnings"]
+
+
+def test_separate_due_on_receipt_notice_does_not_hide_clear_transfer_deadline():
+    result = parse(BASE + """
+Gemäß § 12 der GOÄ wird diese Rechnung bei Erhalt zur Zahlung fällig.
+Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.
+""")
+    assert result["fields"]["due_date"] == "2030-04-29"
+    assert result["field_sources"]["due_date"]["days"] == 14
+
+
 def test_receipt_discount_and_conflicting_terms_do_not_guess_due_date():
-    for terms in ["Zahlbar innerhalb von 30 Tagen nach Erhalt", "Zahlbar innert 10 Tagen mit Skonto", "Zahlbar innert 10 Tagen\nZahlbar innert 30 Tagen", "Zahlungsziel: 14 Werktage"]:
+    for terms in ["Zahlbar innerhalb von 30 Tagen nach Erhalt", "Zahlbar innert 10 Tagen mit Skonto", "Zahlbar innert 10 Tagen\nZahlbar innert 30 Tagen", "Zahlungsziel: 14 Werktage", "Payment is due within 14 days of receipt", "Payment terms: 14 business days"]:
         assert parse(BASE + terms)["fields"]["due_date"] is None
 
 

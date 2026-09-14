@@ -234,7 +234,7 @@ Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto
         "supplier_name": "Demo Klinik GmbH",
         "external_invoice_number": "R-2030-330",
         "invoice_date": "2030-09-08",
-        "due_date": None,
+        "due_date": "2030-09-22",
         "amount_net": "283.06",
         "amount_vat": "36.92",
         "amount_gross": "319.98",
@@ -272,6 +272,12 @@ Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto
         "Gemäß § 12 der GOÄ wird diese Rechnung bei Erhalt zur Zahlung fällig.",
         "Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.",
     ]
+    assert result["field_sources"]["due_date"] == {
+        "method": "invoice_date_plus_days",
+        "days": 14,
+        "text": "Bitte überweisen Sie den Rechnungsbetrag binnen 14 Tage auf folgendes Bankkonto.",
+    }
+    assert "due_date_calculated_from_invoice_date" in result["warnings"]
 
 
 def test_cost_estimate_is_parsed_but_explicitly_classified_for_review():
