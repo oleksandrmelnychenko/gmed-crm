@@ -81,8 +81,6 @@ export const de = {
   login_hide_password: "Passwort ausblenden",
   login_confidentiality_notice:
     "Ihre Daten werden verschlüsselt übertragen und streng vertraulich behandelt.",
-  login_pay_with_mollie: "Mit Mollie bezahlen",
-  login_secure_payments: "Sichere Zahlungen —",
 
   users_title: "Benutzerverwaltung",
   users_subtitle: "Benutzer, Rollen und Zugriffsrechte verwalten",

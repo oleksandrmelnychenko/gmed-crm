@@ -84,8 +84,6 @@ export interface Translations
   login_show_password: string;
   login_hide_password: string;
   login_confidentiality_notice: string;
-  login_pay_with_mollie: string;
-  login_secure_payments: string;
 
   users_title: string;
   users_subtitle: string;

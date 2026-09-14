@@ -10,7 +10,6 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpLeft,
-  CircleDollarSign,
   Clock,
   Eye,
   EyeOff,
@@ -319,24 +318,6 @@ export function LoginPage() {
             <span>{tr.login_back_home}</span>
           </a>
           <p className="gmed-login-security">{tr.login_confidentiality_notice}</p>
-
-          <div className="gmed-login-mollie">
-            <a
-              className="gmed-login-mollie-button"
-              href="https://www.mollie.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <CircleDollarSign aria-hidden="true" />
-              <span>{tr.login_pay_with_mollie}</span>
-            </a>
-            <p>
-              {tr.login_secure_payments}{" "}
-              <a href="https://www.mollie.com/" target="_blank" rel="noopener noreferrer">
-                Mollie
-              </a>
-            </p>
-          </div>
 
           <button type="button" onClick={toggleLang} className="gmed-login-language">
             <Globe aria-hidden="true" />
