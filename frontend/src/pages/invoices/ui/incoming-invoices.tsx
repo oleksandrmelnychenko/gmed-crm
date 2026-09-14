@@ -43,6 +43,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<IncomingInvoice | null>(null);
+  const [pendingSettlement, setPendingSettlement] = useState<IncomingInvoice | null>(null);
   const [paymentChoice, setPaymentChoice] = useState<IncomingInvoice | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -78,6 +79,12 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       .catch(() => { if (active) setError(accountsFailed); });
     return () => { active = false; };
   }, [selectedCurrency, canManage, refresh, accountsFailed]);
+
+  useEffect(() => {
+    if (paymentChoice || !pendingSettlement) return;
+    setSelected(pendingSettlement);
+    setPendingSettlement(null);
+  }, [paymentChoice, pendingSettlement]);
 
   async function preview(row: IncomingInvoice) {
     if (!row.source_document_id || opening) return;
@@ -130,16 +137,17 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     }
     setPaymentBusy(true);
     setPaymentError(null);
+    setError(null);
+    setPaymentChoice(null);
     try {
       await apiFetch(`/external-invoices/${row.id}/patient-payment`, {
         method: "POST",
         body: JSON.stringify({ request_id: crypto.randomUUID(), paid, paid_on: paidOn }),
       });
-      setPaymentChoice(null);
       setRefresh((value) => value + 1);
       onChanged();
     } catch (cause) {
-      setPaymentError(paymentErrorLabel(patientPaymentErrorReason(cause)));
+      setError(paymentErrorLabel(patientPaymentErrorReason(cause)));
     } finally {
       setPaymentBusy(false);
     }
@@ -183,7 +191,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       emptyState={tx("Входящих счетов пока нет", "Noch keine Eingangsrechnungen")}
       rowActionsWidth={canManage ? 225 : 55} rowActions={row => <div className="flex items-center gap-2">
         {row.source_document_id ? <Button type="button" size="icon-sm" variant="outline" disabled={Boolean(opening)} aria-label={`${tx("Оригинал счёта", "Rechnungsoriginal")}: ${row.external_invoice_number}`} onClick={() => void preview(row)}>{opening === row.id ? <LoaderCircle className="size-4 animate-spin" /> : <Eye className="size-4" />}</Button> : null}
-        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} onClick={() => { setPaymentError(null); setPaidOn(new Date().toISOString().slice(0, 10)); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
+        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} disabled={paymentBusy} onClick={() => { setPaymentError(null); setPaidOn(new Date().toISOString().slice(0, 10)); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
       </div>} />
     <ProviderSettlementDialog liability={selected} accounts={accounts} locale={locale} onClose={() => setSelected(null)} onChanged={() => { setRefresh(value => value + 1); onChanged(); }} />
     <Dialog open={Boolean(paymentChoice)} onOpenChange={(open) => { if (!open && !paymentBusy) { setPaymentError(null); setPaymentChoice(null); } }}>
@@ -217,7 +225,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
               </button> : null}
               <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => { setSelected(paymentChoice); setPaymentChoice(null); }}>
+                onClick={() => { setPaymentError(null); setPendingSettlement(paymentChoice); setPaymentChoice(null); }}>
                 <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-orange-100 bg-orange-50 text-orange-700 dark:border-orange-900 dark:bg-orange-950/50 dark:text-orange-300"><Building2 className="size-4.5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{Number(paymentChoice.company_paid_gross) > 0 ? tx("История оплат GMed", "GMed-Zahlungsverlauf") : tx("Оплатила GMed", "Von GMed bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Оплата проводится через счёт компании.", "Die Zahlung wird über ein Unternehmenskonto gebucht.")}</span>
