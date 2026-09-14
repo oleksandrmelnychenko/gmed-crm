@@ -58,7 +58,8 @@ async fn list(
                    COALESCE(NULLIF(BTRIM(source.original_filename), ''), source.auto_name) AS source_document_name,
                    settlement.company_paid_gross, settlement.remaining_provider_liability_gross,
                    settlement.settlement_status, settlement.latest_payment_on, settlement.payment_count,
-                   receivable.patient_receivable_gross, receivable.allocated_receivable_gross,
+                   receivable.patient_receivable_gross AS receivable_patient_receivable_gross,
+                   receivable.allocated_receivable_gross,
                    receivable.remaining_receivable_gross
             FROM external_invoices external
             LEFT JOIN orders ON orders.id = external.order_id
@@ -85,7 +86,7 @@ async fn list(
                 'invoice_date', invoice_date, 'due_date', due_date, 'status', status, 'paid_by', paid_by,
                 'amount_gross', amount_gross::text, 'currency', currency,
                 'company_paid_gross', company_paid_gross::text, 'remaining_gross', remaining_provider_liability_gross::text,
-                'patient_receivable_gross', patient_receivable_gross::text,
+                'patient_receivable_gross', receivable_patient_receivable_gross::text,
                 'allocated_receivable_gross', allocated_receivable_gross::text,
                 'remaining_receivable_gross', remaining_receivable_gross::text,
                 'settlement_status', settlement_status, 'latest_payment_on', latest_payment_on, 'payment_count', payment_count,
