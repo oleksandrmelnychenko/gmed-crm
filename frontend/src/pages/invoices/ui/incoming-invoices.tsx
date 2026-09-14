@@ -16,6 +16,11 @@ import { fetchCompanyFinancialAccounts } from "@/pages/company-finance/data";
 import { ProviderSettlementDialog } from "@/pages/company-finance/provider-settlement-dialog";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 import type { CompanyFinancialAccount, CompanyProviderLiability } from "@/pages/company-finance/types";
+import {
+  canMarkInvoicePaidByPatient,
+  patientPaymentErrorReason,
+  type PatientPaymentErrorReason,
+} from "@/pages/invoices/model/incoming-invoice-payment";
 
 type IncomingInvoice = CompanyProviderLiability & {
   currency: string;
@@ -40,6 +45,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const [selected, setSelected] = useState<IncomingInvoice | null>(null);
   const [paymentChoice, setPaymentChoice] = useState<IncomingInvoice | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10));
   const [accounts, setAccounts] = useState<CompanyFinancialAccount[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
@@ -107,9 +113,23 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     if (row.paid_by === "agency" && Number(row.remaining_gross) <= 0) return tx("Не выставлено", "Nicht berechnet");
     return tx("После оплаты", "Nach Zahlung");
   };
+  const paymentErrorLabel = (reason: PatientPaymentErrorReason | null) => {
+    if (reason === "company_invoice") return tx("Этот счёт не привязан к пациенту. Для него доступна только оплата GMed.", "Diese Rechnung ist keinem Patienten zugeordnet. Dafür ist nur eine Zahlung durch GMed möglich.");
+    if (reason === "company_payment_exists") return tx("Сначала отмените проведённые оплаты GMed.", "Stornieren Sie zuerst die bereits gebuchten GMed-Zahlungen.");
+    if (reason === "invalid_date") return tx("Укажите корректную дату оплаты, не позднее сегодняшней.", "Geben Sie ein gültiges Zahlungsdatum ein, das nicht nach dem heutigen Datum liegt.");
+    if (reason === "not_approved") return tx("Сначала подтвердите неоплаченный входящий счёт.", "Prüfen Sie zuerst die unbezahlte Eingangsrechnung.");
+    if (reason === "not_patient_paid") return tx("Счёт уже был изменён. Обновите список и повторите действие.", "Die Rechnung wurde bereits geändert. Aktualisieren Sie die Liste und versuchen Sie es erneut.");
+    if (reason === "invoice_changed") return tx("Счёт был изменён. Обновите список и повторите действие.", "Die Rechnung wurde geändert. Aktualisieren Sie die Liste und versuchen Sie es erneut.");
+    if (reason === "cancelled") return tx("У отменённого счёта нельзя менять способ оплаты.", "Bei einer stornierten Rechnung kann die Zahlungsart nicht geändert werden.");
+    return tx("Не удалось изменить способ оплаты.", "Die Zahlungsart konnte nicht geändert werden.");
+  };
   async function updatePatientPayment(row: IncomingInvoice, paid: boolean) {
+    if (paid && !canMarkInvoicePaidByPatient(row)) {
+      setPaymentError(paymentErrorLabel("company_invoice"));
+      return;
+    }
     setPaymentBusy(true);
-    setError(null);
+    setPaymentError(null);
     try {
       await apiFetch(`/external-invoices/${row.id}/patient-payment`, {
         method: "POST",
@@ -118,22 +138,22 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       setPaymentChoice(null);
       setRefresh((value) => value + 1);
       onChanged();
-    } catch {
-      setError(tx("Не удалось изменить способ оплаты.", "Die Zahlungsart konnte nicht geändert werden."));
+    } catch (cause) {
+      setPaymentError(paymentErrorLabel(patientPaymentErrorReason(cause)));
     } finally {
       setPaymentBusy(false);
     }
   }
   async function approvePaymentChoice(row: IncomingInvoice) {
     setPaymentBusy(true);
-    setError(null);
+    setPaymentError(null);
     try {
       await apiFetch(`/external-invoices/${row.id}/approve`, { method: "POST", body: "{}" });
       setPaymentChoice(current => current?.id === row.id ? { ...current, status: "approved" } : current);
       setRefresh(value => value + 1);
       onChanged();
     } catch {
-      setError(tx("Не удалось подтвердить входящий счёт.", "Die Eingangsrechnung konnte nicht bestätigt werden."));
+      setPaymentError(tx("Не удалось подтвердить входящий счёт.", "Die Eingangsrechnung konnte nicht bestätigt werden."));
     } finally {
       setPaymentBusy(false);
     }
@@ -163,10 +183,10 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       emptyState={tx("Входящих счетов пока нет", "Noch keine Eingangsrechnungen")}
       rowActionsWidth={canManage ? 225 : 55} rowActions={row => <div className="flex items-center gap-2">
         {row.source_document_id ? <Button type="button" size="icon-sm" variant="outline" disabled={Boolean(opening)} aria-label={`${tx("Оригинал счёта", "Rechnungsoriginal")}: ${row.external_invoice_number}`} onClick={() => void preview(row)}>{opening === row.id ? <LoaderCircle className="size-4 animate-spin" /> : <Eye className="size-4" />}</Button> : null}
-        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} onClick={() => { setPaidOn(new Date().toISOString().slice(0, 10)); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
+        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} onClick={() => { setPaymentError(null); setPaidOn(new Date().toISOString().slice(0, 10)); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
       </div>} />
     <ProviderSettlementDialog liability={selected} accounts={accounts} locale={locale} onClose={() => setSelected(null)} onChanged={() => { setRefresh(value => value + 1); onChanged(); }} />
-    <Dialog open={Boolean(paymentChoice)} onOpenChange={(open) => { if (!open && !paymentBusy) setPaymentChoice(null); }}>
+    <Dialog open={Boolean(paymentChoice)} onOpenChange={(open) => { if (!open && !paymentBusy) { setPaymentError(null); setPaymentChoice(null); } }}>
       <DialogContent className="gap-0 overflow-hidden rounded-xl p-0 sm:max-w-xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
@@ -182,17 +202,19 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
             <span>{tx("Дата оплаты", "Zahlungsdatum")}</span>
             <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={new Date().toISOString().slice(0, 10)} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
           </label>
+          {paymentError ? <Banner tone="error">{paymentError}</Banner> : null}
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung bestätigen")}</Button></div></Banner> : null}
+          {!canMarkInvoicePaidByPatient(paymentChoice) ? <Banner tone="warning">{tx("Это расход компании без привязки к пациенту. Его можно оплатить только через GMed.", "Dies ist eine Unternehmensausgabe ohne Patientenzuordnung. Sie kann nur über GMed bezahlt werden.")}</Banner> : null}
           <fieldset className="space-y-2">
             <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
+            <div className={`grid gap-3 ${canMarkInvoicePaidByPatient(paymentChoice) ? "sm:grid-cols-2" : "sm:grid-cols-1"}`}>
+              {canMarkInvoicePaidByPatient(paymentChoice) ? <button type="button" disabled={paymentBusy || paymentChoice.status === "received" || paymentChoice.paid_by === "agency"}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-sky-300 hover:bg-sky-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:border-sky-800 dark:hover:bg-sky-950/20"
                 onClick={() => void updatePatientPayment(paymentChoice, paymentChoice.paid_by !== "patient")}>
                 <span className="mb-3 flex size-9 items-center justify-center rounded-md border border-sky-100 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-300"><UserRound className="size-4.5" /></span>
                 <span className="block text-sm font-semibold text-foreground">{paymentChoice.paid_by === "patient" ? tx("Снова не оплачен", "Wieder unbezahlt") : tx("Пациент оплатил сам", "Patient hat selbst bezahlt")}</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">{tx("Движение денег GMed не создаётся.", "Es wird keine GMed-Geldbewegung erstellt.")}</span>
-              </button>
+              </button> : null}
               <button type="button" disabled={paymentBusy || paymentChoice.paid_by === "patient" || ["received", "expected"].includes(paymentChoice.status)}
                 className="group flex min-h-32 flex-col rounded-lg border border-border/70 bg-card p-3.5 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => { setSelected(paymentChoice); setPaymentChoice(null); }}>
@@ -204,7 +226,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
           </fieldset>
         </div> : null}
         <div className="flex shrink-0 justify-end border-t border-border/70 bg-muted/20 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
-          <Button type="button" variant="outline" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={paymentBusy} onClick={() => setPaymentChoice(null)}>
+          <Button type="button" variant="outline" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={paymentBusy} onClick={() => { setPaymentError(null); setPaymentChoice(null); }}>
             {tx("Закрыть", "Schließen")}
           </Button>
         </div>
