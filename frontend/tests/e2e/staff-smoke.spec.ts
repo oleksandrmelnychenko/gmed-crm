@@ -2275,7 +2275,7 @@ test.describe("lead wizard UX", () => {
     });
   }
 
-  test("estimated outlays become the last quote and estimate-document row", async ({ page }) => {
+  test("estimated outlays are persisted without VAT and included in the estimate payload", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     const contractId = "00000000-0000-0000-0000-000000000971";
     const orderId = "00000000-0000-0000-0000-000000000972";

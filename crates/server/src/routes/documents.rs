@@ -15522,7 +15522,12 @@ fn build_order_cost_estimate_pdf(
         ),
         ("Summe", TOTAL_WIDTH_MM, PdfCellAlign::Right),
     ]);
-    for item in &context.line_items {
+    let estimated_outlays = estimated_outlays_total(&context.line_items);
+    for item in context
+        .line_items
+        .iter()
+        .filter(|item| estimated_outlays.is_none() || !is_estimated_outlays_item(item))
+    {
         let unit_price = cost_coverage_money_cell(&item.unit_price)
             .unwrap_or_else(|| "____________".to_string());
         let quantity = if item.quantity.trim().is_empty() {
@@ -15548,9 +15553,18 @@ fn build_order_cost_estimate_pdf(
         );
     }
     layout.spacer(4.0);
+    let displayed_net =
+        net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
+    let displayed_outlays = estimated_outlays.map(format_eur);
     let totals = [
-        ("Nettowert:", context.total_net.as_deref(), false, false),
+        ("Nettowert:", displayed_net.as_deref(), false, false),
         ("MWSt. 19%:", context.total_vat.as_deref(), false, false),
+        (
+            "Voraussichtliche Auslagen:",
+            displayed_outlays.as_deref(),
+            false,
+            false,
+        ),
         ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
     ]
     .into_iter()
@@ -15740,6 +15754,48 @@ fn cost_coverage_money_cell(raw: &str) -> Option<String> {
     }
 }
 
+const ESTIMATED_OUTLAYS_DESCRIPTION: &str = "Voraussichtliche Auslagen";
+
+fn is_estimated_outlays_item(item: &GeneratedContractLineItem) -> bool {
+    item.description.trim() == ESTIMATED_OUTLAYS_DESCRIPTION
+}
+
+fn estimated_outlays_total(items: &[GeneratedContractLineItem]) -> Option<f64> {
+    let outlays = items
+        .iter()
+        .filter(|item| is_estimated_outlays_item(item))
+        .collect::<Vec<_>>();
+    if outlays.is_empty() {
+        return None;
+    }
+
+    outlays
+        .into_iter()
+        .map(|item| {
+            parse_eur_amount(&item.line_gross).or_else(|| {
+                let unit_price = parse_eur_amount(&item.unit_price)?;
+                let quantity = parse_eur_amount(&item.quantity)
+                    .filter(|value| *value > 0.0)
+                    .unwrap_or(1.0);
+                Some(unit_price * quantity)
+            })
+        })
+        .sum()
+}
+
+fn net_without_estimated_outlays(
+    total_net: Option<&str>,
+    estimated_outlays: Option<f64>,
+) -> Option<String> {
+    let total_net = total_net.map(str::trim).filter(|value| !value.is_empty())?;
+    match (parse_eur_amount(total_net), estimated_outlays) {
+        (Some(total_net), Some(estimated_outlays)) => {
+            Some(format_eur(total_net - estimated_outlays))
+        }
+        _ => Some(total_net.to_string()),
+    }
+}
+
 fn build_cost_coverage_pdf(
     context: &GeneratedCostCoverageContext,
     document_reference: &str,
@@ -15826,7 +15882,13 @@ fn build_cost_coverage_pdf(
         0.0,
         1.5,
     );
-    if context.line_items.is_empty() {
+    let estimated_outlays = estimated_outlays_total(&context.line_items);
+    let service_items = context
+        .line_items
+        .iter()
+        .filter(|item| estimated_outlays.is_none() || !is_estimated_outlays_item(item))
+        .collect::<Vec<_>>();
+    if service_items.is_empty() {
         admin_block(
             &mut layout,
             translated_label(&context.language, "no_services"),
@@ -15844,7 +15906,7 @@ fn build_cost_coverage_pdf(
             0.0,
             1.0,
         );
-        for item in &context.line_items {
+        for item in service_items {
             // Description (Leistungen).
             layout.text_block(
                 &format!("•  {}", item.description.trim()),
@@ -16020,10 +16082,13 @@ fn build_cost_coverage_pdf(
         1.0,
     );
 
-    // Totals — already German-formatted "2.698,00 EUR" in the context.
+    let displayed_net =
+        net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
+    let displayed_outlays = estimated_outlays.map(format_eur);
     for (label, value) in [
-        ("Nettowert", context.total_net.as_deref()),
+        ("Nettowert", displayed_net.as_deref()),
         ("MWSt. 19%", context.total_vat.as_deref()),
+        (ESTIMATED_OUTLAYS_DESCRIPTION, displayed_outlays.as_deref()),
         ("Gesamtsumme", context.total_gross.as_deref()),
     ] {
         if let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) {
@@ -24820,7 +24885,7 @@ mod tests {
 
     #[test]
     fn single_order_and_order_cost_estimate_are_separate_legal_documents() {
-        let context = GeneratedSingleOrderContext {
+        let mut context = GeneratedSingleOrderContext {
             language: "de".to_string(),
             auto_name: "Einzelauftrag".to_string(),
             title_override: None,
@@ -24946,6 +25011,19 @@ mod tests {
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
 
+        context.line_items.push(GeneratedContractLineItem {
+            description_items: None,
+            localized_sections: Vec::new(),
+            description: super::ESTIMATED_OUTLAYS_DESCRIPTION.to_string(),
+            quantity: "1".to_string(),
+            unit_price: "50,00 EUR".to_string(),
+            line_gross: "50,00 EUR".to_string(),
+            vat_rate: Some("0".to_string()),
+            notes: None,
+        });
+        context.total_net = Some("2.349,00 EUR".to_string());
+        context.total_gross = Some("2.785,81 EUR".to_string());
+
         let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
         let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
         assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
@@ -24967,6 +25045,7 @@ mod tests {
         assert!(estimate_text.contains("VORAUSSICHTLICHER AUFWAND (IN EINHEITEN)"));
         assert!(estimate_text.contains("Nettowert:"));
         assert!(estimate_text.contains("MWSt. 19%:"));
+        assert!(estimate_text.contains("Voraussichtliche Auslagen:"));
         assert!(estimate_text.contains("Gesamtsumme:"));
         assert!(estimate_text.contains("Organisation der Behandlung"));
         assert!(
@@ -24976,7 +25055,22 @@ mod tests {
         assert!(estimate_text.contains("100,00 EUR/1 Stunde"));
         assert!(estimate_text.contains("2.299,00 EUR"));
         assert!(estimate_text.contains("436,81 EUR"));
-        assert!(estimate_text.contains("2.735,81 EUR"));
+        assert!(estimate_text.contains("50,00 EUR"));
+        assert!(estimate_text.contains("2.785,81 EUR"));
+        assert_eq!(
+            estimate_text
+                .matches(super::ESTIMATED_OUTLAYS_DESCRIPTION)
+                .count(),
+            1,
+            "estimated outlays must be rendered once in the totals block"
+        );
+        let net_position = estimate_text.find("Nettowert:").unwrap();
+        let vat_position = estimate_text.find("MWSt. 19%:").unwrap();
+        let outlays_position = estimate_text.find("Voraussichtliche Auslagen:").unwrap();
+        let gross_position = estimate_text.find("Gesamtsumme:").unwrap();
+        assert!(net_position < vat_position);
+        assert!(vat_position < outlays_position);
+        assert!(outlays_position < gross_position);
         let intro_block = [
             "Sehr geehrte Damen und Herren",
             "hiermit erhalten Sie eine Übersicht über die zu erwartenden Kosten",
