@@ -1324,7 +1324,9 @@ async fn validate_lead_contact_identity(
             let owner_lead_id: Option<Uuid> = conflict.try_get("owner_lead_id").unwrap_or_default();
             let owner_patient_id: Option<Uuid> =
                 conflict.try_get("owner_patient_id").unwrap_or_default();
-            if candidate.lead_id == owner_lead_id
+            if candidate
+                .lead_id
+                .is_some_and(|lead_id| owner_lead_id == Some(lead_id))
                 || owner_patient_id.is_some_and(|id| candidate.patient_ids.contains(&id))
             {
                 continue;

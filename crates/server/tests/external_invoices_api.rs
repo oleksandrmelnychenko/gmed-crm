@@ -465,7 +465,7 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{paid_invoice}");
+    assert_eq!(status, StatusCode::CREATED, "{paid_invoice}");
     assert_eq!(paid_invoice["invoice"]["status"], "paid");
     assert_eq!(paid_invoice["invoice"]["order_id"], Value::Null);
 

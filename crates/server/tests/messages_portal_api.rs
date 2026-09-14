@@ -1234,7 +1234,7 @@ async fn first_run_patient_email_link_still_supports_assigned_chat() {
 }
 
 #[tokio::test]
-async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
+async fn protected_portal_document_does_not_break_patient_manager_chat() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -1291,16 +1291,19 @@ async fn deleting_portal_document_file_does_not_break_patient_manager_chat() {
         Some(json!({ "reason": delete_reason })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(delete_body["document"]["status"], "archived");
-    assert_eq!(delete_body["revoked_share_count"], 1);
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(delete_body["error"], "document_delivery_protected");
 
     let (status, after_delete_docs) =
         json_request(&app, "GET", "/api/v1/me/documents", &patient_auth, None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(after_delete_docs.as_array().unwrap().is_empty());
+    let items = after_delete_docs
+        .as_array()
+        .expect("portal document list after protected delete");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], document_id.to_string());
 
-    let patient_message = "The portal file disappeared, please resend the corrected document.";
+    let patient_message = "The protected portal document is still available.";
     let (status, send_body) = json_request(
         &app,
         "POST",
