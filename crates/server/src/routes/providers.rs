@@ -60,6 +60,14 @@ pub fn router() -> Router<AppState> {
                 .delete(delete_specialization_work_type),
         )
         .route(
+            "/providers/specializations/{specialization_id}/work-types/{work_type_id}/activate",
+            post(activate_specialization_work_type),
+        )
+        .route(
+            "/providers/specializations/{specialization_id}/work-types/{work_type_id}/deactivate",
+            post(deactivate_specialization_work_type),
+        )
+        .route(
             "/providers/insurance-providers",
             get(list_insurance_providers),
         )
@@ -2631,6 +2639,86 @@ async fn update_specialization_work_type(
         },
         Err(response) => response,
     }
+}
+
+async fn activate_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((specialization_id, work_type_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    toggle_specialization_work_type_active(state, auth, specialization_id, work_type_id, true).await
+}
+
+async fn deactivate_specialization_work_type(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((specialization_id, work_type_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    toggle_specialization_work_type_active(state, auth, specialization_id, work_type_id, false)
+        .await
+}
+
+async fn toggle_specialization_work_type_active(
+    state: AppState,
+    auth: AuthUser,
+    specialization_id: Uuid,
+    work_type_id: Uuid,
+    is_active: bool,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return e;
+    }
+
+    match sqlx::query(
+        r#"UPDATE medical_specialization_work_types wt
+           SET is_active = $3,
+               updated_at = now()
+           WHERE wt.id = $1
+             AND wt.deleted_at IS NULL
+             AND EXISTS (
+                 SELECT 1
+                 FROM medical_specialization_work_type_assignments assignment
+                 WHERE assignment.work_type_id = wt.id
+                   AND assignment.specialization_id = $2
+             )"#,
+    )
+    .bind(work_type_id)
+    .bind(specialization_id)
+    .bind(is_active)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Specialization work type not found"),
+        Err(e) => {
+            tracing::error!(error = %e, specialization_id = %specialization_id, work_type_id = %work_type_id, "Failed to toggle specialization work type");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update specialization work type",
+            );
+        }
+    }
+
+    let action = if is_active {
+        "activate_provider_specialization_work_type"
+    } else {
+        "deactivate_provider_specialization_work_type"
+    };
+    let _ = audit(
+        &state,
+        auth.user_id,
+        action,
+        "medical_specialization_work_type",
+        Some(work_type_id),
+        Some(json!({
+            "specialization_id": specialization_id,
+            "work_type_id": work_type_id,
+            "is_active": is_active,
+        })),
+    )
+    .await;
+
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn delete_specialization_work_type(

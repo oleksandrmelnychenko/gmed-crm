@@ -6,11 +6,25 @@ import { formatDateTime } from "@/pages/leads/model/leads-model";
 import {
   LeadWizardDocumentMetadata,
   leadWizardDocumentNumber,
+  sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 
 const createdAt = "2026-07-21T10:35:00Z";
 
 describe("LeadWizardDocumentMetadata", () => {
+  it("orders every wizard document list from newest to oldest without mutating it", () => {
+    const documents = [
+      { id: "older", created_at: "2026-09-04T13:43:00Z" },
+      { id: "newer", created_at: "2026-09-14T17:46:00Z" },
+      { id: "invalid", created_at: "" },
+    ] as const;
+
+    expect(sortWizardDocumentsNewestFirst(documents).map((document) => document.id))
+      .toEqual(["newer", "older", "invalid"]);
+    expect(documents.map((document) => document.id))
+      .toEqual(["older", "newer", "invalid"]);
+  });
+
   it("hides the technical version suffix from business document numbers", () => {
     expect(leadWizardDocumentNumber({ id: "framework", document_number: "FC-20260714-0010-V18" }))
       .toBe("FC-20260714-0010");

@@ -114,12 +114,12 @@ function dispatchAuthSessionExpired() {
   window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
 }
 
-async function clearAuthTokens() {
+async function clearAuthTokens(forceSessionExpiredEvent = false) {
   const hadTokens = hasStoredAuthTokens();
   try {
     await clearPersistedAuthTokens();
   } finally {
-    if (hadTokens) {
+    if (hadTokens || forceSessionExpiredEvent) {
       dispatchAuthSessionExpired();
     }
   }
@@ -541,7 +541,8 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const headers = buildApiHeaders(requestInit);
   const url = buildApiUrl(path);
   const method = requestMethod(requestInit);
-  const canRetryAuth = headers.has("Authorization") && !isAuthEndpoint(path);
+  const isProtectedRequest = !isAuthEndpoint(path);
+  const canRetryAuth = headers.has("Authorization") && isProtectedRequest;
 
   if (canRetryAuth && shouldRefreshAccessTokenBeforeRequest(30_000)) {
     const newAccessToken = await tryRefreshAccessToken(timeoutMs);
@@ -569,18 +570,27 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   const request = (async () => {
     let res = await fetchWithRateLimitRetry(url, { ...requestInit, headers }, timeoutMs);
 
-    if (res.status === 401 && canRetryAuth) {
-      const newAccessToken = await tryRefreshAccessToken(timeoutMs);
-      if (newAccessToken) {
-        const retriedHeaders = new Headers(headers);
-        retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
-        res = await fetchWithRateLimitRetry(
-          url,
-          { ...requestInit, headers: retriedHeaders },
-          timeoutMs,
-        );
+    if (res.status === 401 && isProtectedRequest) {
+      if (canRetryAuth) {
+        const newAccessToken = await tryRefreshAccessToken(timeoutMs);
+        if (newAccessToken) {
+          const retriedHeaders = new Headers(headers);
+          retriedHeaders.set("Authorization", `Bearer ${newAccessToken}`);
+          res = await fetchWithRateLimitRetry(
+            url,
+            { ...requestInit, headers: retriedHeaders },
+            timeoutMs,
+          );
+        }
+        if (res.status === 401 && hasStoredAuthTokens()) {
+          await clearAuthTokens();
+          jsonCache.clear();
+        }
       } else {
-        await clearAuthTokens();
+        // Another browser tab can clear shared tokens while this tab still has
+        // an authenticated React tree mounted. Leave the protected workspace
+        // instead of showing unrelated validation errors.
+        await clearAuthTokens(true);
         jsonCache.clear();
       }
     }

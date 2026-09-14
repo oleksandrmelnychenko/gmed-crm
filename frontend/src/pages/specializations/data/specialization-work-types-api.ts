@@ -173,6 +173,17 @@ export function updateSpecializationWorkType(
   });
 }
 
+export function setSpecializationWorkTypeActive(
+  specializationId: string,
+  workTypeId: string,
+  isActive: boolean,
+) {
+  return apiFetch<void>(
+    `${workTypePath(specializationId, workTypeId)}/${isActive ? "activate" : "deactivate"}`,
+    { method: "POST" },
+  );
+}
+
 export function deleteSpecializationWorkType(
   specializationId: string,
   workTypeId: string,

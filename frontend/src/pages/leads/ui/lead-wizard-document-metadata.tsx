@@ -16,6 +16,25 @@ type LeadWizardDocumentMetadataProps = {
   lang: Lang;
 };
 
+export function sortWizardDocumentsNewestFirst<
+  T extends Pick<DocumentItem, "created_at" | "id">,
+>(documents: readonly T[]): T[] {
+  return documents
+    .map((document, index) => ({
+      document,
+      index,
+      createdAt: Date.parse(document.created_at),
+    }))
+    .sort((left, right) => {
+      const leftCreatedAt = Number.isNaN(left.createdAt) ? Number.NEGATIVE_INFINITY : left.createdAt;
+      const rightCreatedAt = Number.isNaN(right.createdAt) ? Number.NEGATIVE_INFINITY : right.createdAt;
+      return rightCreatedAt - leftCreatedAt
+        || right.document.id.localeCompare(left.document.id)
+        || left.index - right.index;
+    })
+    .map(({ document }) => document);
+}
+
 function formatFileSize(size: number | null, lang: Lang) {
   if (!size || size <= 0) return "";
   const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {

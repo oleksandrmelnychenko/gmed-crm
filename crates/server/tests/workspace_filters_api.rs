@@ -10594,6 +10594,86 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
+    let managed_work_type_code = format!("managed_work_type_{}", tag.replace('-', "_"));
+    let (status, work_type_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/work-types"),
+        &pm_bearer,
+        Some(json!({
+            "code": managed_work_type_code,
+            "name_de": format!("Leistungsart {tag}"),
+            "name_ru": format!("Вид работы {tag}"),
+            "min_price_eur": 100,
+            "max_price_eur": 200,
+            "duration_hours": 2,
+            "sort_order": 10,
+            "is_active": true,
+            "descriptions": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let managed_work_type_id = Uuid::parse_str(work_type_body["id"].as_str().unwrap()).unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/providers/specializations/{managed_specialization_id}/work-types/{managed_work_type_id}/deactivate"
+        ),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, active_work_types) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/work-types"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !active_work_types
+            .as_array()
+            .expect("active work type list")
+            .iter()
+            .any(|row| row["id"] == managed_work_type_id.to_string())
+    );
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/providers/specializations/{managed_specialization_id}/work-types/{managed_work_type_id}/activate"
+        ),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, active_work_types) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/work-types"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        active_work_types
+            .as_array()
+            .expect("active work type list")
+            .iter()
+            .any(|row| row["id"] == managed_work_type_id.to_string())
+    );
+
     let (status, _) = json_request(
         &app,
         "POST",

@@ -47,6 +47,7 @@ import {
   deleteSpecializationWorkType,
   fetchProvidersBySpecializations,
   fetchSpecializationWorkTypes,
+  setSpecializationWorkTypeActive,
   updateSpecializationWorkType,
   type SpecializationLinkedProvider,
   type SpecializationWorkType,
@@ -401,6 +402,36 @@ export function SpecializationsPage() {
     }
   }
 
+  async function changeWorkTypeStatus(
+    item: SpecializationWorkType,
+    isActive: boolean,
+  ) {
+    if (!selectedSpecializationId || item.is_active === isActive) {
+      return;
+    }
+
+    const action = `work-type-status-${item.id}`;
+    setBusyAction(action);
+    try {
+      await setSpecializationWorkTypeActive(
+        selectedSpecializationId,
+        item.id,
+        isActive,
+      );
+      await loadSpecializations(selectedSpecializationId);
+      setReloadWorkTypesToken((current) => current + 1);
+      toast.success(
+        isActive
+          ? tx("Вид работы активирован.", "Leistungsart aktiviert.")
+          : tx("Вид работы деактивирован.", "Leistungsart deaktiviert."),
+      );
+    } catch (error) {
+      toast.error(genericError(error, tx));
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function removeWorkType(item: SpecializationWorkType) {
     if (
       !selectedSpecializationId ||
@@ -695,7 +726,35 @@ export function SpecializationsPage() {
                         <span className="text-right font-mono text-sm tabular-nums text-muted-foreground">
                           {item.descriptions.length}
                         </span>
-                        <span>{activeBadge(item.is_active, tx)}</span>
+                        {canManage ? (
+                          <NativeComboboxSelect
+                            aria-label={tx(
+                              `Статус вида работы «${workTypeName(item, lang)}»`,
+                              `Status der Leistungsart „${workTypeName(item, lang)}“`,
+                            )}
+                            value={item.is_active ? "active" : "inactive"}
+                            disabled={busyAction.startsWith("work-type-")}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              void changeWorkTypeStatus(
+                                item,
+                                event.target.value === "active",
+                              );
+                            }}
+                            className={cn(
+                              "h-8 w-full min-w-0 rounded-full px-2 text-[11px] font-semibold",
+                              item.is_active
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-slate-50 text-slate-600",
+                            )}
+                          >
+                            <option value="active">{tx("Активно", "Aktiv")}</option>
+                            <option value="inactive">{tx("Неактивно", "Inaktiv")}</option>
+                          </NativeComboboxSelect>
+                        ) : (
+                          <span>{activeBadge(item.is_active, tx)}</span>
+                        )}
                         <div className="flex justify-end gap-1">
                           {canManage ? (
                             <>

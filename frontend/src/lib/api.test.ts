@@ -503,4 +503,25 @@ describe("API error handling", () => {
     expect(localStorage.removeItem).toHaveBeenCalledWith("gmed_refresh_token");
     expect(sessionExpired).toHaveBeenCalledTimes(1);
   });
+
+  it("expires a stale authenticated tab when shared tokens were already cleared", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage();
+    const sessionExpired = vi.fn();
+    window.addEventListener("gmed:auth-session-expired", sessionExpired);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 }),
+      ),
+    );
+
+    const { apiFetch } = await loadApiModule();
+
+    await expect(apiFetch("/documents/document-1/review-status")).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_token",
+    });
+    expect(sessionExpired).toHaveBeenCalledTimes(1);
+  });
 });

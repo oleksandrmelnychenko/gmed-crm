@@ -167,8 +167,11 @@ describe("lead errors", () => {
 
   it("uses localized HTTP fallbacks without leaking English", () => {
     const forbidden = Object.assign(new Error("Unexpected policy failure"), { status: 403 });
+    const expired = Object.assign(new Error("invalid_token"), { status: 401 });
     const tooLarge = Object.assign(new Error("Payload Too Large"), { status: 413 });
 
+    expect(leadErrorMessage(expired, ru)).toBe("Сессия завершена. Войдите снова");
+    expect(leadErrorMessage(expired, de)).toBe("Sitzung abgelaufen. Bitte erneut anmelden");
     expect(leadErrorMessage(forbidden, ru)).toBe("Недостаточно прав для этого действия");
     expect(leadErrorMessage(forbidden, de)).toBe("Keine Berechtigung für diese Aktion");
     expect(leadErrorMessage(tooLarge, ru)).not.toMatch(/payload|large/i);

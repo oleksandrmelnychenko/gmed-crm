@@ -167,7 +167,10 @@ import {
   updateLeadServiceSelection,
 } from "@/pages/leads/model/leads-model";
 
-import { LeadWizardDocumentMetadata } from "./lead-wizard-document-metadata";
+import {
+  LeadWizardDocumentMetadata,
+  sortWizardDocumentsNewestFirst,
+} from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 
@@ -2312,9 +2315,11 @@ function WizardDocumentRows({
     return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
   }
 
+  const sortedDocuments = sortWizardDocumentsNewestFirst(documents);
+
   return (
     <div className={cn("divide-y divide-border/70 rounded-lg", tokens.surface.card)}>
-      {documents.map((document) => {
+      {sortedDocuments.map((document) => {
         const signed = Boolean(
           complianceKind
           && document.signed_at
@@ -3196,10 +3201,15 @@ export function LeadWizard({
       privacy_consents: [],
       enhanced_due_diligence: [],
     };
+    const seenDocumentIds = new Set<string>();
     [...currentPatientEvidence, ...documents].forEach((item) => {
       if (item.file_deleted_at || item.has_stored_file === false) return;
+      if (seenDocumentIds.has(item.id)) return;
       const kind = wizardDocumentKind(item);
-      if (kind) grouped[kind].push(item);
+      if (kind) {
+        seenDocumentIds.add(item.id);
+        grouped[kind].push(item);
+      }
     });
     return grouped;
   }, [documents, currentPatientEvidence]);

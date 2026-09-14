@@ -189,10 +189,6 @@ export function leadErrorMessage(
   const localizedValidation = localizedFieldValidationMessage(message, tx);
   if (localizedValidation) return localizedValidation;
 
-  for (const [pattern, translation] of LEAD_ERROR_PATTERNS) {
-    if (pattern.test(message)) return tx(translation[0], translation[1]);
-  }
-
   const status = leadErrorStatus(error);
   if (status === 401) return tx("Сессия завершена. Войдите снова", "Sitzung abgelaufen. Bitte erneut anmelden");
   if (status === 403) return tx("Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion");
@@ -200,9 +196,14 @@ export function leadErrorMessage(
   if (status === 408) return tx("Сервер не ответил вовремя. Повторите попытку", "Der Server hat nicht rechtzeitig geantwortet. Bitte erneut versuchen");
   if (status === 409) return tx("Данные уже изменились. Обновите страницу и повторите действие", "Die Daten wurden bereits geändert. Seite aktualisieren und Aktion wiederholen");
   if (status === 413) return tx("Файл слишком большой. Максимальный размер — 25 МБ", "Die Datei ist zu groß. Maximal sind 25 MB erlaubt");
-  if (status === 422) return tx("Проверьте введённые данные", "Eingegebene Daten prüfen");
   if (status === 429) return tx("Слишком много запросов. Повторите попытку позже", "Zu viele Anfragen. Bitte später erneut versuchen");
   if (status !== null && status >= 500) return tx("Ошибка сервера. Повторите попытку", "Serverfehler. Bitte erneut versuchen");
+
+  for (const [pattern, translation] of LEAD_ERROR_PATTERNS) {
+    if (pattern.test(message)) return tx(translation[0], translation[1]);
+  }
+
+  if (status === 422) return tx("Проверьте введённые данные", "Eingegebene Daten prüfen");
 
   if (!message || LIKELY_ENGLISH_ERROR.test(message)) return fallback;
   return message;
