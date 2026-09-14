@@ -177,6 +177,19 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
 /// Repeat-order PDFs are rendered from persisted facts, including service snapshots.
 pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindingOverrides {
     let parse_date = |key| text(context, key).parse::<NaiveDate>().ok();
+    let specialty_names = context["specialty_names"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| json!({ "name_de": name }))
+        .collect::<Vec<_>>();
+    let resolver_data = json!({
+        "date_from": context["date_from"],
+        "date_to": context["date_to"],
+        "catalog_snapshot": { "specializations": specialty_names },
+    });
     let mut bindings = DocumentBindingOverrides {
         period_from: parse_date("date_from"),
         period_to: parse_date("date_to"),
@@ -185,6 +198,12 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
         examination_purpose: context["needs_description"].as_str().map(str::to_owned),
         ..Default::default()
     };
+    bindings.specialties = resolver_data["catalog_snapshot"]["specializations"]
+        .as_array()
+        .filter(|items| !items.is_empty())
+        .map(|_| {
+            super::super::order_intakes::catalog_description("[Fachrichtung]", &resolver_data)
+        });
     let mut services = context["services"]
         .as_array()
         .into_iter()
@@ -200,10 +219,34 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
         .into_iter()
         .map(|line| {
             let unit = text(line, "unit_label");
+            let description_items: Vec<crate::service_description::ServiceDescriptionItem> =
+                serde_json::from_value::<Vec<crate::service_description::ServiceDescriptionItem>>(
+                    line["description_items"].clone(),
+                )
+                .unwrap_or_default()
+                .into_iter()
+                .map(|item| crate::service_description::ServiceDescriptionItem {
+                    id: item.id,
+                    text: super::super::order_intakes::catalog_description(
+                        &item.text,
+                        &resolver_data,
+                    ),
+                })
+                .collect();
+            let note = if description_items.is_empty() {
+                line["note"]
+                    .as_str()
+                    .map(|note| {
+                        super::super::order_intakes::catalog_description(note, &resolver_data)
+                    })
+                    .filter(|note| !note.is_empty())
+            } else {
+                crate::service_description::items_text(&description_items)
+            };
             ServiceLineInput {
                 description: text(line, "description").to_owned(),
-                description_items: serde_json::from_value(line["description_items"].clone()).ok(),
-                note: line["note"].as_str().map(str::to_owned),
+                description_items: (!description_items.is_empty()).then_some(description_items),
+                note,
                 quantity: Some(text(line, "quantity").to_owned()),
                 fee: Some(format!(
                     "{}{}",
@@ -287,5 +330,41 @@ mod tests {
         assert_eq!(order.service_lines.len(), 1);
         assert_eq!(order.service_lines[0].description, "Coordination");
         assert_eq!(order.estimate_total.as_deref(), Some("119,00 EUR"));
+    }
+
+    #[test]
+    fn repeat_documents_resolve_specialty_and_period_placeholders() {
+        let context = json!({
+            "date_from": "2026-09-07",
+            "date_to": "2026-09-10",
+            "specialty_names": ["Plastische und Ästhetische Chirurgie", "Urologie"],
+            "services": [{
+                "description": "Organisation der Behandlung",
+                "description_items": [{
+                    "id": "scope",
+                    "text": "[Datum Beginn] bis [Datum Ende]: [Fachrichtung 1], [Fachrichtung 2], [Fachrichtung n] und [Fachrichtung n+1]"
+                }],
+                "quantity": "1",
+                "unit_price": "450",
+                "vat_rate": "19"
+            }]
+        });
+
+        let bindings = repeat_bindings(&context, "single_order");
+        assert_eq!(
+            bindings.specialties.as_deref(),
+            Some("Plastische und Ästhetische Chirurgie und Urologie")
+        );
+        assert_eq!(
+            bindings.service_lines[0].note.as_deref(),
+            Some("07.09.2026 bis 10.09.2026: Plastische und Ästhetische Chirurgie und Urologie")
+        );
+        assert!(
+            !bindings.service_lines[0]
+                .note
+                .as_deref()
+                .unwrap_or_default()
+                .contains('[')
+        );
     }
 }
