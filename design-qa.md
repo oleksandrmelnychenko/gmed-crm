@@ -57,6 +57,31 @@ final result: passed
 
 ---
 
+# Design QA — Patient contract preview without context redirect
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-2e5d153f-070e-43f3-9801-167d89b18563.png`.
+- Implementation capture: live Chrome verification on `http://127.0.0.1:5173/patients/:patientId?tab=contracts`.
+- State: signed framework contract selected from the patient contracts table.
+
+## Comparison
+
+- Clicking the contract row or eye action now opens an in-context modal over the patient profile.
+- The modal surfaces the contract number, status, signature timestamp, validity period, and creation timestamp.
+- Status editing remains available for authorized roles and opens the existing editor deliberately.
+- The patient route stays unchanged and no additional contracts workspace tab is opened.
+
+## Verification
+
+- Live browser inspection confirmed the modal opens from the table while the URL remains on the patient contracts tab.
+- The focused desktop capture shows a centered, compact dialog with readable metadata, balanced spacing, and no clipping or overlap.
+- TypeScript project check and targeted ESLint check passed.
+
+final result: passed
+
+---
+
 # Design QA — Lead passport data in the patient profile
 
 ## Evidence

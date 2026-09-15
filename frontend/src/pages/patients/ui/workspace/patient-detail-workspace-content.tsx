@@ -335,7 +335,6 @@ type PatientDetailWorkspaceContentProps = {
   onManageInvoice: (invoice: InvoiceItem) => void;
   onNotesSheetOpenChange: (open: boolean) => void;
   onOpenAppointment: (appointmentId: string) => void;
-  onOpenContract: (contractId: string) => void;
   onOpenInvoice: (invoiceId: string) => void;
   onOpenOrder: (orderId: string) => void;
   onOpenPatient: (patientId: string) => void;
@@ -501,7 +500,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     onManageInvoice,
     onNotesSheetOpenChange,
     onOpenAppointment,
-    onOpenContract,
     onOpenInvoice,
     onOpenOrder,
     onOpenPatient,
@@ -998,7 +996,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               canManageContracts={canManageContracts}
               onCreateContract={onCreateContract}
               onEditContractStatus={onEditContractStatus}
-              onOpenContract={onOpenContract}
               statusColors={statusColors}
               statusLabel={patientDetailStatusLabel}
               formatDate={formatDate}

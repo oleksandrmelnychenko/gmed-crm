@@ -2085,9 +2085,6 @@ function usePatientDetailPageContent() {
         onManageInvoice={openInvoiceManager}
         onNotesSheetOpenChange={setNotesSheetOpen}
         onOpenAppointment={(appointmentId) => { staffGo(`/appointments?appointment=${appointmentId}`); }}
-        onOpenContract={(contractId) => {
-          window.open(`/contracts?contract=${contractId}`, "_blank", "noopener,noreferrer");
-        }}
         onOpenInvoice={(invoiceId) => {
           window.open(`/invoices?invoice=${invoiceId}`, "_blank", "noopener,noreferrer");
         }}

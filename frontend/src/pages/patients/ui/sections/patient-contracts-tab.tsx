@@ -1,8 +1,16 @@
-import { useMemo } from "react";
-import { ExternalLink, Pencil, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Eye, FileSignature, Pencil, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { TabsContent } from "@/components/ui/tabs";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import {
@@ -35,7 +43,6 @@ type PatientContractsTabProps = {
   canManageContracts: boolean;
   onCreateContract: () => void;
   onEditContractStatus: (contract: ContractItem) => void;
-  onOpenContract: (contractId: string) => void;
   statusColors: Record<string, string>;
   statusLabel: StatusLabelFn;
   formatDate: DateFormatter;
@@ -51,7 +58,6 @@ export function PatientContractsTab({
   canManageContracts,
   onCreateContract,
   onEditContractStatus,
-  onOpenContract,
   statusColors,
   statusLabel,
   formatDate,
@@ -59,6 +65,7 @@ export function PatientContractsTab({
   isContractExpiringSoon,
 }: PatientContractsTabProps) {
   const { t } = useLang();
+  const [selectedContract, setSelectedContract] = useState<ContractItem | null>(null);
   const pagination = useDataTablePagination(
     contracts,
     contracts.map((contract) => contract.id).join(":"),
@@ -160,7 +167,8 @@ export function PatientContractsTab({
   );
 
   return (
-    <TabsContent value="contracts" className="space-y-4 mt-4 min-h-[400px]">
+    <>
+      <TabsContent value="contracts" className="space-y-4 mt-4 min-h-[400px]">
         {tabLoading ? (
           <TabLoader />
         ) : contracts.length === 0 ? (
@@ -178,7 +186,7 @@ export function PatientContractsTab({
                 {l("patients_no_contract_has_been_created_for_this_patient_yet")}
               </EmptyCell>
             }
-            onRowClick={(contract) => onOpenContract(contract.id)}
+            onRowClick={(contract) => setSelectedContract(contract)}
             toolbarStart={
               canManageContracts ? (
                 <>
@@ -202,11 +210,14 @@ export function PatientContractsTab({
                   variant="ghost"
                   size="icon-sm"
                   className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={() => onOpenContract(contract.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedContract(contract);
+                  }}
                   aria-label={l("patients_open")}
                   title={l("patients_open")}
                 >
-                  <ExternalLink className="size-3.5" />
+                  <Eye className="size-3.5" />
                 </Button>
                 {canManageContracts ? (
                   <Button
@@ -214,7 +225,10 @@ export function PatientContractsTab({
                     variant="ghost"
                     size="icon-sm"
                     className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() => onEditContractStatus(contract)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEditContractStatus(contract);
+                    }}
                     aria-label={l("patients_update_status")}
                     title={l("patients_update_status")}
                   >
@@ -237,6 +251,86 @@ export function PatientContractsTab({
             }
           />
         )}
-    </TabsContent>
+      </TabsContent>
+
+      <Dialog
+        open={Boolean(selectedContract)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedContract(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <FileSignature aria-hidden="true" className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <DialogTitle className="break-words font-mono text-base tracking-[0.08em]">
+                  {selectedContract?.contract_number}
+                </DialogTitle>
+                <DialogDescription className="mt-1">
+                  {l("patients_contract")}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {selectedContract ? (
+            <div className="overflow-hidden rounded-xl border border-border/70">
+              {[
+                [
+                  t.users_status,
+                  <Badge
+                    key="status"
+                    variant="outline"
+                    className={cn(
+                      "rounded-full font-mono text-[10px]",
+                      statusColors[selectedContract.status] ?? "",
+                    )}
+                  >
+                    {statusLabel(selectedContract.status)}
+                  </Badge>,
+                ],
+                [l("patients_signed"), formatDateTime(selectedContract.signed_at, commonNotSet)],
+                [l("patients_valid_from"), formatDate(selectedContract.valid_from, commonNotSet)],
+                [l("patients_valid_to"), formatDate(selectedContract.valid_to, commonNotSet)],
+                [t.users_created, formatDateTime(selectedContract.created_at, commonNotSet)],
+              ].map(([label, value]) => (
+                <div
+                  key={String(label)}
+                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-4 border-b border-border/60 px-4 py-3 text-sm last:border-b-0"
+                >
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="min-w-0 break-words text-right font-medium text-foreground">
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            {selectedContract && canManageContracts ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  const contract = selectedContract;
+                  setSelectedContract(null);
+                  onEditContractStatus(contract);
+                }}
+              >
+                <Pencil aria-hidden="true" className="size-3.5" />
+                {l("patients_update_status")}
+              </Button>
+            ) : null}
+            <Button type="button" onClick={() => setSelectedContract(null)}>
+              {t.common_close}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
