@@ -95,6 +95,16 @@ test("a valid preselected quote can create a new invoice without artificial edit
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 });
 
+test("a prepayment route opens an advance invoice with the selected quote", async ({ page }) => {
+  await prepare(page);
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
+  const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Предложение", exact: true })).toContainText("KV-TEST-1");
+  await expect(dialog.getByRole("combobox", { name: "Тип счёта", exact: true })).toContainText("Авансовый");
+  await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
+});
+
 test("allows an approved interim selection while other services remain unapproved", async ({ page }) => {
   const fixture = await prepare(page);
   fixture.order.leistungen[0].status = "pending";

@@ -2,8 +2,9 @@ import { CircleAlert, Clock3, FileCheck2, FileSignature } from "lucide-react";
 import { isSignaturePending } from "../data/document-signature-api";
 import type { SignatureSummary } from "../data/use-signature-summary";
 
-export function signaturePresentation(summary: SignatureSummary | undefined, lang: string) {
+export function signaturePresentation(summary: SignatureSummary | undefined, lang: string, documentSigned = false) {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+  if (documentSigned) return { Icon: FileCheck2, label: tx("Подписано", "Unterzeichnet"), className: "text-emerald-700 dark:text-emerald-400" };
   if (!summary) return { Icon: FileSignature, label: tx("Электронная подпись", "Elektronische Unterschrift"), className: "" };
   const prefix = summary.test_mode ? "TEST · " : "";
   if (summary.status === "completed") return { Icon: FileCheck2, label: prefix + tx("Подписано", "Unterzeichnet"), className: "text-emerald-700 dark:text-emerald-400" };

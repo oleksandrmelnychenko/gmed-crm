@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -2386,6 +2387,7 @@ function WizardDocumentRows({
   onDownload,
   onSign,
   onDelete,
+  onChanged,
 }: {
   documents: DocumentItem[];
   complianceKind?: DocumentComplianceKind;
@@ -2399,6 +2401,7 @@ function WizardDocumentRows({
   onDownload: (document: DocumentItem) => void;
   onSign?: (document: DocumentItem, kind: DocumentComplianceKind) => void;
   onDelete: (document: DocumentItem) => void;
+  onChanged?: () => void;
 }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [protectedDocumentIds, setProtectedDocumentIds] = useState<Set<string>>(() => new Set());
@@ -2476,12 +2479,16 @@ function WizardDocumentRows({
               title={wizardDocumentFilename(document)}
               iconOnly
               disabled={disabled}
-              onDone={() => setProtectedDocumentIds((current) => {
-                if (current.has(document.id)) return current;
-                const next = new Set(current);
-                next.add(document.id);
-                return next;
-              })}
+              signed={signed}
+              onDone={() => {
+                setProtectedDocumentIds((current) => {
+                  if (current.has(document.id)) return current;
+                  const next = new Set(current);
+                  next.add(document.id);
+                  return next;
+                });
+                onChanged?.();
+              }}
             />
           ) : null}
           {wizardDocumentPreviewKind(document) ? (
@@ -2980,6 +2987,7 @@ export function LeadWizard({
     const reloadVersion = reloadVersionRef.current + 1;
     reloadVersionRef.current = reloadVersion;
     const isCurrentReload = () => reloadVersionRef.current === reloadVersion;
+    const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     setLoading(true);
     setMedicalLookupsLoading(true);
     setCommercialLookupsLoading(true);
@@ -3173,11 +3181,11 @@ export function LeadWizard({
       }
       if (hydrateDraft || hydrateCommercial) {
         setLines(nextLines);
-        setPrepayment(nextPrepayment);
-        setPrepaymentAmount(nextPrepaymentAmount);
-        setPrepaymentDeadline(localDeadline(nextOrder?.prepayment_due_at));
-        setSignedPatient(Boolean(nextOrder?.signed_patient));
-        setSignedAgency(Boolean(nextOrder?.signed_agency));
+        if (commercialVersions.prepayment_required === commercialFlagRequestVersionRef.current.prepayment_required) setPrepayment(nextPrepayment);
+        if (commercialVersions.prepayment_amount === commercialFlagRequestVersionRef.current.prepayment_amount) setPrepaymentAmount(nextPrepaymentAmount);
+        if (commercialVersions.prepayment_due_at === commercialFlagRequestVersionRef.current.prepayment_due_at) setPrepaymentDeadline(localDeadline(nextOrder?.prepayment_due_at));
+        if (commercialVersions.signed_patient === commercialFlagRequestVersionRef.current.signed_patient) setSignedPatient(Boolean(nextOrder?.signed_patient));
+        if (commercialVersions.signed_agency === commercialFlagRequestVersionRef.current.signed_agency) setSignedAgency(Boolean(nextOrder?.signed_agency));
         setPaidAmount(nextPaidAmount);
       }
       if (hydrateDraft) {
@@ -3241,10 +3249,16 @@ export function LeadWizard({
     setContracts(nextContracts);
     setOrders(nextOrders);
     setQuotes(nextQuotes);
-    const nextOrderId = nextOrders[0]?.id;
-    if (prospectMergeOnlyRef.current && nextOrders[0]) {
-      if (signatureVersions.signed_patient === commercialFlagRequestVersionRef.current.signed_patient) setSignedPatient(Boolean(nextOrders[0].signed_patient));
-      if (signatureVersions.signed_agency === commercialFlagRequestVersionRef.current.signed_agency) setSignedAgency(Boolean(nextOrders[0].signed_agency));
+    const nextOrder = nextOrders[0];
+    const nextOrderId = nextOrder?.id;
+    if (prospectMergeOnlyRef.current && nextOrder) {
+      if (signatureVersions.signed_patient === commercialFlagRequestVersionRef.current.signed_patient) setSignedPatient(Boolean(nextOrder.signed_patient));
+      if (signatureVersions.signed_agency === commercialFlagRequestVersionRef.current.signed_agency) setSignedAgency(Boolean(nextOrder.signed_agency));
+    }
+    if (nextOrder) {
+      if (signatureVersions.prepayment_required === commercialFlagRequestVersionRef.current.prepayment_required) setPrepayment(Boolean(nextOrder.prepayment_required));
+      if (signatureVersions.prepayment_amount === commercialFlagRequestVersionRef.current.prepayment_amount) setPrepaymentAmount(String(nextOrder.prepayment_amount ?? ""));
+      if (signatureVersions.prepayment_due_at === commercialFlagRequestVersionRef.current.prepayment_due_at) setPrepaymentDeadline(localDeadline(nextOrder.prepayment_due_at));
     }
     const nextQuote = nextQuotes.find((item) => !nextOrderId || item.order_id === nextOrderId);
     setPaidAmount(nextQuote ? String(nextQuote.paid_amount ?? "") : "");
@@ -3552,6 +3566,9 @@ export function LeadWizard({
     && requiredPrepayment <= quoteTotal + 0.005
   );
   const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
+  const prepaymentInvoiceHref = quote?.patient_id && order?.id
+    ? `/invoices?patient=${encodeURIComponent(quote.patient_id)}&order=${encodeURIComponent(order.id)}&quote=${encodeURIComponent(quote.id)}&invoice_type=advance&create=1`
+    : null;
   const clientQuoteAndPrepaymentReady = Boolean(acceptedQuote);
   const serverQuoteAccepted = readinessChecks.get("quote_accepted");
   const serverPrepaymentReady = readinessChecks.get("prepayment_ready");
@@ -4989,6 +5006,11 @@ ${serviceCommentLines.join("\n")}`
     try {
       if (existingOrderId) {
         const saved = await updateOrderCommercialBasis(existingOrderId, patchValue);
+        flagKeys.forEach((key) => {
+          if (commercialFlagRequestVersionRef.current[key] === requestVersions.get(key)) {
+            commercialFlagRequestVersionRef.current[key] += 1;
+          }
+        });
         setOrders((current) => current.map((item) => (
           item.id === existingOrderId ? { ...item, ...patchValue, prepayment_due_at: saved.prepayment_due_at } : item
         )));
@@ -6284,6 +6306,7 @@ ${serviceCommentLines.join("\n")}`
                           onDownload={(document) => void downloadDocument(document)}
                           onSign={(document, kind) => void signDocument(document.id, kind)}
                           onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                          onChanged={() => { void refreshDocumentsState(); }}
                         />
                       </div>
                     ) : null}
@@ -6676,6 +6699,7 @@ ${serviceCommentLines.join("\n")}`
                     onDownload={(document) => void downloadDocument(document)}
                     onSign={(document, kind) => void signDocument(document.id, kind)}
                     onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                    onChanged={() => { void refreshDocumentsState(); }}
                   />
                 </Section>
               ) : null}
@@ -6708,6 +6732,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
                 </Section>
               </div>
@@ -6804,6 +6829,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
                 </Section>
               </div>
@@ -6828,6 +6854,7 @@ ${serviceCommentLines.join("\n")}`
                   onOpen={(document) => void openOrDownloadDocument(document)}
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
               </Section>
 
@@ -6879,6 +6906,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document, kind) => void signDocument(document.id, kind)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
               </Section>
               {supplementaryDocuments.length > 0 ? (
@@ -6893,6 +6921,7 @@ ${serviceCommentLines.join("\n")}`
                     onOpen={(document) => void openOrDownloadDocument(document)}
                     onDownload={(document) => void downloadDocument(document)}
                     onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                    onChanged={() => { void refreshDocumentsState(); }}
                   />
                 </Section>
               ) : null}
@@ -7246,6 +7275,7 @@ ${serviceCommentLines.join("\n")}`
                   onDownload={(document) => void downloadDocument(document)}
                   onSign={(document) => void signContract(document.id)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />}
                 {renderCommercialDocumentError("framework_contract")}
                 </Section>
@@ -7409,6 +7439,7 @@ ${serviceCommentLines.join("\n")}`
                   onOpen={(document) => void openOrDownloadDocument(document)}
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
                 {isRepeatIntake && commercialDocuments.single_order.length > 0 && readinessChecks.get("order_document_generated") === false ? <Banner tone="warning">{tx("Заказ изменён. Создайте актуальную версию документа и подтвердите подписи заново.", "Der Auftrag wurde geändert. Erstellen Sie die aktuelle Dokumentversion und bestätigen Sie die Unterschriften erneut.")}</Banner> : null}
                 {renderCommercialDocumentError("single_order")}
@@ -7638,17 +7669,34 @@ ${serviceCommentLines.join("\n")}`
                     </Field>
                   ) : null}
                   <Field className="w-full sm:w-64" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
-                    <Input
-                      className={cn(inputClass, "font-mono tabular-nums")}
-                      inputMode="decimal"
-                      min="0"
-                      max={quote ? quoteTotal : undefined}
-                      step="0.01"
-                      value={paidAmount}
-                      readOnly
-                      disabled={!prepayment || isBusy}
-                      placeholder="0.00"
-                    />
+                    <div className="space-y-2">
+                      <Input
+                        className={cn(inputClass, "font-mono tabular-nums")}
+                        inputMode="decimal"
+                        min="0"
+                        max={quote ? quoteTotal : undefined}
+                        step="0.01"
+                        value={paidAmount}
+                        readOnly
+                        disabled={!prepayment || isBusy}
+                        placeholder="0.00"
+                      />
+                      {prepayment ? <p className="text-xs leading-5 text-muted-foreground">{tx(
+                        "Сумма обновляется из оплат авансового счёта.",
+                        "Der Betrag wird aus den Zahlungen der Vorauszahlungsrechnung übernommen.",
+                      )}</p> : null}
+                      {prepaymentInvoiceHref ? (
+                        <StaffLink
+                          to={prepaymentInvoiceHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full justify-center")}
+                        >
+                          <ReceiptText aria-hidden="true" className="size-3.5" />
+                          {tx("Внести предоплату", "Vorauszahlung erfassen")}
+                        </StaffLink>
+                      ) : null}
+                    </div>
                   </Field>
                   {!acceptedQuote ? (
                     <Button
@@ -7735,6 +7783,7 @@ ${serviceCommentLines.join("\n")}`
                   onOpen={(document) => void openOrDownloadDocument(document)}
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
                 {isRepeatIntake && commercialDocuments.order_cost_estimate.length > 0 && readinessChecks.get("order_cost_estimate_document_generated") === false ? <Banner tone="warning">{tx("Смета к заказу устарела. Создайте актуальную версию.", "Der Kostenvoranschlag zum Auftrag ist veraltet. Erstellen Sie eine aktuelle Version.")}</Banner> : null}
                 {renderCommercialDocumentError("order_cost_estimate")}
@@ -7768,6 +7817,7 @@ ${serviceCommentLines.join("\n")}`
                   onOpen={(document) => void openOrDownloadDocument(document)}
                   onDownload={(document) => void downloadDocument(document)}
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                  onChanged={() => { void refreshDocumentsState(); }}
                 />
                 {renderCommercialDocumentError("cost_estimate")}
                 </Section>
@@ -8649,7 +8699,7 @@ ${serviceCommentLines.join("\n")}`
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30">
             {previewedDocument && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
               <div className="shrink-0 px-3 pt-3">
-                <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} onDone={() => { void refreshDocumentsState(); }} />
+                <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} signed={previewDocumentSigned} onDone={() => { void refreshDocumentsState(); }} />
               </div>
             ) : null}
             {documentPreview?.kind === "image" ? (

@@ -139,6 +139,7 @@ import type {
   InvoicePaymentTransaction,
   InvoiceRefundTransaction,
   InvoiceStatus,
+  InvoiceType,
   OrderOption,
   PayerForm,
   PatientOption,
@@ -328,10 +329,16 @@ type InvoiceUiAction =
   | { type: "patch"; value: Partial<InvoiceUiState> }
   | { type: "update"; updater: (state: InvoiceUiState) => InvoiceUiState };
 
-function createInvoiceUiState(initialQuoteId = ""): InvoiceUiState {
+type InvoiceCreateSeed = {
+  quoteId: string;
+  invoiceType: InvoiceType;
+  open: boolean;
+};
+
+function createInvoiceUiState(seed: InvoiceCreateSeed): InvoiceUiState {
   return {
-    createOpen: false,
-    createForm: blankCreateForm(initialQuoteId),
+    createOpen: seed.open,
+    createForm: { ...blankCreateForm(seed.quoteId), invoiceType: seed.invoiceType },
     createBusy: false,
     createError: null,
     statusForm: { status: "draft", dueDate: "", notes: "" },
@@ -628,6 +635,11 @@ function useStaffInvoicesPageContent() {
   const initialOrderId = searchParams.get("order") ?? "";
   const initialQuoteId = searchParams.get("quote") ?? "";
   const initialInvoiceId = searchParams.get("invoice") ?? "";
+  const requestedInvoiceType = searchParams.get("invoice_type") as InvoiceType | null;
+  const initialInvoiceType = requestedInvoiceType && INVOICE_TYPES.includes(requestedInvoiceType)
+    ? requestedInvoiceType
+    : "final";
+  const initialCreateOpen = searchParams.get("create") === "1";
   const initialPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
 
   const [filters, setFilters] = useState<Filters>({ ...DEFAULT_FILTERS, patientId: initialPatientId, orderId: initialOrderId, quoteId: initialQuoteId });
@@ -775,7 +787,11 @@ function useStaffInvoicesPageContent() {
       dunningDialogOpen,
     },
     dispatchInvoiceUiState,
-  ] = useReducer(invoiceUiReducer, initialQuoteId, createInvoiceUiState);
+  ] = useReducer(invoiceUiReducer, {
+    quoteId: initialQuoteId,
+    invoiceType: initialInvoiceType,
+    open: initialCreateOpen,
+  }, createInvoiceUiState);
   const setInvoiceUiField = <K extends keyof InvoiceUiState>(
     field: K,
     value: SetStateAction<InvoiceUiState[K]>,
@@ -2416,7 +2432,8 @@ function useStaffInvoicesPageContent() {
         busy={createBusy}
         dirty={hasFormChanges(createForm, {
           ...blankCreateForm(filters.quoteId),
-          ...createInvoiceLineSelection(quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [], "final"),
+          invoiceType: createForm.invoiceType,
+          ...createInvoiceLineSelection(quotes.find((quote) => quote.id === filters.quoteId)?.line_items ?? [], createForm.invoiceType),
         })}
         optionsBusy={optionsBusy}
         error={createError}

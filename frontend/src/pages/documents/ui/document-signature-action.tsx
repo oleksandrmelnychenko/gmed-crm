@@ -20,19 +20,20 @@ type Props = {
   title: string;
   iconOnly?: boolean;
   disabled?: boolean;
+  signed?: boolean;
   onDone?: () => void;
 } & ({ documentId: string; scope?: never } | { documentId?: never; scope: DocumentScope });
 
 // Opening a dialog is read-only. The existing signing API remains the authority
 // for document ACLs, PDF eligibility and permission to send invitations.
-export function DocumentSignatureAction({ documentId, scope, title, iconOnly, disabled, onDone }: Props) {
+export function DocumentSignatureAction({ documentId, scope, title, iconOnly, disabled, signed = false, onDone }: Props) {
   const { user } = useAuth();
   const { lang } = useLang();
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const changed = useRef(false);
   const summary = useSignatureSummary(user && ["ceo", "patient_manager", "it_admin"].includes(user.role) ? user.id : undefined, documentId);
-  const presentation = signaturePresentation(summary, lang);
+  const presentation = signaturePresentation(summary, lang, signed);
   if (!user || !["ceo", "patient_manager", "it_admin"].includes(user.role)) return null;
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
@@ -42,7 +43,7 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
       type="button" variant={iconOnly ? "ghost" : "outline"} size={iconOnly ? "icon-sm" : "sm"}
       title={presentation.label} aria-label={`${label}: ${title}`} disabled={disabled}
       aria-description={summary ? presentation.label : undefined}
-      className={presentation.className} data-signature-status={summary?.status ?? "none"}
+      className={presentation.className} data-signature-status={signed ? "document-signed" : summary?.status ?? "none"}
       data-document-signature-id={documentId}
       onClick={event => { event.stopPropagation(); setOpen(true); }}
       onKeyDown={event => event.stopPropagation()}
