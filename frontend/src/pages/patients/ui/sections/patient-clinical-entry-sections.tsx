@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -642,122 +644,169 @@ export function PatientMedicationTable({
   tx: Bilingual;
 }) {
   const sections = groupedMedicationItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
-  const columnCount = canManage ? 12 : 11;
-  const headCell = "px-2.5 py-2 text-xs font-medium text-muted-foreground";
-  const headDoseCell = "px-1.5 py-2 text-center text-xs font-medium text-muted-foreground";
-  const bodyCell = "break-words px-2.5 py-2.5 align-middle leading-snug text-foreground";
-  const bodyDoseCell = "px-1.5 py-2.5 text-center align-middle font-mono tabular-nums text-foreground";
   const dose = (value: string | null) => value?.trim() ?? "";
-  const doseValue = (value: string | null) => {
-    const normalized = dose(value);
-    return normalized || <span aria-hidden="true" className="text-muted-foreground/35">—</span>;
-  };
+  const rows = sections.flatMap((section) => section.rows.map((row, sectionIndex) => ({
+    ...row,
+    groupLabel: sectionIndex === 0 && section.label && section.key !== "dauer" ? section.label : null,
+  })));
+  type MedicationTableRow = (typeof rows)[number];
+
+  const columns: ColumnDef<MedicationTableRow>[] = [
+    {
+      id: "substance",
+      label: tx("Действующее вещество", "Wirkstoff"),
+      accessor: (row) => row.item.wirkstoff,
+      width: 180,
+      cellClassName: "whitespace-normal",
+      render: (row) => (
+        <div className="min-w-0">
+          {row.groupLabel ? (
+            <Badge variant="outline" className="mb-1 max-w-full truncate border-violet-200 bg-violet-50 text-[10px] text-violet-700">
+              {row.groupLabel}
+            </Badge>
+          ) : null}
+          <span className="block line-clamp-2 font-medium" title={row.item.wirkstoff ?? undefined}>
+            {row.item.wirkstoff || "—"}
+          </span>
+        </div>
+      ),
+    },
+    {
+      id: "trade_name",
+      label: tx("Торговое название", "Handelsname"),
+      accessor: (row) => row.item.handelsname,
+      width: 180,
+      cellClassName: "whitespace-normal",
+      render: (row) => {
+        const ended = medicationHasEnded(row.item);
+        return (
+          <div className="min-w-0">
+            <span className="block line-clamp-2 font-medium" title={row.item.handelsname ?? undefined}>
+              {row.item.handelsname || tx("Без названия", "Ohne Namen")}
+            </span>
+            {row.item.einnahme_bis ? (
+              <span className={cn(
+                "mt-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide",
+                ended ? "text-rose-700" : "text-emerald-700",
+              )}>
+                {ended ? tx("Приём завершён", "Einnahme beendet") : tx("Приём до", "Einnahme bis")}{" "}
+                {row.item.einnahme_bis.slice(0, 10)}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      id: "strength",
+      label: tx("Дозировка", "Stärke"),
+      accessor: (row) => row.item.staerke,
+      width: 100,
+      render: (row) => <span className="font-mono tabular-nums">{row.item.staerke || "—"}</span>,
+    },
+    {
+      id: "form",
+      label: tx("Форма", "Form"),
+      accessor: (row) => darreichungsformLabel(row.item.form),
+      width: 140,
+      cellClassName: "whitespace-normal",
+      render: (row) => {
+        const label = darreichungsformLabel(row.item.form);
+        return <span className="line-clamp-2" title={label}>{label || "—"}</span>;
+      },
+    },
+    ...([
+      ["morning", tx("Утро", "Morgens"), "dose_morgens"],
+      ["noon", tx("День", "Mittags"), "dose_mittags"],
+      ["evening", tx("Вечер", "Abends"), "dose_abends"],
+      ["night", tx("Ночь", "Zur Nacht"), "dose_nachts"],
+    ] as const).map(([id, label, field]) => ({
+      id,
+      label,
+      accessor: (row: MedicationTableRow) => dose(row.item[field]),
+      align: "right" as const,
+      width: 72,
+      render: (row: MedicationTableRow) => (
+        <span className="font-mono tabular-nums">
+          {row.item.on_hold ? <span aria-hidden className="text-muted-foreground/35">—</span> : dose(row.item[field]) || "—"}
+        </span>
+      ),
+    })),
+    {
+      id: "unit",
+      label: tx("Ед.", "Einheit"),
+      accessor: (row) => row.item.einheit,
+      width: 86,
+      render: (row) => row.item.einheit || "—",
+    },
+    {
+      id: "instructions",
+      label: tx("Указания", "Hinweise"),
+      accessor: (row) => [row.item.hold_note, row.item.hinweis, attributionLabel(row.item)].filter(Boolean).join(" "),
+      width: 320,
+      cellClassName: "whitespace-normal",
+      render: (row) => {
+        const attribution = attributionLabel(row.item);
+        const instructions = [row.item.hold_note, row.item.hinweis].filter(Boolean).join(" · ");
+        const holdPeriod = [
+          row.item.hold_from ? `${tx("с", "seit")} ${row.item.hold_from.slice(0, 10)}` : "",
+          row.item.hold_until ? `${tx("до", "bis")} ${row.item.hold_until.slice(0, 10)}` : "",
+        ].filter(Boolean).join(" ");
+        return (
+          <div className="min-w-0">
+            {row.item.on_hold ? (
+              <Badge variant="outline" className="mb-1 max-w-full truncate border-amber-200 bg-amber-50 text-[10px] text-amber-800">
+                {tx("На холд", "Auf Hold")}{holdPeriod ? ` ${holdPeriod}` : ""}
+              </Badge>
+            ) : null}
+            <span className={cn("block", row.item.on_hold ? "line-clamp-1" : "line-clamp-2")} title={instructions || undefined}>
+              {instructions || "—"}
+            </span>
+            {attribution ? (
+              <span className="mt-0.5 block line-clamp-1 text-[10px] leading-snug text-muted-foreground" title={attribution}>
+                {attribution}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      id: "indication",
+      label: tx("Показание", "Grund"),
+      accessor: (row) => row.item.grund,
+      width: 180,
+      cellClassName: "whitespace-normal",
+      render: (row) => <span className="line-clamp-2" title={row.item.grund ?? undefined}>{row.item.grund || "—"}</span>,
+    },
+  ];
 
   return (
-    <div className="overflow-x-auto bg-card">
-      <table className="w-full min-w-[1040px] border-collapse text-left text-xs">
-        <thead className="border-b border-border/40 bg-card">
-          <tr>
-            <th scope="col" className={headCell}>{tx("Действующее вещество", "Wirkstoff")}</th>
-            <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
-            <th scope="col" className={headCell}>{tx("Дозировка", "Stärke")}</th>
-            <th scope="col" className={headCell}>{tx("Форма", "Form")}</th>
-            <th scope="col" className={headDoseCell}>{tx("Утро", "Morgens")}</th>
-            <th scope="col" className={headDoseCell}>{tx("День", "Mittags")}</th>
-            <th scope="col" className={headDoseCell}>{tx("Вечер", "Abends")}</th>
-            <th scope="col" className={headDoseCell}>{tx("Ночь", "Zur Nacht")}</th>
-            <th scope="col" className={headCell}>{tx("Ед.", "Einheit")}</th>
-            <th scope="col" className={headCell}>{tx("Указания", "Hinweise")}</th>
-            <th scope="col" className={headCell}>{tx("Показание", "Grund")}</th>
-            {canManage ? (
-              <th scope="col" className="w-[72px] px-1 py-2 text-right text-xs font-medium text-muted-foreground">
-                <span className="sr-only">{tx("Действия", "Aktionen")}</span>
-              </th>
-            ) : null}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/30">
-          {sections.map((section) => (
-            <Fragment key={section.key}>
-              {section.label && section.key !== "dauer" ? (
-                <tr>
-                  <td colSpan={columnCount} className="bg-muted/55 px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground">
-                    {section.label}
-                  </td>
-                </tr>
-              ) : null}
-              {section.rows.map(({ item, index }) => {
-                const attribution = attributionLabel(item);
-                const ended = medicationHasEnded(item);
-                return (
-                  <tr
-                    key={item.id ?? index}
-                    className={cn(
-                      "transition-colors",
-                      ended
-                        ? "bg-rose-50/70"
-                        : item.on_hold
-                          ? "bg-amber-50/70"
-                        : "even:bg-muted/20 hover:bg-muted/45",
-                    )}
-                  >
-                    <td className={cn(bodyCell, "whitespace-pre-line font-medium")}>{item.wirkstoff || "—"}</td>
-                    <td className={bodyCell}>
-                      {item.handelsname || tx("Без названия", "Ohne Namen")}
-                      {item.einnahme_bis ? (
-                        <span className={cn(
-                          "mt-0.5 block text-[10px] font-semibold uppercase tracking-wide",
-                          ended ? "text-rose-700" : "text-emerald-700",
-                        )}>
-                          {ended
-                            ? tx("Приём завершён", "Einnahme beendet")
-                            : tx("Приём до", "Einnahme bis")}{" "}
-                          {item.einnahme_bis.slice(0, 10)}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
-                    <td className={cn(bodyCell, "whitespace-pre-line")}>{darreichungsformLabel(item.form)}</td>
-                    {item.on_hold ? (
-                      <td colSpan={4} className="px-2.5 py-2 align-top text-left text-amber-800">
-                        <span className="block text-[11px] font-semibold">
-                          {tx("На холд", "Auf Hold")}
-                          {item.hold_from ? ` ${tx("с", "seit")} ${item.hold_from.slice(0, 10)}` : ""}
-                          {item.hold_until ? ` ${tx("до", "bis")} ${item.hold_until.slice(0, 10)}` : ""}
-                        </span>
-                        {item.hold_note ? (
-                          <span className="mt-0.5 block break-words text-[10px] font-normal">
-                            {item.hold_note}
-                          </span>
-                        ) : null}
-                      </td>
-                    ) : (
-                      <>
-                        <td className={bodyDoseCell}>{doseValue(item.dose_morgens)}</td>
-                        <td className={bodyDoseCell}>{doseValue(item.dose_mittags)}</td>
-                        <td className={bodyDoseCell}>{doseValue(item.dose_abends)}</td>
-                        <td className={bodyDoseCell}>{doseValue(item.dose_nachts)}</td>
-                      </>
-                    )}
-                    <td className={cn(bodyCell, "whitespace-nowrap")}>{item.einheit || ""}</td>
-                    <td className={bodyCell}>
-                      {item.hinweis ? <span className="whitespace-pre-line break-words">{item.hinweis}</span> : null}
-                      {attribution ? (
-                        <span className="mt-1 block max-w-full break-words text-[10px] leading-snug text-muted-foreground">
-                          {attribution}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className={bodyCell}>{item.grund || ""}</td>
-                    {canManage ? <td className="px-2 py-2 text-right align-top">{renderActions(item, index)}</td> : null}
-                  </tr>
-                );
-              })}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      rows={rows}
+      columns={columns}
+      rowId={(row) => row.item.id ?? `medication-${row.index}`}
+      density="compact"
+      rowHeightOverrides={{ compact: 76 }}
+      disableRowHover
+      rowAccent={(row) => medicationHasEnded(row.item)
+        ? "bg-rose-500"
+        : row.item.on_hold
+          ? "bg-amber-500"
+          : null}
+      rowBackground={(row) => medicationHasEnded(row.item)
+        ? "color-mix(in oklch, var(--color-rose-500) 7%, var(--card))"
+        : row.item.on_hold
+          ? "color-mix(in oklch, var(--color-amber-500) 9%, var(--card))"
+          : null}
+      rowActions={canManage ? (row) => renderActions(row.item, row.index) : undefined}
+      rowActionsLabel={tx("Действия", "Aktionen")}
+      rowActionsWidth={104}
+      mobilePrimaryColumnId="trade_name"
+      mobileDetailColumnIds={["substance", "strength", "form", "instructions", "indication"]}
+      storageKey="patient-clinical-medications"
+      className="w-full min-w-0 rounded-none border-0 shadow-none"
+    />
   );
 }
 

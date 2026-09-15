@@ -57,6 +57,34 @@ final result: passed
 
 ---
 
+# Design QA — Lead wizard medication table
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-b24c281f-7b70-449b-9af4-37bbe215cd9a.png` (2048 × 1335 px).
+- Implementation capture: Codex in-app browser capture from `http://127.0.0.1:5173/leads?lead=ad7f4816-b2aa-4476-9715-14457dc2dbf7&view=wizard` at the 2048 × 1335 px reference viewport.
+- State: `Медицинская характеристика`, one medication on hold, Russian locale.
+
+## Comparison
+
+- The local medication grid now uses the shared `DataTable` surface used by the rest of GMED: standard header typography, column separators and resizing, row dividers, pinned action column, and horizontal overflow.
+- The section header, medication count, and orange `Добавить` action retain the same hierarchy as the source.
+- Medication content remains visible in compact rows, including substance, trade name, intake end, strength, form, dose schedule, hold period and note, clinical attribution, indication, and actions.
+- Held and ended medications use the shared row accent and background APIs. The pause, edit, and delete controls remain grouped in the pinned action column.
+- Mobile output uses the shared responsive medication card layout with the trade name as the primary value and the main clinical fields as details.
+
+## Verification
+
+- The source and implementation were compared in the in-app browser at the same 2048 × 1335 desktop viewport, then rechecked at the default desktop viewport.
+- The accessibility tree exposes the section as a table with named columns, resize handles, one row, and all three row actions.
+- No browser console errors or warnings were recorded.
+- Targeted TypeScript, ESLint, and medication integration tests passed.
+- No clipped controls, overlap, layout shift, or actionable P0/P1/P2 visual issue remains.
+
+final result: passed
+
+---
+
 # Design QA — Lead order specialization scrolling
 
 ## Evidence
