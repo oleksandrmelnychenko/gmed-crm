@@ -78,7 +78,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [selectedId, setSelectedId] = useState(documentId ?? "");
   const [loading, setLoading] = useState(!documentId);
   const [error, setError] = useState(false);
-  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [relatedPreview, setRelatedPreview] = useState<{ id: string; kind: "signing" | "review" } | null>(null);
   const [previewedDocuments, setPreviewedDocuments] = useState<string[]>([]);
   const handlePreviewReady = useCallback((id: string) => {
     if (id) setPreviewedDocuments(current => current.includes(id) ? current : [...current, id]);
@@ -98,7 +98,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const availableResult = resultPreview ?? latestResult;
   const displayedResult = showOriginal ? null : availableResult;
   const originalId = composingNew ? selectedId : availableResult?.source_document_id ?? selectedId;
-  const previewId = attachmentPreview ?? displayedResult?.result_document_id ?? (showOriginal ? originalId : selectedId);
+  const previewId = relatedPreview?.id ?? displayedResult?.result_document_id ?? (showOriginal ? originalId : selectedId);
   const patientId = scope?.patientId;
   const orderId = scope?.orderId;
   const leadId = scope?.leadId;
@@ -123,10 +123,10 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
-        <AdminSectionTitle>{attachmentPreview ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
-        {attachmentPreview ? <Button type="button" size="sm" variant="outline" onClick={() => setAttachmentPreview(null)}>{tx("К основному документу", "Zum Hauptdokument")}</Button> : null}
-        {selectedId && !attachmentPreview ? <span className="min-w-0 break-words text-xs text-muted-foreground">{selectedTitle}</span> : null}
-        {availableResult && !attachmentPreview ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
+        <AdminSectionTitle>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Второй документ для подписи", "Zweites Dokument zur Unterschrift") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
+        {relatedPreview ? <Button type="button" size="sm" variant="outline" onClick={() => setRelatedPreview(null)}>{tx("К основному документу", "Zum Hauptdokument")}</Button> : null}
+        {selectedId && !relatedPreview ? <span className="min-w-0 break-words text-xs text-muted-foreground">{selectedTitle}</span> : null}
+        {availableResult && !relatedPreview ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
           <Button type="button" size="sm" variant={displayedResult ? "outline" : "default"} aria-pressed={!displayedResult} onClick={() => setShowOriginal(true)}>{tx("Исходный PDF", "Original-PDF")}</Button>
           <Button type="button" size="sm" variant={displayedResult ? "default" : "outline"} aria-pressed={!!displayedResult} onClick={() => setShowOriginal(false)}>{availableResult.test_mode ? "TEST · " : ""}{tx("Подписанный PDF", "Signiertes PDF")}</Button>
         </div> : null}
@@ -140,7 +140,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setAttachmentPreview(null); setPreviewedDocuments([]); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setRelatedPreview(null); setPreviewedDocuments([]); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
@@ -153,7 +153,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
       {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} onReady={handlePreviewReady} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewAttachment={setAttachmentPreview} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setAttachmentPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setAttachmentPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewRelated={(id, kind) => setRelatedPreview({ id, kind })} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setRelatedPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setRelatedPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
       refreshSignatureSummaries();
       onDone?.();

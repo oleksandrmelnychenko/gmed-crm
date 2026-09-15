@@ -35,6 +35,16 @@ pub(super) async fn list(
            UNION ALL
            SELECT result_document_id AS document_id, status, test_mode, result_document_id, created_at, id
            FROM document_signature_requests WHERE result_document_id = ANY($1)
+           UNION ALL
+           SELECT m.document_id, r.status, r.test_mode, COALESCE(m.result_document_id,r.result_document_id) AS result_document_id, r.created_at, r.id
+           FROM document_signature_requests r
+           JOIN document_signature_members m ON m.request_id=r.id
+           WHERE m.document_id = ANY($1)
+           UNION ALL
+           SELECT m.result_document_id AS document_id, r.status, r.test_mode, m.result_document_id, r.created_at, r.id
+           FROM document_signature_requests r
+           JOIN document_signature_members m ON m.request_id=r.id
+           WHERE m.result_document_id = ANY($1)
          ) requests ORDER BY document_id, created_at DESC, id DESC"
     ).bind(&ids).fetch_all(&state.db).await.map_err(db_error)?;
     let mut summaries = Vec::new();

@@ -212,7 +212,11 @@ pub(super) async fn suggested(
             client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
         }
     }
-    let mut signers = vec![client];
+    let mut signers = if policy == SignerPolicy::AgencyOnly {
+        Vec::new()
+    } else {
+        vec![client]
+    };
     if policy == SignerPolicy::ClientOnly {
         return Ok(signers);
     }

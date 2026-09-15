@@ -9957,7 +9957,10 @@ async fn fetch_document_row(
                    OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
                              WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
                    OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
-                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
+                             WHERE signature_attachment.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = d.id
+                                OR signature_member.result_document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -18880,7 +18883,10 @@ async fn list_documents(
                    OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
                              WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
                    OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
-                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
+                             WHERE signature_attachment.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = d.id
+                                OR signature_member.result_document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -19069,7 +19075,10 @@ async fn list_document_intake_queue(
                    OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
                              WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
                    OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
-                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
+                             WHERE signature_attachment.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = d.id
+                                OR signature_member.result_document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -19428,7 +19437,10 @@ async fn list_document_versions(
                    OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
                              WHERE signature_request.source_document_id = d.id OR signature_request.result_document_id = d.id)
                    OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
-                             WHERE signature_attachment.document_id = d.id)) AS deletion_protected,
+                             WHERE signature_attachment.document_id = d.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = d.id
+                                OR signature_member.result_document_id = d.id)) AS deletion_protected,
                   COALESCE((SELECT count(*)::bigint FROM documents dv WHERE dv.version_root_document_id = d.version_root_document_id), 1) AS version_count,
                   (SELECT dv.id FROM documents dv WHERE dv.replaces_document_id = d.id ORDER BY dv.created_at DESC LIMIT 1) AS superseded_by_document_id,
                   NOT EXISTS(
@@ -22505,6 +22517,9 @@ async fn delete_document_file(
                                 OR signature_request.result_document_id = protected_document.id)
                    OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
                              WHERE signature_attachment.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = protected_document.id
+                                OR signature_member.result_document_id = protected_document.id)
                  )
            )"#,
     )

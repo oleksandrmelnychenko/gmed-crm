@@ -2392,7 +2392,7 @@ async fn rejected_quote_can_be_deleted_but_accepted_quote_is_preserved() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
     assert_eq!(
-        body["error"],
+        body["message"],
         "Only draft, rejected, or expired quotes can be deleted"
     );
     let accepted_exists: bool =

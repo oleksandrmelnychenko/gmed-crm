@@ -307,6 +307,10 @@ type Draft = {
   costThreshold: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
+  providerReleaseConsent: boolean;
+  consentWhatsapp: boolean;
+  consentTelegram: boolean;
+  consentThreema: boolean;
 };
 
 export type { ServiceLine } from "@/pages/orders/model/order-service-line";
@@ -832,6 +836,12 @@ function autosavePayload(
       cost_threshold: draft.costThreshold,
       registration_country: draft.registrationCountry,
       passport_expiry: draft.passportExpiry,
+      document_consents: {
+        provider_release: draft.providerReleaseConsent,
+        whatsapp: draft.consentWhatsapp,
+        telegram: draft.consentTelegram,
+        threema: draft.consentThreema,
+      },
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
@@ -1408,6 +1418,7 @@ function applyPersistedClinicalProfile(
 }
 
 function draftFromLead(lead: LeadDetail): Draft {
+  const documentConsents = asRecord(lead.wizard_state?.["document_consents"]);
   const clinical = clinicalRowsFromLead(lead);
   return {
     firstName: lead.first_name ?? "",
@@ -1471,6 +1482,14 @@ function draftFromLead(lead: LeadDetail): Draft {
     costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
+    providerReleaseConsent: typeof documentConsents?.["provider_release"] === "boolean"
+      ? documentConsents["provider_release"] as boolean
+      : lead.consent_healthcare,
+    consentWhatsapp: typeof documentConsents?.["whatsapp"] === "boolean"
+      ? documentConsents["whatsapp"] as boolean
+      : Boolean(lead.whatsapp_consent),
+    consentTelegram: documentConsents?.["telegram"] === true,
+    consentThreema: documentConsents?.["threema"] === true,
   };
 }
 
@@ -1525,6 +1544,10 @@ function blankDraft(): Draft {
     costThreshold: "",
     privacyConsent: false,
     healthcareConsent: false,
+    providerReleaseConsent: false,
+    consentWhatsapp: false,
+    consentTelegram: false,
+    consentThreema: false,
   };
 }
 
@@ -4794,9 +4817,11 @@ export function LeadWizard({
             ? {
                 consent_privacy: draft.privacyConsent,
                 consent_healthcare: draft.healthcareConsent,
-                consent_provider_release: draft.healthcareConsent,
-                consent_email: Boolean(lead?.email_consent),
-                consent_whatsapp: Boolean(lead?.whatsapp_consent),
+                consent_provider_release: draft.providerReleaseConsent,
+                consent_email: Boolean(draft.email.trim()),
+                consent_whatsapp: draft.consentWhatsapp,
+                consent_telegram: draft.consentTelegram,
+                consent_threema: draft.consentThreema,
               }
             : {}),
           ...(templateId === "enhanced_due_diligence" && amlRequired
@@ -6846,9 +6871,21 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
-                <div>
+                <div className="space-y-1 rounded-lg border border-border/70 bg-muted/10 px-3 py-2">
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
+                  <ToggleRow checked={draft.providerReleaseConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("providerReleaseConsent", checked)} label={tx("Разрешена передача данных медицинским учреждениям и врачам", "Datenübermittlung an medizinische Einrichtungen und Ärztinnen/Ärzte ist erlaubt")} />
+                </div>
+                <div className="rounded-lg border border-border/70 bg-muted/10 px-3 py-3">
+                  <div className="mb-1 text-sm font-semibold text-foreground">
+                    {tx("Каналы связи в документе", "Kommunikationswege im Dokument")}
+                  </div>
+                  <ToggleRow checked={Boolean(draft.email.trim())} disabled withDivider={false} onChange={() => undefined} label={draft.email.trim()
+                    ? tx("E-Mail — отмечен автоматически", "E-Mail – automatisch ausgewählt")
+                    : tx("E-Mail — добавьте адрес в данных клиента", "E-Mail – Adresse in den Kundendaten ergänzen")} />
+                  <ToggleRow checked={draft.consentWhatsapp} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentWhatsapp", checked)} label="WhatsApp" />
+                  <ToggleRow checked={draft.consentTelegram} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentTelegram", checked)} label="Telegram" />
+                  <ToggleRow checked={draft.consentThreema} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentThreema", checked)} label="Threema" />
                 </div>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">

@@ -89,6 +89,7 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
 enum SignerPolicy {
     Flexible,
     ClientOnly,
+    AgencyOnly,
     BothParties,
 }
 
@@ -97,6 +98,7 @@ impl SignerPolicy {
         match self {
             Self::Flexible => "flexible",
             Self::ClientOnly => "client_only",
+            Self::AgencyOnly => "agency_only",
             Self::BothParties => "both_parties",
         }
     }
@@ -106,6 +108,8 @@ impl SignerPolicy {
             Self::Flexible => Ok(()),
             Self::ClientOnly if signers.iter().all(|signer| signer.role == "client") => Ok(()),
             Self::ClientOnly => Err("patient_signature_only"),
+            Self::AgencyOnly if signers.iter().all(|signer| signer.role == "agency") => Ok(()),
+            Self::AgencyOnly => Err("agency_signature_only"),
             Self::BothParties
                 if signers.iter().any(|signer| signer.role == "client")
                     && signers.iter().any(|signer| signer.role == "agency") =>
@@ -127,6 +131,12 @@ fn signer_policy_for_parts(
         Some("framework_contract" | "single_order")
     ) {
         return SignerPolicy::BothParties;
+    }
+    if matches!(generated_template_id, Some("enhanced_due_diligence"))
+        || matches!(compliance_kind, Some("enhanced_due_diligence"))
+        || art == "enhanced_due_diligence"
+    {
+        return SignerPolicy::AgencyOnly;
     }
     if matches!(
         generated_template_id,
@@ -201,7 +211,7 @@ async fn list(
         .is_ok();
     let signer_policy = signer_policy(&source);
     // A signed version displays the history of its source as well.
-    let rows = sqlx::query("SELECT r.*, EXISTS(SELECT 1 FROM document_signature_attachments a WHERE a.request_id=r.id) AS has_review_attachment FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 ORDER BY created_at DESC LIMIT 30")
+    let rows = sqlx::query("SELECT r.*, EXISTS(SELECT 1 FROM document_signature_attachments a WHERE a.request_id=r.id) AS has_review_attachment FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 OR EXISTS(SELECT 1 FROM document_signature_members m WHERE m.request_id=r.id AND (m.document_id=$1 OR m.result_document_id=$1)) ORDER BY created_at DESC LIMIT 30")
         .bind(id).fetch_all(&state.db).await.map_err(db_error)?;
     let provider = connection::current_provider(&state)
         .await
@@ -216,12 +226,18 @@ async fn list(
     } else {
         Value::Null
     };
+    let signing_package = if can_send {
+        package::signing_options(&state, &auth, &source).await?
+    } else {
+        Value::Null
+    };
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
         "signer_policy":signer_policy.as_str(),
         "suggested_signers":suggested_signers,
         "review_package":review_package,
+        "signing_package":signing_package,
         "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
 }
 
@@ -230,6 +246,7 @@ async fn list(
 struct CreateRequest {
     signers: Vec<Signer>,
     attachment_document_id: Option<Uuid>,
+    signing_document_id: Option<Uuid>,
 }
 
 async fn source_bytes(row: &PgRow) -> Result<Vec<u8>, &'static str> {
@@ -274,15 +291,25 @@ async fn create(
     signer_policy(&source)
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
-    let bytes = source_bytes(&source)
+    let source_pdf = source_bytes(&source)
         .await
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    let signing_member =
+        package::prepare_signing_member(&state, &auth, &source, body.signing_document_id).await?;
+    let bytes = package::merge_signing_pdfs(
+        &source_pdf,
+        signing_member
+            .as_ref()
+            .map(|member| member.bytes.as_slice()),
+    )
+    .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
     scan_upload_bytes(Some("source.pdf"), &bytes)
         .await
         .map_err(|_| error(StatusCode::UNPROCESSABLE_ENTITY, "signature_scan_failed"))?;
     let request_id = Uuid::new_v4();
     let source_hash = sha256(&bytes);
+    let primary_source_hash = sha256(&source_pdf);
     let mut title = invitation_title(
         id,
         &source.get::<String, _>("art"),
@@ -317,8 +344,29 @@ async fn create(
     if eligibility(&current).is_some() || context(&current) != context(&source) {
         return Err(error(StatusCode::CONFLICT, "document_changed"));
     }
-    let inserted = sqlx::query("INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,lease_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'submitting',now()+interval '5 minutes') ON CONFLICT DO NOTHING RETURNING id")
-        .bind(request_id).bind(id).bind(auth.user_id).bind(&source_hash).bind(context(&source))
+    let member_id = signing_member
+        .as_ref()
+        .map(|member| member.row.get::<Uuid, _>("id"));
+    let active_conflict: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM document_signature_requests r
+           WHERE r.status IN ('submitting','submission_unknown','pending')
+             AND (r.source_document_id=$1 OR r.source_document_id=$2 OR EXISTS(
+               SELECT 1 FROM document_signature_members m
+               WHERE m.request_id=r.id AND (m.document_id=$1 OR m.document_id=$2)
+             ))
+         )",
+    )
+    .bind(id)
+    .bind(member_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    if active_conflict {
+        return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
+    }
+    let inserted = sqlx::query("INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,primary_source_sha256,source_context,signers,provider_account,test_mode,status,lease_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'submitting',now()+interval '5 minutes') ON CONFLICT DO NOTHING RETURNING id")
+        .bind(request_id).bind(id).bind(auth.user_id).bind(&source_hash).bind(&primary_source_hash).bind(context(&source))
         .bind(json!(signers)).bind(&provider.account).bind(provider.test_mode)
         .fetch_optional(&mut *tx).await.map_err(db_error)?;
     if inserted.is_none() {
@@ -326,6 +374,9 @@ async fn create(
     }
     if let Some(attachment) = &attachment {
         package::persist(&mut tx, request_id, attachment).await?;
+    }
+    if let Some(member) = &signing_member {
+        package::persist_signing_member(&mut tx, request_id, member).await?;
     }
     tx.commit().await.map_err(db_error)?;
     state.audit_sender.try_send(audit::domain_event(
@@ -584,13 +635,30 @@ async fn archive(
     pdf: &[u8],
     report: &[u8],
 ) -> Result<(), &'static str> {
+    let request_id: Uuid = row.get("id");
     let (_, pdf_key, _) = documents::store_document_blob(pdf, "signed.pdf")
         .await
         .map_err(|_| "signature_storage_error")?;
+    let mut member_pdf_keys = Vec::new();
+    for document_id in package::signing_member_ids(state, request_id).await? {
+        match documents::store_document_blob(pdf, "signed-package.pdf").await {
+            Ok((_, key, _)) => member_pdf_keys.push((document_id, key)),
+            Err(_) => {
+                documents::remove_document_blob(&pdf_key).await;
+                for (_, key) in &member_pdf_keys {
+                    documents::remove_document_blob(key).await;
+                }
+                return Err("signature_storage_error");
+            }
+        }
+    }
     let report_key = match documents::store_document_blob(report, "signature-report.pdf").await {
         Ok((_, key, _)) => key,
         Err(_) => {
             documents::remove_document_blob(&pdf_key).await;
+            for (_, key) in &member_pdf_keys {
+                documents::remove_document_blob(key).await;
+            }
             return Err("signature_storage_error");
         }
     };
@@ -603,6 +671,7 @@ async fn archive(
         report,
         &pdf_key,
         &report_key,
+        &member_pdf_keys,
     )
     .await;
     // A failed COMMIT can have succeeded on PostgreSQL. Keep blobs on any database
@@ -610,6 +679,9 @@ async fn archive(
     if let Ok(false) = outcome {
         documents::remove_document_blob(&pdf_key).await;
         documents::remove_document_blob(&report_key).await;
+        for (_, key) in &member_pdf_keys {
+            documents::remove_document_blob(key).await;
+        }
     }
     outcome.map(|_| ())
 }
@@ -624,6 +696,7 @@ async fn archive_transaction(
     report: &[u8],
     pdf_key: &str,
     report_key: &str,
+    member_pdf_keys: &[(Uuid, String)],
 ) -> Result<bool, &'static str> {
     let id: Uuid = row.get("id");
     let source_id: Uuid = row.get("source_document_id");
@@ -639,11 +712,9 @@ async fn archive_transaction(
     };
     let source=sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
         .bind(source_id).fetch_one(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    let current = eligibility(&source).is_none()
-        && context(&source) == row.get::<Value, _>("source_context")
-        && source_bytes(&source)
-            .await
-            .is_ok_and(|bytes| sha256(&bytes) == row.get::<String, _>("source_sha256"));
+    let current = package::signing_sources_current_in_transaction(&mut tx, row, &source)
+        .await
+        .unwrap_or(false);
     let test_mode: bool = row.get("test_mode");
     let publish = current && !test_mode;
     let result_id = Uuid::new_v4();
@@ -674,6 +745,40 @@ async fn archive_transaction(
       FROM documents WHERE id=$1"#)
         .bind(source_id).bind(result_id).bind(prefix).bind(publish).bind(pdf.len() as i64).bind(pdf_key).bind(row.get::<Uuid,_>("requested_by"))
         .bind(verified.signed_at).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+    for (member_source_id, member_pdf_key) in member_pdf_keys {
+        let member_result_id = Uuid::new_v4();
+        sqlx::query(r#"INSERT INTO documents (
+            id,patient_id,lead_id,order_id,appointment_id,auto_name,original_filename,
+            art,category,status,visibility,is_medical,mime_type,file_size,storage_key,
+            klinik,ursprung,notes,generated_template_id,generated_bindings,generated_manual_text,
+            document_direction,document_variant,document_language,access_category,document_date,
+            source_person,source_institution,addressee_person,addressee_institution,
+            financial_status,payment_due_date,payment_date,payment_method,
+            version_root_document_id,replaces_document_id,version_number,uploaded_by,signed_at,signed_by)
+          SELECT $2,patient_id,lead_id,order_id,appointment_id,$3||auto_name,'signed-package.pdf',
+            CASE WHEN $4 THEN art ELSE 'signature_evidence' END,category,'active',
+            CASE WHEN $4 THEN visibility ELSE 'internal' END,is_medical,'application/pdf',$5,$6,
+            klinik,'electronic_signature_package',notes,CASE WHEN $4 THEN generated_template_id ELSE NULL END,
+            generated_bindings,generated_manual_text,document_direction,document_variant,document_language,
+            access_category,document_date,source_person,source_institution,addressee_person,addressee_institution,
+            financial_status,payment_due_date,payment_date,payment_method,
+            CASE WHEN $4 THEN version_root_document_id ELSE $2 END,CASE WHEN $4 THEN id ELSE NULL END,
+            CASE WHEN $4 THEN version_number+1 ELSE 1 END,$7,CASE WHEN $4 THEN $8::timestamptz ELSE NULL END,NULL
+          FROM documents WHERE id=$1"#)
+            .bind(member_source_id).bind(member_result_id).bind(prefix).bind(publish)
+            .bind(pdf.len() as i64).bind(member_pdf_key).bind(row.get::<Uuid,_>("requested_by"))
+            .bind(verified.signed_at).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        if publish {
+            sqlx::query("INSERT INTO provider_document_links(provider_id,document_id,linked_by) SELECT provider_id,$2,linked_by FROM provider_document_links WHERE document_id=$1 ON CONFLICT DO NOTHING")
+                .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        }
+        sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by,valid_from,valid_until) SELECT user_id,granted_for_role,resource_type,scope_type,$2,capability,effect,reason,granted_by,valid_from,valid_until FROM staff_user_access_rules WHERE resource_type='document' AND resource_id=$1 AND revoked_at IS NULL")
+            .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        sqlx::query("INSERT INTO staff_access_profile_rules(profile_id,resource_type,scope_type,resource_id,capability,effect,created_by) SELECT profile_id,resource_type,scope_type,$2,capability,effect,created_by FROM staff_access_profile_rules WHERE resource_type='document' AND resource_id=$1")
+            .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        sqlx::query("UPDATE document_signature_members SET result_document_id=$3 WHERE request_id=$1 AND document_id=$2")
+            .bind(id).bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+    }
     // Keep a verified live version in the provider cards that hold its source.
     // Test and stale evidence remains separate from those operational documents.
     if publish {

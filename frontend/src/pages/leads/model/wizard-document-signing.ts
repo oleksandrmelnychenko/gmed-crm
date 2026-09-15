@@ -2,12 +2,12 @@ import type { DocumentItem } from "@/pages/documents/model/types";
 
 const SIGNABLE_DOCUMENT_TYPES = new Set([
   "confidentiality_release",
-  "privacy_consents",
   "consent_data_release_child",
   "consent_data_release_single",
   "framework_contract",
   "single_order",
   "order_cost_estimate",
+  "enhanced_due_diligence",
 ]);
 
 type SigningDocument = Pick<DocumentItem,
@@ -25,7 +25,7 @@ export function canSignWizardDocument(document: SigningDocument): boolean {
 
   const art = document.art.trim().toLowerCase();
   if (SIGNABLE_DOCUMENT_TYPES.has(art)) return true;
-  if (["identity", "privacy_information", "enhanced_due_diligence", "cost_estimate"].includes(art)) return false;
+  if (["identity", "privacy_information", "cost_estimate"].includes(art)) return false;
 
   // Uploaded consents/contracts may have a verified compliance classification
   // rather than a generated template.

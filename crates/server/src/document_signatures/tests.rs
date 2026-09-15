@@ -77,6 +77,24 @@ fn contracts_still_require_both_signing_parties() {
     );
 }
 
+#[test]
+fn enhanced_due_diligence_requires_only_gmed_signature() {
+    assert_eq!(
+        signer_policy_for_parts(Some("enhanced_due_diligence"), None, "document"),
+        SignerPolicy::AgencyOnly
+    );
+    assert_eq!(
+        signer_policy_for_parts(None, Some("enhanced_due_diligence"), "document"),
+        SignerPolicy::AgencyOnly
+    );
+    let both = signers();
+    assert_eq!(SignerPolicy::AgencyOnly.validate(&both[1..]), Ok(()));
+    assert_eq!(
+        SignerPolicy::AgencyOnly.validate(&both),
+        Err("agency_signature_only")
+    );
+}
+
 fn provider(demo: bool) -> provider::Provider {
     provider::Provider::new(
         if demo {

@@ -9,17 +9,20 @@ const pdf = {
 
 describe("electronic signing in the lead wizard", () => {
   it.each([
-    "confidentiality_release", "privacy_consents", "framework_contract", "single_order", "order_cost_estimate",
+    "confidentiality_release", "framework_contract", "single_order", "order_cost_estimate", "enhanced_due_diligence",
   ])("keeps the action for %s", generated_template_id => {
     expect(canSignWizardDocument({ ...pdf, generated_template_id })).toBe(true);
   });
   it.each([
-    "identity", "privacy_information", "enhanced_due_diligence", "cost_estimate", "medical_report", "medication_plan", "free_document",
+    "identity", "privacy_information", "cost_estimate", "medical_report", "medication_plan", "free_document",
   ])("hides the action for %s, even with stale consent metadata", generated_template_id => {
     expect(canSignWizardDocument({ ...pdf, generated_template_id, compliance_kind: "dsgvo" })).toBe(false);
   });
   it.each(["consent_data_release_child", "consent_data_release_single"])("supports the %s data consent variant", generated_template_id => {
     expect(canSignWizardDocument({ ...pdf, generated_template_id })).toBe(true);
+  });
+  it("sends the generated adult privacy consent only inside the confidentiality package", () => {
+    expect(canSignWizardDocument({ ...pdf, generated_template_id: "privacy_consents" })).toBe(false);
   });
   it("recognizes explicitly classified uploads, but not an arbitrary PDF", () => {
     expect(canSignWizardDocument({ ...pdf, art: "order_cost_estimate" })).toBe(true);

@@ -1,11 +1,20 @@
 //! Prepare a non-signing attachment before inviting anyone. Each remote mutation
 //! has a durable phase; ambiguous writes are reconciled, never blindly replayed.
 use super::*;
+use printpdf::{PdfDocument, PdfParseOptions, PdfSaveOptions};
 
 pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
     match template {
         Some("framework_contract") => Some("privacy_information"),
+        Some("confidentiality_release") => Some("privacy_information"),
         Some("order_cost_estimate") => Some("cost_estimate"),
+        _ => None,
+    }
+}
+
+pub(super) fn signing_companion(template: Option<&str>) -> Option<&'static str> {
+    match template {
+        Some("confidentiality_release") => Some("privacy_consents"),
         _ => None,
     }
 }
@@ -61,10 +70,229 @@ pub(super) async fn options(
     Ok(json!({"template":template,"documents":choices}))
 }
 
+pub(super) async fn signing_options(
+    state: &AppState,
+    auth: &AuthUser,
+    source: &PgRow,
+) -> Result<Value, Response> {
+    let Some(template) = signing_companion(
+        source
+            .get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+    ) else {
+        return Ok(Value::Null);
+    };
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM documents WHERE generated_template_id=$1 AND file_deleted_at IS NULL AND status<>'archived'
+         AND (($2::uuid IS NOT NULL AND lead_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND patient_id=$3))
+         ORDER BY created_at DESC,id DESC LIMIT 100"
+    ).bind(template).bind(source.get::<Option<Uuid>,_>("lead_id")).bind(source.get::<Option<Uuid>,_>("patient_id"))
+        .fetch_all(&state.db).await.map_err(db_error)?;
+    let mut choices = Vec::new();
+    for id in ids {
+        if let Ok(row) = signature_document_access(state, auth, id, false).await
+            && same_scope(source, &row)
+            && eligibility(&row).is_none()
+        {
+            choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number")}));
+        }
+    }
+    Ok(json!({"template":template,"documents":choices}))
+}
+
 pub(super) struct Prepared {
     row: PgRow,
     hash: String,
     filename: String,
+}
+
+pub(super) struct PreparedSigningMember {
+    pub(super) row: PgRow,
+    pub(super) hash: String,
+    pub(super) bytes: Vec<u8>,
+}
+
+pub(super) async fn prepare_signing_member(
+    state: &AppState,
+    auth: &AuthUser,
+    source: &PgRow,
+    selected: Option<Uuid>,
+) -> Result<Option<PreparedSigningMember>, Response> {
+    let required = signing_companion(
+        source
+            .get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+    );
+    let Some(template) = required else {
+        if selected.is_some() {
+            return Err(error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unexpected_signing_document",
+            ));
+        }
+        return Ok(None);
+    };
+    let id = selected.ok_or_else(|| {
+        error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "signing_document_required",
+        )
+    })?;
+    let row = signature_document_access(state, auth, id, false).await?;
+    if row
+        .get::<Option<String>, _>("generated_template_id")
+        .as_deref()
+        != Some(template)
+        || !same_scope(source, &row)
+        || eligibility(&row).is_some()
+    {
+        return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+    }
+    let bytes = source_bytes(&row)
+        .await
+        .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    scan_upload_bytes(Some("signing-document.pdf"), &bytes)
+        .await
+        .map_err(|_| error(StatusCode::UNPROCESSABLE_ENTITY, "signature_scan_failed"))?;
+    Ok(Some(PreparedSigningMember {
+        hash: sha256(&bytes),
+        row,
+        bytes,
+    }))
+}
+
+pub(super) fn merge_signing_pdfs(
+    primary: &[u8],
+    member: Option<&[u8]>,
+) -> Result<Vec<u8>, &'static str> {
+    let Some(member) = member else {
+        return Ok(primary.to_vec());
+    };
+    let mut warnings = Vec::new();
+    let mut document = PdfDocument::parse(primary, &PdfParseOptions::default(), &mut warnings)
+        .map_err(|_| "signature_bundle_invalid_pdf")?;
+    let additional = PdfDocument::parse(member, &PdfParseOptions::default(), &mut warnings)
+        .map_err(|_| "signature_bundle_invalid_pdf")?;
+    document.append_document(additional);
+    let bytes = document.save(&PdfSaveOptions::default(), &mut warnings);
+    if bytes.len() > provider::MAX_PDF || !bytes.starts_with(b"%PDF-") {
+        return Err("signature_bundle_too_large");
+    }
+    Ok(bytes)
+}
+
+pub(super) async fn persist_signing_member(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: Uuid,
+    prepared: &PreparedSigningMember,
+) -> Result<(), Response> {
+    let id: Uuid = prepared.row.get("id");
+    let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
+        .bind(id).fetch_one(&mut **tx).await.map_err(db_error)?;
+    if eligibility(&current).is_some() || context(&current) != context(&prepared.row) {
+        return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+    }
+    sqlx::query("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) VALUES ($1,$2,1,$3,$4)")
+        .bind(request_id).bind(id).bind(&prepared.hash).bind(context(&prepared.row))
+        .execute(&mut **tx).await.map_err(db_error)?;
+    Ok(())
+}
+
+pub(super) async fn signing_sources_current(
+    state: &AppState,
+    request: &PgRow,
+    source: &PgRow,
+) -> Result<bool, &'static str> {
+    if eligibility(source).is_some() || context(source) != request.get::<Value, _>("source_context")
+    {
+        return Ok(false);
+    }
+    let primary = source_bytes(source).await?;
+    let primary_hash = request
+        .get::<Option<String>, _>("primary_source_sha256")
+        .unwrap_or_else(|| request.get::<String, _>("source_sha256"));
+    if sha256(&primary) != primary_hash {
+        return Ok(false);
+    }
+    let members = sqlx::query(
+        "SELECT * FROM document_signature_members WHERE request_id=$1 ORDER BY position",
+    )
+    .bind(request.get::<Uuid, _>("id"))
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| "signature_database_error")?;
+    for member in members {
+        let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1")
+            .bind(member.get::<Uuid,_>("document_id"))
+            .fetch_one(&state.db)
+            .await
+            .map_err(|_| "signature_database_error")?;
+        if eligibility(&current).is_some()
+            || context(&current) != member.get::<Value, _>("source_context")
+        {
+            return Ok(false);
+        }
+        let bytes = source_bytes(&current).await?;
+        if sha256(&bytes) != member.get::<String, _>("sha256") {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) async fn signing_sources_current_in_transaction(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &PgRow,
+    source: &PgRow,
+) -> Result<bool, &'static str> {
+    if eligibility(source).is_some() || context(source) != request.get::<Value, _>("source_context")
+    {
+        return Ok(false);
+    }
+    let primary = source_bytes(source).await?;
+    let primary_hash = request
+        .get::<Option<String>, _>("primary_source_sha256")
+        .unwrap_or_else(|| request.get::<String, _>("source_sha256"));
+    if sha256(&primary) != primary_hash {
+        return Ok(false);
+    }
+    let members = sqlx::query(
+        "SELECT * FROM document_signature_members WHERE request_id=$1 ORDER BY position FOR UPDATE",
+    )
+    .bind(request.get::<Uuid, _>("id"))
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|_| "signature_database_error")?;
+    for member in members {
+        let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
+            .bind(member.get::<Uuid,_>("document_id"))
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|_| "signature_database_error")?;
+        if eligibility(&current).is_some()
+            || context(&current) != member.get::<Value, _>("source_context")
+        {
+            return Ok(false);
+        }
+        let bytes = source_bytes(&current).await?;
+        if sha256(&bytes) != member.get::<String, _>("sha256") {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) async fn signing_member_ids(
+    state: &AppState,
+    request_id: Uuid,
+) -> Result<Vec<Uuid>, &'static str> {
+    sqlx::query_scalar(
+        "SELECT document_id FROM document_signature_members WHERE request_id=$1 ORDER BY position",
+    )
+    .bind(request_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| "signature_database_error")
 }
 
 pub(super) async fn prepare(
@@ -250,26 +478,24 @@ pub(super) async fn sync(
         }
         // A manager may have replaced either PDF while preparation was running.
         // Do not invite recipients to an obsolete or reassigned package.
-        for (document_id, expected_context, expected_hash) in [
-            (
-                request.get::<Uuid, _>("source_document_id"),
-                request.get::<Value, _>("source_context"),
-                hash.clone(),
-            ),
-            (
-                attachment.get::<Uuid, _>("document_id"),
-                attachment.get::<Value, _>("source_context"),
-                expected_hash.clone(),
-            ),
-        ] {
-            let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1")
-                .bind(document_id).fetch_one(&state.db).await.map_err(|_| "signature_database_error")?;
-            if eligibility(&current).is_some()
-                || context(&current) != expected_context
-                || sha256(&source_bytes(&current).await?) != expected_hash
-            {
-                return Err("review_attachment_changed");
-            }
+        let primary = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1")
+            .bind(request.get::<Uuid, _>("source_document_id"))
+            .fetch_one(&state.db)
+            .await
+            .map_err(|_| "signature_database_error")?;
+        if !signing_sources_current(state, request, &primary).await? {
+            return Err("signing_document_changed");
+        }
+        let current_attachment = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1")
+            .bind(attachment.get::<Uuid, _>("document_id"))
+            .fetch_one(&state.db)
+            .await
+            .map_err(|_| "signature_database_error")?;
+        if eligibility(&current_attachment).is_some()
+            || context(&current_attachment) != attachment.get::<Value, _>("source_context")
+            || sha256(&source_bytes(&current_attachment).await?) != expected_hash
+        {
+            return Err("review_attachment_changed");
         }
         set_stage(state, id, "inviting", Some(attachment_id)).await?;
         // A timeout here cannot be retried; subsequent GET must prove whether the
@@ -311,10 +537,15 @@ async fn set_stage(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use printpdf::{Mm, PdfPage};
     #[test]
     fn explicit_companion_mapping_and_exact_attachment_identity() {
         assert_eq!(
             companion(Some("framework_contract")),
+            Some("privacy_information")
+        );
+        assert_eq!(
+            companion(Some("confidentiality_release")),
             Some("privacy_information")
         );
         assert_eq!(
@@ -323,6 +554,11 @@ mod tests {
         );
         assert_eq!(companion(Some("single_order")), None);
         assert_eq!(companion(None), None);
+        assert_eq!(
+            signing_companion(Some("confidentiality_release")),
+            Some("privacy_consents")
+        );
+        assert_eq!(signing_companion(Some("privacy_consents")), None);
         let id = Uuid::new_v4();
         assert_eq!(
             attachment_id(
@@ -344,5 +580,23 @@ mod tests {
             attachment_id(&json!({"attachments":[]}), "a.pdf").unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn signing_bundle_keeps_all_pages_in_one_pdf() {
+        fn pdf(page_count: usize) -> Vec<u8> {
+            let mut document = PdfDocument::new("test");
+            document.with_pages(
+                (0..page_count)
+                    .map(|_| PdfPage::new(Mm(210.0), Mm(297.0), vec![]))
+                    .collect(),
+            );
+            document.save(&PdfSaveOptions::default(), &mut Vec::new())
+        }
+
+        let merged = merge_signing_pdfs(&pdf(2), Some(&pdf(3))).unwrap();
+        let parsed =
+            PdfDocument::parse(&merged, &PdfParseOptions::default(), &mut Vec::new()).unwrap();
+        assert_eq!(parsed.pages.len(), 5);
     }
 }
