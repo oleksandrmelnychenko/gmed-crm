@@ -7134,6 +7134,124 @@ async fn mark_document_signed_records_evidence_and_satisfies_compliance() {
 }
 
 #[tokio::test]
+async fn mark_signature_result_signed_uses_its_verified_source_document_type() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("signature-result-sign");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let (status, source) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("auto_name", format!("Schweigepflichtsentbindung {tag}")),
+            ("art", "confidentiality_release".to_string()),
+            ("category", "consent".to_string()),
+        ],
+        &format!("source-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-source%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{source}");
+    let source_id = Uuid::parse_str(source["id"].as_str().unwrap()).unwrap();
+
+    let evidence_fields = [
+        ("patient_id", patient_id.to_string()),
+        ("status", "active".to_string()),
+        ("visibility", "internal".to_string()),
+        (
+            "auto_name",
+            format!("TEST - Schweigepflichtsentbindung {tag}"),
+        ),
+        ("art", "signature_evidence".to_string()),
+        ("category", "consent".to_string()),
+    ];
+    let evidence_filename = format!("signed-{tag}.pdf");
+    let (status, evidence) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &evidence_fields,
+        &evidence_filename,
+        "application/pdf",
+        b"%PDF-signed%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{evidence}");
+    let evidence_id = Uuid::parse_str(evidence["id"].as_str().unwrap()).unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_signature_requests (
+               id, source_document_id, requested_by, source_sha256, source_context,
+               signers, provider_account, test_mode, status, result_document_id,
+               report_storage_key, report_sha256, signed_sha256
+           ) VALUES ($1, $2, $3, $4, '{}'::jsonb, '[]'::jsonb, $5, true,
+                     'completed', $6, $7, $8, $9)"#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(source_id)
+    .bind(admin_id)
+    .bind("a".repeat(64))
+    .bind(format!("test-{tag}"))
+    .bind(evidence_id)
+    .bind(format!("report-{tag}.pdf"))
+    .bind("b".repeat(64))
+    .bind("c".repeat(64))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{evidence_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "confidentiality_release" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(signed["compliance_kind"], "confidentiality_release");
+
+    let stored: (Option<String>, bool) = sqlx::query_as(
+        "SELECT compliance_kind, signed_at IS NOT NULL FROM documents WHERE id = $1",
+    )
+    .bind(evidence_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored.0.as_deref(), Some("confidentiality_release"));
+    assert!(stored.1);
+
+    let unrelated_filename = format!("unrelated-{tag}.pdf");
+    let (status, unrelated) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &evidence_fields,
+        &unrelated_filename,
+        "application/pdf",
+        b"%PDF-unrelated%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{unrelated}");
+    let unrelated_id = unrelated["id"].as_str().unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{unrelated_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "confidentiality_release" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+}
+
+#[tokio::test]
 async fn lead_document_upload_and_signature_do_not_create_patient() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
         return;

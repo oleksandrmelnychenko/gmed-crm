@@ -1723,7 +1723,46 @@ async fn mark_document_signed(
         }
     }
 
-    if !document_satisfies_compliance_kind(kind, generated_template_id.as_deref(), &document_art) {
+    let mut satisfies_compliance =
+        document_satisfies_compliance_kind(kind, generated_template_id.as_deref(), &document_art);
+    if !satisfies_compliance && document_art == "signature_evidence" {
+        let source_document = sqlx::query(
+            r#"SELECT source.generated_template_id, source.art
+               FROM document_signature_requests request
+               JOIN documents source ON source.id = request.source_document_id
+               WHERE request.result_document_id = $1
+                 AND request.status IN ('completed', 'needs_review')
+               ORDER BY request.updated_at DESC, request.id DESC
+               LIMIT 1"#,
+        )
+        .bind(document_id)
+        .fetch_optional(&state.db)
+        .await;
+        match source_document {
+            Ok(Some(source)) => {
+                let source_template_id = source
+                    .try_get::<Option<String>, _>("generated_template_id")
+                    .ok()
+                    .flatten();
+                let source_art = source.try_get::<String, _>("art").unwrap_or_default();
+                satisfies_compliance = document_satisfies_compliance_kind(
+                    kind,
+                    source_template_id.as_deref(),
+                    &source_art,
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    document_id = %document_id,
+                    "load source document for signature evidence"
+                );
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+    if !satisfies_compliance {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Document type does not satisfy the selected compliance requirement",
