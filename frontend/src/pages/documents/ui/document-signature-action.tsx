@@ -77,11 +77,9 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [selectedId, setSelectedId] = useState(documentId ?? "");
   const [loading, setLoading] = useState(!documentId);
   const [error, setError] = useState(false);
-  const [previewedId, setPreviewedId] = useState("");
   const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
   const [previewedDocuments, setPreviewedDocuments] = useState<string[]>([]);
   const handlePreviewReady = useCallback((id: string) => {
-    setPreviewedId(id);
     if (id) setPreviewedDocuments(current => current.includes(id) ? current : [...current, id]);
   }, []);
   const [signatureState, setSignatureState] = useState<SignatureState | null>(null);
@@ -141,7 +139,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setPreviewedId(""); setAttachmentPreview(null); setPreviewedDocuments([]); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setAttachmentPreview(null); setPreviewedDocuments([]); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
@@ -154,7 +152,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
       {previewId ? <SignatureDocumentPreview key={previewId} documentId={previewId} onReady={handlePreviewReady} /> : null}
     </section>
     <section aria-label={tx("Подписание документа", "Dokument unterzeichnen")} className="min-w-0 space-y-4 bg-muted/10 p-3.5 lg:overflow-y-auto">
-    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedId === selectedId && !displayedResult && !attachmentPreview} previewedDocumentIds={previewedDocuments} onPreviewAttachment={setAttachmentPreview} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setAttachmentPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setAttachmentPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
+    {selectedId ? <DocumentSignaturePanel key={selectedId} documentId={selectedId} previewReady={previewedDocuments.includes(selectedId)} previewedDocumentIds={previewedDocuments} onPreviewAttachment={setAttachmentPreview} expanded onDirtyChange={onDirtyChange} onStateChange={receiveState} onPreviewResult={request => { setAttachmentPreview(null); setResultPreview(request); setShowOriginal(false); }} onComposeNew={() => { setAttachmentPreview(null); setComposingNew(true); setShowOriginal(true); setResultPreview(null); }} onDone={() => {
       clearApiCache("/documents");
       refreshSignatureSummaries();
       onDone?.();

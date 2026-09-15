@@ -91,8 +91,6 @@ for (const lang of ["ru", "de"] as const) {
       await expect(send).toBeDisabled();
       await dialog.getByRole("button", { name: lang === "ru" ? "Проверить приложение" : "Anlage prüfen", exact: true }).click();
       await expect(dialog.getByRole("img")).toBeVisible();
-      await expect(send).toBeDisabled();
-      await dialog.getByRole("button", { name: lang === "ru" ? "К основному документу" : "Zum Hauptdokument", exact: true }).click();
       await expect(send).toBeEnabled();
       await send.click();
       await expect.poll(() => sent.length).toBe(1);
