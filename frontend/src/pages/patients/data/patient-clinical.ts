@@ -355,28 +355,44 @@ export type AllDoctorOption = {
   fachbereich: string | null;
   provider_id: string | null;
   provider_name: string | null;
+  provider_links?: Array<{ id: string; name: string }>;
 };
 
 export function deduplicateAllDoctorOptions(doctors: AllDoctorOption[]): AllDoctorOption[] {
-  const byId = new Map<string, { doctor: AllDoctorOption; providerNames: string[] }>();
+  const byId = new Map<string, {
+    doctor: AllDoctorOption;
+    providerLinks: Map<string, string>;
+  }>();
   for (const doctor of doctors) {
-    const providerName = doctor.provider_name?.trim();
+    const providerLinks = doctor.provider_links?.length
+      ? doctor.provider_links
+      : doctor.provider_id
+        ? [{ id: doctor.provider_id, name: doctor.provider_name?.trim() ?? "" }]
+        : [];
     const existing = byId.get(doctor.id);
     if (!existing) {
       byId.set(doctor.id, {
         doctor,
-        providerNames: providerName ? [providerName] : [],
+        providerLinks: new Map(providerLinks.map((link) => [link.id, link.name])),
       });
       continue;
     }
-    if (providerName && !existing.providerNames.includes(providerName)) {
-      existing.providerNames.push(providerName);
+    for (const link of providerLinks) {
+      if (!existing.providerLinks.has(link.id)) {
+        existing.providerLinks.set(link.id, link.name);
+      }
     }
   }
-  return Array.from(byId.values()).map(({ doctor, providerNames }) => ({
-    ...doctor,
-    provider_name: providerNames.length > 0 ? providerNames.join(", ") : doctor.provider_name,
-  }));
+  return Array.from(byId.values()).map(({ doctor, providerLinks }) => {
+    const links = Array.from(providerLinks, ([id, name]) => ({ id, name }));
+    const providerNames = links.map((link) => link.name).filter(Boolean);
+    return {
+      ...doctor,
+      provider_id: doctor.provider_id ?? links[0]?.id ?? null,
+      provider_name: providerNames.length > 0 ? providerNames.join(", ") : doctor.provider_name,
+      provider_links: links,
+    };
+  });
 }
 
 export function fetchAllDoctors() {

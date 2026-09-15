@@ -321,6 +321,7 @@ export function CaseRecordMedicationsSection() {
       <PatientMedicationSection
         items={medications}
         providers={record.providers}
+        allDoctors={record.allDoctors}
         canManage={canEdit}
         lang={lang}
         headerAction={canEdit ? (

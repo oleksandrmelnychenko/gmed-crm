@@ -11959,7 +11959,11 @@ async fn list_all_doctors(
     let rows = sqlx::query(
         r#"SELECT d.id, d.name, d.title, d.fachbereich,
                   (array_agg(l.provider_id ORDER BY p.name, l.provider_id))[1] AS provider_id,
-                  string_agg(DISTINCT p.name, ', ' ORDER BY p.name) AS provider_name
+                  string_agg(DISTINCT p.name, ', ' ORDER BY p.name) AS provider_name,
+                  jsonb_agg(
+                      jsonb_build_object('id', l.provider_id, 'name', p.name)
+                      ORDER BY p.name, l.provider_id
+                  ) AS provider_links
            FROM provider_doctor_links l
            JOIN provider_doctors d ON d.id = l.doctor_id
            JOIN providers p ON p.id = l.provider_id
@@ -11985,6 +11989,7 @@ async fn list_all_doctors(
                 "fachbereich": row.get::<Option<String>, _>("fachbereich"),
                 "provider_id": row.get::<Uuid, _>("provider_id"),
                 "provider_name": row.get::<Option<String>, _>("provider_name"),
+                "provider_links": row.get::<serde_json::Value, _>("provider_links"),
             })
         })
         .collect::<Vec<_>>();

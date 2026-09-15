@@ -153,14 +153,22 @@ describe("doctor options", () => {
       doctor(),
       doctor({ provider_id: "provider-2", provider_name: "Herzzentrum München" }),
     ])).toEqual([
-      doctor({ provider_name: "München Klinik Bogenhausen, Herzzentrum München" }),
+      doctor({
+        provider_name: "München Klinik Bogenhausen, Herzzentrum München",
+        provider_links: [
+          { id: "provider-1", name: "München Klinik Bogenhausen" },
+          { id: "provider-2", name: "Herzzentrum München" },
+        ],
+      }),
     ]);
   });
 
   it("deduplicates the response before exposing doctor options to forms", async () => {
     apiFetchMock.mockResolvedValue([doctor(), doctor()]);
 
-    await expect(fetchAllDoctors()).resolves.toEqual([doctor()]);
+    await expect(fetchAllDoctors()).resolves.toEqual([doctor({
+      provider_links: [{ id: "provider-1", name: "München Klinik Bogenhausen" }],
+    })]);
     expect(apiFetchMock).toHaveBeenCalledWith("/doctors", { cacheTtlMs: 60_000 });
   });
 });

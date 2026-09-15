@@ -25,8 +25,6 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
-import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
-import type { DoctorOption } from "@/pages/appointments/model/types";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import {
   specializationLabelForItem,
@@ -103,6 +101,7 @@ import { ClinicalDocumentImportSheet } from "./clinical-document-import-sheet";
 import { DiagnosisTreeSection } from "./diagnosis-tree";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
 import { ClinicalRecordSource } from "./clinical-record-source";
+import { doctorsForProviderBranch } from "./provider-doctor-selection";
 import { MedicationBmpImportAction } from "./medication-bmp-import-sheet";
 import { LabResultsPdfAction } from "./lab-results-pdf-action";
 import { PatientSymptomsPainSections } from "./patient-symptoms-pain-sections";
@@ -788,37 +787,17 @@ export function PatientMedicationTable({
 function ProviderDoctorFields({
   value,
   providers,
+  allDoctors,
   onChange,
   tx,
 }: {
   value: ClinicalAttribution;
   providers: ProviderSummary[];
+  allDoctors: AllDoctorOption[];
   onChange: (next: ClinicalAttribution) => void;
   tx: Bilingual;
 }) {
-  // Keyed by provider so a stale list never shows under a freshly picked provider,
-  // and so we never call setState synchronously inside the effect.
-  const [doctorsState, setDoctorsState] = useState<{ providerId: string | null; list: DoctorOption[] }>(
-    { providerId: null, list: [] },
-  );
-
-  useEffect(() => {
-    let active = true;
-    const providerId = value.provider_id;
-    if (!providerId) return;
-    getProviderDoctors(providerId)
-      .then((rows) => {
-        if (active) setDoctorsState({ providerId, list: rows });
-      })
-      .catch(() => {
-        if (active) setDoctorsState({ providerId, list: [] });
-      });
-    return () => {
-      active = false;
-    };
-  }, [value.provider_id]);
-
-  const doctors = doctorsState.providerId === value.provider_id ? doctorsState.list : [];
+  const doctors = doctorsForProviderBranch(providers, allDoctors, value.provider_id);
 
   return (
     <div className="grid gap-2 md:grid-cols-2">
@@ -859,6 +838,8 @@ function ProviderDoctorFields({
             const doctor = doctors.find((d) => d.id === id);
             onChange({
               ...value,
+              provider_id: doctor?.selected_provider_id ?? value.provider_id,
+              provider_name: doctor?.selected_provider_name ?? value.provider_name,
               doctor_id: id,
               doctor_name: doctor?.name ?? null,
               doctor_title: doctor?.title ?? null,
@@ -869,7 +850,10 @@ function ProviderDoctorFields({
           <option value="">{tx("Врач", "Arzt")}</option>
           {doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
-              {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+              {[
+                [doctor.title, doctor.name].filter(Boolean).join(" "),
+                doctor.selected_provider_name,
+              ].filter(Boolean).join(" · ")}
             </option>
           ))}
         </NativeComboboxSelect>
@@ -3481,6 +3465,7 @@ export function PatientClinicalTab({
             <ProviderDoctorFields
               value={draft}
               providers={providers}
+              allDoctors={allDoctors}
               tx={tx}
               onChange={(attr) => set(attr as Partial<ClinicalProcedure>)}
             />
@@ -3566,6 +3551,7 @@ export function PatientClinicalTab({
             <ProviderDoctorFields
               value={draft}
               providers={providers}
+              allDoctors={allDoctors}
               tx={tx}
               onChange={(attr) => set(attr as Partial<ClinicalVerlaufEntry>)}
             />
@@ -3659,7 +3645,7 @@ export function PatientClinicalTab({
             onChange={set}
             lang={lang}
             dateRangeValid={medicationDateRangeValid(draft)}
-            attribution={<ProviderDoctorFields value={draft} providers={providers} tx={tx} onChange={(attribution) => set(attribution as Partial<ClinicalMedication>)} />}
+            attribution={<ProviderDoctorFields value={draft} providers={providers} allDoctors={allDoctors} tx={tx} onChange={(attribution) => set(attribution as Partial<ClinicalMedication>)} />}
           />
         )}
       />
@@ -3828,6 +3814,7 @@ export function PatientClinicalTab({
             <ProviderDoctorFields
               value={draft}
               providers={providers}
+              allDoctors={allDoctors}
               tx={tx}
               onChange={(attr) => set(attr as Partial<ClinicalExamination>)}
             />

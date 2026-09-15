@@ -8,8 +8,6 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
-import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
-import type { DoctorOption } from "@/pages/appointments/model/types";
 import type {
   AllDoctorOption,
   ClinicalDiagnosis,
@@ -19,6 +17,7 @@ import type { ProviderSummary, SpecializationItem } from "@/pages/providers/mode
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { ClinicalRecordSource } from "./clinical-record-source";
+import { doctorsForProviderBranch } from "./provider-doctor-selection";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -299,35 +298,17 @@ function Field({
 function ProviderDoctorFields({
   draft,
   providers,
+  allDoctors,
   onChange,
   tx,
 }: {
   draft: WorkingNode;
   providers: ProviderSummary[];
+  allDoctors: AllDoctorOption[];
   onChange: (patch: Partial<WorkingNode>) => void;
   tx: Bilingual;
 }) {
-  const [doctorsState, setDoctorsState] = useState<{ providerId: string | null; list: DoctorOption[] }>(
-    { providerId: null, list: [] },
-  );
-
-  useEffect(() => {
-    let active = true;
-    const providerId = draft.provider_id;
-    if (!providerId) return;
-    getProviderDoctors(providerId)
-      .then((rows) => {
-        if (active) setDoctorsState({ providerId, list: rows });
-      })
-      .catch(() => {
-        if (active) setDoctorsState({ providerId, list: [] });
-      });
-    return () => {
-      active = false;
-    };
-  }, [draft.provider_id]);
-
-  const doctors = doctorsState.providerId === draft.provider_id ? doctorsState.list : [];
+  const doctors = doctorsForProviderBranch(providers, allDoctors, draft.provider_id);
 
   return (
     <div className="grid gap-2 md:grid-cols-2">
@@ -367,6 +348,8 @@ function ProviderDoctorFields({
             const id = event.target.value || null;
             const doctor = doctors.find((d) => d.id === id);
             onChange({
+              provider_id: doctor?.selected_provider_id ?? draft.provider_id,
+              provider_name: doctor?.selected_provider_name ?? draft.provider_name,
               doctor_id: id,
               doctor_name: doctor?.name ?? null,
               doctor_title: doctor?.title ?? null,
@@ -377,7 +360,10 @@ function ProviderDoctorFields({
           <option value="">{tx("Врач", "Arzt")}</option>
           {doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
-              {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+              {[
+                [doctor.title, doctor.name].filter(Boolean).join(" "),
+                doctor.selected_provider_name,
+              ].filter(Boolean).join(" · ")}
             </option>
           ))}
         </NativeComboboxSelect>
@@ -993,7 +979,7 @@ function DiagnosisForm({
           {tx("Из нашей базы", "Aus unserer Basis")}
         </label>
         {draft.source_mode === "intern" ? (
-          <ProviderDoctorFields draft={draft} providers={providers} tx={tx} onChange={set} />
+          <ProviderDoctorFields draft={draft} providers={providers} allDoctors={allDoctors} tx={tx} onChange={set} />
         ) : (
           <div className="space-y-2">
             <div className="grid gap-2 md:grid-cols-2">

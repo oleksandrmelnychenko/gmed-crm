@@ -17,13 +17,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
-import type { DoctorOption } from "@/pages/appointments/model/types";
 import {
   darreichungsformLabel,
 } from "@/pages/patients/data/medication-options";
 import {
   updateClinicalMedicationLifecycle,
+  type AllDoctorOption,
   type ClinicalAttribution,
   type ClinicalMedication,
   type ClinicalWarning,
@@ -33,6 +32,7 @@ import type { ProviderSummary } from "@/pages/providers/model/types";
 
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { MedicationEditorFields, MEDICATION_EDITOR_CLASS_NAME } from "./medication-editor-fields";
+import { doctorsForProviderBranch } from "./provider-doctor-selection";
 
 type Bilingual = (ru: string, de: string) => string;
 type SectionTone = "neutral" | "danger" | "warning";
@@ -210,36 +210,17 @@ function CheckboxField({
 function ProviderDoctorFields({
   value,
   providers,
+  allDoctors,
   onChange,
   tx,
 }: {
   value: ClinicalAttribution;
   providers: ProviderSummary[];
+  allDoctors: AllDoctorOption[];
   onChange: (next: ClinicalAttribution) => void;
   tx: Bilingual;
 }) {
-  const [doctorsState, setDoctorsState] = useState<{
-    providerId: string | null;
-    list: DoctorOption[];
-  }>({ providerId: null, list: [] });
-
-  useEffect(() => {
-    let active = true;
-    const providerId = value.provider_id;
-    if (!providerId) return;
-    getProviderDoctors(providerId)
-      .then((rows) => {
-        if (active) setDoctorsState({ providerId, list: rows });
-      })
-      .catch(() => {
-        if (active) setDoctorsState({ providerId, list: [] });
-      });
-    return () => {
-      active = false;
-    };
-  }, [value.provider_id]);
-
-  const doctors = doctorsState.providerId === value.provider_id ? doctorsState.list : [];
+  const doctors = doctorsForProviderBranch(providers, allDoctors, value.provider_id);
   return (
     <div className="grid gap-2 md:grid-cols-2">
       <Field label={tx("Провайдер", "Anbieter")}>
@@ -279,6 +260,8 @@ function ProviderDoctorFields({
             const doctor = doctors.find((item) => item.id === id);
             onChange({
               ...value,
+              provider_id: doctor?.selected_provider_id ?? value.provider_id,
+              provider_name: doctor?.selected_provider_name ?? value.provider_name,
               doctor_id: id,
               doctor_name: doctor?.name ?? null,
               doctor_title: doctor?.title ?? null,
@@ -289,7 +272,10 @@ function ProviderDoctorFields({
           <option value="">{tx("Врач", "Arzt")}</option>
           {doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
-              {[doctor.title, doctor.name].filter(Boolean).join(" ")}
+              {[
+                [doctor.title, doctor.name].filter(Boolean).join(" "),
+                doctor.selected_provider_name,
+              ].filter(Boolean).join(" · ")}
             </option>
           ))}
         </NativeComboboxSelect>
@@ -895,6 +881,7 @@ function MedicationHoldDialog({
 export function PatientMedicationSection({
   items,
   providers,
+  allDoctors,
   canManage,
   lang,
   onSave,
@@ -902,6 +889,7 @@ export function PatientMedicationSection({
 }: {
   items: ClinicalMedication[];
   providers: ProviderSummary[];
+  allDoctors: AllDoctorOption[];
   canManage: boolean;
   lang: string;
   onSave: (next: ClinicalMedication[]) => Promise<unknown>;
@@ -1001,7 +989,7 @@ export function PatientMedicationSection({
             onChange={set}
             lang={lang}
             dateRangeValid={medicationDateRangeValid(draft)}
-            attribution={<ProviderDoctorFields value={draft} providers={providers} tx={tx} onChange={(attribution) => set(attribution as Partial<ClinicalMedication>)} />}
+            attribution={<ProviderDoctorFields value={draft} providers={providers} allDoctors={allDoctors} tx={tx} onChange={(attribution) => set(attribution as Partial<ClinicalMedication>)} />}
           />
         )}
       />

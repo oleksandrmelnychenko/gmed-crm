@@ -3880,6 +3880,13 @@ async fn all_doctors_list_excludes_non_medical_contact_people() {
     let medical_provider_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
     let medical_doctor_id =
         seed_provider_doctor(&pool, medical_provider_id, &format!("{tag}-clinic")).await;
+    let linked_medical_provider_id = seed_provider(&pool, &format!("{tag}-linked-clinic")).await;
+    sqlx::query("INSERT INTO provider_doctor_links (provider_id, doctor_id) VALUES ($1, $2)")
+        .bind(linked_medical_provider_id)
+        .bind(medical_doctor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let non_medical_provider_id =
         seed_provider_with_type(&pool, &format!("{tag}-restaurant"), "non_medical").await;
     let non_medical_contact_id =
@@ -3895,6 +3902,23 @@ async fn all_doctors_list_excludes_non_medical_contact_people() {
         rows.iter()
             .any(|row| row["id"] == medical_doctor_id.to_string()),
         "medical provider doctor must be available for clinical attribution"
+    );
+    let medical_doctor = rows
+        .iter()
+        .find(|row| row["id"] == medical_doctor_id.to_string())
+        .expect("medical doctor row");
+    let provider_links = medical_doctor["provider_links"]
+        .as_array()
+        .expect("provider links array");
+    assert!(
+        provider_links
+            .iter()
+            .any(|link| link["id"] == medical_provider_id.to_string())
+    );
+    assert!(
+        provider_links
+            .iter()
+            .any(|link| link["id"] == linked_medical_provider_id.to_string())
     );
     assert!(
         !rows

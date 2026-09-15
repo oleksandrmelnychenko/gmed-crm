@@ -140,6 +140,7 @@ export function LeadMedicalIntakeForm({
       <PatientMedicationSection
         items={medications}
         providers={providers}
+        allDoctors={allDoctors}
         canManage
         lang={lang}
         onSave={async (next) => {

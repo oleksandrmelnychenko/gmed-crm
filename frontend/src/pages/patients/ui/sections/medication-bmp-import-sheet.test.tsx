@@ -283,6 +283,7 @@ describe("patient medication section integration", () => {
       <PatientMedicationSection
         items={[]}
         providers={[]}
+        allDoctors={[]}
         canManage
         lang="de"
         headerAction={<button type="button">BMP-XML importieren</button>}
