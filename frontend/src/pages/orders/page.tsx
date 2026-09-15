@@ -3793,7 +3793,6 @@ function useOrdersPageContent() {
                             <ArrowUpRight className="size-3.5" />
                             {l("orders_dokumente")}
                           </Button>
-                          <DocumentSignatureAction scope={{ orderId: orderDetail.id }} title={orderDetail.order_number} />
                           {permissions.canManagePhase
                             ? (orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
                                 (transition) => {

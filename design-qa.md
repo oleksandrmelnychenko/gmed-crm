@@ -216,3 +216,27 @@ final result: passed
 - TypeScript project check and targeted ESLint check passed.
 
 final result: passed
+
+---
+
+# Design QA — Order header actions without aggregate signature
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-f53308b8-0bb6-4e3c-af55-93c070db2e64.png`.
+- Implementation capture: Codex in-app browser capture from `http://127.0.0.1:5173/orders/:orderId?patient=:patientId`.
+- State: active patient order in the overview section.
+
+## Comparison
+
+- The aggregate `Электронная подпись` action was removed from the order header.
+- `Пациент`, `Документы`, lifecycle controls, and their original spacing remain intact.
+- Signature actions for individual documents remain available in document-specific surfaces.
+
+## Verification
+
+- The live accessibility tree exposes `Пациент`, `Документы`, `Приостановить`, `Завершить`, and `Отменить` in the header, with no aggregate signature button.
+- The focused desktop capture shows the action row reflowed without a gap, clipping, overlap, or layout shift.
+- Targeted ESLint and TypeScript project checks passed.
+
+final result: passed
