@@ -753,7 +753,15 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
 }
 
 function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
-  return JSON.stringify(snapshot);
+  // Moving between tabs is UI navigation, not a data change. Persist the
+  // current tab with the next real save without issuing a write for each click.
+  return JSON.stringify({
+    draft: snapshot.draft,
+    lines: snapshot.lines,
+    paidAmount: snapshot.paidAmount,
+    prepayment: snapshot.prepayment,
+    prepaymentAmount: snapshot.prepaymentAmount,
+  });
 }
 
 function autosavePayload(
@@ -2686,6 +2694,16 @@ export function LeadWizard({
   const stepNavigationInFlightRef = useRef(false);
   const commercialGenerationInFlightRef = useRef(false);
   const reloadVersionRef = useRef(0);
+  const lookupSessionVersionRef = useRef(0);
+  const commercialLookupUiVersionRef = useRef(0);
+  const medicalLookupsRequestRef = useRef<
+    Promise<[ProviderSummary[], AllDoctorOption[]]> | null
+  >(null);
+  const specialtiesRequestRef = useRef<Promise<SpecializationItem[]> | null>(null);
+  const agencyServicesRequestRef = useRef<Promise<AgencyServiceItem[]> | null>(null);
+  const medicalLookupsLoadedRef = useRef(false);
+  const specialtiesLoadedRef = useRef(false);
+  const agencyServicesLoadedRef = useRef(false);
   const caseIdRef = useRef<string | null>(null);
   const prospectPatientIdRef = useRef<string | null>(null);
   const prospectMergeOnlyRef = useRef(false);
@@ -2867,6 +2885,7 @@ export function LeadWizard({
       setWorkTypesError("");
       return;
     }
+    if (step !== "order" && step !== "commercial") return;
 
     let active = true;
     setWorkTypesLoading(true);
@@ -2900,7 +2919,99 @@ export function LeadWizard({
     return () => {
       active = false;
     };
-  }, [open, selectedSpecializationItems, tx]);
+  }, [open, selectedSpecializationItems, step, tx]);
+
+  useEffect(() => {
+    if (!open) return;
+    // These catalogues are large and only used by their respective steps.
+    // Keep one request per wizard session and load it on first use.
+    const sessionVersion = lookupSessionVersionRef.current;
+    const isCurrentSession = () => lookupSessionVersionRef.current === sessionVersion;
+    const loadSpecialties = () => {
+      specialtiesRequestRef.current ??= fetchSpecializations(false, true).catch(() => []);
+      return specialtiesRequestRef.current;
+    };
+
+    if (step === "medical") {
+      if (medicalLookupsLoadedRef.current && specialtiesLoadedRef.current) {
+        setMedicalLookupsLoading(false);
+        return;
+      }
+      medicalLookupsRequestRef.current ??= Promise.all([
+        fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => []),
+        fetchAllDoctors().catch(() => []),
+      ]);
+      setMedicalLookupsLoading(true);
+      void Promise.all([medicalLookupsRequestRef.current, loadSpecialties()])
+        .then(([[nextProviders, nextAllDoctors], nextSpecialties]) => {
+          if (!isCurrentSession()) return;
+          setClinicalProviders(nextProviders.filter((item) => item.provider_type === "medical"));
+          setAllDoctors(nextAllDoctors);
+          setSpecialties(nextSpecialties);
+          medicalLookupsLoadedRef.current = true;
+          specialtiesLoadedRef.current = true;
+        })
+        .finally(() => {
+          if (isCurrentSession()) setMedicalLookupsLoading(false);
+        });
+      return;
+    }
+
+    if (step === "order") {
+      if (specialtiesLoadedRef.current) {
+        setCommercialLookupsLoading(false);
+        return;
+      }
+      const uiRequestVersion = commercialLookupUiVersionRef.current + 1;
+      commercialLookupUiVersionRef.current = uiRequestVersion;
+      setCommercialLookupsLoading(true);
+      void loadSpecialties()
+        .then((nextSpecialties) => {
+          if (!isCurrentSession()) return;
+          setSpecialties(nextSpecialties);
+          specialtiesLoadedRef.current = true;
+        })
+        .finally(() => {
+          if (
+            isCurrentSession()
+            && commercialLookupUiVersionRef.current === uiRequestVersion
+          ) {
+            setCommercialLookupsLoading(false);
+          }
+        });
+      return;
+    }
+
+    if (step === "commercial") {
+      if (specialtiesLoadedRef.current && agencyServicesLoadedRef.current) {
+        setCommercialLookupsLoading(false);
+        return;
+      }
+      const uiRequestVersion = commercialLookupUiVersionRef.current + 1;
+      commercialLookupUiVersionRef.current = uiRequestVersion;
+      agencyServicesRequestRef.current ??= fetchAgencyServices(
+        "/agency-services?active_only=true",
+        { forceFresh: true },
+      ).catch(() => []);
+      setCommercialLookupsLoading(true);
+      void Promise.all([loadSpecialties(), agencyServicesRequestRef.current])
+        .then(([nextSpecialties, nextAgencyServices]) => {
+          if (!isCurrentSession()) return;
+          setSpecialties(nextSpecialties);
+          setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
+          specialtiesLoadedRef.current = true;
+          agencyServicesLoadedRef.current = true;
+        })
+        .finally(() => {
+          if (
+            isCurrentSession()
+            && commercialLookupUiVersionRef.current === uiRequestVersion
+          ) {
+            setCommercialLookupsLoading(false);
+          }
+        });
+    }
+  }, [open, step]);
   const selectedWorkTypeIdSet = useMemo(
     () => new Set(draft?.selectedSpecializationWorkTypeIds ?? []),
     [draft?.selectedSpecializationWorkTypeIds],
@@ -2995,8 +3106,6 @@ export function LeadWizard({
     const isCurrentReload = () => reloadVersionRef.current === reloadVersion;
     const commercialVersions = { ...commercialFlagRequestVersionRef.current };
     setLoading(true);
-    setMedicalLookupsLoading(true);
-    setCommercialLookupsLoading(true);
     setError("");
     setValidationContext(null);
     replaceDocumentPreview(null);
@@ -3020,17 +3129,6 @@ export function LeadWizard({
         }
         return { attachmentImportError, documents: nextDocuments };
       });
-      const medicalLookupsPromise = Promise.all([
-        fetchProviders("/providers?active_only=true&provider_type=medical").catch(() => []),
-        fetchAllDoctors().catch(() => []),
-      ]);
-      const commercialLookupsPromise = Promise.all([
-        // This catalogue is editable from the admin area. A lead wizard must
-        // not reuse the five-minute shared cache after a speciality is added
-        // or reactivated (for example Kardiologie).
-        fetchSpecializations(false, true).catch(() => []),
-        fetchAgencyServices("/agency-services?active_only=true", { forceFresh: true }).catch(() => []),
-      ]);
       const leadOrdersPath = "/orders?lead_id=" + encodeURIComponent(leadId);
       const ordersPromise = Promise.all([
         leadPromise,
@@ -3053,27 +3151,6 @@ export function LeadWizard({
           } catch (bootstrapError) {
             return { bootstrapError, orders: existingOrders };
           }
-        });
-
-      void medicalLookupsPromise
-        .then(([nextProviders, nextAllDoctors]) => {
-          if (!isCurrentReload()) return;
-          setClinicalProviders(
-            nextProviders.filter((item) => item.provider_type === "medical"),
-          );
-          setAllDoctors(nextAllDoctors);
-        })
-        .finally(() => {
-          if (isCurrentReload()) setMedicalLookupsLoading(false);
-        });
-      void commercialLookupsPromise
-        .then(([nextSpecialties, nextAgencyServices]) => {
-          if (!isCurrentReload()) return;
-          setSpecialties(nextSpecialties);
-          setAgencyServices(nextAgencyServices.filter((item) => item.is_active));
-        })
-        .finally(() => {
-          if (isCurrentReload()) setCommercialLookupsLoading(false);
         });
 
       const [
@@ -3365,6 +3442,14 @@ export function LeadWizard({
   useEffect(() => {
     if (open) return;
     reloadVersionRef.current += 1;
+    lookupSessionVersionRef.current += 1;
+    commercialLookupUiVersionRef.current += 1;
+    medicalLookupsRequestRef.current = null;
+    specialtiesRequestRef.current = null;
+    agencyServicesRequestRef.current = null;
+    medicalLookupsLoadedRef.current = false;
+    specialtiesLoadedRef.current = false;
+    agencyServicesLoadedRef.current = false;
     setCreatedLeadId(null);
     hydrated.current = null;
     setLead(null);
@@ -3374,6 +3459,13 @@ export function LeadWizard({
     setContracts([]);
     setOrders([]);
     setQuotes([]);
+    setSpecialties([]);
+    setWorkTypesBySpecialization({});
+    setWorkTypesLoading(false);
+    setWorkTypesError("");
+    setAgencyServices([]);
+    setClinicalProviders([]);
+    setAllDoctors([]);
     setError("");
     setCommercialDocumentErrors({});
     setCommercialQuoteError("");

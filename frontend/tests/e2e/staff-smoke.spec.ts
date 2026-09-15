@@ -2774,6 +2774,53 @@ test.describe("lead onboarding wizard", () => {
     await expect(wizard).toBeHidden();
   });
 
+  test("wizard navigation stays local and loads large catalogues only when needed", async ({
+    page,
+  }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const updateRequests: string[] = [];
+    const catalogueRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        request.method() === "POST"
+        && url.pathname.endsWith(`/leads/${leadId}/update`)
+      ) {
+        updateRequests.push(url.pathname);
+      }
+      if (
+        url.pathname.endsWith("/providers/specializations")
+        || url.pathname.endsWith("/providers")
+        || url.pathname.endsWith("/doctors")
+        || url.pathname.endsWith("/agency-services")
+      ) {
+        catalogueRequests.push(url.pathname);
+      }
+    });
+
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
+    await expect(navigation.locator('[data-step="master_data"]'))
+      .toHaveAttribute("aria-current", "step");
+    expect(catalogueRequests).toEqual([]);
+
+    const documentsStep = navigation.locator('[data-step="documents"]');
+    await documentsStep.click();
+    await expect(documentsStep).toHaveAttribute("aria-current", "step");
+    await page.waitForTimeout(900);
+    expect(updateRequests).toEqual([]);
+    expect(catalogueRequests).toEqual([]);
+
+    await navigation.locator('[data-step="medical"]').click();
+    await expect.poll(() => new Set(catalogueRequests)).toEqual(new Set([
+      "/api/v1/providers",
+      "/api/v1/doctors",
+      "/api/v1/providers/specializations",
+    ]));
+    expect(catalogueRequests).not.toContain("/api/v1/agency-services");
+  });
+
   test("wizard header archives a lead that does not belong to the service", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
