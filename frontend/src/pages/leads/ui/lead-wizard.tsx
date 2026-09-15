@@ -118,6 +118,7 @@ import {
 } from "@/pages/documents/data/document-api";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
+import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
 import { canSignWizardDocument } from "../model/wizard-document-signing";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import {
@@ -502,6 +503,8 @@ type WizardDocumentPreview = {
   title: string;
   url: string;
 };
+
+const ignoreDocumentPreviewReady = () => undefined;
 
 const AUTOSAVE_DELAY_MS = 800;
 const LEAD_EDIT_LEASE_HEARTBEAT_MS = 60_000;
@@ -8643,9 +8646,9 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30">
             {previewedDocument && canSignWizardDocument(previewedDocument) && documentPreview?.kind !== "image" ? (
-              <div className="mb-3">
+              <div className="shrink-0 px-3 pt-3">
                 <DocumentSignatureAction documentId={previewedDocument.id} title={wizardDocumentFilename(previewedDocument)} onDone={() => { void refreshDocumentsState(); }} />
               </div>
             ) : null}
@@ -8653,13 +8656,18 @@ ${serviceCommentLines.join("\n")}`
               <img
                 src={documentPreview.url}
                 alt={documentPreview.title}
-                className="mx-auto h-full max-h-full w-full object-contain"
+                className="m-3 mx-auto min-h-0 flex-1 object-contain"
+              />
+            ) : documentPreview?.kind === "pdf" ? (
+              <SignatureDocumentPreview
+                documentId={documentPreview.id}
+                onReady={ignoreDocumentPreviewReady}
               />
             ) : documentPreview ? (
               <iframe
                 title={documentPreview.title}
                 src={documentPreview.url}
-                className="h-full w-full border border-border bg-white"
+                className="m-3 min-h-0 flex-1 border border-border bg-white"
               />
             ) : null}
           </div>
