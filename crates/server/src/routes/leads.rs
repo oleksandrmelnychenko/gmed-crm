@@ -365,7 +365,10 @@ fn normalized_language_code(value: &str) -> Option<&'static str> {
             "lv" => Some("lv"),
             "zh" => Some("zh"),
             "ur" => Some("ur"),
-            _ => None,
+            _ => crate::routes::patients::ALLOWED_PATIENT_LANGUAGES
+                .iter()
+                .copied()
+                .find(|candidate| *candidate == base),
         },
     }
 }
@@ -7005,6 +7008,10 @@ mod questionnaire_mapping_tests {
         assert_eq!(
             normalize_intake_language(None, Some("uk_UA")),
             Some("uk".to_string())
+        );
+        assert_eq!(
+            normalize_intake_language(Some("ky"), Some("ru-RU")),
+            Some("ky".to_string())
         );
     }
 
